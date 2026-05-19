@@ -11,6 +11,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -21,8 +22,8 @@ import java.util.List;
 public class ExamService {
 
     // Đường dẫn cố định trên server — admin lo 1 lần
-    private static final String TEMPLATE_DIR = "C:/ExamSystem/grader-base";
-    private static final String EXAMS_DIR    = "C:/ExamSystem/exams";
+    private static final String TEMPLATE_DIR = "D:/FPT/Capstone/Grader_App/grader-base";
+    private static final String EXAMS_DIR    = "D:/FPT/Capstone/Grader_App/exams";
 
     @Autowired
     private ExamRepository examRepository;
@@ -73,12 +74,14 @@ public class ExamService {
                 StandardCopyOption.REPLACE_EXISTING
         );
 
-        // Copy run_grader.sh
-        Files.copy(
-                Path.of(TEMPLATE_DIR, "run_grader.sh"),
-                buildDir.resolve("run_grader.sh"),
-                StandardCopyOption.REPLACE_EXISTING
-        );
+        // Copy run_grader.sh — strip CRLF and BOM so Linux shebang is valid
+        String shContent = Files.readString(
+                Path.of(TEMPLATE_DIR, "run_grader.sh"), StandardCharsets.UTF_8)
+                .replace("\uFEFF", "") // Remove UTF-8 BOM if present
+                .replace("\r\n", "\n")
+                .replace("\r", "\n");
+        Files.writeString(buildDir.resolve("run_grader.sh"),
+                shContent, StandardCharsets.UTF_8);
 
         // Copy scripts/merge_pubspec.dart
         Path scriptsDst = buildDir.resolve("scripts");

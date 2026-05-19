@@ -83,8 +83,8 @@ public class GradingService {
 
         String[] command = {
                 "docker", "run", "--rm",
-                "--memory",  "512m",
-                "--cpus",    "1.0",
+                "--memory",  "2g",
+                "--cpus",    "2.0",
                 "--network", "none",
                 "-v", libPath     + ":/app/lib",
                 "-v", pubspecPath + ":/app/pubspec_student.yaml:ro",

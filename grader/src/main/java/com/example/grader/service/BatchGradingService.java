@@ -38,7 +38,6 @@ public class BatchGradingService {
     @Autowired private ExamRepository examRepo;
 
     private final ObjectMapper mapper = new ObjectMapper();
-    private Semaphore semaphore;
     private ExecutorService executor;
     private final BlockingQueue<GradingJob> jobQueue = new LinkedBlockingQueue<>();
 
@@ -48,20 +47,22 @@ public class BatchGradingService {
 
     @PostConstruct
     public void startWorkers() {
-        semaphore = new Semaphore(maxConcurrent);
-        executor  = Executors.newFixedThreadPool(maxConcurrent + 1);
-        executor.submit(() -> {
-            Thread.currentThread().setName("grading-dispatcher");
-            while (!Thread.currentThread().isInterrupted()) {
-                try {
-                    GradingJob job = jobQueue.take();
-                    semaphore.acquire();
-                    executor.submit(() -> {
-                        try { processJob(job); } finally { semaphore.release(); }
-                    });
-                } catch (InterruptedException e) { Thread.currentThread().interrupt(); break; }
-            }
-        });
+        executor = Executors.newFixedThreadPool(maxConcurrent);
+        for (int i = 0; i < maxConcurrent; i++) {
+            final int idx = i;
+            executor.submit(() -> {
+                Thread.currentThread().setName("grading-worker-" + idx);
+                while (!Thread.currentThread().isInterrupted()) {
+                    try {
+                        GradingJob job = jobQueue.take();
+                        processJob(job);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        break;
+                    }
+                }
+            });
+        }
         log.info("Grading workers started (concurrent: {})", maxConcurrent);
     }
 

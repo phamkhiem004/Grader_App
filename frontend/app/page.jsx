@@ -1,45 +1,12 @@
 "use client";
 
 import { useState, useRef, useCallback } from "react";
+import SidebarLayout from "@/components/layout/SidebarLayout";
+import { UploadCloud, Play, FileArchive, X, CheckCircle, Clock, AlertCircle, DownloadCloud, Loader2, CheckSquare, BarChart2 } from "lucide-react";
 
 const API_BASE = "http://localhost:8080/api";
 
-const STATUS_COLOR = {
-  QUEUED: { bg: "#F1EFE8", text: "#5F5E5A", label: "Chờ" },
-  GRADING: { bg: "#E6F1FB", text: "#185FA5", label: "Đang chấm" },
-  DONE: { bg: "#EAF3DE", text: "#3B6D11", label: "Xong" },
-  ERROR: { bg: "#FCEBEB", text: "#A32D2D", label: "Lỗi" },
-};
-
-function StatusBadge({ status }) {
-  const s = STATUS_COLOR[status] || STATUS_COLOR.QUEUED;
-  return (
-    <span style={{
-      background: s.bg, color: s.text,
-      fontSize: 11, fontWeight: 600, padding: "2px 8px",
-      borderRadius: 99, letterSpacing: "0.03em"
-    }}>{s.label}</span>
-  );
-}
-
-function ProgressBar({ done, total, error }) {
-  const pct = total > 0 ? Math.round((done / total) * 100) : 0;
-  const errPct = total > 0 ? Math.round((error / total) * 100) : 0;
-  return (
-    <div style={{ marginTop: 6 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#888780", marginBottom: 4 }}>
-        <span>{done}/{total} bài</span>
-        <span style={{ fontVariantNumeric: "tabular-nums", fontWeight: 600, color: pct === 100 ? "#3B6D11" : "#185FA5" }}>{pct}%</span>
-      </div>
-      <div style={{ height: 6, borderRadius: 99, background: "#E8E6DF", overflow: "hidden", display: "flex" }}>
-        <div style={{ width: `${pct}%`, background: error > 0 ? "#3B6D11" : "#3B6D11", transition: "width .4s ease" }} />
-        <div style={{ width: `${errPct}%`, background: "#A32D2D", transition: "width .4s ease" }} />
-      </div>
-    </div>
-  );
-}
-
-export default function BatchGradingPage() {
+export default function DashboardPage() {
   const [examId, setExamId] = useState("FLUTTER_PE_01");
   const [files, setFiles] = useState([]);
   const [dragging, setDragging] = useState(false);
@@ -51,7 +18,27 @@ export default function BatchGradingPage() {
   const fileRef = useRef();
   const pollRef = useRef(null);
 
-  // ── File handling ───────────────────────────────────────────
+  // Helper function to make error messages human-readable
+  const formatErrorMsg = (errStr) => {
+    if (typeof errStr !== 'string') return errStr;
+    const parts = errStr.split(': ');
+    if (parts.length < 2) return errStr;
+
+    const fileName = parts[0];
+    const errMsg = parts.slice(1).join(': ');
+
+    if (errMsg.includes('Duplicate entry')) {
+      return `${fileName}: Đã có kết quả trên hệ thống (Lỗi trùng lặp bài thi).`;
+    }
+    
+    if (errMsg.includes('could not execute statement') || errMsg.includes('SQL') || errMsg.includes('Constraint')) {
+      return `${fileName}: Lỗi cơ sở dữ liệu khi lưu kết quả.`;
+    }
+
+    return errStr; // For things like "Sai format — cần: MaSV_Ten.zip"
+  };
+
+  // File handling
   const addFiles = useCallback((incoming) => {
     const zips = Array.from(incoming).filter(f => f.name.endsWith(".zip"));
     setFiles(prev => {
@@ -68,10 +55,10 @@ export default function BatchGradingPage() {
 
   const removeFile = (name) => setFiles(f => f.filter(x => x.name !== name));
 
-  // ── Upload + poll ───────────────────────────────────────────
+  // Upload + poll
   const execute = async () => {
     if (!files.length) { setUploadErr("Chưa có file nào để chấm."); return; }
-    if (!examId.trim()) { setUploadErr("Nhập mã đề thi."); return; }
+    if (!examId.trim()) { setUploadErr("Vui lòng nhập mã đề thi."); return; }
 
     setPhase("uploading"); setUploadErr(null); setParseErrors([]);
 
@@ -90,7 +77,6 @@ export default function BatchGradingPage() {
 
       setPhase("polling");
       startPolling(data.batchId);
-
     } catch (e) {
       setUploadErr("Không kết nối được server: " + e.message);
       setPhase("idle");
@@ -119,360 +105,317 @@ export default function BatchGradingPage() {
   };
 
   const downloadCSV = () => {
-    if (!progress?.results?.length) return;
-    const header = "Mã SV,Họ tên,Điểm,Trạng thái,Batch\n";
-    const rows = progress.results.map(r =>
-      `${r.studentId},"${r.studentName || ""}",${r.score ?? ""},${r.status},${r.batchId}`
-    ).join("\n");
-    const blob = new Blob(["\uFEFF" + header + rows], { type: "text/csv;charset=utf-8" });
+    if (!progress?.results?.length && !parseErrors.length) return;
+    
+    const header = "Mã SV,Họ tên,Điểm,Trạng thái,Ghi chú\n";
+    
+    // 1. Các bài hợp lệ đã nạp vào server
+    const validRows = (progress?.results || []).map(r => {
+      let note = "";
+      if (r.status === "ERROR") note = "Lỗi khi chấm (thường do lỗi compile hoặc crash)";
+      if (r.status === "DONE") {
+        try {
+          const d = JSON.parse(r.details || "{}");
+          note = `Pass: ${d.soTestPass ?? 0}/${d.tongSoTest ?? 0}`;
+        } catch (_) {}
+      }
+      return `${r.studentId},"${r.studentName || ""}",${r.score != null ? r.score.toFixed(1) : ""},${r.status},"${note}"`;
+    });
+
+    // 2. Các file lỗi/từ chối ngay từ đầu (parseErrors)
+    const errorRows = parseErrors.map(errStr => {
+      if (typeof errStr !== 'string') return "";
+      const parts = errStr.split(': ');
+      const filename = parts[0] || errStr;
+      
+      const fileParts = filename.replace('.zip', '').split('_');
+      const studentId = fileParts[0] || filename;
+      const studentName = fileParts.slice(1).join(' ') || "";
+      
+      const cleanedMsg = formatErrorMsg(errStr).replace(/"/g, '""');
+      return `${studentId},"${studentName}","",BỊ LOẠI,"${cleanedMsg}"`;
+    }).filter(row => row !== "");
+
+    const allRows = [...validRows, ...errorRows].join("\n");
+
+    const blob = new Blob(["\uFEFF" + header + allRows], { type: "text/csv;charset=utf-8" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = `ketqua_${batchId}.csv`;
+    
+    // Tạo tên file định dạng: Mã đề thi_YYYY-MM-DD.csv
+    const dateStr = new Date().toISOString().split('T')[0];
+    a.download = `${examId}_${dateStr}.csv`;
+    
     a.click();
   };
 
-  // ── Derived ─────────────────────────────────────────────────
   const isRunning = phase === "uploading" || phase === "polling";
   const p = progress;
+  
+  const totalItems = (p?.total || 0) + parseErrors.length;
+  const errorItems = (p?.error || 0) + parseErrors.length;
+  const doneItems = p?.done || 0;
+  const gradingItems = p?.grading || 0;
+  
+  const pct = totalItems > 0 ? Math.round((doneItems / totalItems) * 100) : 0;
+  const errPct = totalItems > 0 ? Math.round((errorItems / totalItems) * 100) : 0;
 
   return (
-    <div style={{
-      minHeight: "100vh", background: "#F5F3EE",
-      fontFamily: "'IBM Plex Mono', 'Courier New', monospace",
-      padding: "40px 24px"
-    }}>
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap');
-        * { box-sizing: border-box; }
-        button { cursor: pointer; font-family: inherit; }
-        input  { font-family: inherit; }
-        ::-webkit-scrollbar { width:4px }
-        ::-webkit-scrollbar-thumb { background:#C4C2BA; border-radius:2px }
-        @keyframes spin { to { transform: rotate(360deg) } }
-        @keyframes fadeIn { from { opacity:0; transform:translateY(8px) } to { opacity:1; transform:none } }
-        .row-enter { animation: fadeIn .2s ease forwards }
-      `}</style>
-
-      <div style={{ maxWidth: 820, margin: "0 auto" }}>
-
-        {/* ── Header ── */}
-        <div style={{ marginBottom: 36 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
-            <div style={{
-              width: 32, height: 32, borderRadius: 6,
-              background: "#2C2C2A", display: "flex", alignItems: "center", justifyContent: "center"
-            }}>
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                <rect x="2" y="2" width="5" height="5" rx="1" fill="#F5F3EE" />
-                <rect x="9" y="2" width="5" height="5" rx="1" fill="#F5F3EE" opacity=".6" />
-                <rect x="2" y="9" width="5" height="5" rx="1" fill="#F5F3EE" opacity=".6" />
-                <rect x="9" y="9" width="5" height="5" rx="1" fill="#F5F3EE" />
-              </svg>
-            </div>
-            <span style={{ fontSize: 13, fontWeight: 600, color: "#2C2C2A", letterSpacing: "0.08em", textTransform: "uppercase" }}>
-              Hệ thống chấm thi tự động
-            </span>
-          </div>
-          <p style={{ fontSize: 12, color: "#888780", margin: 0, fontFamily: "'IBM Plex Sans', sans-serif" }}>
-            Upload hàng loạt bài nộp của sinh viên · Docker grader · Chấm 3 bài song song
-          </p>
-        </div>
-
-        {/* ── Config row ── */}
-        <div style={{
-          background: "#fff", border: "1px solid #E3E1D9",
-          borderRadius: 12, padding: "16px 20px", marginBottom: 16,
-          display: "flex", alignItems: "center", gap: 16
-        }}>
-          <label style={{ fontSize: 11, fontWeight: 600, color: "#888780", letterSpacing: "0.06em", textTransform: "uppercase", whiteSpace: "nowrap" }}>
-            Mã đề thi
-          </label>
-          <input
-            value={examId}
-            onChange={e => setExamId(e.target.value)}
-            disabled={isRunning}
-            placeholder="VD: FLUTTER_PE_01"
-            style={{
-              flex: 1, border: "1px solid #E3E1D9", borderRadius: 8,
-              padding: "8px 12px", fontSize: 13, background: isRunning ? "#F5F3EE" : "#fff",
-              color: "#2C2C2A", outline: "none"
-            }}
-          />
-          <div style={{
-            fontSize: 11, color: "#888780", whiteSpace: "nowrap",
-            fontFamily: "'IBM Plex Sans', sans-serif"
-          }}>
-            {files.length} file đã chọn
-          </div>
-        </div>
-
-        {/* ── Drop zone ── */}
-        {phase === "idle" && (
-          <div
-            onDrop={onDrop}
-            onDragOver={e => { e.preventDefault(); setDragging(true); }}
-            onDragLeave={() => setDragging(false)}
-            onClick={() => fileRef.current.click()}
-            style={{
-              border: `2px dashed ${dragging ? "#2C2C2A" : "#C4C2BA"}`,
-              borderRadius: 12, padding: "40px 24px", textAlign: "center",
-              cursor: "pointer", transition: "all .15s",
-              background: dragging ? "#EEECEA" : "#FAFAF8",
-              marginBottom: 16
-            }}
-          >
-            <div style={{ fontSize: 28, marginBottom: 8 }}>📂</div>
-            <p style={{ fontSize: 13, color: "#444441", margin: "0 0 4px", fontWeight: 500, fontFamily: "'IBM Plex Sans',sans-serif" }}>
-              Kéo thả file ZIP vào đây hoặc bấm để chọn
-            </p>
-            <p style={{ fontSize: 11, color: "#888780", margin: 0, fontFamily: "'IBM Plex Sans',sans-serif" }}>
-              Chỉ nhận .zip · Format tên: <code style={{ background: "#F1EFE8", padding: "1px 5px", borderRadius: 4 }}>MaSV_HoTen.zip</code>
-            </p>
-            <input ref={fileRef} type="file" multiple accept=".zip"
-              style={{ display: "none" }}
-              onChange={e => addFiles(e.target.files)} />
-          </div>
-        )}
-
-        {/* ── File list ── */}
-        {files.length > 0 && phase === "idle" && (
-          <div style={{
-            background: "#fff", border: "1px solid #E3E1D9",
-            borderRadius: 12, overflow: "hidden", marginBottom: 16
-          }}>
-            <div style={{
-              padding: "10px 16px", borderBottom: "1px solid #F1EFE8",
-              display: "flex", justifyContent: "space-between", alignItems: "center"
-            }}>
-              <span style={{ fontSize: 11, fontWeight: 600, color: "#888780", letterSpacing: "0.06em", textTransform: "uppercase" }}>
-                Danh sách bài nộp ({files.length})
-              </span>
-              <button onClick={() => setFiles([])} style={{
-                border: "none", background: "none", fontSize: 11,
-                color: "#A32D2D", fontWeight: 500, padding: "2px 6px"
-              }}>Xóa tất cả</button>
-            </div>
-            <div style={{ maxHeight: 220, overflowY: "auto" }}>
-              {files.map((f, i) => {
-                const parts = f.name.replace(".zip", "").split("_");
-                const maSV = parts[0] || "—";
-                const tenSV = parts.slice(1).join(" ") || "—";
-                return (
-                  <div key={f.name} className="row-enter" style={{
-                    display: "flex", alignItems: "center", gap: 12,
-                    padding: "9px 16px",
-                    borderBottom: i < files.length - 1 ? "1px solid #F5F3EE" : "none",
-                    animationDelay: `${i * 20}ms`
-                  }}>
-                    <span style={{ fontSize: 11, color: "#B4B2A9", minWidth: 20, textAlign: "right" }}>{i + 1}</span>
-                    <code style={{ fontSize: 12, color: "#185FA5", minWidth: 90 }}>{maSV}</code>
-                    <span style={{ fontSize: 12, color: "#444441", flex: 1, fontFamily: "'IBM Plex Sans',sans-serif" }}>{tenSV}</span>
-                    <span style={{ fontSize: 11, color: "#B4B2A9" }}>{(f.size / 1024).toFixed(0)} KB</span>
-                    <button onClick={() => removeFile(f.name)} style={{
-                      border: "none", background: "none", color: "#C4C2BA",
-                      fontSize: 16, lineHeight: 1, padding: "0 2px",
-                      transition: "color .1s"
-                    }} onMouseEnter={e => e.target.style.color = "#A32D2D"}
-                      onMouseLeave={e => e.target.style.color = "#C4C2BA"}>×</button>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* ── Error ── */}
-        {uploadErr && (
-          <div style={{
-            background: "#FCEBEB", border: "1px solid #F7C1C1",
-            borderRadius: 8, padding: "10px 14px", marginBottom: 16,
-            fontSize: 12, color: "#791F1F", fontFamily: "'IBM Plex Sans',sans-serif"
-          }}>⚠ {uploadErr}</div>
-        )}
-        {parseErrors.length > 0 && (
-          <div style={{
-            background: "#FAEEDA", border: "1px solid #FAC775",
-            borderRadius: 8, padding: "10px 14px", marginBottom: 16, fontSize: 12
-          }}>
-            <div style={{ fontWeight: 600, color: "#633806", marginBottom: 4, fontFamily: "'IBM Plex Sans',sans-serif" }}>
-              File sai format tên — bị bỏ qua:
-            </div>
-            {parseErrors.map((e, i) => (
-              <div key={i} style={{ color: "#854F0B", fontFamily: "'IBM Plex Sans',sans-serif" }}>• {e}</div>
-            ))}
-          </div>
-        )}
-
-        {/* ── Execute button ── */}
-        {phase === "idle" && (
-          <button onClick={execute} style={{
-            width: "100%", padding: "14px", borderRadius: 10,
-            background: "#2C2C2A", color: "#F5F3EE", border: "none",
-            fontSize: 13, fontWeight: 600, letterSpacing: "0.05em",
-            textTransform: "uppercase", transition: "background .15s"
-          }}
-            onMouseEnter={e => e.target.style.background = "#444441"}
-            onMouseLeave={e => e.target.style.background = "#2C2C2A"}>
-            ▶ Bắt đầu chấm tự động
-          </button>
-        )}
-
-        {/* ── Uploading spinner ── */}
-        {phase === "uploading" && (
-          <div style={{
-            background: "#fff", border: "1px solid #E3E1D9", borderRadius: 12,
-            padding: "24px", textAlign: "center"
-          }}>
-            <div style={{
-              width: 24, height: 24, border: "2px solid #E3E1D9",
-              borderTopColor: "#2C2C2A", borderRadius: "50%",
-              animation: "spin .8s linear infinite", margin: "0 auto 12px"
-            }} />
-            <p style={{ fontSize: 13, color: "#444441", margin: 0, fontFamily: "'IBM Plex Sans',sans-serif" }}>
-              Đang upload {files.length} bài lên server...
-            </p>
-          </div>
-        )}
-
-        {/* ── Progress panel ── */}
-        {(phase === "polling" || phase === "done") && p && (
-          <div style={{ animation: "fadeIn .3s ease" }}>
-
-            {/* Summary cards */}
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 10, marginBottom: 16 }}>
-              {[
-                { label: "Tổng", val: p.total, color: "#2C2C2A" },
-                { label: "Xong", val: p.done, color: "#3B6D11" },
-                { label: "Đang chấm", val: p.grading, color: "#185FA5" },
-                { label: "Lỗi", val: p.error, color: "#A32D2D" },
-              ].map(c => (
-                <div key={c.label} style={{
-                  background: "#fff", border: "1px solid #E3E1D9",
-                  borderRadius: 10, padding: "14px 16px", textAlign: "center"
-                }}>
-                  <div style={{ fontSize: 22, fontWeight: 600, color: c.color, marginBottom: 2 }}>{c.val}</div>
-                  <div style={{ fontSize: 11, color: "#888780", letterSpacing: "0.04em", fontFamily: "'IBM Plex Sans',sans-serif" }}>{c.label}</div>
-                </div>
-              ))}
-            </div>
-
-            {/* Progress bar */}
-            <div style={{
-              background: "#fff", border: "1px solid #E3E1D9",
-              borderRadius: 12, padding: "16px 20px", marginBottom: 16
-            }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                <span style={{ fontSize: 11, fontWeight: 600, color: "#888780", letterSpacing: "0.06em", textTransform: "uppercase" }}>
-                  Tiến độ chấm — batch: <code style={{ color: "#185FA5" }}>{batchId}</code>
-                </span>
-                {phase === "polling" && (
-                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                    <div style={{
-                      width: 8, height: 8, borderRadius: "50%", background: "#3B6D11",
-                      animation: "spin 1s linear infinite", border: "1.5px solid #97C459", borderTopColor: "transparent"
-                    }} />
-                    <span style={{ fontSize: 11, color: "#3B6D11", fontFamily: "'IBM Plex Sans',sans-serif" }}>Đang chạy...</span>
-                  </div>
-                )}
-                {phase === "done" && (
-                  <span style={{ fontSize: 11, color: "#3B6D11", fontWeight: 600, fontFamily: "'IBM Plex Sans',sans-serif" }}>✓ Hoàn tất</span>
-                )}
-              </div>
-              <ProgressBar done={p.done} total={p.total} error={p.error} />
-            </div>
-
-            {/* Results table */}
-            <div style={{
-              background: "#fff", border: "1px solid #E3E1D9",
-              borderRadius: 12, overflow: "hidden", marginBottom: 16
-            }}>
-              <div style={{
-                padding: "10px 16px", borderBottom: "1px solid #F1EFE8",
-                display: "flex", justifyContent: "space-between", alignItems: "center"
-              }}>
-                <span style={{ fontSize: 11, fontWeight: 600, color: "#888780", letterSpacing: "0.06em", textTransform: "uppercase" }}>
-                  Kết quả từng sinh viên
-                </span>
-                {phase === "done" && (
-                  <button onClick={downloadCSV} style={{
-                    border: "1px solid #E3E1D9", borderRadius: 6, background: "#F5F3EE",
-                    fontSize: 11, fontWeight: 600, color: "#444441", padding: "4px 10px",
-                    letterSpacing: "0.04em"
-                  }}>↓ Xuất CSV</button>
-                )}
+    <SidebarLayout title="Dashboard Chấm Thi (Batch Grading)" activePath="/">
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
+        
+        {/* Cột trái: Form cấu hình & Upload */}
+        <div className="xl:col-span-1 space-y-6">
+          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
+            <h2 className="text-base font-bold text-slate-800 mb-4 flex items-center gap-2">
+              <CheckSquare size={18} className="text-blue-600" />
+              Thiết lập phiên chấm bài
+            </h2>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Mã Đề Thi</label>
+                <input
+                  value={examId}
+                  onChange={e => setExamId(e.target.value)}
+                  disabled={isRunning}
+                  placeholder="VD: FLUTTER_PE_01"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all disabled:opacity-60 font-medium text-slate-800"
+                />
               </div>
 
-              {/* Table header */}
-              <div style={{
-                display: "grid", gridTemplateColumns: "100px 1fr 80px 100px 100px",
-                padding: "8px 16px", background: "#FAFAF8",
-                borderBottom: "1px solid #F1EFE8",
-                fontSize: 10, fontWeight: 600, color: "#B4B2A9",
-                letterSpacing: "0.07em", textTransform: "uppercase"
-              }}>
-                <span>Mã SV</span>
-                <span>Họ tên</span>
-                <span style={{ textAlign: "center" }}>Điểm</span>
-                <span style={{ textAlign: "center" }}>Trạng thái</span>
-                <span style={{ textAlign: "center" }}>Pass/Total</span>
-              </div>
-
-              <div style={{ maxHeight: 380, overflowY: "auto" }}>
-                {p.results?.map((r, i) => {
-                  let passCount = 0, totalCount = 0;
-                  try {
-                    const d = JSON.parse(r.details || "{}");
-                    passCount = d.soTestPass ?? 0;
-                    totalCount = d.tongSoTest ?? 0;
-                  } catch (_) { }
-                  return (
-                    <div key={r.id} className="row-enter" style={{
-                      display: "grid",
-                      gridTemplateColumns: "100px 1fr 80px 100px 100px",
-                      padding: "10px 16px",
-                      borderBottom: i < p.results.length - 1 ? "1px solid #F5F3EE" : "none",
-                      alignItems: "center",
-                      animationDelay: `${i * 15}ms`
-                    }}>
-                      <code style={{ fontSize: 12, color: "#185FA5" }}>{r.studentId}</code>
-                      <span style={{ fontSize: 12, color: "#2C2C2A", fontFamily: "'IBM Plex Sans',sans-serif" }}>
-                        {r.studentName || "—"}
-                      </span>
-                      <span style={{
-                        textAlign: "center", fontSize: 14, fontWeight: 600,
-                        color: r.score >= 5 ? "#3B6D11" : r.score != null ? "#A32D2D" : "#888780"
-                      }}>
-                        {r.score != null ? r.score.toFixed(1) : "—"}
-                      </span>
-                      <span style={{ textAlign: "center" }}>
-                        <StatusBadge status={r.status} />
-                      </span>
-                      <span style={{ textAlign: "center", fontSize: 12, color: "#888780", fontFamily: "'IBM Plex Sans',sans-serif" }}>
-                        {r.status === "DONE" ? `${passCount}/${totalCount}` : "—"}
-                      </span>
+              {phase === "idle" && (
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Upload Bài Nộp</label>
+                  <div
+                    onDrop={onDrop}
+                    onDragOver={e => { e.preventDefault(); setDragging(true); }}
+                    onDragLeave={() => setDragging(false)}
+                    onClick={() => fileRef.current.click()}
+                    className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all ${
+                      dragging ? "border-blue-500 bg-blue-50" : "border-slate-200 bg-slate-50 hover:bg-slate-100 hover:border-slate-300"
+                    }`}
+                  >
+                    <div className="bg-white w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-3 shadow-sm border border-slate-100">
+                      <UploadCloud size={24} className={dragging ? "text-blue-500" : "text-slate-400"} />
                     </div>
-                  );
-                })}
+                    <p className="text-sm font-semibold text-slate-700 mb-1">Kéo thả file ZIP vào đây</p>
+                    <p className="text-xs text-slate-500">Hoặc click để duyệt file. Format: MaSV_HoTen.zip</p>
+                    <input ref={fileRef} type="file" multiple accept=".zip" className="hidden" onChange={e => addFiles(e.target.files)} />
+                  </div>
+                </div>
+              )}
+
+              {/* Lỗi Upload */}
+              {uploadErr && (
+                <div className="bg-rose-50 text-rose-600 border border-rose-200 rounded-xl p-4 flex items-start gap-3">
+                  <AlertCircle size={18} className="shrink-0 mt-0.5" />
+                  <p className="text-sm font-medium">{uploadErr}</p>
+                </div>
+              )}
+
+              {/* Lỗi Format Tên File / Bị bỏ qua */}
+              {parseErrors.length > 0 && (
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+                  <h3 className="text-sm font-bold text-amber-800 mb-2 flex items-center gap-2">
+                    <AlertCircle size={16} /> File bị lỗi hoặc sai định dạng
+                  </h3>
+                  <ul className="space-y-2">
+                    {parseErrors.map((err, i) => (
+                      <li key={i} className="text-xs text-amber-700 font-medium ml-6 list-disc break-words whitespace-pre-wrap">
+                        {formatErrorMsg(err)}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {/* Nút Execute */}
+              {phase === "idle" && (
+                <button 
+                  onClick={execute}
+                  disabled={files.length === 0}
+                  className="w-full bg-slate-800 hover:bg-slate-900 disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-semibold py-3.5 px-4 rounded-xl flex items-center justify-center gap-2 transition-all shadow-sm active:scale-[0.98]"
+                >
+                  <Play size={18} />
+                  Bắt đầu chấm tự động ({files.length} bài)
+                </button>
+              )}
+
+              {/* Loading State */}
+              {phase === "uploading" && (
+                <div className="bg-blue-50 border border-blue-100 rounded-xl p-6 text-center">
+                  <Loader2 size={28} className="animate-spin text-blue-600 mx-auto mb-3" />
+                  <h3 className="text-sm font-bold text-blue-900 mb-1">Đang tải dữ liệu lên...</h3>
+                  <p className="text-xs text-blue-700/80">Đang upload {files.length} bài thi lên server</p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Danh sách file đang chọn */}
+          {files.length > 0 && phase === "idle" && (
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col max-h-[400px]">
+              <div className="px-5 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+                <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">File đã chọn ({files.length})</span>
+                <button onClick={() => setFiles([])} className="text-xs font-semibold text-rose-500 hover:text-rose-700">Xóa hết</button>
+              </div>
+              <div className="overflow-y-auto custom-scrollbar p-2">
+                {files.map((f) => (
+                  <div key={f.name} className="flex items-center gap-3 p-3 hover:bg-slate-50 rounded-lg group">
+                    <FileArchive size={16} className="text-slate-400 shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-slate-700 truncate">{f.name}</p>
+                      <p className="text-xs text-slate-400">{(f.size / 1024).toFixed(0)} KB</p>
+                    </div>
+                    <button onClick={() => removeFile(f.name)} className="text-slate-300 hover:text-rose-500 p-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <X size={16} />
+                    </button>
+                  </div>
+                ))}
               </div>
             </div>
+          )}
+        </div>
 
-            {/* Reset button */}
-            {phase === "done" && (
-              <button onClick={reset} style={{
-                width: "100%", padding: "12px", borderRadius: 10,
-                background: "none", color: "#2C2C2A",
-                border: "1.5px solid #C4C2BA",
-                fontSize: 12, fontWeight: 600, letterSpacing: "0.05em", textTransform: "uppercase"
-              }}
-                onMouseEnter={e => { e.target.style.background = "#F1EFE8" }}
-                onMouseLeave={e => { e.target.style.background = "none" }}>
-                ↺ Chấm batch mới
-              </button>
-            )}
-          </div>
-        )}
+        {/* Cột phải: Tiến độ & Kết quả (Chỉ hiện khi polling hoặc done) */}
+        <div className="xl:col-span-2 space-y-6">
+          {(phase === "polling" || phase === "done") ? (
+            <>
+              {/* Thống kê nhanh */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-5">
+                  <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Tổng số bài</p>
+                  <p className="text-3xl font-bold text-slate-800">{totalItems}</p>
+                </div>
+                <div className="bg-white rounded-2xl shadow-sm border border-emerald-100 p-5 relative overflow-hidden">
+                  <div className="absolute top-0 right-0 p-4 opacity-10"><CheckCircle size={48} className="text-emerald-500" /></div>
+                  <p className="text-xs font-bold text-emerald-600 uppercase tracking-wider mb-1">Hoàn thành</p>
+                  <p className="text-3xl font-bold text-emerald-600">{doneItems}</p>
+                </div>
+                <div className="bg-white rounded-2xl shadow-sm border border-blue-100 p-5 relative overflow-hidden">
+                  <div className="absolute top-0 right-0 p-4 opacity-10"><Clock size={48} className="text-blue-500" /></div>
+                  <p className="text-xs font-bold text-blue-600 uppercase tracking-wider mb-1">Đang chấm</p>
+                  <p className="text-3xl font-bold text-blue-600">{gradingItems}</p>
+                </div>
+                <div className="bg-white rounded-2xl shadow-sm border border-rose-100 p-5 relative overflow-hidden">
+                  <div className="absolute top-0 right-0 p-4 opacity-10"><AlertCircle size={48} className="text-rose-500" /></div>
+                  <p className="text-xs font-bold text-rose-600 uppercase tracking-wider mb-1">Bị Lỗi</p>
+                  <p className="text-3xl font-bold text-rose-600">{errorItems}</p>
+                </div>
+              </div>
 
+              {/* Thanh tiến độ */}
+              <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
+                <div className="flex justify-between items-end mb-4">
+                  <div>
+                    <h3 className="text-base font-bold text-slate-800">Tiến độ thực thi</h3>
+                    <p className="text-xs font-medium text-slate-500 mt-1">Batch ID: <span className="text-slate-700 font-mono bg-slate-100 px-2 py-0.5 rounded">{batchId}</span></p>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-2xl font-bold text-blue-600">{pct}%</span>
+                  </div>
+                </div>
+                
+                <div className="h-3 w-full bg-slate-100 rounded-full overflow-hidden flex">
+                  <div className="h-full bg-blue-500 transition-all duration-500 ease-out" style={{ width: `${pct}%` }}></div>
+                  <div className="h-full bg-rose-500 transition-all duration-500 ease-out" style={{ width: `${errPct}%` }}></div>
+                </div>
+                
+                {phase === "done" && (
+                  <div className="mt-4 flex justify-end">
+                    <button onClick={reset} className="text-sm font-semibold text-blue-600 hover:text-blue-800 bg-blue-50 px-4 py-2 rounded-lg transition-colors">
+                      Chấm kỳ thi mới
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Bảng kết quả */}
+              <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+                <div className="px-6 py-5 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+                  <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider">Chi tiết kết quả</h3>
+                  {phase === "done" && (
+                    <button onClick={downloadCSV} className="flex items-center gap-2 text-xs font-semibold text-slate-600 hover:text-slate-900 bg-white border border-slate-200 px-3 py-1.5 rounded-lg shadow-sm transition-all hover:shadow active:scale-95">
+                      <DownloadCloud size={16} /> Xuất CSV
+                    </button>
+                  )}
+                </div>
+                
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="bg-white border-b border-slate-100 text-xs font-bold text-slate-500 uppercase tracking-wider">
+                        <th className="px-6 py-4 font-bold">Mã SV</th>
+                        <th className="px-6 py-4 font-bold">Họ & Tên</th>
+                        <th className="px-6 py-4 font-bold text-center">Trạng thái</th>
+                        <th className="px-6 py-4 font-bold text-center">Tỉ lệ Pass</th>
+                        <th className="px-6 py-4 font-bold text-right">Điểm số</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {p?.results?.map((r) => {
+                        let passCount = 0, totalCount = 0;
+                        try {
+                          const d = JSON.parse(r.details || "{}");
+                          passCount = d.soTestPass ?? 0;
+                          totalCount = d.tongSoTest ?? 0;
+                        } catch (_) {}
+                        
+                        const isDone = r.status === "DONE";
+                        const isError = r.status === "ERROR";
+                        const isGrading = r.status === "GRADING";
+
+                        return (
+                          <tr key={r.id} className="hover:bg-slate-50/50 transition-colors">
+                            <td className="px-6 py-4 text-sm font-mono font-medium text-slate-700">{r.studentId}</td>
+                            <td className="px-6 py-4 text-sm font-medium text-slate-800">{r.studentName || "—"}</td>
+                            <td className="px-6 py-4 text-center">
+                              <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold ${
+                                isDone ? 'bg-emerald-100 text-emerald-700' :
+                                isError ? 'bg-rose-100 text-rose-700' :
+                                isGrading ? 'bg-blue-100 text-blue-700' :
+                                'bg-slate-100 text-slate-600'
+                              }`}>
+                                {isDone ? 'Đã xong' : isError ? 'Lỗi' : isGrading ? 'Đang chấm' : 'Chờ'}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4 text-center text-sm text-slate-500 font-medium">
+                              {isDone ? `${passCount}/${totalCount}` : "—"}
+                            </td>
+                            <td className="px-6 py-4 text-right">
+                              {r.score != null ? (
+                                <span className={`text-base font-bold ${r.score >= 5 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                                  {r.score.toFixed(1)}
+                                </span>
+                              ) : (
+                                <span className="text-slate-400 font-medium">—</span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                      {(!p?.results || p.results.length === 0) && (
+                        <tr>
+                          <td colSpan="5" className="px-6 py-8 text-center text-sm text-slate-500">Đang chờ dữ liệu...</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="h-full flex flex-col items-center justify-center text-center p-12 border-2 border-dashed border-slate-200 rounded-2xl bg-slate-50/50">
+              <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mb-4 text-slate-400">
+                <BarChart2 size={32} />
+              </div>
+              <h3 className="text-base font-bold text-slate-700 mb-2">Chưa có phiên chấm bài nào</h3>
+              <p className="text-sm text-slate-500 max-w-sm">Hãy cấu hình đề thi và upload file ZIP bài làm của sinh viên để bắt đầu tiến trình chấm điểm tự động.</p>
+            </div>
+          )}
+        </div>
       </div>
-    </div>
+    </SidebarLayout>
   );
 }

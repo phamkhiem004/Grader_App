@@ -27,6 +27,6 @@ grader:
   image:
     prefix: ${GRADER_IMAGE_PREFIX:grading-env}
   max:
-    concurrent: ${GRADER_MAX_CONCURRENT:3}
+    concurrent: ${GRADER_MAX_CONCURRENT:8}
   timeout:
     seconds: ${GRADER_TIMEOUT_SECONDS:120}

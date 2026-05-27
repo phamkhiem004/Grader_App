@@ -22,8 +22,8 @@ import java.util.List;
 public class ExamService {
 
     // Đường dẫn cố định trên server — admin lo 1 lần
-    private static final String TEMPLATE_DIR = "D:/FPT/Capstone/Grader_App/grader-base";
-    private static final String EXAMS_DIR    = "D:/FPT/Capstone/Grader_App/exams";
+    private static final String TEMPLATE_DIR = "C:/MyGit/Grader_App/grader-base";
+    private static final String EXAMS_DIR    = "C:/MyGit/Grader_App/exams";
 
     @Autowired
     private ExamRepository examRepository;

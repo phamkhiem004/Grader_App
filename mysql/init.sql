@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS exam_results (
                   ) DEFAULT 'QUEUED',
     mode          VARCHAR(10)   DEFAULT 'submit' COMMENT 'submit | test',
     details       LONGTEXT                       COMMENT 'JSON chi tiết từng testcase',
-    error_log     TEXT                           COMMENT 'Lỗi thô để AI đọc sau',
+    error_log     LONGTEXT                          COMMENT 'Lỗi thô để AI đọc sau',
     submitted_at  TIMESTAMP     DEFAULT CURRENT_TIMESTAMP,
     updated_at    TIMESTAMP     DEFAULT CURRENT_TIMESTAMP
                                 ON UPDATE CURRENT_TIMESTAMP,

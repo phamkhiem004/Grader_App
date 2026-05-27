@@ -44,8 +44,7 @@ public class ExamResult {
     @Column(name = "mode", length = 10)
     private String mode;
 
-    @Lob
-    @Column(name = "details")
+    @Column(name = "details", columnDefinition = "LONGTEXT")
     private String details;
 
     @Lob

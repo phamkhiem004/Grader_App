@@ -1,5 +1,14 @@
 # docker-compose.yml
-version: '3.9'
+#
+#  Mặc định: chỉ chạy MySQL (hạ tầng).
+#    docker compose up -d
+#
+#  Backend Spring Boot KHUYẾN NGHỊ chạy trên host (Windows/Mac) vì nó build &
+#  mount thư mục bài nộp vào docker.sock của host — đường dẫn phải là đường dẫn
+#  host thật. Chạy host:  cd grader && ./mvnw spring-boot:run
+#
+#  Nếu deploy trọn gói trên 1 host Linux, bật thêm service backend:
+#    docker compose --profile full up -d --build
 
 services:
   mysql:
@@ -7,9 +16,9 @@ services:
     container_name: chamthi-mysql
     restart: always
     environment:
-      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_ROOT_PASSWORD: "123456"     # khớp default backend (root/123456) → clone về chạy ngay
       MYSQL_DATABASE: chamthi_db
-      MYSQL_USER: chamthi
+      MYSQL_USER: chamthi               # user phụ + dùng cho healthcheck
       MYSQL_PASSWORD: chamthi123
     ports:
       - "3306:3306"
@@ -23,29 +32,32 @@ services:
       retries: 5
       start_period: 30s
 
-  chamthi-api:
+  grader-api:
+    profiles: ["full"]            # chỉ chạy khi `--profile full`
     build:
-      context: ./chamthi
+      context: ./grader           # ✅ backend nằm ở ./grader (không phải ./chamthi)
       dockerfile: Dockerfile
     container_name: chamthi-api
     restart: always
     ports:
       - "8080:8080"
     environment:
-      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/chamthi_db?useSSL=false&serverTimezone=UTC
-      SPRING_DATASOURCE_USERNAME: chamthi
-      SPRING_DATASOURCE_PASSWORD: chamthi123
-      SPRING_JPA_HIBERNATE_DDL_AUTO: validate   # Dùng init.sql — không để update
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/chamthi_db?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+      SPRING_DATASOURCE_USERNAME: root
+      SPRING_DATASOURCE_PASSWORD: "123456"
       GRADER_IMAGE_PREFIX: grading-env
-      GRADER_MAX_CONCURRENT: 3
-      GRADER_TIMEOUT_SECONDS: 120
+      GRADER_BASE_IMAGE: grading-base:latest
+      GRADER_TEMPLATE_DIR: /workspace/grader-base  # khớp volume mount bên dưới
+      GRADER_EXAMS_DIR: /workspace/exams
+      GRADER_MAX_CONCURRENT: 8
+      GRADER_TIMEOUT_SECONDS: 240
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - submissions_temp:/tmp/submissions
+      - /var/run/docker.sock:/var/run/docker.sock  # build/run ảnh chấm qua host docker
+      - ./grader-base:/workspace/grader-base
+      - ./exams:/workspace/exams
     depends_on:
       mysql:
         condition: service_healthy
 
 volumes:
   mysql_data:
-  submissions_temp:

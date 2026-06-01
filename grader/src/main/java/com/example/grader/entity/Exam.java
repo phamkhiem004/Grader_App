@@ -23,8 +23,15 @@ public class Exam {
     @Column(name = "exam_name", length = 200)
     private String examName;
 
+    @Lob
+    @Column(name = "teacher_note")
+    private String teacherNote;     // ghi chú/đề bài để AI hiểu ngữ cảnh khi nhận xét
+
     @Column(name = "image_name", length = 100)
     private String imageName;
+
+    @Column(name = "testcase_path", length = 500)
+    private String testcasePath;   // đường dẫn testcase trên host để mount lúc chấm
 
     @Enumerated(EnumType.STRING)
     @Column(name = "status", length = 20)

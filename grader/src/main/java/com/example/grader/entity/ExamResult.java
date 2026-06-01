@@ -47,6 +47,9 @@ public class ExamResult {
     @Column(name = "details", columnDefinition = "LONGTEXT")
     private String details;
 
+    @Column(name = "result_json", columnDefinition = "LONGTEXT")
+    private String resultJson;     // JSON đầy đủ cho AI đọc & nhận xét
+
     @Lob
     @Column(name = "error_log")
     private String errorLog;

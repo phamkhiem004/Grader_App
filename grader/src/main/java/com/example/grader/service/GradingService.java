@@ -23,8 +23,20 @@ public class GradingService {
     @Value("${grader.image.prefix:grading-env}")
     private String imagePrefix;
 
+    /** Ảnh nền dùng chung — chạy container chấm và mount testcase + lib vào. */
+    @Value("${grader.base-image:grading-base:latest}")
+    private String baseImage;
+
     @Value("${grader.timeout.seconds:120}")
     private int timeoutSeconds;
+
+    /** RAM mỗi container chấm. Tăng giúp tránh OOM khi compile project lớn. */
+    @Value("${grader.run.memory:2048m}")
+    private String runMemory;
+
+    /** Số CPU mỗi container chấm. Tăng giúp `flutter test` compile nhanh hơn. */
+    @Value("${grader.run.cpus:2.0}")
+    private String runCpus;
 
     private final ObjectMapper mapper = new ObjectMapper();
 
@@ -50,7 +62,7 @@ public class GradingService {
                 .orElseThrow(() -> new IllegalArgumentException("Không tìm thấy thư mục lib/ trong file nộp"));
     }
 
-    public String gradeSubmission(String studentId, String examId,
+    public String gradeSubmission(String studentId, String examId, String testcasePath,
                                   Path tempDir, Path zipPath) throws Exception {
         Path extractDir = tempDir.resolve("extracted");
         Files.createDirectories(extractDir);
@@ -72,7 +84,7 @@ public class GradingService {
 
             return runDockerGrader(
                     studentLib.toAbsolutePath().toString(),
-                    examId
+                    examId, testcasePath
             );
         } finally {
             deleteDirectory(tempDir.toFile());
@@ -80,18 +92,25 @@ public class GradingService {
     }
 
     // ── Gọi Docker ───────────────────────────────────────────────
-    private String runDockerGrader(String libPath,// ← Bỏ param này
-                                   String examId) throws Exception {
-        String imageName = imagePrefix + "-" + examId.toLowerCase();
-
-        String[] command = {
+    private String runDockerGrader(String libPath, String examId, String testcasePath) throws Exception {
+        List<String> command = new ArrayList<>(List.of(
                 "docker", "run", "--rm",
-                "--memory", "1024m",
-                "--cpus", "1.0",
-                "-v", toDockerPath(libPath) + ":/app/lib",
-                // ← Xóa dòng mount pubspec_student.yaml
-                imageName
-        };
+                "--memory", runMemory,
+                "--cpus", runCpus,
+                "-v", toDockerPath(libPath) + ":/app/lib"
+        ));
+
+        // MOUNT mode: mount testcase vào ảnh nền (không cần image riêng cho đề).
+        // Fallback (đề cũ): dùng image grading-env-<đề> đã build sẵn.
+        boolean mountMode = testcasePath != null && !testcasePath.isBlank()
+                && Files.exists(Path.of(testcasePath));
+        if (mountMode) {
+            command.add("-v");
+            command.add(toDockerPath(testcasePath) + ":/app/test");
+            command.add(baseImage);
+        } else {
+            command.add(imagePrefix + "-" + examId.toLowerCase());
+        }
 
         ProcessBuilder pb = new ProcessBuilder(command);
         Process process = pb.start();
@@ -131,7 +150,46 @@ public class GradingService {
         if (process.exitValue() != 0 && !output.contains("GRADE_RESULT_START"))
             throw new RuntimeException("Lỗi biên dịch: " + stderr.toString().trim());
 
-        return parseGraderOutput(output);
+        String resultJson = parseGraderOutput(output);
+        ensureTestsRan(resultJson, output);   // 0/0 (không test nào chạy) → coi là LỖI, không phải DONE
+        return resultJson;
+    }
+
+    /**
+     * Nếu không có testcase nào chạy (tongSoTest == 0) thì gần như chắc chắn bài nộp KHÔNG
+     * biên dịch được với testcase (thiếu file/sai tên class) → ném lỗi rõ ràng thay vì để
+     * hệ thống hiểu nhầm là "DONE 0 điểm".
+     */
+    private void ensureTestsRan(String resultJson, String output) {
+        try {
+            JsonNode n = mapper.readTree(resultJson);
+            if (n.path("tongSoTest").asInt(-1) == 0) {
+                String hint = extractCompileErrors(output);
+                throw new RuntimeException(
+                        "Bài nộp không chạy được testcase nào (0/0) — thường do thiếu file/sai tên "
+                      + "class so với đề, hoặc lỗi biên dịch."
+                      + (hint.isEmpty() ? "" : " Chi tiết: " + hint));
+            }
+        } catch (RuntimeException re) {
+            throw re;                       // ném tiếp lỗi 0/0
+        } catch (Exception ignored) {       // JSON lạ → bỏ qua, giữ luồng cũ
+        }
+    }
+
+    /** Trích vài dòng lỗi biên dịch của Dart/Flutter từ output để báo cho người chấm. */
+    private String extractCompileErrors(String output) {
+        StringBuilder sb = new StringBuilder();
+        int count = 0;
+        for (String line : output.split("\n")) {
+            String t = line.trim();
+            if (t.startsWith("{")) continue;   // bỏ dòng JSON machine
+            if (t.contains("Error:") || t.contains("Error when reading")) {
+                if (count > 0) sb.append(" | ");
+                sb.append(t.length() > 180 ? t.substring(0, 180) : t);
+                if (++count >= 3) break;
+            }
+        }
+        return sb.toString();
     }
 
     // ── Parse output ─────────────────────────────────────────────

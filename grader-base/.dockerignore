@@ -1,0 +1,8 @@
+# Giữ build context của ảnh nền gọn nhẹ (chỉ cần Dockerfile.base + pubspec + scripts + run_grader.sh)
+build-base.ps1
+build-base.sh
+prune-grader.ps1
+prune-grader.sh
+README.md
+*.log
+.DS_Store

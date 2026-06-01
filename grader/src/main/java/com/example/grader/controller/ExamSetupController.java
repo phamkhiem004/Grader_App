@@ -21,9 +21,11 @@ public class ExamSetupController {
     @PostMapping("/upload-testcase")
     public ResponseEntity<?> uploadTestcase(
             @RequestParam("examId")   String examId,
+            @RequestParam(value = "examName",    required = false) String examName,
+            @RequestParam(value = "teacherNote", required = false) String teacherNote,
             @RequestParam("testcase") MultipartFile zip) {
         try {
-            return ResponseEntity.ok(examService.setupExam(examId, zip));
+            return ResponseEntity.ok(examService.setupExam(examId, examName, teacherNote, zip));
 
         } catch (IllegalArgumentException e) {
             // Thiếu file bắt buộc, sai format...
@@ -42,5 +44,15 @@ public class ExamSetupController {
         return examRepo.findByExamId(examId)
                 .map(ResponseEntity::ok)
                 .orElse(ResponseEntity.notFound().build());
+    }
+
+    /** Xóa 1 đề không dùng nữa: gỡ ảnh Docker + bản ghi DB (giải phóng dung lượng). */
+    @DeleteMapping("/{examId}")
+    public ResponseEntity<?> deleteExam(@PathVariable String examId) {
+        try {
+            return ResponseEntity.ok(examService.deleteExam(examId));
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
+        }
     }
 }

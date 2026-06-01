@@ -13,12 +13,21 @@ public interface ExamResultRepository extends JpaRepository<ExamResult, Long> {
     // Lấy toàn bộ bài trong 1 batch
     List<ExamResult> findByBatchIdOrderByStudentId(String batchId);
 
+    // Lấy toàn bộ bài của 1 đề thi — dùng cho thống kê
+    List<ExamResult> findByExamId(String examId);
+
     // Tìm 1 bài cụ thể trong batch
     Optional<ExamResult> findByStudentIdAndBatchId(String studentId, String batchId);
 
     // Đếm theo trạng thái — dùng cho progress bar
     long countByBatchIdAndStatus(String batchId, GradingStatus status);
 
+    // Job đang chờ/đang chấm — để khôi phục hàng đợi sau restart
+    List<ExamResult> findByStatusIn(java.util.Collection<GradingStatus> statuses);
+
     // Kiểm tra đã nộp chính thức chưa
     boolean existsByStudentIdAndExamIdAndMode(String studentId, String examId, String mode);
+
+    // Tìm bản ghi cũ để ghi đè khi chấm lại (cùng SV + đề + mode)
+    Optional<ExamResult> findByStudentIdAndExamIdAndMode(String studentId, String examId, String mode);
 }

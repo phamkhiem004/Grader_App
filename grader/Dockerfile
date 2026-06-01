@@ -1,27 +1,30 @@
-FROM ghcr.io/cirruslabs/flutter:stable
+# grader/Dockerfile — Spring Boot backend (multi-stage)
+# ============================================================================
+#  Stage 1: build .jar bằng Maven (cache dependency để build lại nhanh)
+#  Stage 2: runtime JRE gọn + docker CLI (để build/run ảnh chấm qua docker.sock)
+# ============================================================================
 
-RUN apt-get update && apt-get install -y \
-    xvfb libgtk-3-0 xauth \
-    && rm -rf /var/lib/apt/lists/*
+# ---- Build stage ----------------------------------------------------------
+FROM maven:3.9-eclipse-temurin-17 AS build
+WORKDIR /src
 
+# Cache dependencies trước (chỉ chạy lại khi pom.xml đổi)
+COPY pom.xml .
+RUN mvn -q -B dependency:go-offline
+
+COPY src ./src
+RUN mvn -q -B clean package -DskipTests
+
+# ---- Runtime stage --------------------------------------------------------
+FROM eclipse-temurin:17-jre AS runtime
 WORKDIR /app
 
-# pubspec GV — làm base để merge
-COPY grader_template/pubspec.yaml ./pubspec_base.yaml
-COPY grader_template/pubspec.lock ./pubspec.lock
+# docker CLI: backend cần gọi `docker build` / `docker run` qua docker.sock mount từ host
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends docker.io \
+    && rm -rf /var/lib/apt/lists/*
 
-# Pre-cache packages của GV vào image
-RUN flutter pub get
-RUN flutter precache --universal
+COPY --from=build /src/target/*.jar app.jar
 
-# Copy testcase + grader + scripts
-COPY grader_template/test/      ./test/
-COPY grader_template/scripts/   ./scripts/
-
-# lib/ và pubspec_student.yaml sẽ được mount lúc chấm
-RUN mkdir -p lib
-
-COPY run_grader.sh .
-RUN chmod +x run_grader.sh
-
-CMD ["./run_grader.sh"]
+EXPOSE 8080
+ENTRYPOINT ["java", "-jar", "/app/app.jar"]

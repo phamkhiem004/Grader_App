@@ -1,0 +1,30 @@
+# ── Java / Maven ────────────────────────────────────────────────
+grader/target/
+*.class
+*.jar
+!**/maven-wrapper.jar
+
+# ── Node / Next.js ──────────────────────────────────────────────
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/.turbo/
+npm-debug.log*
+yarn-error.log*
+
+# ── Dữ liệu runtime của hệ thống chấm ───────────────────────────
+# exams/ chứa testcase đã upload (mount lúc chấm) — dữ liệu runtime
+exams/
+# submissions/ lưu zip bài nộp SV để audit — dữ liệu runtime
+submissions/
+
+# ── IDE / OS ────────────────────────────────────────────────────
+.idea/
+*.iml
+.vscode/
+.DS_Store
+Thumbs.db
+
+# ── Logs / tạm ──────────────────────────────────────────────────
+*.log
+*.tmp

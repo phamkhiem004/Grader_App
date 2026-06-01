@@ -3,11 +3,12 @@
 import { useState, useRef, useCallback } from "react";
 import SidebarLayout from "@/components/layout/SidebarLayout";
 import { Settings, UploadCloud, FileJson, FileCode2, Package, Play, CheckCircle, AlertCircle, Loader2 } from "lucide-react";
-
-const API_BASE = "http://localhost:8080/api";
+import { API_BASE } from "@/lib/config";
 
 export default function TeacherSetupPage() {
   const [examId, setExamId] = useState("");
+  const [examName, setExamName] = useState("");
+  const [teacherNote, setTeacherNote] = useState("");
   const [file, setFile] = useState(null);
   const [dragging, setDragging] = useState(false);
   const [phase, setPhase] = useState("idle"); // idle | uploading | done
@@ -41,6 +42,8 @@ export default function TeacherSetupPage() {
 
     const form = new FormData();
     form.append("examId", examId.trim());
+    if (examName.trim()) form.append("examName", examName.trim());
+    if (teacherNote.trim()) form.append("teacherNote", teacherNote.trim());
     form.append("testcase", file);
 
     try {
@@ -66,6 +69,8 @@ export default function TeacherSetupPage() {
   const reset = () => {
     setFile(null);
     setExamId("");
+    setExamName("");
+    setTeacherNote("");
     setPhase("idle");
     setError(null);
   };
@@ -73,7 +78,7 @@ export default function TeacherSetupPage() {
   const isRunning = phase === "uploading";
 
   return (
-    <SidebarLayout title="Cấu hình Đề thi (Exam Setup)" activePath="/teacher">
+    <SidebarLayout title="Cấu hình Đề thi" subtitle="Khởi tạo môi trường chấm điểm cho từng mã đề" activePath="/teacher">
       <div className="max-w-4xl mx-auto">
         
         {/* Tiêu đề trang */}
@@ -110,6 +115,30 @@ export default function TeacherSetupPage() {
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all disabled:opacity-60 font-medium text-slate-800 uppercase"
                   />
                   <p className="text-xs text-slate-400 mt-2">Mã đề này sẽ được dùng để khớp với bài làm của sinh viên khi chấm tự động.</p>
+
+                  <div className="mt-4">
+                    <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500">Tên đề thi <span className="font-normal normal-case text-slate-400">(tuỳ chọn)</span></label>
+                    <input
+                      value={examName}
+                      onChange={e => setExamName(e.target.value)}
+                      disabled={isRunning || phase === "done"}
+                      placeholder="VD: Flutter Practical Exam"
+                      className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-800 transition-all focus:border-transparent focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-60"
+                    />
+                  </div>
+
+                  <div className="mt-4">
+                    <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500">Ghi chú đề bài <span className="font-normal normal-case text-slate-400">(cho AI nhận xét)</span></label>
+                    <textarea
+                      value={teacherNote}
+                      onChange={e => setTeacherNote(e.target.value)}
+                      disabled={isRunning || phase === "done"}
+                      rows={3}
+                      placeholder="VD: Bài yêu cầu xây màn hình login, validate form và gọi API giả lập..."
+                      className="w-full resize-none rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-800 transition-all focus:border-transparent focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-60"
+                    />
+                    <p className="mt-1.5 text-xs text-slate-400">Mô tả ngắn yêu cầu đề — lưu kèm kết quả để AI hiểu ngữ cảnh khi nhận xét.</p>
+                  </div>
                 </div>
               </div>
 
@@ -141,7 +170,7 @@ export default function TeacherSetupPage() {
                     ) : (
                       <div>
                         <p className="text-sm font-semibold text-slate-700 mb-1">Kéo thả ZIP testcase vào đây</p>
-                        <p className="text-xs text-slate-500">Phải chứa exam.dart, grader.dart, skills_matrix.json</p>
+                        <p className="text-xs text-slate-500">Phải chứa exam_test.dart, grader.dart, skills_matrix.json</p>
                       </div>
                     )}
                     <input ref={fileRef} type="file" accept=".zip" className="hidden" onChange={(e) => handleFile(e.target.files)} />
@@ -164,7 +193,7 @@ export default function TeacherSetupPage() {
                 <button 
                   onClick={execute}
                   disabled={!examId || !file}
-                  className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-semibold py-3.5 px-4 rounded-xl flex items-center justify-center gap-2 transition-all shadow-sm shadow-indigo-600/20 active:scale-[0.98]"
+                  className="w-full bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 disabled:from-slate-300 disabled:to-slate-300 disabled:shadow-none disabled:cursor-not-allowed text-white font-semibold py-3.5 px-4 rounded-xl flex items-center justify-center gap-2 transition-all shadow-sm shadow-indigo-600/20 active:scale-[0.98]"
                 >
                   <Play size={18} />
                   Xây dựng môi trường chấm (Docker Build)
@@ -175,8 +204,8 @@ export default function TeacherSetupPage() {
               {phase === "uploading" && (
                 <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-8 text-center max-w-lg mx-auto">
                   <Loader2 size={32} className="animate-spin text-indigo-600 mx-auto mb-4" />
-                  <h3 className="text-base font-bold text-indigo-900 mb-2">Đang khởi tạo Sandbox...</h3>
-                  <p className="text-sm text-indigo-700/80">Hệ thống đang giải nén testcase và build Docker Image riêng biệt cho mã đề <strong>{examId}</strong>. Quá trình này có thể mất 1-2 phút.</p>
+                  <h3 className="text-base font-bold text-indigo-900 mb-2">Đang lưu testcase...</h3>
+                  <p className="text-sm text-indigo-700/80">Hệ thống đang giải nén & lưu testcase cho mã đề <strong>{examId}</strong> — gần như tức thì (mount lúc chấm, không build image). <span className="text-indigo-600/70">(Lần đầu trên máy chủ có thể lâu hơn nếu cần dựng ảnh nền.)</span></p>
                 </div>
               )}
 
@@ -210,7 +239,7 @@ export default function TeacherSetupPage() {
             </h3>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-                <div className="flex items-center gap-2 mb-2 text-indigo-600"><FileCode2 size={16} /><span className="font-mono text-sm font-bold">exam.dart</span></div>
+                <div className="flex items-center gap-2 mb-2 text-indigo-600"><FileCode2 size={16} /><span className="font-mono text-sm font-bold">exam_test.dart</span></div>
                 <p className="text-xs text-slate-500">File chứa các Unit/Widget test do giảng viên viết dùng package test của Flutter.</p>
               </div>
               <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">

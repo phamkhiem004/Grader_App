@@ -6,6 +6,7 @@ import com.example.grader.entity.ExamStatus;
 import com.example.grader.repository.ExamRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -14,140 +15,207 @@ import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.stream.Stream;
 
+/**
+ * Setup đề theo cơ chế MOUNT: KHÔNG build image riêng cho từng đề.
+ * Chỉ lưu testcase lên đĩa rồi mount vào ảnh nền grading-base lúc chấm.
+ *  → upload gần như tức thì, không tích tụ image.
+ */
 @Service
 @Slf4j
 public class ExamService {
 
-    // Đường dẫn cố định trên server — admin lo 1 lần
-    private static final String TEMPLATE_DIR = "C:/MyGit/Grader_App/grader-base";
-    private static final String EXAMS_DIR    = "C:/MyGit/Grader_App/exams";
+    @Value("${grader.template-dir:grader-base}")
+    private String templateDir;
+
+    @Value("${grader.exams-dir:exams}")
+    private String examsDir;
+
+    @Value("${grader.base-image:grading-base:latest}")
+    private String baseImage;
+
+    @Value("${grader.image.prefix:grading-env}")
+    private String imagePrefix;
+
+    private final AtomicBoolean baseImageReady = new AtomicBoolean(false);
 
     @Autowired
     private ExamRepository examRepository;
 
-    // ── GV chỉ gọi hàm này ──────────────────────────────────────
-    public ExamSetupResponse setupExam(String examId,
-                                       MultipartFile testcaseZip) throws Exception {
-        // 1. Tạo thư mục cho đề thi này
-        Path examDir     = Path.of(EXAMS_DIR, examId);
-        Path testcaseDir = examDir.resolve("testcase");
-        Path buildDir    = examDir.resolve("build");
+    // ── Setup đề: chỉ lưu testcase (mount lúc chấm), KHÔNG build image ──
+    public ExamSetupResponse setupExam(String examId, String examName,
+                                       String teacherNote, MultipartFile testcaseZip) throws Exception {
+        Path tmplDir = locateTemplateDir();
+        ensureBaseImage(tmplDir);   // vẫn cần ảnh nền (container chạy từ đây)
+
+        Path testcaseDir = resolveExamsDir(tmplDir).resolve(examId).resolve("testcase");
+        if (Files.exists(testcaseDir)) deleteRecursively(testcaseDir);
         Files.createDirectories(testcaseDir);
-        Files.createDirectories(buildDir);
 
-        // 2. Giải nén testcase GV upload
         unzip(testcaseZip.getBytes(), testcaseDir);
-
-        // 3. Validate đủ file chưa
         validateRequiredFiles(testcaseDir);
 
-        // 4. Ghép build context:
-        //    Dockerfile.template + run_grader.sh (từ server)
-        //    + test/ của GV (từ zip vừa upload)
-        assembleBuildContext(testcaseDir, buildDir);
-
-        // 5. Docker build tự động
-        String imageName = "grading-env-" + examId.toLowerCase();
-        buildDockerImage(buildDir, imageName);
-
-        // 6. Lưu DB
-        Exam exam = examRepository.findByExamId(examId)
-                .orElse(new Exam());
+        Exam exam = examRepository.findByExamId(examId).orElse(new Exam());
         exam.setExamId(examId);
-        exam.setImageName(imageName);
+        exam.setImageName(baseImage);
+        exam.setTestcasePath(testcaseDir.toAbsolutePath().normalize().toString());
         exam.setStatus(ExamStatus.READY);
+        if (examName    != null && !examName.isBlank())    exam.setExamName(examName.trim());
+        if (teacherNote != null && !teacherNote.isBlank()) exam.setTeacherNote(teacherNote.trim());
         examRepository.save(exam);
 
-        return new ExamSetupResponse(examId, imageName, "READY");
+        log.info("✅ Đề {} sẵn sàng (mount testcase, không build image): {}", examId, testcaseDir);
+        return new ExamSetupResponse(examId, baseImage, "READY");
     }
 
-    // ── Ghép Dockerfile + testcase vào 1 build context ──────────
-    private void assembleBuildContext(Path testcaseDir, Path buildDir) throws Exception {
+    // ── Xóa đề: gỡ ảnh per-exam cũ (legacy) nếu còn + testcase + DB ──
+    public Map<String, Object> deleteExam(String examId) {
+        boolean imageRemoved = false;
+        try {
+            imageRemoved = runDocker(
+                    List.of("docker", "rmi", "-f", imagePrefix + "-" + examId.toLowerCase()),
+                    "rmi-" + examId) == 0;
+        } catch (Exception e) {
+            log.warn("Không gỡ được ảnh legacy của {}: {}", examId, e.getMessage());
+        }
+        try {
+            Path examDir = resolveExamsDir(locateTemplateDir()).resolve(examId);
+            if (Files.exists(examDir)) deleteRecursively(examDir);
+        } catch (Exception ignored) {}
 
-        // Copy Dockerfile.template → build/Dockerfile
-        Files.copy(
-                Path.of(TEMPLATE_DIR, "Dockerfile.template"),
-                buildDir.resolve("Dockerfile"),
-                StandardCopyOption.REPLACE_EXISTING
-        );
+        boolean dbRemoved = examRepository.findByExamId(examId)
+                .map(e -> { examRepository.delete(e); return true; })
+                .orElse(false);
 
-        // Copy run_grader.sh — strip CRLF and BOM so Linux shebang is valid
-        String shContent = Files.readString(
-                Path.of(TEMPLATE_DIR, "run_grader.sh"), StandardCharsets.UTF_8)
-                .replace("\uFEFF", "") // Remove UTF-8 BOM if present
-                .replace("\r\n", "\n")
-                .replace("\r", "\n");
-        Files.writeString(buildDir.resolve("run_grader.sh"),
-                shContent, StandardCharsets.UTF_8);
-
-        // Copy scripts/merge_pubspec.dart
-        Path scriptsDst = buildDir.resolve("scripts");
-        Files.createDirectories(scriptsDst);
-        Files.copy(
-                Path.of(TEMPLATE_DIR, "scripts/merge_pubspec.dart"),
-                scriptsDst.resolve("merge_pubspec.dart"),
-                StandardCopyOption.REPLACE_EXISTING
-        );
-
-        // Copy pubspec base
-        Files.copy(
-                Path.of(TEMPLATE_DIR, "pubspec.base.yaml"),
-                buildDir.resolve("pubspec.yaml"),
-                StandardCopyOption.REPLACE_EXISTING
-        );
-
-        // Copy testcase GV → build/test/
-        Path buildTestDir = buildDir.resolve("test");
-        Files.createDirectories(buildTestDir);
-        copyDirectory(testcaseDir, buildTestDir);
-
-        log.info("📦 Build context:\n  Dockerfile ✓\n  run_grader.sh ✓\n  test/ ✓ ({} files)",
-                Files.list(buildTestDir).count());
+        log.info("🗑️ Đã xóa đề {} (ảnh legacy: {}, DB: {})", examId, imageRemoved, dbRemoved);
+        Map<String, Object> r = new LinkedHashMap<>();
+        r.put("examId", examId);
+        r.put("imageRemoved", imageRemoved);
+        r.put("dbRecordRemoved", dbRemoved);
+        return r;
     }
 
-    // ── Gọi docker build ─────────────────────────────────────────
-    private void buildDockerImage(Path buildDir, String imageName) throws Exception {
-        log.info("🔨 Building image: {}...", imageName);
+    /** Thư mục cạnh grader-base (gốc repo)/<name>, dùng chung cho exams/ và submissions/. */
+    public Path resolveSibling(String name) {
+        Path p = Path.of(name);
+        if (p.isAbsolute()) return p.normalize();
+        Path root = locateTemplateDir().getParent();
+        return (root != null ? root.resolve(name) : p.toAbsolutePath()).normalize();
+    }
 
-        ProcessBuilder pb = new ProcessBuilder(
-                "docker", "build", "-t", imageName,
-                buildDir.toAbsolutePath().toString()
-        );
+    // ── Ảnh nền dùng chung: build 1 lần duy nhất ────────────────
+    private synchronized void ensureBaseImage(Path base) throws Exception {
+        if (baseImageReady.get()) return;
+
+        if (dockerImageExists(baseImage)) {
+            log.info("✅ Ảnh nền {} đã có sẵn", baseImage);
+            baseImageReady.set(true);
+            return;
+        }
+        if (!Files.exists(base.resolve("Dockerfile.base")))
+            throw new IllegalStateException(
+                    "Không tìm thấy Dockerfile.base trong " + base.toAbsolutePath()
+                  + ". Đặt biến môi trường GRADER_TEMPLATE_DIR trỏ tới thư mục grader-base "
+                  + "(vd <repo>/grader-base) hoặc chạy backend từ thư mục gốc repo.");
+
+        log.info("🏗️  Chưa có ảnh nền {} — build lần đầu (có thể mất vài phút)...", baseImage);
+        int exit = runDocker(List.of(
+                "docker", "build",
+                "-f", base.resolve("Dockerfile.base").toAbsolutePath().toString(),
+                "-t", baseImage,
+                base.toAbsolutePath().toString()
+        ), "base-build");
+        if (exit != 0)
+            throw new RuntimeException("Build ảnh nền thất bại (exit " + exit + ").");
+
+        log.info("✅ Ảnh nền {} đã sẵn sàng", baseImage);
+        baseImageReady.set(true);
+    }
+
+    // ── Định vị grader-base (dò ngược lên từ CWD) ───────────────
+    private Path locateTemplateDir() {
+        Path configured = Path.of(templateDir);
+        String name = configured.getFileName() != null
+                ? configured.getFileName().toString() : "grader-base";
+
+        List<Path> tried = new ArrayList<>();
+        Path p = Path.of("").toAbsolutePath();
+        for (int i = 0; i < 5 && p != null; i++) {
+            for (Path c : new Path[]{ p.resolve(configured), p.resolve(name) }) {
+                tried.add(c);
+                if (Files.exists(c.resolve("Dockerfile.base")))
+                    return c.toAbsolutePath().normalize();
+            }
+            p = p.getParent();
+        }
+        log.warn("⚠️ Không định vị được grader-base (Dockerfile.base). Đã thử: {}", tried);
+        return configured.toAbsolutePath().normalize();
+    }
+
+    private Path resolveExamsDir(Path tmplDir) {
+        Path configured = Path.of(examsDir);
+        if (configured.isAbsolute()) return configured.normalize();
+        Path root = tmplDir.getParent();
+        return (root != null ? root.resolve(examsDir) : configured.toAbsolutePath()).normalize();
+    }
+
+    // ── Helpers docker ──────────────────────────────────────────
+    private boolean dockerImageExists(String image) {
+        try {
+            Process pr = new ProcessBuilder("docker", "image", "inspect", image)
+                    .redirectErrorStream(true).start();
+            try (BufferedReader r = new BufferedReader(new InputStreamReader(pr.getInputStream()))) {
+                while (r.readLine() != null) { /* drain */ }
+            }
+            return pr.waitFor(30, TimeUnit.SECONDS) && pr.exitValue() == 0;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private int runDocker(List<String> command, String tag) throws Exception {
+        ProcessBuilder pb = new ProcessBuilder(command);
+        pb.environment().put("DOCKER_BUILDKIT", "1");
         pb.redirectErrorStream(true);
         Process process = pb.start();
-
-        // Log output docker build
         try (BufferedReader r = new BufferedReader(
-                new InputStreamReader(process.getInputStream()))) {
+                new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
             String line;
-            while ((line = r.readLine()) != null) log.debug("[docker build] {}", line);
+            while ((line = r.readLine()) != null) log.debug("[{}] {}", tag, line);
         }
-
-        int exit = process.waitFor();
-        if (exit != 0) throw new RuntimeException(
-                "docker build thất bại (exit " + exit + "). Kiểm tra lại testcase."
-        );
-
-        log.info("✅ Image {} đã sẵn sàng", imageName);
+        return process.waitFor();
     }
 
+    // ── Validate + unzip + xóa đệ quy ───────────────────────────
     private void validateRequiredFiles(Path dir) throws Exception {
         for (String f : List.of("exam_test.dart", "grader.dart", "skills_matrix.json")) {
-            if (!Files.exists(dir.resolve(f)))
+            Path p = dir.resolve(f);
+            if (!Files.exists(p))
                 throw new IllegalArgumentException("Thiếu file bắt buộc: " + f);
+            if (Files.size(p) == 0)
+                throw new IllegalArgumentException(
+                        "File bắt buộc bị RỖNG (0 byte): " + f
+                      + " — kiểm tra lại nội dung file trước khi nén zip.");
         }
+        if (!Files.readString(dir.resolve("grader.dart")).contains("main"))
+            throw new IllegalArgumentException(
+                    "grader.dart không có hàm main() — file có thể sai nội dung/encoding.");
     }
 
-    private void copyDirectory(Path src, Path dst) throws Exception {
-        Files.walk(src).forEach(s -> {
-            try {
-                Files.copy(s, dst.resolve(src.relativize(s)),
-                        StandardCopyOption.REPLACE_EXISTING);
-            } catch (Exception ignored) {}
-        });
+    private void deleteRecursively(Path dir) throws Exception {
+        if (!Files.exists(dir)) return;
+        try (Stream<Path> walk = Files.walk(dir)) {
+            walk.sorted(Comparator.reverseOrder())
+                .forEach(p -> { try { Files.delete(p); } catch (Exception ignored) {} });
+        }
     }
 
     private void unzip(byte[] bytes, Path dest) throws Exception {
@@ -155,7 +223,9 @@ public class ExamService {
                 new java.io.ByteArrayInputStream(bytes))) {
             java.util.zip.ZipEntry entry;
             while ((entry = zis.getNextEntry()) != null) {
-                Path out = dest.resolve(entry.getName());
+                Path out = dest.resolve(entry.getName()).normalize();
+                if (!out.startsWith(dest))
+                    throw new IllegalArgumentException("Zip Slip: " + entry.getName());
                 if (entry.isDirectory()) { Files.createDirectories(out); }
                 else {
                     Files.createDirectories(out.getParent());

@@ -1,0 +1,50 @@
+# grader-base/Dockerfile.base
+# ============================================================================
+#  ẢNH NỀN DÙNG CHUNG (grading-base) — BUILD MỘT LẦN DUY NHẤT
+# ----------------------------------------------------------------------------
+#  Tất cả phần "nặng" (Flutter SDK, apt packages, flutter pub get, precache)
+#  được gói sẵn vào đây. Mỗi đề thi (PE_01, PE_02, ...) chỉ cần `FROM` ảnh này
+#  rồi copy testcase vào → build chỉ còn vài giây thay vì vài phút.
+#
+#  Build:  docker build -f Dockerfile.base -t grading-base:latest .
+#  (hoặc chạy build-base.ps1 / build-base.sh trong thư mục này)
+# ============================================================================
+
+# syntax=docker/dockerfile:1
+FROM ghcr.io/cirruslabs/flutter:stable
+
+# Tắt analytics để CLI không treo chờ prompt khi build/chạy
+ENV FLUTTER_SUPPRESS_ANALYTICS=true \
+    DART_DISABLE_ANALYTICS=true \
+    DEBIAN_FRONTEND=noninteractive \
+    CI=true
+
+# Thư viện cho Xvfb + render widget headless
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        xvfb libgtk-3-0 libglu1-mesa xauth \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# ── Pubspec CỐ ĐỊNH của hệ thống chấm ────────────────────────────────────────
+# run_grader.sh luôn dùng pubspec base này (SV chỉ được dùng package đã cài sẵn),
+# nên ta resolve & "đóng băng" toàn bộ package ngay trong ảnh nền.
+COPY pubspec.base.yaml ./pubspec_base.yaml
+COPY pubspec.base.yaml ./pubspec.yaml
+RUN flutter pub get
+
+# Tải sẵn artifacts engine để lúc chấm KHÔNG cần internet.
+# (Chỉ chạy 1 lần khi build base — không lặp lại cho từng đề thi)
+RUN flutter precache --universal
+
+# ── File tiện ích KHÔNG đổi giữa các đề thi ─────────────────────────────────
+COPY scripts/      ./scripts/
+COPY run_grader.sh ./run_grader.sh
+# Chuẩn hoá CRLF → LF để shebang hợp lệ trên Linux + cấp quyền chạy
+RUN tr -d '\r' < run_grader.sh > run_grader.lf \
+    && mv run_grader.lf run_grader.sh \
+    && chmod +x run_grader.sh \
+    && mkdir -p lib test
+
+# Mỗi đề thi sẽ override test/ và (nếu cần) CMD.
+CMD ["./run_grader.sh"]

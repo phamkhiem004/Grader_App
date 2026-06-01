@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS exam_results (
                   ) DEFAULT 'QUEUED',
     mode          VARCHAR(10)   DEFAULT 'submit' COMMENT 'submit | test',
     details       LONGTEXT                       COMMENT 'JSON chi tiết từng testcase',
+    result_json   LONGTEXT                       COMMENT 'JSON đầy đủ (student/exam/test_cases/analyze) cho AI',
     error_log     LONGTEXT                          COMMENT 'Lỗi thô để AI đọc sau',
     submitted_at  TIMESTAMP     DEFAULT CURRENT_TIMESTAMP,
     updated_at    TIMESTAMP     DEFAULT CURRENT_TIMESTAMP
@@ -40,7 +41,9 @@ CREATE TABLE IF NOT EXISTS exams (
     id            BIGINT AUTO_INCREMENT PRIMARY KEY,
     exam_id       VARCHAR(50)   NOT NULL UNIQUE  COMMENT 'VD: FLUTTER_PE_01',
     exam_name     VARCHAR(200)                   COMMENT 'Tên đề thi hiển thị',
-    image_name    VARCHAR(100)                   COMMENT 'Tên Docker image: grading-env-flutter_pe_01',
+    teacher_note  TEXT                           COMMENT 'Ghi chú/đề bài cho AI hiểu ngữ cảnh',
+    image_name    VARCHAR(100)                   COMMENT 'Ảnh chấm (grading-base khi dùng mount)',
+    testcase_path VARCHAR(500)                   COMMENT 'Đường dẫn testcase trên host để mount lúc chấm',
     status        ENUM(
                     'BUILDING', -- Đang build Docker image
                     'READY',    -- Sẵn sàng chấm

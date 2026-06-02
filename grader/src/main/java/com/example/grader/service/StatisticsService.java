@@ -35,12 +35,17 @@ public class StatisticsService {
     private static final DateTimeFormatter DAY_FMT = DateTimeFormatter.ofPattern("dd/MM");
     private static final String[] RANGES = {"0-2", "2-4", "4-6", "6-8", "8-10"};
 
-    // ── Danh sách đề cho dropdown lọc ───────────────────────────
+    // ── Danh sách đề cho dropdown lọc (chỉ những đề đã thực hiện chấm) ──
     public List<ExamOption> getExamOptions() {
+        java.util.Set<String> gradedExamIds = new java.util.HashSet<>(resultRepo.findDistinctExamIds());
         List<ExamOption> out = new ArrayList<>();
-        examRepo.findAll().forEach(e -> out.add(new ExamOption(
-                e.getExamId(),
-                e.getExamName() != null ? e.getExamName() : e.getExamId())));
+        examRepo.findAll().forEach(e -> {
+            if (gradedExamIds.contains(e.getExamId())) {
+                out.add(new ExamOption(
+                        e.getExamId(),
+                        e.getExamName() != null ? e.getExamName() : e.getExamId()));
+            }
+        });
         return out;
     }
 

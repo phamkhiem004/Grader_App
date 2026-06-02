@@ -5,6 +5,7 @@ import com.example.grader.entity.ExamResult;
 import com.example.grader.entity.ExamStatus;
 import com.example.grader.entity.GradingStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
 
 import java.util.List;
 import java.util.Optional;
@@ -15,6 +16,10 @@ public interface ExamResultRepository extends JpaRepository<ExamResult, Long> {
 
     // Lấy toàn bộ bài của 1 đề thi — dùng cho thống kê
     List<ExamResult> findByExamId(String examId);
+
+    // Danh sách examId đã từng được chấm — dùng để lọc dropdown thống kê
+    @Query("select distinct r.examId from ExamResult r where r.examId is not null")
+    List<String> findDistinctExamIds();
 
     // Tìm 1 bài cụ thể trong batch
     Optional<ExamResult> findByStudentIdAndBatchId(String studentId, String batchId);

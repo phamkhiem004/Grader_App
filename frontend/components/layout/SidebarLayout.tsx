@@ -1,7 +1,11 @@
-import React from 'react';
+"use client";
+
+import React, { useEffect } from 'react';
 import Link from 'next/link';
-import { Settings, FileText, CheckSquare, BarChart2, Users, LogOut, Bell, Search, GraduationCap } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { Settings, FileText, CheckSquare, BarChart2, LogOut, Bell, Search, GraduationCap, UserCircle, Loader2 } from 'lucide-react';
 import { clsx } from 'clsx';
+import { useAuth } from '@/components/auth/AuthProvider';
 
 interface SidebarLayoutProps {
   children: React.ReactNode;
@@ -18,10 +22,40 @@ const PRIMARY_NAV = [
 
 const SECONDARY_NAV = [
   { name: 'Thống kê', path: '/statistics', icon: BarChart2 },
-  { name: 'Sinh viên', path: '#', icon: Users },
+  { name: 'Giáo viên', path: '/profile', icon: UserCircle },
 ];
 
+/** Chữ cái đầu của tên để làm avatar. */
+function initialsOf(name?: string): string {
+  if (!name) return "GV";
+  const parts = name.trim().split(/\s+/);
+  if (parts.length === 1) return parts[0].charAt(0).toUpperCase();
+  return (parts[0].charAt(0) + parts[parts.length - 1].charAt(0)).toUpperCase();
+}
+
 export default function SidebarLayout({ children, activePath = '/', title, subtitle }: SidebarLayoutProps) {
+  const { teacher, loading, logout } = useAuth();
+  const router = useRouter();
+
+  // Bảo vệ route: chưa đăng nhập → về /login
+  useEffect(() => {
+    if (!loading && !teacher) router.replace("/login");
+  }, [loading, teacher, router]);
+
+  const handleLogout = async () => {
+    await logout();
+    router.replace("/login");
+  };
+
+  // Đang kiểm tra phiên hoặc chuẩn bị chuyển hướng → màn chờ (tránh nháy nội dung)
+  if (loading || !teacher) {
+    return (
+      <div className="flex h-screen w-full items-center justify-center bg-[#0b1120]">
+        <Loader2 size={28} className="animate-spin text-indigo-400" />
+      </div>
+    );
+  }
+
   const renderLink = (item: { name: string; path: string; icon: React.ElementType }) => {
     const isActive = activePath === item.path;
     return (
@@ -70,8 +104,21 @@ export default function SidebarLayout({ children, activePath = '/', title, subti
           <nav className="space-y-1">{SECONDARY_NAV.map(renderLink)}</nav>
         </div>
 
-        <div className="shrink-0 border-t border-white/5 p-4">
-          <button className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-slate-400 transition-colors hover:bg-slate-800/70 hover:text-white">
+        {/* GV đang đăng nhập + đăng xuất */}
+        <div className="shrink-0 border-t border-white/5 p-3">
+          <Link href="/profile" className="mb-1 flex items-center gap-3 rounded-lg px-2 py-2 transition-colors hover:bg-slate-800/70">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 to-blue-600 text-xs font-bold text-white ring-1 ring-white/10">
+              {initialsOf(teacher.fullName)}
+            </div>
+            <div className="min-w-0 leading-tight">
+              <div className="truncate text-sm font-semibold text-white">{teacher.fullName}</div>
+              <div className="truncate text-[11px] text-slate-500">{teacher.email}</div>
+            </div>
+          </Link>
+          <button
+            onClick={handleLogout}
+            className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-slate-400 transition-colors hover:bg-slate-800/70 hover:text-white"
+          >
             <LogOut size={18} />
             Đăng xuất
           </button>
@@ -99,9 +146,15 @@ export default function SidebarLayout({ children, activePath = '/', title, subti
               <Bell size={20} />
               <span className="absolute right-0 top-0 h-2 w-2 rounded-full border-2 border-white bg-rose-500" />
             </button>
-            <div className="flex h-9 w-9 cursor-pointer items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 to-blue-600 text-sm font-semibold text-white shadow-sm ring-2 ring-white">
-              GV
-            </div>
+            <Link href="/profile" className="flex items-center gap-2.5">
+              <div className="hidden text-right leading-tight sm:block">
+                <div className="text-sm font-semibold text-slate-800">{teacher.fullName}</div>
+                <div className="text-[11px] text-slate-500">Giáo viên</div>
+              </div>
+              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 to-blue-600 text-sm font-semibold text-white shadow-sm ring-2 ring-white">
+                {initialsOf(teacher.fullName)}
+              </div>
+            </Link>
           </div>
         </header>
 

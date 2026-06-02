@@ -8,7 +8,8 @@ import {
   Line, Area, PieChart, Pie, Cell, ComposedChart
 } from 'recharts';
 import {
-  TrendingUp, Users, Target, Award, RefreshCw, AlertCircle, Loader2, BarChart2, ChevronDown,
+  TrendingUp, Users, Target, Award, RefreshCw, Filter, AlertCircle, Loader2, BarChart2,
+  CheckCircle2, Clock, XCircle
 } from 'lucide-react';
 
 // ── Kiểu dữ liệu khớp StatisticsResponse của backend ──────────────
@@ -32,41 +33,15 @@ interface Stats {
 }
 interface ExamOption { examId: string; examName: string; }
 
-// ── Theo dõi theme sáng/tối để tô màu biểu đồ cho khớp ────────────
-function useIsDark() {
-  const [dark, setDark] = useState(false);
-  useEffect(() => {
-    const el = document.documentElement;
-    const update = () => setDark(el.classList.contains('dark'));
-    update();
-    const obs = new MutationObserver(update);
-    obs.observe(el, { attributes: true, attributeFilter: ['class'] });
-    return () => obs.disconnect();
-  }, []);
-  return dark;
-}
-
 export default function StatisticsPage() {
   const [exams, setExams] = useState<ExamOption[]>([]);
   const [examId, setExamId] = useState<string>("ALL");
   const [stats, setStats] = useState<Stats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const dark = useIsDark();
+  const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
 
-  // Màu biểu đồ theo theme
-  const grid = dark ? '#1e293b' : '#e2e8f0';
-  const tick = dark ? '#94a3b8' : '#64748b';
-  const tooltipStyle: React.CSSProperties = {
-    borderRadius: 12,
-    border: `1px solid ${dark ? '#1e2a42' : '#e6e8f2'}`,
-    background: dark ? '#0f1729' : '#ffffff',
-    color: dark ? '#e5e7eb' : '#0f172a',
-    boxShadow: '0 10px 30px -12px rgba(2,6,23,.45)',
-    fontSize: 13,
-  };
-
-  // Tải danh sách đề cho dropdown (chỉ đề đã có bài chấm)
+  // Tải danh sách đề cho dropdown (1 lần) — backend chỉ trả về đề đã chấm
   useEffect(() => {
     fetch(`${API_BASE}/statistics/exams`)
       .then(r => r.ok ? r.json() : [])
@@ -81,6 +56,7 @@ export default function StatisticsPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Lỗi tải thống kê");
       setStats(data);
+      setUpdatedAt(new Date());
     } catch (e: any) {
       setError(e.message?.includes("fetch") ? "Không kết nối được server." : (e.message || "Lỗi tải thống kê"));
       setStats(null);
@@ -97,64 +73,71 @@ export default function StatisticsPage() {
   ] : [];
   const hasPassFail = stats ? (stats.passCount + stats.failCount) > 0 : false;
   const isEmpty = stats != null && stats.totalStudents === 0;
-  const selectedName = examId === "ALL"
+  const currentExamName = examId === "ALL"
     ? "Tất cả đề thi"
-    : (exams.find(e => e.examId === examId)?.examName || examId);
+    : (exams.find(e => e.examId === examId)?.examName ?? examId);
 
   return (
     <SidebarLayout title="Thống kê & Báo cáo" subtitle="Phân tích phổ điểm và tiến độ chấm bài" activePath="/statistics">
-      <div className="space-y-6 max-w-7xl mx-auto pb-10">
+      <div className="space-y-6 pb-10">
 
-        {/* ── Thanh tiêu đề + bộ lọc ─────────────────────────────── */}
-        <div className="card flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-center gap-4">
-            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500 to-blue-600 text-white shadow-lg shadow-indigo-600/30 ring-1 ring-white/10">
-              <BarChart2 size={24} />
+        {/* Header / Toolbar */}
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div className="flex items-center gap-4">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-blue-600 text-white shadow-lg shadow-indigo-600/25">
+                <BarChart2 size={24} />
+              </div>
+              <div className="min-w-0">
+                <h2 className="truncate text-lg font-bold text-slate-900">{currentExamName}</h2>
+                <p className="text-xs text-slate-500">
+                  {updatedAt
+                    ? `Cập nhật lúc ${updatedAt.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`
+                    : "Đang tải dữ liệu..."}
+                </p>
+              </div>
             </div>
-            <div className="min-w-0">
-              <h2 className="truncate text-lg font-bold tracking-tight text-slate-800">{selectedName}</h2>
-              <p className="text-xs text-slate-500">
-                Ngưỡng đạt {stats?.passThreshold ?? 5}.0 điểm · {stats?.totalSubmissions ?? 0} lượt chấm
-              </p>
-            </div>
-          </div>
 
-          <div className="flex items-center gap-2">
-            <div className="relative">
-              <select
-                value={examId}
-                onChange={e => setExamId(e.target.value)}
-                className="w-full appearance-none rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-4 pr-10 text-sm font-medium text-slate-700 shadow-sm outline-none transition-all focus:border-transparent focus:ring-2 focus:ring-indigo-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 sm:w-64"
+            <div className="flex items-center gap-2.5">
+              <div className="relative">
+                <Filter size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <select
+                  value={examId}
+                  onChange={e => setExamId(e.target.value)}
+                  className="appearance-none rounded-lg border border-slate-200 bg-slate-50 py-2.5 pl-9 pr-9 text-sm font-medium text-slate-700 shadow-sm transition-all hover:bg-white focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                >
+                  <option value="ALL">Tất cả đề thi</option>
+                  {exams.map(e => (
+                    <option key={e.examId} value={e.examId}>{e.examName} ({e.examId})</option>
+                  ))}
+                </select>
+                <svg className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.17l3.71-3.94a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clipRule="evenodd" /></svg>
+              </div>
+              <button
+                onClick={() => loadStats(examId)}
+                disabled={loading}
+                className="flex items-center gap-2 rounded-lg bg-gradient-to-r from-indigo-600 to-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm shadow-blue-600/20 transition-all hover:from-indigo-700 hover:to-blue-700 disabled:opacity-60"
               >
-                <option value="ALL">Tất cả đề thi</option>
-                {exams.map(e => (
-                  <option key={e.examId} value={e.examId}>{e.examName} ({e.examId})</option>
-                ))}
-              </select>
-              <ChevronDown size={16} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <RefreshCw size={16} className={loading ? "animate-spin" : ""} /> Làm mới
+              </button>
             </div>
-            <button
-              onClick={() => loadStats(examId)}
-              disabled={loading}
-              className="flex h-[42px] items-center gap-2 rounded-xl bg-gradient-to-r from-indigo-600 to-blue-600 px-4 text-sm font-semibold text-white shadow-sm shadow-blue-600/25 transition-all hover:from-indigo-700 hover:to-blue-700 active:scale-[0.98] disabled:opacity-60"
-            >
-              <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
-              <span className="hidden sm:inline">Làm mới</span>
-            </button>
           </div>
         </div>
 
         {/* Lỗi kết nối */}
         {error && (
-          <div className="flex items-center gap-3 rounded-xl border border-rose-200 bg-rose-50 p-4 text-rose-600 dark:border-rose-500/30">
+          <div className="flex items-center gap-3 rounded-xl border border-rose-200 bg-rose-50 p-4 text-rose-600">
             <AlertCircle size={18} className="shrink-0" />
             <p className="text-sm font-medium">{error}</p>
           </div>
         )}
 
-        {/* Chưa có dữ liệu */}
+        {/* Skeleton lần tải đầu */}
+        {loading && !stats && !error && <StatsSkeleton />}
+
+        {/* Trạng thái chưa có dữ liệu */}
         {!loading && !error && isEmpty && (
-          <div className="flex flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-300/70 bg-white/60 p-16 text-center backdrop-blur-sm dark:border-slate-700">
+          <div className="flex flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-200 bg-white/50 p-16 text-center">
             <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-50 to-blue-50 text-indigo-400">
               <BarChart2 size={30} />
             </div>
@@ -165,68 +148,70 @@ export default function StatisticsPage() {
           </div>
         )}
 
-        {/* ── Nội dung thống kê ──────────────────────────────────── */}
-        {!error && !isEmpty && (
-          <div className={loading ? "pointer-events-none space-y-6 opacity-50 transition-opacity" : "space-y-6 transition-opacity"}>
-            {/* KPIs */}
+        {/* Nội dung thống kê */}
+        {!error && !isEmpty && stats && (
+          <div className={loading ? "space-y-6 pointer-events-none opacity-60 transition-opacity" : "space-y-6 transition-opacity"}>
+            {/* Top KPIs */}
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
-              <KpiCard icon={Users}      tone="blue"    label="Tổng thí sinh"  value={stats?.totalStudents ?? 0} sub={stats && stats.totalSubmissions !== stats.totalStudents ? `${stats.totalSubmissions} lượt chấm` : "đã tham gia"} />
-              <KpiCard icon={Target}     tone="emerald" label="Tỉ lệ Pass"     value={`${stats?.passRate ?? 0}%`} sub={`${stats?.passCount ?? 0}/${stats?.graded ?? 0} bài đạt`} />
-              <KpiCard icon={Award}      tone="amber"   label="Điểm trung bình" value={stats?.avgScore ?? 0} suffix="/ 10" sub={`${stats?.graded ?? 0} bài đã chấm`} />
-              <KpiCard icon={TrendingUp} tone="indigo"  label="Tiến độ chấm"   value={`${stats?.progressPct ?? 0}%`} sub={`${stats?.graded ?? 0}/${stats?.totalSubmissions ?? 0} hoàn thành`} progress={stats?.progressPct} />
+              <KpiCard icon={Users}      tone="blue"    label="Tổng thí sinh"  value={stats.totalStudents} sub={stats.totalSubmissions !== stats.totalStudents ? `${stats.totalSubmissions} lượt chấm` : "Số sinh viên dự thi"} />
+              <KpiCard icon={Target}     tone="emerald" label="Tỉ lệ Pass"     value={`${stats.passRate}%`} sub={`${stats.passCount}/${stats.graded} bài đạt`} progress={stats.passRate} />
+              <KpiCard icon={Award}      tone="amber"   label="Điểm trung bình" value={stats.avgScore} suffix="/ 10" progress={stats.avgScore * 10} />
+              <KpiCard icon={TrendingUp} tone="indigo"  label="Tiến độ chấm"   value={`${stats.progressPct}%`} sub={`${stats.graded}/${stats.totalSubmissions} đã chấm`} progress={stats.progressPct} />
             </div>
 
-            {/* Hàng biểu đồ 1 */}
+            {/* Status breakdown */}
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+              <StatusPill icon={CheckCircle2} tone="emerald" label="Đã chấm xong" value={stats.graded} />
+              <StatusPill icon={Clock}        tone="amber"   label="Đang chờ / chấm" value={stats.pending} />
+              <StatusPill icon={XCircle}      tone="rose"    label="Lỗi" value={stats.errors} />
+            </div>
+
+            {/* Charts Row 1 */}
             <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-              {/* Phổ điểm */}
-              <div className="card p-6 lg:col-span-2">
-                <div className="mb-6 flex items-center justify-between">
-                  <div>
-                    <h3 className="text-base font-bold text-slate-800">Phổ điểm của lớp</h3>
-                    <p className="text-sm text-slate-500">Phân bố điểm số của {stats?.graded ?? 0} bài đã chấm</p>
-                  </div>
-                  <span className="hidden rounded-lg bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-600 sm:inline dark:bg-indigo-500/15 dark:text-indigo-300">Hệ điểm 10</span>
-                </div>
+              {/* Bar Chart: Phổ điểm */}
+              <ChartCard
+                className="lg:col-span-2"
+                icon={BarChart2}
+                tone="indigo"
+                title="Phổ điểm của lớp"
+                subtitle={`Phân bố điểm số của ${stats.graded} bài đã chấm`}
+              >
                 <div className="h-72 w-full">
                   {!loading && (
                     <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={stats?.scoreDistribution ?? []} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                      <BarChart data={stats.scoreDistribution ?? []} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                         <defs>
                           <linearGradient id="barGrad" x1="0" y1="0" x2="0" y2="1">
                             <stop offset="0%" stopColor="#818cf8" />
                             <stop offset="100%" stopColor="#6366f1" />
                           </linearGradient>
                         </defs>
-                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={grid} />
-                        <XAxis dataKey="range" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: tick }} dy={10} />
-                        <YAxis allowDecimals={false} axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: tick }} />
-                        <RechartsTooltip cursor={{ fill: dark ? 'rgba(148,163,184,0.08)' : '#f8fafc' }} contentStyle={tooltipStyle} />
-                        <Bar dataKey="count" name="Số lượng SV" fill="url(#barGrad)" radius={[8, 8, 0, 0]} barSize={44} />
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#eef2f7" />
+                        <XAxis dataKey="range" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#64748b' }} dy={10} />
+                        <YAxis allowDecimals={false} axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#64748b' }} />
+                        <RechartsTooltip cursor={{ fill: '#f8fafc' }} content={<ChartTooltip unit="sinh viên" />} />
+                        <Bar dataKey="count" name="Số sinh viên" fill="url(#barGrad)" radius={[6, 6, 0, 0]} barSize={44} />
                       </BarChart>
                     </ResponsiveContainer>
                   )}
                 </div>
-              </div>
+              </ChartCard>
 
-              {/* Tỉ lệ Đạt/Trượt */}
-              <div className="card flex flex-col p-6">
-                <div className="mb-4">
-                  <h3 className="text-base font-bold text-slate-800">Tỉ lệ Đạt / Trượt</h3>
-                  <p className="text-sm text-slate-500">Ngưỡng đạt: {stats?.passThreshold ?? 5}.0 điểm</p>
-                </div>
+              {/* Pie Chart: Pass/Fail Ratio */}
+              <ChartCard icon={Target} tone="emerald" title="Tỉ lệ Đạt / Trượt" subtitle={`Ngưỡng đạt: ${stats.passThreshold}.0 điểm`}>
                 <div className="relative flex flex-1 flex-col items-center justify-center">
                   {hasPassFail ? (
                     <>
                       <ResponsiveContainer width="100%" height={220}>
                         <PieChart>
-                          <Pie data={passFailData} innerRadius={66} outerRadius={92} paddingAngle={4} dataKey="value" stroke="none" cornerRadius={6}>
+                          <Pie data={passFailData} innerRadius={65} outerRadius={90} paddingAngle={4} dataKey="value" stroke="none">
                             {passFailData.map((entry, index) => <Cell key={`cell-${index}`} fill={entry.color} />)}
                           </Pie>
-                          <RechartsTooltip contentStyle={tooltipStyle} />
+                          <RechartsTooltip content={<ChartTooltip unit="bài" />} />
                         </PieChart>
                       </ResponsiveContainer>
                       <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-                        <span className="text-3xl font-bold text-slate-800">{stats?.passRate ?? 0}%</span>
+                        <span className="text-3xl font-bold text-slate-800">{stats.passRate}%</span>
                         <span className="text-xs font-semibold uppercase tracking-wide text-emerald-500">Đạt</span>
                       </div>
                     </>
@@ -244,50 +229,36 @@ export default function StatisticsPage() {
                     ))}
                   </div>
                 )}
-              </div>
+              </ChartCard>
             </div>
 
-            {/* Hàng biểu đồ 2 */}
-            <div className="card p-6">
-              <div className="mb-6 flex items-end justify-between">
-                <div>
-                  <h3 className="text-base font-bold text-slate-800">Tiến độ chấm bài 7 ngày qua</h3>
-                  <p className="text-sm text-slate-500">Số bài hoàn thành và lỗi mỗi ngày</p>
-                </div>
-                <div className="hidden items-center gap-4 text-xs font-medium text-slate-500 sm:flex">
-                  <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-indigo-500" /> Hoàn thành</span>
-                  <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-rose-500" /> Lỗi</span>
-                </div>
-              </div>
+            {/* Charts Row 2 */}
+            <ChartCard icon={TrendingUp} tone="blue" title="Tiến độ chấm bài 7 ngày qua" subtitle="Số bài hoàn thành và lỗi mỗi ngày">
               <div className="h-64 w-full">
                 {!loading && (
                   <ResponsiveContainer width="100%" height="100%">
-                    <ComposedChart data={stats?.trend ?? []} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                    <ComposedChart data={stats.trend ?? []} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                       <defs>
                         <linearGradient id="colorGraded" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#6366f1" stopOpacity={0.28} />
+                          <stop offset="5%" stopColor="#6366f1" stopOpacity={0.25} />
                           <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
                         </linearGradient>
                       </defs>
-                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={grid} />
-                      <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: tick }} dy={10} />
-                      <YAxis allowDecimals={false} axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: tick }} />
-                      <RechartsTooltip contentStyle={tooltipStyle} />
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#eef2f7" />
+                      <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#64748b' }} dy={10} />
+                      <YAxis allowDecimals={false} axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#64748b' }} />
+                      <RechartsTooltip content={<ChartTooltip unit="bài" />} />
                       <Area type="monotone" dataKey="graded" name="Hoàn thành" stroke="#6366f1" strokeWidth={3} fillOpacity={1} fill="url(#colorGraded)" />
                       <Line type="monotone" dataKey="errors" name="Lỗi" stroke="#f43f5e" strokeWidth={2} dot={{ r: 4, fill: '#f43f5e' }} />
                     </ComposedChart>
                   </ResponsiveContainer>
                 )}
               </div>
-            </div>
-          </div>
-        )}
-
-        {/* Skeleton lần tải đầu */}
-        {loading && !stats && !error && (
-          <div className="card flex items-center justify-center p-16">
-            <Loader2 size={24} className="mr-3 animate-spin text-indigo-500" />
-            <span className="text-sm font-medium text-slate-500">Đang tải thống kê...</span>
+              <div className="mt-3 flex justify-center gap-6">
+                <div className="flex items-center gap-2"><span className="h-3 w-3 rounded-full bg-indigo-500" /><span className="text-sm font-medium text-slate-600">Hoàn thành</span></div>
+                <div className="flex items-center gap-2"><span className="h-3 w-3 rounded-full bg-rose-500" /><span className="text-sm font-medium text-slate-600">Lỗi</span></div>
+              </div>
+            </ChartCard>
           </div>
         )}
       </div>
@@ -295,35 +266,115 @@ export default function StatisticsPage() {
   );
 }
 
+// ── Bảng màu dùng chung ───────────────────────────────────────────
+const TONES: Record<string, { icon: string; bar: string; soft: string }> = {
+  blue:    { icon: "bg-blue-50 text-blue-600",       bar: "from-blue-500 to-blue-600",       soft: "bg-blue-500" },
+  emerald: { icon: "bg-emerald-50 text-emerald-600", bar: "from-emerald-500 to-emerald-600", soft: "bg-emerald-500" },
+  amber:   { icon: "bg-amber-50 text-amber-600",     bar: "from-amber-500 to-amber-600",     soft: "bg-amber-500" },
+  indigo:  { icon: "bg-indigo-50 text-indigo-600",   bar: "from-indigo-500 to-indigo-600",   soft: "bg-indigo-500" },
+  rose:    { icon: "bg-rose-50 text-rose-600",       bar: "from-rose-500 to-rose-600",       soft: "bg-rose-500" },
+};
+
 // ── Thẻ KPI tái sử dụng ───────────────────────────────────────────
 function KpiCard({ icon: Icon, tone, label, value, sub, suffix, progress }: {
   icon: React.ElementType; tone: string; label: string;
   value: React.ReactNode; sub?: string; suffix?: string; progress?: number;
 }) {
-  const tones: Record<string, { badge: string; bar: string }> = {
-    blue:    { badge: "bg-blue-50 text-blue-600 dark:bg-blue-500/15 dark:text-blue-300",          bar: "bg-blue-500" },
-    emerald: { badge: "bg-emerald-50 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-300", bar: "bg-emerald-500" },
-    amber:   { badge: "bg-amber-50 text-amber-600 dark:bg-amber-500/15 dark:text-amber-300",       bar: "bg-amber-500" },
-    indigo:  { badge: "bg-indigo-50 text-indigo-600 dark:bg-indigo-500/15 dark:text-indigo-300",    bar: "bg-indigo-500" },
-  };
-  const t = tones[tone] || tones.blue;
+  const t = TONES[tone] || TONES.blue;
   return (
-    <div className="card card-hover p-5">
-      <div className="mb-3 flex items-start justify-between">
-        <p className="eyebrow pt-1">{label}</p>
-        <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${t.badge}`}>
-          <Icon size={20} />
-        </span>
+    <div className="group relative overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md">
+      <div className={`absolute inset-x-0 top-0 h-1 bg-gradient-to-r ${t.bar}`} />
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="mb-1 text-xs font-bold uppercase tracking-wider text-slate-500">{label}</p>
+          <p className="truncate text-2xl font-bold text-slate-800">
+            {value} {suffix && <span className="text-sm font-medium text-slate-400">{suffix}</span>}
+          </p>
+        </div>
+        <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${t.icon} transition-transform group-hover:scale-110`}>
+          <Icon size={22} />
+        </div>
       </div>
-      <p className="text-3xl font-bold tracking-tight text-slate-800">
-        {value} {suffix && <span className="text-sm font-medium text-slate-400">{suffix}</span>}
-      </p>
       {typeof progress === "number" && (
         <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
-          <div className={`h-full rounded-full ${t.bar} transition-all duration-500`} style={{ width: `${Math.min(100, Math.max(0, progress))}%` }} />
+          <div className={`h-full rounded-full ${t.soft} transition-all`} style={{ width: `${Math.max(0, Math.min(100, progress))}%` }} />
         </div>
       )}
       {sub && <p className="mt-2 truncate text-xs text-slate-400">{sub}</p>}
+    </div>
+  );
+}
+
+// ── Ô trạng thái nhỏ ──────────────────────────────────────────────
+function StatusPill({ icon: Icon, tone, label, value }: {
+  icon: React.ElementType; tone: string; label: string; value: number;
+}) {
+  const t = TONES[tone] || TONES.blue;
+  return (
+    <div className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+      <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${t.icon}`}>
+        <Icon size={20} />
+      </div>
+      <div>
+        <p className="text-xl font-bold leading-none text-slate-800">{value}</p>
+        <p className="mt-1 text-xs font-medium text-slate-500">{label}</p>
+      </div>
+    </div>
+  );
+}
+
+// ── Khung biểu đồ tái sử dụng ─────────────────────────────────────
+function ChartCard({ icon: Icon, tone, title, subtitle, children, className = "" }: {
+  icon: React.ElementType; tone: string; title: string; subtitle?: string;
+  children: React.ReactNode; className?: string;
+}) {
+  const t = TONES[tone] || TONES.indigo;
+  return (
+    <div className={`flex flex-col rounded-2xl border border-slate-200 bg-white p-6 shadow-sm ${className}`}>
+      <div className="mb-6 flex items-center gap-3">
+        <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${t.icon}`}>
+          <Icon size={18} />
+        </div>
+        <div>
+          <h3 className="text-base font-bold text-slate-800">{title}</h3>
+          {subtitle && <p className="text-sm text-slate-500">{subtitle}</p>}
+        </div>
+      </div>
+      {children}
+    </div>
+  );
+}
+
+// ── Tooltip biểu đồ tuỳ chỉnh ─────────────────────────────────────
+function ChartTooltip({ active, payload, label, unit }: any) {
+  if (!active || !payload?.length) return null;
+  return (
+    <div className="rounded-xl border border-slate-100 bg-white px-3.5 py-2.5 shadow-lg">
+      {label && <p className="mb-1.5 text-xs font-semibold text-slate-700">{label}</p>}
+      {payload.map((p: any, i: number) => (
+        <div key={i} className="flex items-center gap-2 text-sm">
+          <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: p.color || p.payload?.color }} />
+          <span className="text-slate-500">{p.name}:</span>
+          <span className="font-semibold text-slate-800">{p.value} {unit}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ── Skeleton khi tải lần đầu ──────────────────────────────────────
+function StatsSkeleton() {
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <div key={i} className="h-28 animate-pulse rounded-2xl border border-slate-200 bg-white shadow-sm" />
+        ))}
+      </div>
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+        <div className="h-96 animate-pulse rounded-2xl border border-slate-200 bg-white shadow-sm lg:col-span-2" />
+        <div className="h-96 animate-pulse rounded-2xl border border-slate-200 bg-white shadow-sm" />
+      </div>
     </div>
   );
 }

@@ -2,10 +2,12 @@
 
 import { useState, useRef, useCallback } from "react";
 import SidebarLayout from "@/components/layout/SidebarLayout";
+import { useAuth } from "@/components/auth/AuthProvider";
 import { API_BASE, DEFAULT_EXAM_ID, PASS_THRESHOLD } from "@/lib/config";
 import { UploadCloud, Play, FileArchive, X, CheckCircle, Clock, AlertCircle, DownloadCloud, Loader2, CheckSquare, BarChart2, Users, TrendingUp, FileJson } from "lucide-react";
 
 export default function DashboardPage() {
+  const { teacher } = useAuth();
   const [examId, setExamId] = useState(DEFAULT_EXAM_ID);
   const [files, setFiles] = useState([]);
   const [dragging, setDragging] = useState(false);
@@ -63,6 +65,7 @@ export default function DashboardPage() {
 
     const form = new FormData();
     form.append("examId", examId.trim());
+    if (teacher?.email) form.append("createdBy", teacher.email);   // gắn GV đang đăng nhập
     files.forEach(f => form.append("files", f));
 
     try {

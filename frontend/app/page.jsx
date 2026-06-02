@@ -3,7 +3,7 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import SidebarLayout from "@/components/layout/SidebarLayout";
 import { useAuth } from "@/components/auth/AuthProvider";
-import { API_BASE, DEFAULT_EXAM_ID, PASS_THRESHOLD } from "@/lib/config";
+import { API_BASE, PASS_THRESHOLD } from "@/lib/config";
 
 // Khóa lưu phiên chấm đang/ vừa chạy → rời trang rồi quay lại KHÔNG mất kết quả
 const ACTIVE_BATCH_KEY = "grader_active_batch";
@@ -11,7 +11,7 @@ import { UploadCloud, Play, FileArchive, X, CheckCircle, Clock, AlertCircle, Dow
 
 export default function DashboardPage() {
   const { teacher } = useAuth();
-  const [examId, setExamId] = useState(DEFAULT_EXAM_ID);
+  const [examId, setExamId] = useState("");
   const [files, setFiles] = useState([]);
   const [dragging, setDragging] = useState(false);
   const [batchId, setBatchId] = useState(null);
@@ -263,7 +263,7 @@ export default function DashboardPage() {
                   value={examId}
                   onChange={e => setExamId(e.target.value)}
                   disabled={isRunning}
-                  placeholder="VD: FLUTTER_PE_01"
+                  placeholder="Nhập mã đề thi..."
                   className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-800 transition-all focus:border-transparent focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-60"
                 />
               </div>

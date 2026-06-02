@@ -200,7 +200,7 @@ export default function DashboardPage() {
 
         {/* Cột trái: Form cấu hình & Upload */}
         <div className="space-y-6 xl:col-span-1">
-          <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <div className="card overflow-hidden">
             {/* Header gradient */}
             <div className="flex items-center gap-3 border-b border-slate-100 bg-gradient-to-r from-indigo-50 to-blue-50 px-6 py-4">
               <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-blue-600 text-white shadow-sm">
@@ -303,7 +303,7 @@ export default function DashboardPage() {
 
           {/* Danh sách file đang chọn */}
           {files.length > 0 && phase === "idle" && (
-            <div className="flex max-h-[420px] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+            <div className="card flex max-h-[420px] flex-col overflow-hidden">
               <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50/50 px-5 py-4">
                 <div className="flex items-center gap-2">
                   <span className="text-xs font-bold uppercase tracking-wider text-slate-500">File đã chọn ({files.length})</span>
@@ -344,7 +344,7 @@ export default function DashboardPage() {
               </div>
 
               {/* Thanh tiến độ */}
-              <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+              <div className="card p-6">
                 <div className="mb-4 flex items-end justify-between">
                   <div>
                     <h3 className="flex items-center gap-2 text-base font-bold text-slate-800">
@@ -387,7 +387,7 @@ export default function DashboardPage() {
               </div>
 
               {/* Bảng kết quả */}
-              <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+              <div className="card overflow-hidden">
                 <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50/50 px-6 py-4">
                   <h3 className="text-sm font-bold uppercase tracking-wider text-slate-700">Chi tiết kết quả</h3>
                   {phase === "done" && (
@@ -503,7 +503,7 @@ export default function DashboardPage() {
               </div>
             </>
           ) : (
-            <div className="flex h-full flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-200 bg-white/50 p-12 text-center">
+            <div className="flex h-full flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-300/70 bg-white/60 p-12 text-center backdrop-blur-sm">
               <div className="mb-4 flex h-20 w-20 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-50 to-blue-50 text-indigo-400">
                 <BarChart2 size={36} />
               </div>
@@ -554,14 +554,14 @@ function StatCard({ label, value, icon: Icon, tone, pulse }) {
   };
   const t = tones[tone] || tones.slate;
   return (
-    <div className={`rounded-2xl border ${t.border} bg-white p-5 shadow-sm transition-shadow hover:shadow-md`}>
+    <div className="card card-hover p-5">
       <div className="mb-3 flex items-center justify-between">
-        <p className="text-xs font-bold uppercase tracking-wider text-slate-500">{label}</p>
-        <span className={`flex h-7 w-7 items-center justify-center rounded-lg ${t.badge} ${pulse ? "animate-pulse" : ""}`}>
-          <Icon size={15} />
+        <p className="eyebrow">{label}</p>
+        <span className={`flex h-8 w-8 items-center justify-center rounded-lg ${t.badge} ${pulse ? "animate-pulse" : ""}`}>
+          <Icon size={16} />
         </span>
       </div>
-      <p className={`text-3xl font-bold ${t.text}`}>{value}</p>
+      <p className={`text-3xl font-bold tracking-tight ${t.text}`}>{value}</p>
     </div>
   );
 }

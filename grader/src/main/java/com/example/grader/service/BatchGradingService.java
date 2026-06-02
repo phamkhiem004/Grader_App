@@ -81,6 +81,12 @@ public class BatchGradingService {
         }
         log.info("Grading workers started (concurrent: {})", maxConcurrent);
         recoverPendingJobs();   // hàng đợi bền: nạp lại job QUEUED/GRADING sau restart
+        try {                   // Flag Pattern: bật has_results cho dữ liệu cũ (chạy 1 lần)
+            int n = examRepo.backfillHasResults();
+            if (n > 0) log.info("Đã backfill cờ has_results cho {} đề có sẵn bài chấm", n);
+        } catch (Exception e) {
+            log.warn("Backfill has_results lỗi: {}", e.getMessage());
+        }
     }
 
     @PreDestroy
@@ -170,6 +176,7 @@ public class BatchGradingService {
             float score = parseScore(resultJson);
             String fullJson = assembleResultJson(job, resultJson);   // JSON đầy đủ cho AI
             updateStatus(job, GradingStatus.DONE, score, resultJson, fullJson);
+            examRepo.markHasResults(job.examId());   // Flag Pattern: đề này đã có bài chấm xong
             log.info("[{}] DONE {} → {} đ", job.batchId(), job.studentId(), score);
             success = true;
 
@@ -257,9 +264,16 @@ public class BatchGradingService {
         }
     }
 
+    /** Giới hạn độ dài log lỗi để không phình DB (cột là LONGTEXT, đây là chặn phòng xa). */
+    private static final int MAX_ERROR_LOG = 60_000;
+
     private void updateErrorLog(GradingJob job, String msg) {
+        String safe = msg == null ? "" : msg;
+        if (safe.length() > MAX_ERROR_LOG)
+            safe = safe.substring(0, MAX_ERROR_LOG) + "\n…(đã cắt bớt log lỗi)";
+        final String log = safe;
         resultRepo.findByStudentIdAndBatchId(job.studentId(), job.batchId())
-                .ifPresent(r -> { r.setErrorLog(msg); resultRepo.save(r); });
+                .ifPresent(r -> { r.setErrorLog(log); resultRepo.save(r); });
     }
 
     private void checkBatchComplete(String batchId) {

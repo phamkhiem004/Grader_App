@@ -391,6 +391,53 @@ public class BatchGradingService {
     }
 
     // ── Progress cho GV ──────────────────────────────────────────
+    /** Thông báo: các phiên chấm gần đây (của GV nếu có email, không thì toàn hệ thống). */
+    public List<GradingBatch> recentBatches(String createdBy) {
+        return (createdBy == null || createdBy.isBlank())
+                ? batchRepo.findTop10ByOrderByCreatedAtDesc()
+                : batchRepo.findTop10ByCreatedByOrderByCreatedAtDesc(createdBy);
+    }
+
+    /** Đọc các file mã nguồn trong bài nộp (zip đã staged) để hiển thị cho GV chấm tay. */
+    public List<Map<String, String>> readSubmissionFiles(String examId, String studentId) {
+        List<Map<String, String>> out = new ArrayList<>();
+        ExamResult r = resultRepo.findByStudentIdAndExamIdAndMode(studentId, examId, "submit").orElse(null);
+        if (r == null || r.getBatchId() == null) return out;
+        Path zip = stagedZipPath(examId, r.getBatchId(), studentId);
+        if (!Files.exists(zip)) return out;
+
+        final int MAX_FILES = 40, MAX_BYTES = 80_000;
+        try (java.util.zip.ZipInputStream zis = new java.util.zip.ZipInputStream(Files.newInputStream(zip))) {
+            java.util.zip.ZipEntry e;
+            while ((e = zis.getNextEntry()) != null && out.size() < MAX_FILES) {
+                if (e.isDirectory()) continue;
+                String name = e.getName();
+                String lower = name.toLowerCase();
+                if (!(lower.endsWith(".dart") || lower.endsWith(".yaml") || lower.endsWith(".yml")
+                        || lower.endsWith(".json") || lower.endsWith(".md") || lower.endsWith(".txt"))) continue;
+                if (lower.contains("/.dart_tool/") || lower.contains("/build/") || lower.contains("/.git/")) continue;
+                // Đọc CÓ GIỚI HẠN (readNBytes) → 1 entry khổng lồ không thể làm OOM
+                byte[] buf = zis.readNBytes(MAX_BYTES + 1);
+                String content = new String(buf, java.nio.charset.StandardCharsets.UTF_8);
+                if (buf.length > MAX_BYTES) content = content + "\n… (đã cắt bớt)";
+                Map<String, String> m = new LinkedHashMap<>();
+                m.put("name", name);
+                m.put("content", content);
+                out.add(m);
+            }
+        } catch (Exception ex) {
+            log.warn("Đọc file bài nộp {}/{} lỗi: {}", examId, studentId, ex.getMessage());
+        }
+        // .dart lên đầu, rồi theo tên
+        out.sort((a, b) -> {
+            boolean ad = a.get("name").toLowerCase().endsWith(".dart");
+            boolean bd = b.get("name").toLowerCase().endsWith(".dart");
+            if (ad != bd) return ad ? -1 : 1;
+            return a.get("name").compareTo(b.get("name"));
+        });
+        return out;
+    }
+
     public BatchProgressResponse getBatchProgress(String batchId) {
         List<ExamResult> all = resultRepo.findByBatchIdOrderByStudentId(batchId);
         long done    = all.stream().filter(r -> r.getStatus() == GradingStatus.DONE).count();

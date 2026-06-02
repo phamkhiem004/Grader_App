@@ -53,6 +53,19 @@ public class ExamResult {
     @Column(name = "error_log", columnDefinition = "LONGTEXT")
     private String errorLog;
 
+    // ── Chấm thủ công theo tiêu chí (ghi đè/ bổ sung cho điểm tự động) ──
+    @Column(name = "manual_score")
+    private Float manualScore;
+
+    @Column(name = "manual_json", columnDefinition = "LONGTEXT")
+    private String manualJson;   // JSON: breakdown điểm từng tiêu chí + nhận xét
+
+    @Column(name = "manual_by", length = 100)
+    private String manualBy;     // email GV chấm tay
+
+    @Column(name = "manual_at")
+    private Instant manualAt;
+
     @Column(name = "submitted_at")
     private Instant submittedAt;
 

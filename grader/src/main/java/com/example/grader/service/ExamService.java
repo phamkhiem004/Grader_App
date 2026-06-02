@@ -4,6 +4,8 @@ import com.example.grader.dto.ExamSetupResponse;
 import com.example.grader.entity.Exam;
 import com.example.grader.entity.ExamStatus;
 import com.example.grader.repository.ExamRepository;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -46,9 +48,35 @@ public class ExamService {
     private String imagePrefix;
 
     private final AtomicBoolean baseImageReady = new AtomicBoolean(false);
+    private final ObjectMapper mapper = new ObjectMapper();
 
     @Autowired
     private ExamRepository examRepository;
+
+    // ── Rubric chấm tay: đọc tiêu chí từ skills_matrix.json của đề ──
+    public List<Map<String, Object>> getCriteria(String examId) throws Exception {
+        Exam exam = examRepository.findByExamId(examId)
+                .orElseThrow(() -> new IllegalArgumentException("Không tìm thấy đề: " + examId));
+        String tc = exam.getTestcasePath();
+        List<Map<String, Object>> out = new ArrayList<>();
+        if (tc == null || tc.isBlank()) return out;
+        Path f = Path.of(tc).resolve("skills_matrix.json");
+        if (!Files.exists(f)) return out;
+
+        JsonNode root = mapper.readTree(Files.readString(f));
+        root.fields().forEachRemaining(e -> {
+            JsonNode v = e.getValue();
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("testId", e.getKey());
+            m.put("name", v.path("name").asText(""));
+            m.put("skill", v.path("skill").asText(""));
+            m.put("weight", v.path("weight").asDouble(0));
+            m.put("description", v.path("description").asText(""));
+            m.put("expected", v.path("expected").asText(""));
+            out.add(m);
+        });
+        return out;
+    }
 
     // ── Setup đề: chỉ lưu testcase (mount lúc chấm), KHÔNG build image ──
     public ExamSetupResponse setupExam(String examId, String examName,

@@ -71,6 +71,29 @@ public class AuthService {
         return toProfile(resolve(token));
     }
 
+    // ── Đổi tên hiển thị ─────────────────────────────────────────
+    public TeacherProfile updateProfile(String token, String fullName) {
+        Teacher t = resolve(token);
+        if (fullName == null || fullName.isBlank())
+            throw new IllegalArgumentException("Tên hiển thị không được để trống");
+        t.setFullName(fullName.trim());
+        teacherRepo.save(t);
+        log.info("GV {} đổi tên hiển thị", t.getEmail());
+        return toProfile(t);
+    }
+
+    // ── Đổi mật khẩu (yêu cầu mật khẩu hiện tại) ─────────────────
+    public void changePassword(String token, String currentPassword, String newPassword) {
+        Teacher t = resolve(token);
+        if (!encoder.matches(currentPassword == null ? "" : currentPassword, t.getPasswordHash()))
+            throw new IllegalArgumentException("Mật khẩu hiện tại không đúng");
+        if (newPassword == null || newPassword.length() < 6)
+            throw new IllegalArgumentException("Mật khẩu mới phải từ 6 ký tự trở lên");
+        t.setPasswordHash(encoder.encode(newPassword));
+        teacherRepo.save(t);
+        log.info("GV {} đổi mật khẩu", t.getEmail());
+    }
+
     // ── Đăng xuất: xoá token ─────────────────────────────────────
     public void logout(String token) {
         if (token == null || token.isBlank()) return;
@@ -130,6 +153,6 @@ public class AuthService {
         t.setPasswordHash(encoder.encode(password));
         t.setRole("TEACHER");
         teacherRepo.save(t);
-        log.info("Seed tài khoản GV: {} / {}", email, password);
+        log.info("Seed tài khoản GV mẫu: {}", email);   // KHÔNG log mật khẩu
     }
 }

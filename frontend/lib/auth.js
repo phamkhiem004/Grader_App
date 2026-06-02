@@ -52,3 +52,22 @@ export async function apiLogout(token) {
     });
   } catch { /* ignore */ }
 }
+
+async function postAuthed(path, token, body) {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || "Có lỗi xảy ra");
+  return data;
+}
+
+export function apiUpdateProfile(token, fullName) {
+  return postAuthed("/auth/update-profile", token, { fullName });
+}
+
+export function apiChangePassword(token, currentPassword, newPassword) {
+  return postAuthed("/auth/change-password", token, { currentPassword, newPassword });
+}

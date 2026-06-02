@@ -30,4 +30,8 @@ public interface GradingBatchRepository extends JpaRepository<GradingBatch,Long>
 
     @Query("SELECT COALESCE(SUM(b.doneCount), 0) FROM GradingBatch b WHERE b.createdBy = :email")
     long sumDoneByCreatedBy(String email);
+
+    // ── Thông báo: các phiên chấm gần đây ────────────────────────
+    List<GradingBatch> findTop10ByOrderByCreatedAtDesc();
+    List<GradingBatch> findTop10ByCreatedByOrderByCreatedAtDesc(String createdBy);
 }

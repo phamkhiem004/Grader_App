@@ -1,150 +1,233 @@
-# Grader App — Hệ thống chấm bài thi Flutter tự động
+# 🎓 Grader App — Hệ thống chấm thi Flutter tự động
 
-Chấm tự động hàng loạt bài thi thực hành Flutter của sinh viên trong môi trường
-Docker cô lập. Giảng viên upload testcase một lần, sau đó nộp hàng loạt file ZIP
-bài làm và nhận điểm + chi tiết từng testcase, xuất CSV.
+Hệ thống chấm bài thi thực hành **Flutter/Dart** tự động trong môi trường **Docker cô lập**. Giáo viên upload hàng loạt bài nộp (file ZIP), hệ thống tự biên dịch, chạy testcase và trả về điểm + log chi tiết cho từng sinh viên.
 
-```
-┌─────────────┐     ┌──────────────────┐     ┌─────────────────────────┐
-│  Frontend   │ ──▶ │  Spring Boot API  │ ──▶ │  Docker (chấm cô lập)   │
-│  Next.js    │     │  (grader/)        │     │  grading-base → đề thi  │
-└─────────────┘     └────────┬─────────┘     └─────────────────────────┘
-                             │
-                        ┌────▼────┐
-                        │  MySQL  │
-                        └─────────┘
-```
+---
 
-## Thành phần
+## ✨ Tính năng chính
 
-| Thư mục        | Vai trò |
-|----------------|---------|
-| `frontend/`    | UI Next.js 16 + React 19 + Tailwind 4 (dashboard, cấu hình đề, thống kê) |
-| `grader/`      | Backend Spring Boot: nhận upload, build ảnh, điều phối chấm, lưu kết quả |
-| `grader-base/` | Dockerfile + pubspec + script dùng chung để dựng môi trường chấm |
-| `mysql/`       | `init.sql` khởi tạo schema |
-| `exams/`       | (runtime) testcase đã upload, mount lúc chấm — **không commit** |
-| `submissions/` | (runtime) zip bài nộp SV lưu để audit — **không commit** |
+| Nhóm | Tính năng |
+|---|---|
+| **Chấm bài** | Upload & chấm hàng loạt; hàng đợi 8 worker song song; mỗi bài chạy trong 1 container Docker riêng (`--rm`); tự giới hạn RAM/CPU/timeout |
+| **Theo dõi** | Tiến độ real-time (queued / grading / done / error); **không mất kết quả khi rời trang** (tự khôi phục từ backend) |
+| **Lịch sử chấm** | Xem lại theo từng đề: danh sách bài + điểm + trạng thái; tải JSON từng bài; **xuất CSV** |
+| **Thống kê** | Tổng hợp pass/fail, điểm trung bình, biểu đồ; tối ưu O(log N) bằng Flag Pattern |
+| **Tài khoản GV** | Đăng nhập/đăng ký; token 7 ngày; trang hồ sơ + số liệu chấm theo từng giáo viên |
+| **Giao diện** | Sáng/Tối (dark mode); responsive; xuất CSV & JSON (cho AI nhận xét) |
 
-## ⚡ Kiến trúc: 1 ảnh nền + mount (không build image cho từng đề)
+---
 
-Phần nặng (Flutter + packages + engine) gói **một lần** vào ảnh nền `grading-base`.
-Setup đề **không build image** — chỉ lưu testcase lên đĩa. Lúc chấm, **mount** testcase + bài SV
-vào ảnh nền qua container tạm (`--rm`).
+## 🏗️ Kiến trúc & Công nghệ
 
 ```
-grading-base:latest        ← ảnh DUY NHẤT (build 1 lần)
-   docker run --rm -v <bài SV>:/app/lib -v <testcase đề>:/app/test  grading-base
+┌──────────────┐      REST API       ┌──────────────────┐      docker.sock      ┌─────────────────┐
+│   Frontend   │ ─────────────────►  │     Backend      │ ───────────────────►  │  Docker Engine  │
+│  Next.js 16  │  ◄───────────────   │  Spring Boot 4   │  ◄──── kết quả JSON   │ grading-base +  │
+│  React 19    │                     │  (8 worker pool) │                       │  container/ bài │
+└──────────────┘                     └────────┬─────────┘                       └─────────────────┘
+                                              │ JPA/Hibernate
+                                       ┌──────▼──────┐
+                                       │  MySQL 8.0  │
+                                       └─────────────┘
 ```
 
-- **Upload đề: gần như tức thì** (không có `docker build`).
-- **Không tích tụ image** cho từng đề → Docker gọn.
-- **Chấm bài** chỉ tạo container tạm, tự xóa (`--rm`) — không để lại gì.
+| Thành phần | Công nghệ |
+|---|---|
+| **Backend** | Spring Boot 4.0.6 · Java 17 · JPA/Hibernate · MySQL 8.0 |
+| **Frontend** | Next.js 16.2.6 · React 19 · Tailwind CSS v4 · Recharts · lucide-react |
+| **Chấm bài** | Docker · Flutter SDK (ảnh nền `grading-base`) |
 
-> Đề cũ đã build image `grading-env-*` (legacy) vẫn chấm được; setup lại để chuyển sang mount.
+---
 
-Backend **tự build ảnh nền lần đầu** (khi GV setup đề đầu tiên). Hoặc build trước thủ công:
+## 📋 Yêu cầu hệ thống
 
-```powershell
+- **Docker Desktop** (bật, chia sẻ ổ đĩa chứa project nếu trên Windows)
+- **Java 17+** và **Maven** (hoặc dùng `mvnw` kèm sẵn)
+- **Node.js 20+** và **npm**
+- RAM khuyến nghị ≥ 8GB (mỗi container chấm mặc định 2GB)
+
+---
+
+## 🚀 Cài đặt & Chạy
+
+### Bước 1 — Khởi động MySQL
+
+```bash
+docker compose up -d        # chạy MySQL 8.0 (cổng 3306), tự nạp mysql/init.sql
+```
+
+### Bước 2 — Build ảnh nền chấm bài (chỉ 1 lần)
+
+```bash
+cd grader-base
 # Windows
-cd grader-base; ./build-base.ps1
+./build-base.ps1
+# Linux/Mac
+./build-base.sh
+# hoặc thủ công:
+docker build -f Dockerfile.base -t grading-base:latest .
 ```
-```bash
-# Linux / macOS
-cd grader-base && ./build-base.sh
-```
+> Ảnh `grading-base` gói sẵn Flutter SDK + package → các lần chấm sau chỉ mount testcase (nhanh vài giây). Xem chi tiết ở mục [Docker image & container](#-docker-image--container).
 
-> Đổi `grader-base/pubspec.base.yaml` (thêm package cho SV dùng) → build lại ảnh nền.
-
-## Chạy dự án (khuyến nghị: backend trên host)
-
-Backend build & mount thư mục bài nộp vào Docker của host nên nên chạy **trực tiếp trên host**.
+### Bước 3 — Chạy Backend (khuyến nghị chạy trên host)
 
 ```bash
-# 1) Hạ tầng MySQL
-docker compose up -d
-
-# 2) Backend (cửa sổ riêng) — chạy từ thư mục gốc repo
-cd grader && ./mvnw spring-boot:run        # Windows: .\mvnw.cmd spring-boot:run
-
-# 3) Frontend (cửa sổ riêng)
-cd frontend && npm install && npm run dev   # http://localhost:3000
+cd grader
+./mvnw spring-boot:run        # Windows: .\mvnw spring-boot:run
 ```
+Backend chạy ở **http://localhost:8080**. Lần đầu sẽ tự seed 2 tài khoản mẫu (xem bên dưới).
 
-Yêu cầu: Docker Desktop đang chạy, JDK 17+, Node 20+.
+### Bước 4 — Chạy Frontend
 
-### Cơ sở dữ liệu (clone về chạy ngay)
+```bash
+cd frontend
+npm install
+npm run dev
+```
+Mở **http://localhost:3000** → đăng nhập → bắt đầu chấm.
 
-Default backend khớp với MySQL trong `docker-compose.yml`, **không cần sửa gì**:
-`localhost:3306` · DB `chamthi_db` · user `root` / pass `123456`.
+> 💡 **Triển khai trọn gói trên 1 máy Linux**: `docker compose --profile full up -d --build` (bật cả service backend).
 
-- **Cách A (khuyến nghị):** `docker compose up -d` → MySQL tự tạo DB + bảng (qua `mysql/init.sql`).
-- **Cách B (đã có MySQL native trên máy):** tạo sẵn `CREATE DATABASE chamthi_db;` rồi chạy backend
-  (Hibernate `ddl-auto: update` tự tạo bảng). Nếu user/pass khác `root/123456`, đặt biến môi trường:
-  `SPRING_DATASOURCE_USERNAME`, `SPRING_DATASOURCE_PASSWORD`, `SPRING_DATASOURCE_URL`.
+---
 
-### Cấu hình backend (biến môi trường)
+## 🔑 Tài khoản mặc định
+
+| Email | Mật khẩu | Vai trò |
+|---|---|---|
+| `giaovien@fpt.edu.vn` | `123456` | TEACHER |
+| `admin@fpt.edu.vn` | `123456` | ADMIN |
+
+---
+
+## 📖 Hướng dẫn sử dụng
+
+### 1. Cấu hình đề thi (trang **Cấu hình Đề thi**)
+Upload file ZIP testcase chứa: `exam_test.dart`, `grader.dart`, `skills_matrix.json`.
+
+### 2. Chấm bài (trang **Chấm bài (Batch)**)
+- Nhập **mã đề** → kéo thả các file ZIP bài nộp.
+- Tên file phải đúng định dạng: **`MaSV_HoTen.zip`** (vd `HE123456_Nguyen_Van_A.zip`).
+- Bấm **Bắt đầu chấm** → theo dõi tiến độ real-time.
+- Rời trang rồi quay lại **vẫn còn kết quả** (tự tải lại từ server).
+- Tải **CSV** (bảng điểm) hoặc **JSON** (đầy đủ, cho AI nhận xét).
+
+### 3. Xem lịch sử (trang **Lịch sử chấm**)
+- Chọn đề ở cột trái → xem toàn bộ bài đã chấm (điểm, trạng thái, thời gian).
+- Tìm theo mã SV / tên; tải **JSON** từng bài; **xuất CSV** cả đề.
+
+### 4. Thống kê (trang **Thống kê**)
+Chọn đề (hoặc tất cả) để xem pass/fail, điểm trung bình, phân bố điểm.
+
+---
+
+## ⚙️ Cấu hình (biến môi trường)
+
+Tất cả có giá trị mặc định — chỉ ghi đè khi cần.
+
+### Backend (`grader`)
 
 | Biến | Mặc định | Ý nghĩa |
-|------|----------|---------|
-| `GRADER_TEMPLATE_DIR` | `grader-base` | Thư mục chứa Dockerfile.base (tương đối CWD) |
-| `GRADER_EXAMS_DIR`    | `exams`      | Nơi lưu testcase (mount lúc chấm) |
-| `GRADER_BASE_IMAGE`   | `grading-base:latest` | Ảnh nền dùng chung (ảnh duy nhất) |
-| `GRADER_MAX_CONCURRENT` | `8` | Số bài chấm song song |
-| `GRADER_TIMEOUT_SECONDS` | `240` | Timeout mỗi bài |
-| `GRADER_SAVE_SUBMISSIONS` | `true` | Lưu zip bài nộp để audit |
-| `GRADER_SUBMISSIONS_RETENTION_DAYS` | `30` | Số ngày giữ bài nộp (≤0 = mãi) |
+|---|---|---|
+| `SPRING_DATASOURCE_URL` | `jdbc:mysql://localhost:3306/chamthi_db` | Kết nối MySQL |
+| `SPRING_DATASOURCE_USERNAME` / `_PASSWORD` | `root` / `123456` | Tài khoản DB |
+| `GRADER_MAX_CONCURRENT` | `8` | Số bài chấm song song (= số container đồng thời) |
+| `GRADER_TIMEOUT_SECONDS` | `240` | Timeout mỗi bài (giây) |
+| `GRADER_RUN_MEMORY` | `2048m` | RAM mỗi container chấm |
+| `GRADER_RUN_CPUS` | `2.0` | Số CPU mỗi container chấm |
+| `GRADER_BASE_IMAGE` | `grading-base:latest` | Tên ảnh nền |
+| `GRADER_SAVE_SUBMISSIONS` | `true` | Lưu file ZIP để audit/chấm lại |
+| `GRADER_SUBMISSIONS_RETENTION_DAYS` | `30` | Số ngày giữ bài nộp (≤0 = giữ mãi) |
+| `GRADER_PASS_THRESHOLD` | `5` | Ngưỡng điểm đạt (hệ 10) |
 
-> Chạy backend từ **thư mục gốc repo** để `grader-base`/`exams` (đường dẫn tương đối)
-> trỏ đúng, hoặc đặt biến môi trường tuyệt đối.
+> ⚠️ **Máy yếu/ít RAM**: giảm `GRADER_MAX_CONCURRENT` và/hoặc `GRADER_RUN_MEMORY`.
+> Tối đa RAM ước tính = `MAX_CONCURRENT × RUN_MEMORY` (mặc định 8 × 2GB = 16GB).
 
-## Luồng sử dụng
+### Frontend (`frontend/.env.local`)
 
-1. **Cấu hình đề** (`/teacher`): upload ZIP testcase chứa `exam_test.dart`,
-   `grader.dart`, `skills_matrix.json` → hệ thống **lưu testcase** (mount lúc chấm, không build image).
-   - 💡 Sinh nhanh bộ testcase bằng AI: xem [`docs/prompt-tao-testcase.md`](docs/prompt-tao-testcase.md)
-     — dán prompt + đề bài vào Claude để tạo 3 file đúng định dạng.
-2. **Chấm hàng loạt** (`/`): kéo thả các file `MaSV_HoTen.zip` (chứa `lib/`),
-   theo dõi tiến độ realtime, xuất CSV.
-3. **Thống kê** (`/statistics`): phổ điểm, tỉ lệ đạt/trượt.
+| Biến | Mặc định | Ý nghĩa |
+|---|---|---|
+| `NEXT_PUBLIC_API_BASE` | `http://localhost:8080/api` | URL backend |
+| `NEXT_PUBLIC_DEFAULT_EXAM_ID` | `FLUTTER_PE_01` | Mã đề gợi ý sẵn |
+| `NEXT_PUBLIC_PASS_THRESHOLD` | `5` | Ngưỡng điểm đạt |
 
-## Định dạng file nộp của sinh viên
+---
 
-`MaSV_HoTen.zip` — bên trong có thư mục `lib/` chứa code `.dart`. Sinh viên chỉ
-được dùng package đã cài sẵn trong ảnh nền (`pubspec.base.yaml`).
-
-## API chính
+## 🔌 API chính
 
 | Method | Endpoint | Mô tả |
-|--------|----------|-------|
-| POST   | `/api/exam-setup/upload-testcase` | Upload testcase (lưu để mount lúc chấm) |
-| DELETE | `/api/exam-setup/{examId}` | Xóa đề: gỡ testcase + bản ghi DB (+ ảnh legacy nếu có) |
-| POST   | `/api/batch/upload` | Upload hàng loạt bài SV để chấm |
-| GET    | `/api/batch/progress/{batchId}` | Tiến độ + kết quả batch |
-| GET    | `/api/results/{examId}/{studentId}` | JSON đầy đủ 1 bài (cho AI) |
-| GET    | `/api/results/batch/{batchId}` | JSON tất cả bài trong batch |
-| GET    | `/api/statistics/exams` | Danh sách đề thi (cho dropdown lọc) |
-| GET    | `/api/statistics?examId=ALL` | Số liệu tổng hợp: phổ điểm, tỉ lệ đạt, tiến độ 7 ngày |
+|---|---|---|
+| `POST` | `/api/auth/login` · `/register` · `/logout` · `/me` | Xác thực giáo viên |
+| `POST` | `/api/exam-setup/upload-testcase` | Cấu hình đề (upload testcase) |
+| `GET` | `/api/exam-setup/status/{examId}` | Trạng thái đề |
+| `POST` | `/api/batch/upload` | Upload & chấm hàng loạt |
+| `GET` | `/api/batch/progress/{batchId}` | Tiến độ 1 phiên chấm |
+| `GET` | `/api/results/exam/{examId}` | **Lịch sử chấm theo đề** (danh sách bài) |
+| `GET` | `/api/results/{examId}/{studentId}` | JSON đầy đủ 1 bài |
+| `GET` | `/api/results/batch/{batchId}` | JSON đầy đủ cả phiên chấm |
+| `GET` | `/api/statistics` · `/statistics/exams` | Thống kê & danh sách đề đã chấm |
 
-## Lưu trữ & Audit (tra lại khi chấm sai)
+---
 
-Mỗi bài chấm xong, hệ thống giữ lại 3 thứ để đối chiếu/chấm lại:
+## 🐳 Docker image & container
 
-| Dữ liệu | Nơi lưu |
+### Ảnh nền `grading-base` (build 1 lần)
+`grader-base/Dockerfile.base` — gói sẵn Flutter SDK, package, script chấm. Mọi đề thi dùng chung ảnh này, **không** build ảnh riêng cho từng đề → upload nhanh, không tích tụ image.
+
+### Container chấm (mỗi bài 1 container, tự xóa)
+Khi chấm 1 bài, backend chạy:
+```bash
+docker run --rm --memory 2048m --cpus 2.0 \
+  -v <bài-nộp>/lib:/app/lib \      # code sinh viên
+  -v <testcase>:/app/test \         # testcase của đề (mount mode)
+  grading-base:latest
+```
+→ container chạy `run_grader.sh` (flutter test) → trả JSON kết quả → tự xóa (`--rm`).
+
+**Lợi ích**: cô lập (lỗi 1 bài không ảnh hưởng bài khác) · nhanh · sạch · kiểm soát tài nguyên.
+
+---
+
+## 📁 Cấu trúc thư mục
+
+```
+Grader_App/
+├── grader/                 # Backend Spring Boot
+│   └── src/main/java/com/example/grader/
+│       ├── controller/     # REST API (Auth, Batch, Result, ExamSetup, Statistics)
+│       ├── service/        # BatchGradingService (hàng đợi), GradingService (docker), AuthService
+│       ├── entity/         # Exam, ExamResult, GradingBatch, Teacher
+│       └── repository/     # JPA repositories
+├── frontend/               # Next.js
+│   └── app/
+│       ├── page.jsx        # Chấm bài (dashboard)
+│       ├── history/        # Lịch sử chấm
+│       ├── statistics/     # Thống kê
+│       ├── login·register·profile·teacher/
+│       └── components/     # SidebarLayout, AuthProvider
+├── grader-base/            # Dockerfile.base + script chấm + pubspec base
+├── exams/                  # Testcase từng đề (mount lúc chấm)
+├── submissions/            # File ZIP bài nộp đã lưu (audit)
+├── mysql/init.sql          # Khởi tạo schema + bảng teachers
+└── docker-compose.yml      # MySQL (+ backend khi --profile full)
+```
+
+---
+
+## 🔧 Xử lý sự cố thường gặp
+
+| Triệu chứng | Nguyên nhân & cách xử lý |
 |---|---|
-| **Bài nộp gốc** (zip SV) | `submissions/<đề>/<batch>/<MaSV>.zip` (tắt bằng `GRADER_SAVE_SUBMISSIONS=false`) |
-| **Testcase đề** | `exams/<đề>/testcase/` (giữ vì cần mount lúc chấm) |
-| **Kết quả chi tiết** | DB `exam_results.result_json` (test nào pass/fail, expected/actual, điểm) |
+| Chấm bị kẹt `QUEUED` mãi | Đã fix (worker không chết). Nếu còn → restart backend, `recoverPendingJobs` tự nạp lại hàng đợi |
+| `image not found: grading-base` | Chưa build ảnh nền → chạy `grader-base/build-base.ps1` |
+| Bài báo `0/0 — không chạy được testcase` | Bài nộp sai tên class/thiếu file so với đề, hoặc lỗi biên dịch |
+| `Sai format — cần MaSV_Ten.zip` | Đổi tên file ZIP đúng định dạng `MaSV_HoTen.zip` |
+| Hết RAM khi chấm nhiều | Giảm `GRADER_MAX_CONCURRENT` hoặc `GRADER_RUN_MEMORY` |
+| Mất kết nối DB | Kiểm tra `docker compose ps`, cổng 3306, biến `SPRING_DATASOURCE_*` |
 
-Bài nộp cũ hơn `GRADER_SUBMISSIONS_RETENTION_DAYS` (mặc định 30) tự dọn lúc 3h sáng.
+---
 
-## Quản lý dung lượng Docker
+## 📝 Ghi chú
 
-- **Chỉ có 1 image** `grading-base` (~4.5GB). Setup đề **không tạo image**, chấm bài **không tạo image**
-  (container tạm `--rm` tự xóa) → Docker không tích tụ.
-- Dọn rác an toàn (image `<none>` + build cache, không đụng volume/dự án khác):
-  ```powershell
-  ./grader-base/prune-grader.ps1     # Windows
-  ./grader-base/prune-grader.sh      # Linux/macOS
-  ```
-- Đề cũ còn ảnh `grading-env-*` (legacy)? Xóa: `DELETE /api/exam-setup/{đề}` hoặc `docker rmi grading-env-<đề>`.
+- Backend **khuyến nghị chạy trên host** (không trong container) vì cần mount đường dẫn host thật vào Docker để chấm.
+- Bài nộp được lưu tại `submissions/` để audit & chấm lại; tự dọn sau `RETENTION_DAYS` ngày.
+- Chấm lại cùng (SV + đề) sẽ **ghi đè** kết quả cũ.

@@ -14,7 +14,7 @@ interface WorkspaceHeaderProps {
 
 export default function WorkspaceHeader({ student, totalScore, maxTotal }: WorkspaceHeaderProps) {
   return (
-    <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-4 shrink-0">
+    <header className="h-16 bg-white/90 backdrop-blur-md border-b border-slate-200/80 flex items-center justify-between px-4 shrink-0 shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
       <div className="flex items-center gap-4">
         <Link href="/teacher" className="p-2 hover:bg-slate-100 rounded-md text-slate-500 transition-colors">
           <ArrowLeft size={20} />
@@ -23,7 +23,7 @@ export default function WorkspaceHeader({ student, totalScore, maxTotal }: Works
         <div>
           <h1 className="text-sm font-semibold text-slate-800">Kỳ thi: Flutter Cơ bản (PE_06)</h1>
           <div className="flex items-center gap-2 text-xs text-slate-500 mt-0.5">
-            <span className="font-medium text-blue-600">{student.id}</span>
+            <span className="font-medium text-indigo-600">{student.id}</span>
             <span>•</span>
             <span>{student.name}</span>
           </div>

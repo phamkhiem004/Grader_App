@@ -50,8 +50,7 @@ public class ExamResult {
     @Column(name = "result_json", columnDefinition = "LONGTEXT")
     private String resultJson;     // JSON đầy đủ cho AI đọc & nhận xét
 
-    @Lob
-    @Column(name = "error_log")
+    @Column(name = "error_log", columnDefinition = "LONGTEXT")
     private String errorLog;
 
     @Column(name = "submitted_at")

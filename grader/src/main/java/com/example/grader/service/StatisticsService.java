@@ -35,10 +35,12 @@ public class StatisticsService {
     private static final DateTimeFormatter DAY_FMT = DateTimeFormatter.ofPattern("dd/MM");
     private static final String[] RANGES = {"0-2", "2-4", "4-6", "6-8", "8-10"};
 
-    // ── Danh sách đề cho dropdown lọc ───────────────────────────
+    // ── Danh sách đề cho dropdown lọc (CHỈ đề đã có bài chấm xong) ──
+    // Flag Pattern: đọc thẳng cờ has_results trên bảng exams (index) → O(log N),
+    // không quét/đếm bảng exam_results như trước.
     public List<ExamOption> getExamOptions() {
         List<ExamOption> out = new ArrayList<>();
-        examRepo.findAll().forEach(e -> out.add(new ExamOption(
+        examRepo.findByHasResultsTrueOrderByExamNameAsc().forEach(e -> out.add(new ExamOption(
                 e.getExamId(),
                 e.getExamName() != null ? e.getExamName() : e.getExamId())));
         return out;
@@ -48,6 +50,11 @@ public class StatisticsService {
     public StatisticsResponse getStatistics(String examId) {
         boolean all = examId == null || examId.isBlank() || examId.equalsIgnoreCase("ALL");
         List<ExamResult> results = all ? resultRepo.findAll() : resultRepo.findByExamId(examId);
+
+        // Chỉ tính bài NỘP CHÍNH THỨC (mode submit), bỏ các lần chạy thử (mode test) → số liệu chính xác
+        results = results.stream()
+                .filter(r -> r.getMode() == null || "submit".equalsIgnoreCase(r.getMode()))
+                .toList();
 
         long submissions = results.size();                       // số lượt chấm (dòng)
         long total = results.stream()                            // SỐ THÍ SINH thật (distinct)

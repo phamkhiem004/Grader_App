@@ -195,6 +195,8 @@ export default function SidebarLayout({ children, activePath = '/', title, subti
     );
   }
 
+  // Vùng icon CỐ ĐỊNH (w-16) → icon luôn ở 1 vị trí, không "nhảy" khi đóng/mở.
+  // Chữ luôn render, chỉ fade opacity + bị panel che dần khi thu gọn → trượt mượt.
   const renderLink = (item: { name: string; path: string; icon: React.ElementType }) => {
     const isActive = activePath === item.path;
     return (
@@ -203,19 +205,22 @@ export default function SidebarLayout({ children, activePath = '/', title, subti
         href={item.path}
         title={collapsed ? item.name : undefined}
         className={clsx(
-          'group relative flex items-center overflow-hidden whitespace-nowrap rounded-lg text-sm font-medium transition-all',
-          collapsed ? 'justify-center px-0 py-2.5' : 'gap-3 px-3 py-2.5',
+          'group relative flex h-11 items-center overflow-hidden rounded-lg text-sm font-medium transition-colors',
           isActive ? 'bg-indigo-500/10 text-white' : 'text-slate-400 hover:bg-slate-800/70 hover:text-white'
         )}
       >
         {isActive && (
           <span className="absolute left-0 top-1/2 h-5 w-1 -translate-y-1/2 rounded-r-full bg-indigo-400" />
         )}
-        <item.icon
-          size={18}
-          className={clsx('shrink-0 transition-colors', isActive ? 'text-indigo-300' : 'text-slate-500 group-hover:text-slate-300')}
-        />
-        {!collapsed && item.name}
+        <span className="flex w-16 shrink-0 items-center justify-center">
+          <item.icon
+            size={18}
+            className={clsx('transition-colors', isActive ? 'text-indigo-300' : 'text-slate-500 group-hover:text-slate-300')}
+          />
+        </span>
+        <span className={clsx('truncate whitespace-nowrap pr-3 transition-opacity duration-200', collapsed ? 'opacity-0' : 'opacity-100')}>
+          {item.name}
+        </span>
       </Link>
     );
   };
@@ -225,80 +230,68 @@ export default function SidebarLayout({ children, activePath = '/', title, subti
       {/* Sidebar */}
       <aside
         className={clsx(
-          'z-20 flex shrink-0 flex-col overflow-hidden bg-[#0b1120] text-slate-300 shadow-xl transition-[width] duration-200 ease-in-out',
+          'z-20 flex shrink-0 flex-col overflow-hidden bg-[#0b1120] text-slate-300 shadow-xl transition-[width] duration-300 ease-in-out',
           collapsed ? 'w-20' : 'w-64'
         )}
       >
         {/* Brand + nút thu gọn */}
-        <div className={clsx('flex h-16 shrink-0 items-center border-b border-white/5', collapsed ? 'justify-center px-2' : 'gap-3 px-5')}>
+        <div className="flex h-16 shrink-0 items-center overflow-hidden border-b border-white/5">
           <button
             type="button"
-            onClick={collapsed ? toggleCollapse : undefined}
-            title={collapsed ? 'Mở rộng menu' : undefined}
-            className={clsx(
-              'flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-blue-600 shadow-lg shadow-indigo-600/30 ring-1 ring-white/10',
-              collapsed && 'cursor-pointer hover:brightness-110'
-            )}
+            onClick={toggleCollapse}
+            title={collapsed ? 'Mở rộng menu' : 'Thu gọn menu'}
+            className="flex h-16 w-20 shrink-0 items-center justify-center"
           >
-            <GraduationCap size={20} className="text-white" />
+            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-blue-600 shadow-lg shadow-indigo-600/30 ring-1 ring-white/10 transition-transform hover:scale-105">
+              <GraduationCap size={20} className="text-white" />
+            </span>
           </button>
-          {!collapsed && (
-            <>
-              <div className="min-w-0 flex-1 overflow-hidden whitespace-nowrap leading-tight">
-                <div className="text-[15px] font-bold tracking-wide text-white">Grader</div>
-                <div className="text-[10px] font-medium uppercase tracking-[0.18em] text-slate-500">Auto-grading</div>
-              </div>
-              <button
-                type="button"
-                onClick={toggleCollapse}
-                title="Thu gọn menu"
-                className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-800/70 hover:text-white"
-              >
-                <PanelLeftClose size={18} />
-              </button>
-            </>
-          )}
+          <div className={clsx('min-w-0 flex-1 whitespace-nowrap leading-tight transition-opacity duration-200', collapsed ? 'opacity-0' : 'opacity-100')}>
+            <div className="text-[15px] font-bold tracking-wide text-white">Grader</div>
+            <div className="text-[10px] font-medium uppercase tracking-[0.18em] text-slate-500">Auto-grading</div>
+          </div>
+          <button
+            type="button"
+            onClick={toggleCollapse}
+            title="Thu gọn menu"
+            className={clsx('mr-3 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-400 transition-all hover:bg-slate-800/70 hover:text-white', collapsed ? 'pointer-events-none opacity-0' : 'opacity-100')}
+          >
+            <PanelLeftClose size={18} />
+          </button>
         </div>
 
-        <div className="custom-scrollbar flex-1 overflow-y-auto px-3 py-6">
-          {!collapsed && (
-            <div className="mb-3 px-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-600">Quản lý chấm thi</div>
-          )}
+        <div className="custom-scrollbar flex-1 overflow-y-auto px-2 py-6">
+          <div className={clsx('mb-3 px-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-600 transition-opacity duration-200', collapsed ? 'opacity-0' : 'opacity-100')}>Quản lý chấm thi</div>
           <nav className="space-y-1">{PRIMARY_NAV.map(renderLink)}</nav>
 
-          {!collapsed && (
-            <div className="mb-3 mt-8 px-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-600">Báo cáo & Dữ liệu</div>
-          )}
-          <nav className={clsx('space-y-1', collapsed && 'mt-4 border-t border-white/5 pt-4')}>{SECONDARY_NAV.map(renderLink)}</nav>
+          <div className={clsx('mb-3 mt-7 px-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-600 transition-opacity duration-200', collapsed ? 'opacity-0' : 'opacity-100')}>Báo cáo & Dữ liệu</div>
+          <nav className="space-y-1">{SECONDARY_NAV.map(renderLink)}</nav>
         </div>
 
         {/* GV đang đăng nhập + đăng xuất */}
-        <div className={clsx('shrink-0 border-t border-white/5', collapsed ? 'p-2' : 'p-3')}>
+        <div className="shrink-0 overflow-hidden border-t border-white/5 px-2 py-3">
           <Link
             href="/profile"
             title={collapsed ? teacher.fullName : undefined}
-            className={clsx('mb-1 flex items-center rounded-lg transition-colors hover:bg-slate-800/70', collapsed ? 'justify-center p-2' : 'gap-3 px-2 py-2')}
+            className="mb-1 flex h-12 items-center overflow-hidden rounded-lg transition-colors hover:bg-slate-800/70"
           >
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 to-blue-600 text-xs font-bold text-white ring-1 ring-white/10">
-              {initialsOf(teacher.fullName)}
+            <span className="flex w-16 shrink-0 items-center justify-center">
+              <span className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 to-blue-600 text-xs font-bold text-white ring-1 ring-white/10">
+                {initialsOf(teacher.fullName)}
+              </span>
+            </span>
+            <div className={clsx('min-w-0 whitespace-nowrap pr-2 leading-tight transition-opacity duration-200', collapsed ? 'opacity-0' : 'opacity-100')}>
+              <div className="truncate text-sm font-semibold text-white">{teacher.fullName}</div>
+              <div className="truncate text-[11px] text-slate-500">{teacher.email}</div>
             </div>
-            {!collapsed && (
-              <div className="min-w-0 leading-tight">
-                <div className="truncate text-sm font-semibold text-white">{teacher.fullName}</div>
-                <div className="truncate text-[11px] text-slate-500">{teacher.email}</div>
-              </div>
-            )}
           </Link>
           <button
             onClick={handleLogout}
             title={collapsed ? 'Đăng xuất' : undefined}
-            className={clsx(
-              'flex w-full items-center rounded-lg text-sm font-medium text-slate-400 transition-colors hover:bg-slate-800/70 hover:text-white',
-              collapsed ? 'justify-center py-2.5' : 'gap-3 px-3 py-2.5'
-            )}
+            className="flex h-11 w-full items-center overflow-hidden rounded-lg text-sm font-medium text-slate-400 transition-colors hover:bg-slate-800/70 hover:text-white"
           >
-            <LogOut size={18} />
-            {!collapsed && 'Đăng xuất'}
+            <span className="flex w-16 shrink-0 items-center justify-center"><LogOut size={18} /></span>
+            <span className={clsx('whitespace-nowrap transition-opacity duration-200', collapsed ? 'opacity-0' : 'opacity-100')}>Đăng xuất</span>
           </button>
         </div>
       </aside>

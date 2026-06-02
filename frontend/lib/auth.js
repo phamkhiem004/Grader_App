@@ -4,15 +4,18 @@ import { API_BASE } from "./config";
 
 const TOKEN_KEY = "grader_token";
 
+// Lưu token ở sessionStorage: mở app/tab mới sẽ YÊU CẦU đăng nhập lại,
+// nhưng F5 / chuyển trang TRONG cùng phiên vẫn giữ đăng nhập.
 export function getToken() {
   if (typeof window === "undefined") return null;
-  try { return localStorage.getItem(TOKEN_KEY); } catch { return null; }
+  try { return sessionStorage.getItem(TOKEN_KEY); } catch { return null; }
 }
 
 export function setToken(token) {
   try {
-    if (token) localStorage.setItem(TOKEN_KEY, token);
-    else localStorage.removeItem(TOKEN_KEY);
+    if (token) sessionStorage.setItem(TOKEN_KEY, token);
+    else sessionStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(TOKEN_KEY);   // dọn token cũ từng lưu ở localStorage (phiên trước)
   } catch { /* ignore */ }
 }
 

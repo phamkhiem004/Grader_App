@@ -84,7 +84,7 @@ export default function TeacherSetupPage() {
         {/* Tiêu đề trang */}
         <div className="mb-8">
           <div className="flex items-center gap-3 mb-2">
-            <div className="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center shadow-lg shadow-indigo-600/20 text-white">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-blue-600 flex items-center justify-center shadow-lg shadow-indigo-600/30 ring-1 ring-white/10 text-white">
               <Settings size={20} />
             </div>
             <div>
@@ -96,7 +96,7 @@ export default function TeacherSetupPage() {
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
           {/* Form cấu hình */}
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 md:col-span-2">
+          <div className="card p-6 md:col-span-2">
             <div className="grid md:grid-cols-2 gap-8">
               
               {/* Bước 1: Mã đề */}
@@ -233,20 +233,20 @@ export default function TeacherSetupPage() {
 
         {/* Thông tin thêm về cấu trúc file */}
         {phase === "idle" && (
-          <div className="mt-8 bg-slate-100 rounded-2xl p-6 border border-slate-200/60">
+          <div className="mt-8 rounded-2xl border border-slate-200 bg-slate-50/80 p-6">
             <h3 className="text-sm font-bold text-slate-700 mb-4 flex items-center gap-2">
               <Package size={16} /> Cấu trúc file ZIP yêu cầu
             </h3>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+              <div className="card-hover bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
                 <div className="flex items-center gap-2 mb-2 text-indigo-600"><FileCode2 size={16} /><span className="font-mono text-sm font-bold">exam_test.dart</span></div>
                 <p className="text-xs text-slate-500">File chứa các Unit/Widget test do giảng viên viết dùng package test của Flutter.</p>
               </div>
-              <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+              <div className="card-hover bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
                 <div className="flex items-center gap-2 mb-2 text-rose-600"><FileCode2 size={16} /><span className="font-mono text-sm font-bold">grader.dart</span></div>
                 <p className="text-xs text-slate-500">Script điều phối việc chạy <code className="bg-slate-100 px-1 rounded">flutter test</code> và đọc kết quả máy chấm trả về dạng JSON.</p>
               </div>
-              <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+              <div className="card-hover bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
                 <div className="flex items-center gap-2 mb-2 text-emerald-600"><FileJson size={16} /><span className="font-mono text-sm font-bold">skills_matrix.json</span></div>
                 <p className="text-xs text-slate-500">Rubric chứa ma trận điểm, định nghĩa điểm số cho từng tiêu chí testcase.</p>
               </div>

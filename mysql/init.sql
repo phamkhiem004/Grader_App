@@ -44,6 +44,7 @@ CREATE TABLE IF NOT EXISTS exams (
     teacher_note  TEXT                           COMMENT 'Ghi chú/đề bài cho AI hiểu ngữ cảnh',
     image_name    VARCHAR(100)                   COMMENT 'Ảnh chấm (grading-base khi dùng mount)',
     testcase_path VARCHAR(500)                   COMMENT 'Đường dẫn testcase trên host để mount lúc chấm',
+    has_results   BOOLEAN       NOT NULL DEFAULT FALSE COMMENT 'Flag Pattern: đã có bài chấm xong → hiện ở dropdown Thống kê',
     status        ENUM(
                     'BUILDING', -- Đang build Docker image
                     'READY',    -- Sẵn sàng chấm
@@ -55,7 +56,8 @@ CREATE TABLE IF NOT EXISTS exams (
     updated_at    TIMESTAMP     DEFAULT CURRENT_TIMESTAMP
                                 ON UPDATE CURRENT_TIMESTAMP,
 
-    INDEX idx_exam_status (status)
+    INDEX idx_exam_status (status),
+    INDEX idx_exam_has_results (has_results)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Thông tin và trạng thái từng đề thi';
 
 

@@ -10,7 +10,9 @@ import java.time.Instant;
 @Getter
 @Setter
 @Entity
-@Table(name = "exams")
+@Table(name = "exams", indexes = {
+        @Index(name = "idx_exam_has_results", columnList = "has_results")
+})
 public class Exam {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -32,6 +34,15 @@ public class Exam {
 
     @Column(name = "testcase_path", length = 500)
     private String testcasePath;   // đường dẫn testcase trên host để mount lúc chấm
+
+    /**
+     * Cờ "đã có bài chấm xong" (Counter/Flag Pattern). Bật true khi bài đầu tiên
+     * của đề được chấm DONE → trang Thống kê chỉ cần SELECT … WHERE hasResults = true
+     * (đọc O(log N) nhờ index) thay vì quét toàn bảng exam_results mỗi lần load.
+     */
+    @ColumnDefault("false")
+    @Column(name = "has_results", nullable = false)
+    private boolean hasResults;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "status", length = 20)

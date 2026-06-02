@@ -87,6 +87,12 @@ public class BatchGradingService {
         }
         log.info("Grading workers started (concurrent: {})", maxConcurrent);
         recoverPendingJobs();   // hàng đợi bền: nạp lại job QUEUED/GRADING sau restart
+        try {                   // Flag Pattern: bật has_results cho dữ liệu cũ (chạy 1 lần)
+            int n = examRepo.backfillHasResults();
+            if (n > 0) log.info("Đã backfill cờ has_results cho {} đề có sẵn bài chấm", n);
+        } catch (Exception e) {
+            log.warn("Backfill has_results lỗi: {}", e.getMessage());
+        }
     }
 
     @PreDestroy
@@ -191,6 +197,7 @@ public class BatchGradingService {
             float score = parseScore(resultJson);
             String fullJson = assembleResultJson(job, resultJson);   // JSON đầy đủ cho AI
             updateStatus(job, GradingStatus.DONE, score, resultJson, fullJson);
+            examRepo.markHasResults(job.examId());   // Flag Pattern: đề này đã có bài chấm xong
             log.info("[{}] DONE {} → {} đ", job.batchId(), job.studentId(), score);
             success = true;
 

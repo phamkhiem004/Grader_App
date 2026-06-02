@@ -36,7 +36,7 @@ export default function RubricPanel({ rubrics, scores, onScoreChange, feedback, 
             const isFull = currentScore === r.maxScore;
             
             return (
-              <div key={r.id} className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm transition-all hover:shadow-md hover:border-blue-200">
+              <div key={r.id} className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm transition-all hover:shadow-md hover:border-indigo-200">
                 <div className="flex justify-between items-start gap-4 mb-3">
                   <div>
                     <h3 className="font-semibold text-slate-800 text-sm leading-tight">{r.criteria}</h3>
@@ -56,9 +56,9 @@ export default function RubricPanel({ rubrics, scores, onScoreChange, feedback, 
                       className={clsx(
                         "flex-1 py-1.5 rounded-md text-xs font-medium border transition-all",
                         currentScore === val 
-                          ? isFull 
-                            ? "bg-emerald-50 text-emerald-700 border-emerald-200" 
-                            : "bg-blue-50 text-blue-700 border-blue-200"
+                          ? isFull
+                            ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                            : "bg-indigo-50 text-indigo-700 border-indigo-200"
                           : "bg-white text-slate-500 border-slate-200 hover:bg-slate-50 hover:border-slate-300"
                       )}
                     >
@@ -75,7 +75,7 @@ export default function RubricPanel({ rubrics, scores, onScoreChange, feedback, 
                     step="0.5"
                     value={scores[r.id] ?? ''}
                     onChange={(e) => onScoreChange(r.id, Math.min(r.maxScore, Math.max(0, Number(e.target.value))))}
-                    className="w-16 text-sm py-1.5 px-2 border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-center font-medium"
+                    className="w-16 text-sm py-1.5 px-2 border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-center font-medium"
                     placeholder="Điểm"
                   />
                 </div>
@@ -94,7 +94,7 @@ export default function RubricPanel({ rubrics, scores, onScoreChange, feedback, 
             value={feedback}
             onChange={(e) => onFeedbackChange(e.target.value)}
             placeholder="Nhập nhận xét cho sinh viên..."
-            className="w-full min-h-[120px] p-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-y text-slate-700 bg-slate-50"
+            className="w-full min-h-[120px] p-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-y text-slate-700 bg-slate-50"
           />
         </div>
       </div>
@@ -107,7 +107,7 @@ export default function RubricPanel({ rubrics, scores, onScoreChange, feedback, 
             Auto-grade
           </button>
           
-          <button className="flex-1 flex items-center justify-center gap-2 px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg shadow-sm shadow-blue-600/20 transition-all active:scale-[0.98]">
+          <button className="flex-1 flex items-center justify-center gap-2 px-6 py-2.5 bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 text-white text-sm font-semibold rounded-lg shadow-sm shadow-indigo-600/25 transition-all active:scale-[0.98]">
             <Save size={18} />
             Lưu & Chuyển bài tiếp theo
           </button>

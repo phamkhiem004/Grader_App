@@ -24,12 +24,12 @@ export default function SubmissionViewer({ files }: SubmissionViewerProps) {
             onClick={() => setActiveTab(idx)}
             className={clsx(
               "flex items-center gap-2 px-4 py-2 rounded-t-lg text-sm font-medium transition-all",
-              activeTab === idx 
-                ? "bg-white text-blue-700 border-t border-x border-slate-200 shadow-[0_-2px_4px_rgba(0,0,0,0.02)]" 
+              activeTab === idx
+                ? "bg-white text-indigo-700 border-t border-x border-slate-200 shadow-[0_-2px_4px_rgba(0,0,0,0.02)]"
                 : "text-slate-500 hover:bg-slate-200 hover:text-slate-700"
             )}
           >
-            <FileCode2 size={16} className={activeTab === idx ? "text-blue-500" : "text-slate-400"} />
+            <FileCode2 size={16} className={activeTab === idx ? "text-indigo-500" : "text-slate-400"} />
             {file.name}
           </button>
         ))}
@@ -41,7 +41,7 @@ export default function SubmissionViewer({ files }: SubmissionViewerProps) {
           <CodeXml size={14} />
           <span>Read-only view</span>
         </div>
-        <button className="text-xs font-medium text-slate-500 hover:text-blue-600 flex items-center gap-1.5 transition-colors">
+        <button className="text-xs font-medium text-slate-500 hover:text-indigo-600 flex items-center gap-1.5 transition-colors">
           <Download size={14} />
           Tải file
         </button>

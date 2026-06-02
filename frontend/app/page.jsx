@@ -1,9 +1,12 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import SidebarLayout from "@/components/layout/SidebarLayout";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { API_BASE, DEFAULT_EXAM_ID, PASS_THRESHOLD } from "@/lib/config";
+
+// Khóa lưu phiên chấm đang/ vừa chạy → rời trang rồi quay lại KHÔNG mất kết quả
+const ACTIVE_BATCH_KEY = "grader_active_batch";
 import { UploadCloud, Play, FileArchive, X, CheckCircle, Clock, AlertCircle, DownloadCloud, Loader2, CheckSquare, BarChart2, Users, TrendingUp, FileJson } from "lucide-react";
 
 export default function DashboardPage() {
@@ -18,6 +21,37 @@ export default function DashboardPage() {
   const [parseErrors, setParseErrors] = useState([]);
   const fileRef = useRef();
   const pollRef = useRef(null);
+
+  // ── Khôi phục phiên chấm khi quay lại trang (đọc lại từ backend theo batchId đã lưu) ──
+  useEffect(() => {
+    let saved = null;
+    try { saved = JSON.parse(localStorage.getItem(ACTIVE_BATCH_KEY) || "null"); } catch (_) {}
+    if (!saved?.batchId) return;
+
+    if (saved.examId) setExamId(saved.examId);
+    if (saved.parseErrors) setParseErrors(saved.parseErrors);
+    setBatchId(saved.batchId);
+
+    fetch(`${API_BASE}/batch/progress/${saved.batchId}`)
+      .then(r => r.json())
+      .then(data => {
+        if (!data || data.total == null) return;
+        // Batch cũ đã bị xóa/không còn dữ liệu → bỏ phiên đã lưu, về trạng thái nhập mới
+        if ((data.total || 0) === 0 && !(saved.parseErrors?.length)) {
+          try { localStorage.removeItem(ACTIVE_BATCH_KEY); } catch (_) {}
+          return;
+        }
+        setProgress(data);
+        const pending = (data.queued || 0) + (data.grading || 0);
+        if (pending > 0) { setPhase("polling"); startPolling(saved.batchId); }
+        else setPhase("done");
+      })
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Dọn interval khi rời trang (tránh setState trên component đã unmount)
+  useEffect(() => () => clearInterval(pollRef.current), []);
 
   // Helper function to make error messages human-readable
   const formatErrorMsg = (errStr) => {
@@ -58,6 +92,7 @@ export default function DashboardPage() {
 
   // Upload + poll
   const execute = async () => {
+    if (phase === "uploading" || phase === "polling") return;   // chống bấm nhiều lần
     if (!files.length) { setUploadErr("Chưa có file nào để chấm."); return; }
     if (!examId.trim()) { setUploadErr("Vui lòng nhập mã đề thi."); return; }
 
@@ -77,6 +112,13 @@ export default function DashboardPage() {
       setBatchId(data.batchId);
       if (data.parseErrors?.length) setParseErrors(data.parseErrors);
 
+      // Lưu lại để khi rời trang → quay lại vẫn còn kết quả (đọc lại từ backend)
+      try {
+        localStorage.setItem(ACTIVE_BATCH_KEY, JSON.stringify({
+          batchId: data.batchId, examId: examId.trim(), parseErrors: data.parseErrors || [],
+        }));
+      } catch (_) {}
+
       setPhase("polling");
       startPolling(data.batchId);
     } catch (e) {
@@ -86,6 +128,7 @@ export default function DashboardPage() {
   };
 
   const startPolling = (bid) => {
+    clearInterval(pollRef.current);   // tránh chạy 2 interval song song
     pollRef.current = setInterval(async () => {
       try {
         const res = await fetch(`${API_BASE}/batch/progress/${bid}`);
@@ -102,6 +145,7 @@ export default function DashboardPage() {
 
   const reset = () => {
     clearInterval(pollRef.current);
+    try { localStorage.removeItem(ACTIVE_BATCH_KEY); } catch (_) {}
     setFiles([]); setBatchId(null); setProgress(null);
     setPhase("idle"); setUploadErr(null); setParseErrors([]);
   };

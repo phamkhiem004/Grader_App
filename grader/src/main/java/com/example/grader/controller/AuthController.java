@@ -57,6 +57,30 @@ public class AuthController {
         return ResponseEntity.ok(Map.of("ok", true));
     }
 
+    /** Đổi tên hiển thị của GV đang đăng nhập. */
+    @PostMapping("/update-profile")
+    public ResponseEntity<?> updateProfile(@RequestHeader(value = "Authorization", required = false) String authz,
+                                           @RequestBody Map<String, String> body) {
+        try {
+            return ResponseEntity.ok(authService.updateProfile(extractToken(authz, null), body.get("fullName")));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    /** Đổi mật khẩu của GV đang đăng nhập. */
+    @PostMapping("/change-password")
+    public ResponseEntity<?> changePassword(@RequestHeader(value = "Authorization", required = false) String authz,
+                                            @RequestBody Map<String, String> body) {
+        try {
+            authService.changePassword(extractToken(authz, null),
+                    body.get("currentPassword"), body.get("newPassword"));
+            return ResponseEntity.ok(Map.of("ok", true));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
+    }
+
     /** Lấy token từ header "Authorization: Bearer xxx" hoặc query param ?token=. */
     private String extractToken(String authz, String tokenParam) {
         if (authz != null && authz.startsWith("Bearer ")) return authz.substring(7).trim();

@@ -47,6 +47,18 @@ public class ExamSetupController {
                 .orElse(ResponseEntity.notFound().build());
     }
 
+    /** Rubric (danh sách tiêu chí) của đề — cho trang chấm tay. */
+    @GetMapping("/criteria/{examId}")
+    public ResponseEntity<?> getCriteria(@PathVariable String examId) {
+        try {
+            return ResponseEntity.ok(examService.getCriteria(examId));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.status(404).body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
+        }
+    }
+
     /** Xóa 1 đề không dùng nữa: gỡ ảnh Docker + bản ghi DB (giải phóng dung lượng). */
     @DeleteMapping("/{examId}")
     public ResponseEntity<?> deleteExam(@PathVariable String examId) {

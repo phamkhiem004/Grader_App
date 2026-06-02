@@ -1,17 +1,39 @@
 "use client";
 
-import React, { useEffect } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Settings, FileText, CheckSquare, BarChart2, LogOut, Bell, Search, GraduationCap, UserCircle, Loader2 } from 'lucide-react';
+import {
+  Settings, FileText, CheckSquare, BarChart2, LogOut, Bell, Search,
+  GraduationCap, UserCircle, Loader2, History, PanelLeftClose, PanelLeftOpen,
+  Clock, CheckCircle2, AlertCircle,
+} from 'lucide-react';
 import { clsx } from 'clsx';
 import { useAuth } from '@/components/auth/AuthProvider';
+import { API_BASE } from '@/lib/config';
 
 interface SidebarLayoutProps {
   children: React.ReactNode;
   activePath?: string;
   title: string;
   subtitle?: string;
+}
+
+interface BatchNotif {
+  batchId: string;
+  examId: string;
+  status: string;
+  totalFiles: number;
+  doneCount: number;
+  errorCount: number;
+  createdAt: string;
+}
+interface SearchRow {
+  examId: string;
+  studentId: string;
+  studentName: string | null;
+  score: number | null;
+  status: string;
 }
 
 const PRIMARY_NAV = [
@@ -21,6 +43,7 @@ const PRIMARY_NAV = [
 ];
 
 const SECONDARY_NAV = [
+  { name: 'Lịch sử chấm', path: '/history', icon: History },
   { name: 'Thống kê', path: '/statistics', icon: BarChart2 },
   { name: 'Giáo viên', path: '/profile', icon: UserCircle },
 ];
@@ -33,14 +56,130 @@ function initialsOf(name?: string): string {
   return (parts[0].charAt(0) + parts[parts.length - 1].charAt(0)).toUpperCase();
 }
 
+/** Diễn giải trạng thái 1 phiên chấm cho thông báo. */
+function notifStatus(n: BatchNotif) {
+  const done = n.doneCount || 0, err = n.errorCount || 0, total = n.totalFiles || 0;
+  if (n.status === 'IN_PROGRESS') return { Icon: Clock, tone: 'text-blue-500', text: `Đang chấm ${done + err}/${total}` };
+  if (n.status === 'COMPLETED') return { Icon: CheckCircle2, tone: 'text-emerald-500', text: `Hoàn tất ${done}/${total} bài` };
+  if (n.status === 'PARTIAL') return { Icon: AlertCircle, tone: 'text-amber-500', text: `Xong ${done}/${total}, ${err} lỗi` };
+  return { Icon: AlertCircle, tone: 'text-slate-400', text: `${done + err}/${total}` };
+}
+
 export default function SidebarLayout({ children, activePath = '/', title, subtitle }: SidebarLayoutProps) {
   const { teacher, loading, logout } = useAuth();
   const router = useRouter();
+
+  // ── UI state ──────────────────────────────────────────────────
+  // Đọc trạng thái thu gọn NGAY khi khởi tạo (tránh render mở rồi mới đóng = giật khi chuyển trang)
+  const [collapsed, setCollapsed] = useState(() => {
+    if (typeof window === "undefined") return false;
+    try { return localStorage.getItem("sidebar_collapsed") === "1"; } catch { return false; }
+  });
+  const [notifOpen, setNotifOpen] = useState(false);
+  const [notifs, setNotifs] = useState<BatchNotif[]>([]);
+  const [lastSeen, setLastSeen] = useState(0);
+  const [q, setQ] = useState("");
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [results, setResults] = useState<SearchRow[]>([]);
+  const [searching, setSearching] = useState(false);
+
+  const notifRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLDivElement>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const searchSeq = useRef(0);   // chống response cũ ghi đè response mới
 
   // Bảo vệ route: chưa đăng nhập → về /login
   useEffect(() => {
     if (!loading && !teacher) router.replace("/login");
   }, [loading, teacher, router]);
+
+  // Khôi phục mốc "đã xem thông báo" (collapsed đã đọc ở lazy-init phía trên)
+  useEffect(() => {
+    try {
+      setLastSeen(Number(localStorage.getItem("notif_last_seen") || 0));
+    } catch { /* bỏ qua */ }
+  }, []);
+
+  // Nạp thông báo (phiên chấm gần đây) + tự làm mới mỗi 30s
+  const loadNotifs = useCallback(() => {
+    const url = `${API_BASE}/batch/recent` + (teacher?.email ? `?createdBy=${encodeURIComponent(teacher.email)}` : "");
+    fetch(url)
+      .then((r) => r.json())
+      .then((d) => setNotifs(Array.isArray(d) ? d : []))
+      .catch(() => {});
+  }, [teacher?.email]);
+
+  useEffect(() => {
+    loadNotifs();
+    const id = setInterval(loadNotifs, 30000);
+    return () => clearInterval(id);
+  }, [loadNotifs]);
+
+  // Đóng dropdown khi click ra ngoài
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (notifRef.current && !notifRef.current.contains(e.target as Node)) setNotifOpen(false);
+      if (searchRef.current && !searchRef.current.contains(e.target as Node)) setSearchOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => {
+      document.removeEventListener("mousedown", handler);
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, []);
+
+  const toggleCollapse = () => {
+    setCollapsed((c) => {
+      const n = !c;
+      try { localStorage.setItem("sidebar_collapsed", n ? "1" : "0"); } catch { /* bỏ qua */ }
+      return n;
+    });
+  };
+
+  const unread = notifs.filter(
+    (n) => n.createdAt && new Date(n.createdAt).getTime() > lastSeen
+  ).length;
+
+  const toggleNotif = () => {
+    setNotifOpen((o) => {
+      const open = !o;
+      if (open && notifs.length) {
+        const latest = Math.max(...notifs.map((x) => (x.createdAt ? new Date(x.createdAt).getTime() : 0)));
+        setLastSeen(latest);
+        try { localStorage.setItem("notif_last_seen", String(latest)); } catch { /* bỏ qua */ }
+      }
+      return open;
+    });
+  };
+
+  const onSearchChange = (val: string) => {
+    setQ(val);
+    setSearchOpen(true);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (val.trim().length < 1) { setResults([]); setSearching(false); return; }
+    setSearching(true);
+    const seq = ++searchSeq.current;
+    debounceRef.current = setTimeout(() => {
+      fetch(`${API_BASE}/results/search?q=${encodeURIComponent(val.trim())}`)
+        .then((r) => (r.ok ? r.json() : []))
+        .then((d) => { if (seq === searchSeq.current) setResults(Array.isArray(d) ? d : []); })
+        .catch(() => { if (seq === searchSeq.current) setResults([]); })
+        .finally(() => { if (seq === searchSeq.current) setSearching(false); });
+    }, 300);
+  };
+
+  const gotoResult = (r: SearchRow) => {
+    setSearchOpen(false);
+    setQ("");
+    setResults([]);
+    router.push(`/history?exam=${encodeURIComponent(r.examId)}&q=${encodeURIComponent(r.studentId)}`);
+  };
+
+  const onSearchSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (results.length) gotoResult(results[0]);
+    else if (q.trim()) { setSearchOpen(false); router.push(`/history?q=${encodeURIComponent(q.trim())}`); }
+  };
 
   const handleLogout = async () => {
     await logout();
@@ -62,11 +201,11 @@ export default function SidebarLayout({ children, activePath = '/', title, subti
       <Link
         key={item.name}
         href={item.path}
+        title={collapsed ? item.name : undefined}
         className={clsx(
-          'group relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all',
-          isActive
-            ? 'bg-indigo-500/10 text-white'
-            : 'text-slate-400 hover:bg-slate-800/70 hover:text-white'
+          'group relative flex items-center overflow-hidden whitespace-nowrap rounded-lg text-sm font-medium transition-all',
+          collapsed ? 'justify-center px-0 py-2.5' : 'gap-3 px-3 py-2.5',
+          isActive ? 'bg-indigo-500/10 text-white' : 'text-slate-400 hover:bg-slate-800/70 hover:text-white'
         )}
       >
         {isActive && (
@@ -76,7 +215,7 @@ export default function SidebarLayout({ children, activePath = '/', title, subti
           size={18}
           className={clsx('shrink-0 transition-colors', isActive ? 'text-indigo-300' : 'text-slate-500 group-hover:text-slate-300')}
         />
-        {item.name}
+        {!collapsed && item.name}
       </Link>
     );
   };
@@ -84,43 +223,82 @@ export default function SidebarLayout({ children, activePath = '/', title, subti
   return (
     <div className="flex h-screen w-full overflow-hidden bg-slate-50 font-sans text-slate-800">
       {/* Sidebar */}
-      <aside className="z-20 flex w-64 shrink-0 flex-col bg-[#0b1120] text-slate-300 shadow-xl">
-        {/* Brand */}
-        <div className="flex h-16 shrink-0 items-center gap-3 border-b border-white/5 px-5">
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-blue-600 shadow-lg shadow-indigo-600/30 ring-1 ring-white/10">
+      <aside
+        className={clsx(
+          'z-20 flex shrink-0 flex-col overflow-hidden bg-[#0b1120] text-slate-300 shadow-xl transition-[width] duration-200 ease-in-out',
+          collapsed ? 'w-20' : 'w-64'
+        )}
+      >
+        {/* Brand + nút thu gọn */}
+        <div className={clsx('flex h-16 shrink-0 items-center border-b border-white/5', collapsed ? 'justify-center px-2' : 'gap-3 px-5')}>
+          <button
+            type="button"
+            onClick={collapsed ? toggleCollapse : undefined}
+            title={collapsed ? 'Mở rộng menu' : undefined}
+            className={clsx(
+              'flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-blue-600 shadow-lg shadow-indigo-600/30 ring-1 ring-white/10',
+              collapsed && 'cursor-pointer hover:brightness-110'
+            )}
+          >
             <GraduationCap size={20} className="text-white" />
-          </div>
-          <div className="leading-tight">
-            <div className="text-[15px] font-bold tracking-wide text-white">Grader</div>
-            <div className="text-[10px] font-medium uppercase tracking-[0.18em] text-slate-500">Auto-grading</div>
-          </div>
+          </button>
+          {!collapsed && (
+            <>
+              <div className="min-w-0 flex-1 overflow-hidden whitespace-nowrap leading-tight">
+                <div className="text-[15px] font-bold tracking-wide text-white">Grader</div>
+                <div className="text-[10px] font-medium uppercase tracking-[0.18em] text-slate-500">Auto-grading</div>
+              </div>
+              <button
+                type="button"
+                onClick={toggleCollapse}
+                title="Thu gọn menu"
+                className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-800/70 hover:text-white"
+              >
+                <PanelLeftClose size={18} />
+              </button>
+            </>
+          )}
         </div>
 
         <div className="custom-scrollbar flex-1 overflow-y-auto px-3 py-6">
-          <div className="mb-3 px-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-600">Quản lý chấm thi</div>
+          {!collapsed && (
+            <div className="mb-3 px-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-600">Quản lý chấm thi</div>
+          )}
           <nav className="space-y-1">{PRIMARY_NAV.map(renderLink)}</nav>
 
-          <div className="mb-3 mt-8 px-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-600">Báo cáo & Dữ liệu</div>
-          <nav className="space-y-1">{SECONDARY_NAV.map(renderLink)}</nav>
+          {!collapsed && (
+            <div className="mb-3 mt-8 px-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-600">Báo cáo & Dữ liệu</div>
+          )}
+          <nav className={clsx('space-y-1', collapsed && 'mt-4 border-t border-white/5 pt-4')}>{SECONDARY_NAV.map(renderLink)}</nav>
         </div>
 
         {/* GV đang đăng nhập + đăng xuất */}
-        <div className="shrink-0 border-t border-white/5 p-3">
-          <Link href="/profile" className="mb-1 flex items-center gap-3 rounded-lg px-2 py-2 transition-colors hover:bg-slate-800/70">
+        <div className={clsx('shrink-0 border-t border-white/5', collapsed ? 'p-2' : 'p-3')}>
+          <Link
+            href="/profile"
+            title={collapsed ? teacher.fullName : undefined}
+            className={clsx('mb-1 flex items-center rounded-lg transition-colors hover:bg-slate-800/70', collapsed ? 'justify-center p-2' : 'gap-3 px-2 py-2')}
+          >
             <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 to-blue-600 text-xs font-bold text-white ring-1 ring-white/10">
               {initialsOf(teacher.fullName)}
             </div>
-            <div className="min-w-0 leading-tight">
-              <div className="truncate text-sm font-semibold text-white">{teacher.fullName}</div>
-              <div className="truncate text-[11px] text-slate-500">{teacher.email}</div>
-            </div>
+            {!collapsed && (
+              <div className="min-w-0 leading-tight">
+                <div className="truncate text-sm font-semibold text-white">{teacher.fullName}</div>
+                <div className="truncate text-[11px] text-slate-500">{teacher.email}</div>
+              </div>
+            )}
           </Link>
           <button
             onClick={handleLogout}
-            className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-slate-400 transition-colors hover:bg-slate-800/70 hover:text-white"
+            title={collapsed ? 'Đăng xuất' : undefined}
+            className={clsx(
+              'flex w-full items-center rounded-lg text-sm font-medium text-slate-400 transition-colors hover:bg-slate-800/70 hover:text-white',
+              collapsed ? 'justify-center py-2.5' : 'gap-3 px-3 py-2.5'
+            )}
           >
             <LogOut size={18} />
-            Đăng xuất
+            {!collapsed && 'Đăng xuất'}
           </button>
         </div>
       </aside>
@@ -134,18 +312,104 @@ export default function SidebarLayout({ children, activePath = '/', title, subti
             {subtitle && <p className="truncate text-xs text-slate-500">{subtitle}</p>}
           </div>
           <div className="flex items-center gap-5">
-            <div className="relative hidden md:block">
-              <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-              <input
-                type="text"
-                placeholder="Tìm mã đề, sinh viên..."
-                className="w-64 rounded-full border border-transparent bg-slate-100 py-2 pl-9 pr-4 text-sm outline-none transition-all focus:border-indigo-400 focus:bg-white focus:ring-2 focus:ring-indigo-100"
-              />
+            {/* Thanh tìm kiếm */}
+            <div ref={searchRef} className="relative hidden md:block">
+              <form onSubmit={onSearchSubmit}>
+                <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="text"
+                  value={q}
+                  onChange={(e) => onSearchChange(e.target.value)}
+                  onFocus={() => q.trim() && setSearchOpen(true)}
+                  placeholder="Tìm mã đề, sinh viên..."
+                  className="w-64 rounded-full border border-transparent bg-slate-100 py-2 pl-9 pr-4 text-sm outline-none transition-all focus:border-indigo-400 focus:bg-white focus:ring-2 focus:ring-indigo-100"
+                />
+              </form>
+              {searchOpen && q.trim().length > 0 && (
+                <div className="absolute left-0 top-full z-30 mt-2 w-80 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl">
+                  {searching ? (
+                    <div className="p-4 text-center text-xs text-slate-400">
+                      <Loader2 size={14} className="mr-1 inline animate-spin" /> Đang tìm...
+                    </div>
+                  ) : results.length === 0 ? (
+                    <div className="p-4 text-center text-xs text-slate-400">Không tìm thấy kết quả</div>
+                  ) : (
+                    <ul className="max-h-80 overflow-y-auto py-1">
+                      {results.map((r, i) => (
+                        <li key={`${r.examId}-${r.studentId}-${i}`}>
+                          <button
+                            onClick={() => gotoResult(r)}
+                            className="flex w-full items-center gap-3 px-3 py-2 text-left transition-colors hover:bg-slate-50"
+                          >
+                            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-slate-100 to-slate-200 text-xs font-bold text-slate-500">
+                              {(r.studentName || r.studentId || '?').charAt(0).toUpperCase()}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <p className="truncate text-sm font-medium text-slate-700">{r.studentName || r.studentId}</p>
+                              <p className="truncate font-mono text-xs text-slate-400">{r.studentId} · {r.examId}</p>
+                            </div>
+                            {r.score != null && (
+                              <span className="shrink-0 text-xs font-bold text-slate-500">{r.score.toFixed(1)}</span>
+                            )}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
             </div>
-            <button className="relative text-slate-500 transition-colors hover:text-slate-800">
-              <Bell size={20} />
-              <span className="absolute right-0 top-0 h-2 w-2 rounded-full border-2 border-white bg-rose-500" />
-            </button>
+
+            {/* Chuông thông báo */}
+            <div ref={notifRef} className="relative">
+              <button
+                onClick={toggleNotif}
+                className="relative text-slate-500 transition-colors hover:text-slate-800"
+                title="Thông báo"
+              >
+                <Bell size={20} />
+                {unread > 0 && (
+                  <span className="absolute -right-1.5 -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-bold text-white ring-2 ring-white">
+                    {unread > 9 ? '9+' : unread}
+                  </span>
+                )}
+              </button>
+              {notifOpen && (
+                <div className="absolute right-0 top-full z-30 mt-2 w-80 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl">
+                  <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+                    <h4 className="text-sm font-bold text-slate-700">Thông báo</h4>
+                    <span className="text-[11px] text-slate-400">{notifs.length} phiên gần đây</span>
+                  </div>
+                  {notifs.length === 0 ? (
+                    <div className="p-6 text-center text-xs text-slate-400">Chưa có phiên chấm nào</div>
+                  ) : (
+                    <ul className="max-h-96 overflow-y-auto py-1">
+                      {notifs.map((n) => {
+                        const s = notifStatus(n);
+                        return (
+                          <li key={n.batchId}>
+                            <button
+                              onClick={() => { setNotifOpen(false); router.push(`/history?exam=${encodeURIComponent(n.examId)}`); }}
+                              className="flex w-full items-start gap-3 px-4 py-2.5 text-left transition-colors hover:bg-slate-50"
+                            >
+                              <s.Icon size={18} className={clsx('mt-0.5 shrink-0', s.tone)} />
+                              <div className="min-w-0 flex-1">
+                                <p className="truncate text-sm font-semibold text-slate-700">{n.examId}</p>
+                                <p className="text-xs text-slate-500">{s.text}</p>
+                                <p className="mt-0.5 text-[11px] text-slate-400">
+                                  {n.createdAt ? new Date(n.createdAt).toLocaleString('vi-VN') : ''}
+                                </p>
+                              </div>
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </div>
+              )}
+            </div>
+
             <Link href="/profile" className="flex items-center gap-2.5">
               <div className="hidden text-right leading-tight sm:block">
                 <div className="text-sm font-semibold text-slate-800">{teacher.fullName}</div>

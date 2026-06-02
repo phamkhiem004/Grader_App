@@ -95,10 +95,6 @@ export default function LoginPage() {
             Chưa có tài khoản?{" "}
             <Link href="/register" className="font-semibold text-indigo-600 hover:text-indigo-700">Đăng ký</Link>
           </p>
-
-          <div className="mt-5 rounded-xl border border-slate-100 bg-slate-50 p-3 text-center text-xs text-slate-500">
-            Tài khoản mẫu: <span className="font-mono font-semibold text-slate-700">giaovien@fpt.edu.vn</span> / <span className="font-mono font-semibold text-slate-700">123456</span>
-          </div>
         </form>
       </div>
     </div>

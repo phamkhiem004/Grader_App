@@ -16,6 +16,7 @@ public class ExamSetupController {
 
     @Autowired
     private ExamService examService;
+    @Autowired
     private ExamRepository examRepo;
 
     @PostMapping("/upload-testcase")

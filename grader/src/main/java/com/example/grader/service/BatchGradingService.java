@@ -69,12 +69,18 @@ public class BatchGradingService {
             executor.submit(() -> {
                 Thread.currentThread().setName("grading-worker-" + idx);
                 while (!Thread.currentThread().isInterrupted()) {
+                    GradingJob job = null;
                     try {
-                        GradingJob job = jobQueue.take();
+                        job = jobQueue.take();
                         processJob(job);
                     } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();
                         break;
+                    } catch (Throwable t) {
+                        // QUAN TRỌNG: KHÔNG để 1 job lỗi giết chết worker (nếu chết thì các bài
+                        // sau sẽ kẹt QUEUED vĩnh viễn). Ghi log rồi tiếp tục nhận job kế tiếp.
+                        log.error("Worker gặp lỗi ngoài dự kiến khi xử lý job {}: {}",
+                                job != null ? job.studentId() : "?", t.toString(), t);
                     }
                 }
             });
@@ -110,6 +116,7 @@ public class BatchGradingService {
 
         List<String> queued      = new ArrayList<>();
         List<String> parseErrors = new ArrayList<>();
+        List<GradingJob> pendingJobs = new ArrayList<>();   // enqueue SAU khi chốt totalFiles
 
         for (MultipartFile file : files) {
             String filename = Objects.requireNonNull(file.getOriginalFilename());
@@ -140,7 +147,7 @@ public class BatchGradingService {
                 placeholder.setErrorLog(null);
                 resultRepo.save(placeholder);
 
-                jobQueue.add(new GradingJob(
+                pendingJobs.add(new GradingJob(
                         info.studentId(), info.studentName(),
                         batchId, examId, zip.toString()
                 ));
@@ -152,17 +159,31 @@ public class BatchGradingService {
             }
         }
 
-        log.info("[{}] Enqueued {}/{}", batchId, queued.size(), files.size());
-        return new BatchSubmitResponse(batchId, queued.size(), parseErrors);
+        // totalFiles = SỐ BÀI THỰC SỰ ĐƯA VÀO CHẤM (không tính file bị loại) → batch hoàn tất đúng
+        batch.setTotalFiles(pendingJobs.size());
+        batchRepo.save(batch);
+
+        // Đưa vào hàng đợi SAU khi đã chốt totalFiles (để worker không hoàn tất trước khi totalFiles đúng)
+        pendingJobs.forEach(jobQueue::add);
+
+        // Tất cả file đều bị loại → đóng batch ngay (không có job nào để kích hoạt checkBatchComplete)
+        if (pendingJobs.isEmpty()) {
+            batch.setStatus(BatchStatus.COMPLETED);
+            batch.setCompletedAt(Instant.now());
+            batchRepo.save(batch);
+        }
+
+        log.info("[{}] Enqueued {}/{}", batchId, pendingJobs.size(), files.size());
+        return new BatchSubmitResponse(batchId, pendingJobs.size(), parseErrors);
     }
 
-    // ── Xử lý 1 job ─────────────────────────────────────────────
+    // ── Xử lý 1 job (TUYỆT ĐỐI không ném exception ra ngoài → worker không bao giờ chết) ──
     private void processJob(GradingJob job) {
-        log.info("[{}] Chấm: {}", job.batchId(), job.studentId());
-        updateStatus(job, GradingStatus.GRADING, null, null, null);
-
         boolean success = false;
         try {
+            log.info("[{}] Chấm: {}", job.batchId(), job.studentId());
+            updateStatus(job, GradingStatus.GRADING, null, null, null);
+
             Path zipPath = Path.of(job.zipPath());     // file đã staged trên đĩa
             if (!Files.exists(zipPath))
                 throw new IllegalStateException("Mất file bài nộp: " + zipPath);
@@ -182,15 +203,17 @@ public class BatchGradingService {
 
         } catch (Exception e) {
             log.error("[{}] ERROR {} → {}", job.batchId(), job.studentId(), e.getMessage());
-            updateStatus(job, GradingStatus.ERROR, 0f, null, null);
-            updateErrorLog(job, e.getMessage());
+            try { updateStatus(job, GradingStatus.ERROR, 0f, null, null); }
+            catch (Exception ex) { log.warn("[{}] Không ghi được ERROR cho {}: {}", job.batchId(), job.studentId(), ex.getMessage()); }
+            updateErrorLog(job, e.getMessage());     // đã tự bọc try/catch + cắt ngắn bên trong
+        } finally {
+            // Bookkeeping luôn chạy & có bọc lỗi → 1 lỗi ghi DB không làm kẹt batch
+            try { if (!saveSubmissions) deleteQuietly(Path.of(job.zipPath())); } catch (Exception ignored) {}
+            try { batchRepo.incrementCounts(job.batchId(), success ? 1 : 0, success ? 0 : 1); }
+            catch (Exception ex) { log.warn("[{}] incrementCounts lỗi: {}", job.batchId(), ex.getMessage()); }
+            try { checkBatchComplete(job.batchId()); }
+            catch (Exception ex) { log.warn("[{}] checkBatchComplete lỗi: {}", job.batchId(), ex.getMessage()); }
         }
-
-        // Không lưu audit → xóa file staged sau khi đã ghi trạng thái cuối
-        if (!saveSubmissions) deleteQuietly(Path.of(job.zipPath()));
-
-        batchRepo.incrementCounts(job.batchId(), success ? 1 : 0, success ? 0 : 1);
-        checkBatchComplete(job.batchId());
     }
 
     private void updateStatus(GradingJob job, GradingStatus status, Float score, String details, String fullJson) {
@@ -264,25 +287,33 @@ public class BatchGradingService {
         }
     }
 
-    /** Giới hạn độ dài log lỗi để không phình DB (cột là LONGTEXT, đây là chặn phòng xa). */
+    /** Giới hạn độ dài log lỗi để không phình DB / không tràn cột. */
     private static final int MAX_ERROR_LOG = 60_000;
 
     private void updateErrorLog(GradingJob job, String msg) {
-        String safe = msg == null ? "" : msg;
-        if (safe.length() > MAX_ERROR_LOG)
-            safe = safe.substring(0, MAX_ERROR_LOG) + "\n…(đã cắt bớt log lỗi)";
-        final String log = safe;
-        resultRepo.findByStudentIdAndBatchId(job.studentId(), job.batchId())
-                .ifPresent(r -> { r.setErrorLog(log); resultRepo.save(r); });
+        try {
+            String text = msg == null ? "" : msg;
+            if (text.length() > MAX_ERROR_LOG)
+                text = text.substring(0, MAX_ERROR_LOG) + "\n…(đã cắt bớt log lỗi)";
+            final String finalText = text;
+            resultRepo.findByStudentIdAndBatchId(job.studentId(), job.batchId())
+                    .ifPresent(r -> { r.setErrorLog(finalText); resultRepo.save(r); });
+        } catch (Exception e) {
+            // Tuyệt đối KHÔNG để việc ghi log lỗi (vd cột error_log quá nhỏ) làm chết worker
+            log.warn("[{}] Không ghi được error_log cho {}: {}", job.batchId(), job.studentId(), e.getMessage());
+        }
     }
 
     private void checkBatchComplete(String batchId) {
         batchRepo.findByBatchId(batchId).ifPresent(b -> {
-            if (b.getDoneCount() + b.getErrorCount() >= b.getTotalFiles()) {
-                b.setStatus(b.getErrorCount() == 0 ? BatchStatus.COMPLETED : BatchStatus.PARTIAL);
+            int done  = b.getDoneCount()  != null ? b.getDoneCount()  : 0;
+            int error = b.getErrorCount() != null ? b.getErrorCount() : 0;
+            int total = b.getTotalFiles() != null ? b.getTotalFiles() : 0;
+            if (done + error >= total) {
+                b.setStatus(error == 0 ? BatchStatus.COMPLETED : BatchStatus.PARTIAL);
                 b.setCompletedAt(Instant.now());
                 batchRepo.save(b);
-                log.info("[{}] Batch hoàn tất {}/{}", batchId, b.getDoneCount(), b.getTotalFiles());
+                log.info("[{}] Batch hoàn tất {}/{}", batchId, done, total);
             }
         });
     }

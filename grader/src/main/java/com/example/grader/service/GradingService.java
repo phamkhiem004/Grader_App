@@ -13,6 +13,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Stream;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
@@ -49,17 +50,22 @@ public class GradingService {
         if (Files.exists(extractDir.resolve("lib"))) return extractDir;
 
         // Nếu không có, tìm sâu vào 1 cấp (trường hợp SV nén cả thư mục cha chứa lib)
-        List<Path> subDirs = Files.list(extractDir).filter(Files::isDirectory).toList();
+        List<Path> subDirs;
+        try (Stream<Path> s = Files.list(extractDir)) {
+            subDirs = s.filter(Files::isDirectory).toList();
+        }
         for (Path sub : subDirs) {
             if (Files.exists(sub.resolve("lib"))) return sub;
         }
 
-        // Tìm sâu hơn nữa
-        return Files.walk(extractDir)
-                .filter(p -> p.getFileName().toString().equals("lib") && Files.isDirectory(p))
-                .map(Path::getParent)
-                .findFirst()
-                .orElseThrow(() -> new IllegalArgumentException("Không tìm thấy thư mục lib/ trong file nộp"));
+        // Tìm sâu hơn nữa (đóng Stream để không rò rỉ file descriptor)
+        try (Stream<Path> walk = Files.walk(extractDir)) {
+            return walk
+                    .filter(p -> p.getFileName().toString().equals("lib") && Files.isDirectory(p))
+                    .map(Path::getParent)
+                    .findFirst()
+                    .orElseThrow(() -> new IllegalArgumentException("Không tìm thấy thư mục lib/ trong file nộp"));
+        }
     }
 
     public String gradeSubmission(String studentId, String examId, String testcasePath,
@@ -74,9 +80,11 @@ public class GradingService {
             Path projectRoot = detectProjectRoot(extractDir);
             Path studentLib = projectRoot.resolve("lib");
 
-            // Chỉ kiểm tra file .dart bên trong thư mục lib
-            long dartCount = Files.walk(studentLib)
-                    .filter(p -> p.toString().endsWith(".dart")).count();
+            // Chỉ kiểm tra file .dart bên trong thư mục lib (đóng Stream)
+            long dartCount;
+            try (Stream<Path> s = Files.walk(studentLib)) {
+                dartCount = s.filter(p -> p.toString().endsWith(".dart")).count();
+            }
             if (dartCount == 0)
                 throw new IllegalArgumentException("Không có file .dart trong lib/");
 
@@ -284,9 +292,11 @@ public class GradingService {
     }
 
     private void deleteDirectory(File dir) throws Exception {
-        if (dir.exists())
-            Files.walk(dir.toPath()).sorted(Comparator.reverseOrder())
+        if (!dir.exists()) return;
+        try (Stream<Path> walk = Files.walk(dir.toPath())) {
+            walk.sorted(Comparator.reverseOrder())
                     .map(Path::toFile).forEach(File::delete);
+        }
     }
 
     private String toDockerPath(String path) {

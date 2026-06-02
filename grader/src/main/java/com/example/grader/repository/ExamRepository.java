@@ -18,6 +18,9 @@ public interface ExamRepository extends JpaRepository<Exam, Long> {
 
     boolean existsByExamId(String examId);
 
+    // Thống kê hồ sơ GV: số đề do GV này cấu hình
+    long countByCreatedBy(String createdBy);
+
     // ── Counter/Flag Pattern: chỉ lấy đề đã có bài chấm xong (cho dropdown Thống kê) ──
     // Đọc O(log N) nhờ index idx_exam_has_results, không cần JOIN/đếm exam_results.
     List<Exam> findByHasResultsTrueOrderByExamNameAsc();

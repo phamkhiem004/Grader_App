@@ -25,15 +25,15 @@ public class GradingBatch {
 
     @ColumnDefault("0")
     @Column(name = "total_files")
-    private Integer totalFiles;
+    private Integer totalFiles = 0;
 
     @ColumnDefault("0")
     @Column(name = "done_count")
-    private Integer doneCount;
+    private Integer doneCount = 0;
 
     @ColumnDefault("0")
     @Column(name = "error_count")
-    private Integer errorCount;
+    private Integer errorCount = 0;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "status", length = 20)
@@ -52,7 +52,10 @@ public class GradingBatch {
     @PrePersist
     protected void onCreate() {
         createdAt = Instant.now();
-        if (status == null) status = BatchStatus.IN_PROGRESS;
+        if (status     == null) status     = BatchStatus.IN_PROGRESS;
+        if (totalFiles == null) totalFiles = 0;
+        if (doneCount  == null) doneCount  = 0;
+        if (errorCount == null) errorCount = 0;
     }
 
 }

@@ -19,9 +19,15 @@ public interface GradingBatchRepository extends JpaRepository<GradingBatch,Long>
     @Transactional
     @Query("""
         UPDATE GradingBatch b SET
-            b.doneCount  = b.doneCount  + :done,
-            b.errorCount = b.errorCount + :error
+            b.doneCount  = COALESCE(b.doneCount, 0)  + :done,
+            b.errorCount = COALESCE(b.errorCount, 0) + :error
         WHERE b.batchId = :batchId
     """)
     void incrementCounts(String batchId, int done, int error);
+
+    // ── Thống kê hồ sơ giáo viên ─────────────────────────────────
+    long countByCreatedBy(String createdBy);
+
+    @Query("SELECT COALESCE(SUM(b.doneCount), 0) FROM GradingBatch b WHERE b.createdBy = :email")
+    long sumDoneByCreatedBy(String email);
 }

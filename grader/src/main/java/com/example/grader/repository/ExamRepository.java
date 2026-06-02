@@ -13,4 +13,7 @@ public interface ExamRepository extends JpaRepository<Exam, Long> {
     List<Exam> findByStatus(ExamStatus status);
 
     boolean existsByExamId(String examId);
+
+    // Thống kê hồ sơ GV: số đề do GV này cấu hình
+    long countByCreatedBy(String createdBy);
 }

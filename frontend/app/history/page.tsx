@@ -1,16 +1,38 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import SidebarLayout from "@/components/layout/SidebarLayout";
 import { API_BASE, PASS_THRESHOLD } from "@/lib/config";
 import { Skeleton, SkeletonRow } from "@/components/ui/Skeleton";
 import { Tooltip } from "@/components/ui/Tooltip";
+import CompetencyPanel, { CompetencyItem } from "@/components/grading/CompetencyPanel";
 import {
   History, FileJson, DownloadCloud, Search, ChevronRight,
   CheckCircle, AlertCircle, Clock, Users, FileText, FileArchive,
+  BarChart3, X, Loader2,
 } from "lucide-react";
 
 interface ExamOption { examId: string; examName: string; }
+interface TestCaseItem {
+  test_id?: string; name?: string; status?: string; weight?: number;
+  skill_code?: string; skill_name?: string; category_label?: string;
+  difficulty?: string; skill?: string;
+  expected?: string; actual?: string;
+}
+
+const DIFF_BADGE: Record<string, string> = {
+  basic: "bg-slate-100 text-slate-500",
+  intermediate: "bg-amber-100 text-amber-700",
+  advanced: "bg-rose-100 text-rose-700",
+};
+const DIFF_VI: Record<string, string> = { basic: "Cơ bản", intermediate: "Trung bình", advanced: "Nâng cao" };
+interface DetailData {
+  student?: { id?: string; name?: string };
+  grading_result?: { score?: number; passed_tests?: number; failed_tests?: number; total_tests?: number };
+  competency_assessment?: CompetencyItem[];
+  test_cases?: TestCaseItem[];
+}
 interface ResultRow {
   id: number;
   studentId: string;
@@ -41,6 +63,19 @@ export default function HistoryPage() {
   const [loadingExams, setLoadingExams] = useState(true);
   const [loadingRows, setLoadingRows] = useState(false);
   const [q, setQ] = useState("");
+
+  // Modal chi tiết năng lực 1 bài
+  const [detailRow, setDetailRow] = useState<ResultRow | null>(null);
+  const [detail, setDetail] = useState<DetailData | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+
+  // Khóa cuộn trang nền khi mở modal
+  useEffect(() => {
+    if (!detailRow) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = prev; };
+  }, [detailRow]);
 
   // Đọc query param từ thanh search header (?exam=...&q=...) — ưu tiên trước khi chọn mặc định
   useEffect(() => {
@@ -99,6 +134,28 @@ export default function HistoryPage() {
       : 0;
     return { total: rows.length, done: done.length, error, avg };
   }, [rows]);
+
+  // Mở modal chi tiết: tải result_json đầy đủ (có competency_assessment + test_cases)
+  const openDetail = async (r: ResultRow) => {
+    if (!selected || !r.hasJson) return;
+    setDetailRow(r);
+    setDetail(null);
+    setDetailLoading(true);
+    try {
+      const res = await fetch(
+        `${API_BASE}/results/${encodeURIComponent(selected)}/${encodeURIComponent(r.studentId)}`
+      );
+      if (res.ok) {
+        const text = await res.text();
+        setDetail(JSON.parse(text) as DetailData);
+      }
+    } catch {
+      /* bỏ qua */
+    } finally {
+      setDetailLoading(false);
+    }
+  };
+  const closeDetail = () => { setDetailRow(null); setDetail(null); };
 
   // Tải JSON của 1 sinh viên
   const downloadStudentJson = async (r: ResultRow) => {
@@ -264,7 +321,7 @@ export default function HistoryPage() {
                     <th className="px-6 py-3.5">Pass</th>
                     <th className="px-6 py-3.5 text-right">Điểm</th>
                     <th className="px-6 py-3.5">Thời gian</th>
-                    <th className="px-4 py-3.5 text-center">JSON</th>
+                    <th className="px-4 py-3.5 text-center">Chi tiết</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -364,18 +421,28 @@ export default function HistoryPage() {
                           <td className="px-6 py-3.5 text-xs text-slate-500">
                             {r.updatedAt ? new Date(r.updatedAt).toLocaleString("vi-VN") : "—"}
                           </td>
-                          <td className="px-4 py-3.5 text-center">
+                          <td className="px-4 py-3.5">
                             {r.hasJson ? (
-                              <Tooltip label={`Tải JSON của ${r.studentId}`} side="left">
-                                <button
-                                  onClick={() => downloadStudentJson(r)}
-                                  className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-indigo-50 hover:text-indigo-600"
-                                >
-                                  <FileJson size={15} />
-                                </button>
-                              </Tooltip>
+                              <div className="flex items-center justify-center gap-1">
+                                <Tooltip label={`Xem năng lực ${r.studentId}`} side="left">
+                                  <button
+                                    onClick={() => openDetail(r)}
+                                    className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-indigo-50 hover:text-indigo-600"
+                                  >
+                                    <BarChart3 size={15} />
+                                  </button>
+                                </Tooltip>
+                                <Tooltip label={`Tải JSON của ${r.studentId}`} side="left">
+                                  <button
+                                    onClick={() => downloadStudentJson(r)}
+                                    className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-indigo-50 hover:text-indigo-600"
+                                  >
+                                    <FileJson size={15} />
+                                  </button>
+                                </Tooltip>
+                              </div>
                             ) : (
-                              <span className="text-slate-300">—</span>
+                              <span className="block text-center text-slate-300">—</span>
                             )}
                           </td>
                         </tr>
@@ -388,6 +455,118 @@ export default function HistoryPage() {
           </div>
         </div>
       </div>
+      {/* Modal chi tiết năng lực 1 bài — render qua Portal ra body để không bị
+          giam trong khung max-w-6xl (animate-fade-in-up tạo containing block). */}
+      {detailRow && typeof document !== "undefined" && createPortal(
+        <div
+          className="animate-modal-overlay fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm"
+          onClick={closeDetail}
+        >
+          <div
+            className="animate-modal-pop flex max-h-[88vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex shrink-0 items-center justify-between border-b border-slate-100 px-6 py-4">
+              <div className="min-w-0">
+                <h3 className="truncate text-sm font-bold text-slate-800">
+                  {detailRow.studentName || detailRow.studentId}
+                </h3>
+                <p className="font-mono text-xs text-slate-400">
+                  {detailRow.studentId} · {selected}
+                </p>
+              </div>
+              <button
+                onClick={closeDetail}
+                className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="custom-scrollbar flex-1 space-y-5 overflow-y-auto p-6">
+              {detailLoading ? (
+                <div className="flex items-center justify-center py-12 text-slate-400">
+                  <Loader2 size={22} className="animate-spin" />
+                </div>
+              ) : detail ? (
+                <>
+                  {/* Tóm tắt điểm */}
+                  <div className="flex items-center justify-between rounded-xl bg-slate-50 px-5 py-4">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Điểm tự động</p>
+                      <p className="text-2xl font-bold text-slate-800">
+                        {detail.grading_result?.score != null ? detail.grading_result.score.toFixed(2) : "—"}
+                        <span className="text-sm font-medium text-slate-400">/10</span>
+                      </p>
+                    </div>
+                    <div className="text-right text-xs text-slate-500">
+                      <p>
+                        Pass:{" "}
+                        <span className="font-bold text-emerald-600">
+                          {detail.grading_result?.passed_tests ?? 0}
+                        </span>{" "}
+                        / {detail.grading_result?.total_tests ?? 0}
+                      </p>
+                    </div>
+                  </div>
+
+                  <CompetencyPanel items={detail.competency_assessment} />
+
+                  {/* Danh sách testcase */}
+                  {detail.test_cases && detail.test_cases.length > 0 && (
+                    <div className="space-y-2">
+                      <p className="text-sm font-bold text-slate-700">Chi tiết testcase</p>
+                      <div className="space-y-1.5">
+                        {detail.test_cases.map((tc, i) => {
+                          const passed = (tc.status || "").toLowerCase() === "passed";
+                          return (
+                            <div
+                              key={tc.test_id || i}
+                              className="rounded-lg border border-slate-100 bg-white px-3 py-2"
+                            >
+                              <div className="flex items-center gap-2">
+                                <span
+                                  className={`h-1.5 w-1.5 shrink-0 rounded-full ${passed ? "bg-emerald-500" : "bg-rose-500"}`}
+                                />
+                                <span className="min-w-0 flex-1 truncate text-xs font-medium text-slate-700">
+                                  {tc.name || tc.test_id}
+                                </span>
+                                {(tc.skill_name || tc.skill_code) && (
+                                  <span
+                                    className="shrink-0 rounded bg-indigo-50 px-1.5 py-0.5 text-[10px] font-medium text-indigo-600"
+                                    title={`${tc.category_label ? tc.category_label + " · " : ""}${tc.skill_code || ""}`}
+                                  >
+                                    {tc.skill_name || tc.skill_code}
+                                  </span>
+                                )}
+                                {tc.difficulty && (
+                                  <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${DIFF_BADGE[tc.difficulty] || DIFF_BADGE.basic}`}>
+                                    {DIFF_VI[tc.difficulty] || tc.difficulty}
+                                  </span>
+                                )}
+                              </div>
+                              {!passed && tc.actual && (
+                                <p className="mt-1 line-clamp-2 pl-3.5 text-[11px] text-rose-500" title={tc.actual}>
+                                  {tc.actual}
+                                </p>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="py-12 text-center text-sm text-slate-400">
+                  Không tải được dữ liệu bài này.
+                </div>
+              )}
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
     </SidebarLayout>
   );
 }

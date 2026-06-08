@@ -1,0 +1,75 @@
+{
+  "version": "2026.2",
+  "subject": {
+    "code": "PRM_FLUTTER",
+    "name": "Mobile Programming — Flutter/Dart",
+    "note": "Danh mục kiến thức (syllabus) dùng để RA ĐỀ và ĐÁNH GIÁ NĂNG LỰC. Testcase tham chiếu kỹ năng bằng `code` (ID ổn định). File này là SEED: khi `version` đổi, backend RE-SEED lại DB từ file (xem SyllabusService). Chỉnh runtime qua /api/syllabus (CRUD) thì đừng bump version kẻo bị ghi đè."
+  },
+
+  "difficulty_levels": [
+    { "code": "basic",        "label": "Cơ bản",     "points": 1, "criteria": "Kiến thức của một buổi học đơn lẻ, áp dụng trực tiếp, không cần kết hợp nhiều khái niệm." },
+    { "code": "intermediate", "label": "Trung bình",  "points": 2, "criteria": "Kết hợp 2–3 khái niệm, có điều kiện/rẽ nhánh, vài edge case." },
+    { "code": "advanced",     "label": "Nâng cao",    "points": 3, "criteria": "Tổng hợp nhiều phần, xử lý edge case khó, tối ưu/đệ quy/bất đồng bộ." }
+  ],
+  "_scoring_note": "ĐIỂM THEO ĐỘ KHÓ: weight mỗi testcase = points của difficulty (basic=1, intermediate=2, advanced=3). Điểm cuối = Σweight_pass / Σweight × 10 (grader tự chuẩn hóa).",
+
+  "level_thresholds_default": { "weak": 0.4, "good": 0.7 },
+
+  "categories": [
+    { "code": "DART_ESSENTIALS",   "name": "Dart Essentials",              "competency_label": "Dart Essentials",     "order": 1, "description": "Ch.2–3: Cú pháp Dart, kiểu dữ liệu, hàm, class cơ bản, null safety." },
+    { "code": "OOP_ASYNC",         "name": "OOP & Asynchronous",           "competency_label": "OOP & Async",         "order": 2, "description": "Ch.3–4: OOP patterns, Futures, Streams, async/await." },
+    { "code": "UI_FUNDAMENTALS",   "name": "UI Fundamentals",              "competency_label": "UI Fundamentals",     "order": 3, "description": "Ch.4: Widgets, Layouts, MaterialApp, lists & pickers." },
+    { "code": "NAV_STATE",         "name": "Navigation & State Management", "competency_label": "Navigation & State",  "order": 4, "description": "Ch.8: Navigator 1.0/2.0, named routes, deep links, basic state." },
+    { "code": "LAYOUT_RESPONSIVE", "name": "Layout & Responsive Design",   "competency_label": "Layout & Responsive", "order": 5, "description": "Ch.5–6: Advanced layouts (Grid/Stack/Flex), responsive patterns." },
+    { "code": "FORMS_VALIDATION",  "name": "Forms & Validation",           "competency_label": "Forms & Validation",  "order": 6, "description": "Form, TextFormField, validator, ràng buộc nghiệp vụ." },
+    { "code": "NETWORKING",        "name": "Networking & JSON API",        "competency_label": "Networking & API",    "order": 7, "description": "Ch.9: HTTP/REST, JSON parsing, FutureBuilder." },
+    { "code": "STORAGE",           "name": "Local Storage & Persistence",  "competency_label": "Storage & Persistence","order": 8, "description": "Ch.10: SharedPreferences, SQLite/Hive, caching." },
+    { "code": "AUTH",              "name": "Authentication & User Management","competency_label": "Authentication",    "order": 9, "description": "Ch.11: Auth basics, session, guarded routes." }
+  ],
+
+  "skills": [
+    { "code": "DART_SYNTAX",       "category": "DART_ESSENTIALS",   "name": "Cú pháp & kiểu dữ liệu",   "default_difficulty": "basic",        "testable": "auto",   "description": "Biến, kiểu, toán tử, control flow (if/for/while).",                              "resources": ["dart.dev/language", "Ch.2"] },
+    { "code": "DART_FUNCTIONS",    "category": "DART_ESSENTIALS",   "name": "Hàm",                      "default_difficulty": "basic",        "testable": "auto",   "description": "Khai báo hàm, tham số (named/optional), arrow function, closure.",               "resources": ["dart.dev/language/functions", "Ch.2"] },
+    { "code": "DART_CLASSES",      "category": "DART_ESSENTIALS",   "name": "Class & constructor",      "default_difficulty": "basic",        "testable": "auto",   "description": "Class, constructor named + required, field, getter/setter; model cơ bản.",       "resources": ["dart.dev/language/classes", "Ch.3"] },
+    { "code": "DART_COLLECTIONS",  "category": "DART_ESSENTIALS",   "name": "Collection & logic thuần", "default_difficulty": "intermediate", "testable": "auto",   "description": "List/Map/Set, filter/map/reduce, sort, nextId(max+1), hàm thuần xử lý dữ liệu.", "resources": ["dart.dev/codelabs/iterables", "Ch.3"] },
+    { "code": "DART_NULL_SAFETY",  "category": "DART_ESSENTIALS",   "name": "Null safety",              "default_difficulty": "basic",        "testable": "auto",   "description": "Nullable (?), bang (!), null-aware (??, ?.), late, required.",                   "resources": ["dart.dev/null-safety", "Ch.2"] },
+
+    { "code": "OOP_INHERITANCE",   "category": "OOP_ASYNC",         "name": "Kế thừa & abstract",       "default_difficulty": "intermediate", "testable": "auto",   "description": "extends, abstract class, override, super.",                                      "resources": ["dart.dev/language/extend", "Ch.3"] },
+    { "code": "OOP_PATTERNS",      "category": "OOP_ASYNC",         "name": "OOP patterns",             "default_difficulty": "advanced",     "testable": "auto",   "description": "mixin, interface (implements), factory, ==/hashCode, toString.",                 "resources": ["dart.dev/language/mixins", "Ch.3"] },
+    { "code": "OOP_MODEL",         "category": "OOP_ASYNC",         "name": "Model nâng cao",           "default_difficulty": "intermediate", "testable": "auto",   "description": "copyWith, bất biến (immutable), toString, so sánh model.",                       "resources": ["Ch.3"] },
+    { "code": "ASYNC_FUTURE",      "category": "OOP_ASYNC",         "name": "Future & async/await",     "default_difficulty": "intermediate", "testable": "auto",   "description": "Future, async, await, then/catchError; xử lý bất đồng bộ thuần Dart.",           "resources": ["dart.dev/codelabs/async-await", "Ch.4"] },
+    { "code": "ASYNC_STREAM",      "category": "OOP_ASYNC",         "name": "Stream",                   "default_difficulty": "advanced",     "testable": "auto",   "description": "Stream, listen, async*, StreamController.",                                      "resources": ["dart.dev/tutorials/language/streams", "Ch.4"] },
+
+    { "code": "UI_WIDGETS",        "category": "UI_FUNDAMENTALS",   "name": "Widget cơ bản",            "default_difficulty": "basic",        "testable": "auto",   "description": "Scaffold, AppBar, Text, ElevatedButton/TextButton, Icon, Image.",                "resources": ["docs.flutter.dev/ui/widgets", "Ch.4"] },
+    { "code": "UI_MATERIAL",       "category": "UI_FUNDAMENTALS",   "name": "MaterialApp & Theme",      "default_difficulty": "basic",        "testable": "auto",   "description": "MaterialApp, ThemeData, màu, TextStyle (bold/size).",                            "resources": ["docs.flutter.dev/ui/design/material", "Ch.4"] },
+    { "code": "UI_LISTS",          "category": "UI_FUNDAMENTALS",   "name": "Danh sách động",           "default_difficulty": "intermediate", "testable": "auto",   "description": "ListView/ListView.builder; render danh sách item kèm dữ liệu.",                  "resources": ["docs.flutter.dev/cookbook/lists", "Ch.4"] },
+    { "code": "UI_PICKERS",        "category": "UI_FUNDAMENTALS",   "name": "Dialog & Pickers",         "default_difficulty": "intermediate", "testable": "auto",   "description": "AlertDialog/showDialog, SnackBar, date/time picker.",                            "resources": ["docs.flutter.dev/cookbook/design", "Ch.4"] },
+
+    { "code": "NAV_BASIC",         "category": "NAV_STATE",         "name": "Push/Pop",                 "default_difficulty": "basic",        "testable": "auto",   "description": "Navigator.push/pop với MaterialPageRoute; mở/đóng màn hình.",                    "resources": ["docs.flutter.dev/cookbook/navigation", "Ch.8"] },
+    { "code": "NAV_NAMED",         "category": "NAV_STATE",         "name": "Named routes & arguments", "default_difficulty": "intermediate", "testable": "auto",   "description": "routes/onGenerateRoute, truyền & nhận tham số giữa màn hình.",                   "resources": ["docs.flutter.dev/cookbook/navigation/named-routes", "Ch.8"] },
+    { "code": "NAV_ADVANCED",      "category": "NAV_STATE",         "name": "Navigator 2.0 / deep links","default_difficulty": "advanced",    "testable": "auto",   "description": "Router API, deep link, điều hướng theo URL.",                                    "resources": ["docs.flutter.dev/ui/navigation", "Ch.8"] },
+    { "code": "STATE_BASIC",       "category": "NAV_STATE",         "name": "setState",                 "default_difficulty": "basic",        "testable": "auto",   "description": "StatefulWidget + setState: cập nhật UI theo sự kiện.",                           "resources": ["docs.flutter.dev/ui/interactivity", "Ch.8"] },
+    { "code": "STATE_LIFTING",     "category": "NAV_STATE",         "name": "Nâng state & callback",    "default_difficulty": "intermediate", "testable": "auto",   "description": "Callback (ValueChanged/VoidCallback); widget con báo sự kiện lên cha.",          "resources": ["docs.flutter.dev/data-and-backend/state-mgmt/simple", "Ch.8"] },
+
+    { "code": "LAYOUT_FLEX",       "category": "LAYOUT_RESPONSIVE", "name": "Row/Column/Flex",          "default_difficulty": "basic",        "testable": "auto",   "description": "Row, Column, Expanded/Flexible, Padding, SizedBox; căn chỉnh.",                  "resources": ["docs.flutter.dev/ui/layout", "Ch.5"] },
+    { "code": "LAYOUT_STACK",      "category": "LAYOUT_RESPONSIVE", "name": "Stack & Positioned",       "default_difficulty": "intermediate", "testable": "auto",   "description": "Stack, Positioned, Align; xếp lớp.",                                             "resources": ["api.flutter.dev/flutter/widgets/Stack-class.html", "Ch.5"] },
+    { "code": "LAYOUT_GRID",       "category": "LAYOUT_RESPONSIVE", "name": "GridView",                 "default_difficulty": "intermediate", "testable": "auto",   "description": "GridView.count/builder, SliverGrid.",                                            "resources": ["docs.flutter.dev/cookbook/lists/grid-lists", "Ch.6"] },
+    { "code": "LAYOUT_RESPONSIVE", "category": "LAYOUT_RESPONSIVE", "name": "Responsive design",        "default_difficulty": "advanced",     "testable": "auto",   "description": "MediaQuery, LayoutBuilder, breakpoint cho nhiều kích thước màn hình.",           "resources": ["docs.flutter.dev/ui/layout/responsive", "Ch.6"] },
+
+    { "code": "FORM_INPUT",        "category": "FORMS_VALIDATION",  "name": "Ô nhập liệu",              "default_difficulty": "basic",        "testable": "auto",   "description": "TextField/TextFormField, TextEditingController, nhãn (label/hint).",             "resources": ["docs.flutter.dev/cookbook/forms", "Ch.7"] },
+    { "code": "FORM_VALIDATE",     "category": "FORMS_VALIDATION",  "name": "Validator",                "default_difficulty": "intermediate", "testable": "auto",   "description": "Form + GlobalKey<FormState> + validator; kiểm tra rỗng/định dạng, báo lỗi đúng.","resources": ["docs.flutter.dev/cookbook/forms/validation", "Ch.7"] },
+    { "code": "FORM_BUSINESS",     "category": "FORMS_VALIDATION",  "name": "Ràng buộc nghiệp vụ",      "default_difficulty": "intermediate", "testable": "auto",   "description": "Số tiền dương, ngày không tương lai, giá trị trong khoảng cho phép.",            "resources": ["Ch.7"] },
+
+    { "code": "NET_JSON",          "category": "NETWORKING",        "name": "Parse JSON & model",       "default_difficulty": "intermediate", "testable": "auto",   "description": "jsonDecode/jsonEncode (dart:convert), fromJson/toJson, map JSON ↔ model.",       "resources": ["docs.flutter.dev/data-and-backend/serialization/json", "Ch.9"] },
+    { "code": "NET_FUTUREBUILDER", "category": "NETWORKING",        "name": "FutureBuilder",            "default_difficulty": "advanced",     "testable": "auto",   "description": "Hiển thị loading/error/data theo Future.",                                       "resources": ["api.flutter.dev/flutter/widgets/FutureBuilder-class.html", "Ch.9"] },
+    { "code": "NET_HTTP",          "category": "NETWORKING",        "name": "HTTP / REST API",          "default_difficulty": "advanced",     "testable": "manual", "description": "Gọi API bằng package http/dio. CẦN MẠNG + PACKAGE NGOÀI → chấm tay.",            "resources": ["pub.dev/packages/http", "Ch.9"] },
+
+    { "code": "STORE_CACHE",       "category": "STORAGE",           "name": "Caching & build query",    "default_difficulty": "intermediate", "testable": "auto",   "description": "Logic cache trong bộ nhớ, dựng câu truy vấn/khoá lưu (thuần Dart, test được).",  "resources": ["Ch.10"] },
+    { "code": "STORE_PREFS",       "category": "STORAGE",           "name": "SharedPreferences",        "default_difficulty": "intermediate", "testable": "manual", "description": "Lưu cặp khoá-giá trị. CẦN PLUGIN NỀN TẢNG → chấm tay.",                          "resources": ["pub.dev/packages/shared_preferences", "Ch.10"] },
+    { "code": "STORE_DB",          "category": "STORAGE",           "name": "SQLite / Hive",            "default_difficulty": "advanced",     "testable": "manual", "description": "CSDL cục bộ (sqflite/Hive). CẦN PLUGIN → chấm tay.",                              "resources": ["pub.dev/packages/sqflite", "Ch.10"] },
+
+    { "code": "AUTH_GUARD",        "category": "AUTH",              "name": "Guarded routes",           "default_difficulty": "advanced",     "testable": "auto",   "description": "Chặn/điều hướng route khi chưa đăng nhập (logic thuần, test được).",             "resources": ["Ch.11"] },
+    { "code": "AUTH_BASIC",        "category": "AUTH",              "name": "Đăng nhập/đăng ký",        "default_difficulty": "intermediate", "testable": "manual", "description": "Luồng auth cơ bản. CẦN BACKEND → chấm tay.",                                     "resources": ["Ch.11"] },
+    { "code": "AUTH_SESSION",      "category": "AUTH",              "name": "Session & token",          "default_difficulty": "advanced",     "testable": "manual", "description": "Lưu/giữ phiên đăng nhập bằng token. CẦN BACKEND → chấm tay.",                     "resources": ["Ch.11"] }
+  ]
+}

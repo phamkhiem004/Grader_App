@@ -74,14 +74,19 @@ Từ ĐỀ BÀI ở cuối, hãy sinh ra ĐÚNG 3 file: `exam_test.dart`, `grade
 1. **Tên test = mã testcase.** Mỗi `test(...)`/`testWidgets(...)` trong `exam_test.dart` phải có
    tên là một mã, ví dụ `'TC_LOGIC_01'`, `'TC_UI_01'`. Tên này PHẢI trùng KHÍT (phân biệt hoa/thường)
    với key trong `skills_matrix.json`. Test có tên không nằm trong matrix sẽ bị bỏ qua khi tính điểm.
-2. **`skills_matrix.json`** — map mỗi mã_testcase → **OBJECT metadata** (để AI nhận xét chính xác):
+2. **`skills_matrix.json`** — map mỗi mã_testcase → **OBJECT metadata**. **CHO ĐIỂM THEO ĐỘ KHÓ:**
    ```json
-   { "TC_UI_01": { "weight": 1.0, "skill": "Flutter UI", "name": "Render màn hình login",
+   { "TC_UI_01": { "skill_code": "UI_WIDGETS", "difficulty": "basic", "weight": 1,
+       "skill": "Widget cơ bản", "name": "Render màn hình login",
        "description": "Kiểm tra màn hình đăng nhập hiển thị đúng.",
        "expected": "Hiển thị form email + password + nút Đăng nhập." } }
    ```
-   Bắt buộc `weight`; nên có đủ `skill`, `name`, `description`, `expected`. Tổng các `weight` NÊN
-   bằng `10` (điểm cuối = tổng_weight_pass / tổng_weight × 10). (Vẫn chấp nhận dạng số cũ `"TC": 1.0`.)
+   - `skill_code` (BẮT BUỘC): chọn CHÍNH XÁC từ **DANH MỤC KỸ NĂNG (SYLLABUS)** ở mục bên dưới.
+   - `difficulty` (BẮT BUỘC): `basic` | `intermediate` | `advanced` (xem tiêu chí ở mục "ĐỘ KHÓ").
+   - `weight` = **ĐIỂM THEO ĐỘ KHÓ** — quy ĐÚNG theo độ khó, KHÔNG tự chọn tùy ý:
+     **`basic` → 1, `intermediate` → 2, `advanced` → 3** (testcase càng khó càng nhiều điểm).
+   - **KHÔNG cần tổng = 10.** Grader tự chuẩn hóa: điểm cuối = `Σweight_pass / Σweight × 10`.
+   - Nên có thêm `skill` (tên kỹ năng thân thiện), `name`, `description`, `expected`.
 3. **`grader.dart`**: COPY NGUYÊN VĂN template ở mục "GRADER.DART CHUẨN" bên dưới. KHÔNG chỉnh sửa.
 4. **`exam_test.dart`**:
    - `import 'package:flutter/material.dart';` + `import 'package:flutter_test/flutter_test.dart';`
@@ -94,6 +99,36 @@ Từ ĐỀ BÀI ở cuối, hãy sinh ra ĐÚNG 3 file: `exam_test.dart`, `grade
    - NÊN thêm `reason:` vào `expect(...)` để khi fail có thông báo dễ hiểu (grader lưu vào trường
      `actual` cho AI đọc): `expect(found, isTrue, reason: 'Phải hiển thị nút Đăng ký');`
 5. Mỗi test phải ĐỘC LẬP (không phụ thuộc thứ tự chạy, không chia sẻ state toàn cục).
+
+## ĐỘ KHÓ & CHO ĐIỂM (BẮT BUỘC theo đây)
+Mỗi testcase gán `difficulty` rồi suy ra `weight`:
+
+| difficulty | Khi nào gán | weight (điểm) |
+|---|---|---|
+| `basic` | Kiến thức 1 buổi học, áp dụng thẳng, không kết hợp. | **1** |
+| `intermediate` | Kết hợp 2–3 khái niệm, có điều kiện/edge case. | **2** |
+| `advanced` | Tổng hợp nhiều phần, edge case khó, tối ưu/async. | **3** |
+
+→ Testcase càng khó càng nhiều điểm. KHÔNG tự chọn weight tùy ý; KHÔNG ép tổng = 10
+(grader tự chuẩn hóa: điểm = Σweight_pass / Σweight × 10). Nên phủ nhiều mức độ khó để
+đánh giá năng lực có chiều sâu (đừng để toàn `basic`).
+
+## DANH MỤC KỸ NĂNG (SYLLABUS v2026.2) — chọn `skill_code` từ đây
+Mỗi testcase PHẢI gắn `skill_code` lấy CHÍNH XÁC từ danh sách dưới (không tự bịa code mới).
+Cho phần chấm tự động chỉ dùng skill `auto`; skill `manual` (cần package ngoài/mạng) để chấm tay.
+
+```
+[DART_ESSENTIALS]   DART_SYNTAX, DART_FUNCTIONS, DART_CLASSES, DART_COLLECTIONS, DART_NULL_SAFETY
+[OOP_ASYNC]         OOP_INHERITANCE, OOP_PATTERNS, OOP_MODEL, ASYNC_FUTURE, ASYNC_STREAM
+[UI_FUNDAMENTALS]   UI_WIDGETS, UI_MATERIAL, UI_LISTS, UI_PICKERS
+[NAV_STATE]         NAV_BASIC, NAV_NAMED, NAV_ADVANCED, STATE_BASIC, STATE_LIFTING
+[LAYOUT_RESPONSIVE] LAYOUT_FLEX, LAYOUT_STACK, LAYOUT_GRID, LAYOUT_RESPONSIVE
+[FORMS_VALIDATION]  FORM_INPUT, FORM_VALIDATE, FORM_BUSINESS
+[NETWORKING]        NET_JSON, NET_FUTUREBUILDER, (NET_HTTP = manual)
+[STORAGE]           STORE_CACHE, (STORE_PREFS, STORE_DB = manual)
+[AUTH]              AUTH_GUARD, (AUTH_BASIC, AUTH_SESSION = manual)
+```
+(Mô tả đầy đủ từng code xem `syllabus.json`. Một testcase phủ nhiều skill → chọn skill CHÍNH.)
 
 ## TRƯỚC KHI VIẾT TEST — suy ra "hợp đồng API"
 Đề thi mô tả thứ SV phải làm. Trước khi viết test, hãy SUY RA và LIỆT KÊ ngắn gọn:
@@ -306,7 +341,8 @@ Future<Map<String, dynamic>> _analyzeLib() async {
    - Bash: `zip FLUTTER_PE_XX.zip exam_test.dart grader.dart skills_matrix.json`
 
 KIỂM TRA LẦN CUỐI trước khi trả lời: tên mọi test ↔ key matrix khớp 100%; chỉ dùng flutter/flutter_test;
-import `../lib/...` đúng tên file đã nêu trong giả định; tổng điểm thô = 10.
+import `../lib/...` đúng tên file đã nêu trong giả định; MỖI testcase có `skill_code` (trong danh mục) +
+`difficulty`; `weight` ĐÚNG theo độ khó (basic=1, intermediate=2, advanced=3).
 
 =========================== ĐỀ BÀI ===========================
 <DÁN ĐỀ BÀI / YÊU CẦU BÀI THI VÀO ĐÂY. Càng rõ tên file/class/hàm và text UI mong đợi, test càng chính xác.>
@@ -321,22 +357,25 @@ import `../lib/...` đúng tên file đã nêu trong giả định; tổng đi�
 - **Giả định**: SV tạo `lib/event.dart` (class `Event` có `id, title, capacity, registeredCount`,
   getter `canRegister`, hàm `register()`), và `lib/event_screen.dart` (widget `EventScreen` hiển thị
   ListView các sự kiện, nút `Đăng ký`, text `Đã đăng ký: x/y`, đổi thành `Đã đầy` khi hết chỗ).
-- **`skills_matrix.json`** (tổng = 10):
+- **`skills_matrix.json`** (weight theo độ khó: basic=1, intermediate=2, advanced=3):
 
 ```json
 {
-  "TC_LOGIC_01": { "weight": 1.0, "skill": "Model/OOP", "name": "Khởi tạo Event",
+  "TC_LOGIC_01": { "skill_code": "DART_CLASSES", "difficulty": "basic", "weight": 1,
+    "skill": "Class & constructor", "name": "Khởi tạo Event",
     "description": "Tạo Event và truy xuất đủ thuộc tính.",
     "expected": "title, capacity đúng; registeredCount = 0." },
-  "TC_LOGIC_02": { "weight": 1.0, "skill": "Business logic", "name": "canRegister",
+  "TC_LOGIC_02": { "skill_code": "DART_COLLECTIONS", "difficulty": "intermediate", "weight": 2,
+    "skill": "Collection & logic thuần", "name": "canRegister",
     "description": "Còn chỗ thì canRegister=true, đầy thì false.",
     "expected": "canRegister đổi theo registeredCount." },
-  "TC_UI_03": { "weight": 2.0, "skill": "Flutter UI + State", "name": "Cập nhật khi bấm Đăng ký",
+  "TC_UI_03": { "skill_code": "STATE_BASIC", "difficulty": "advanced", "weight": 3,
+    "skill": "setState", "name": "Cập nhật khi bấm Đăng ký",
     "description": "Bấm nút làm tăng số đã đăng ký trên UI.",
     "expected": "Hiển thị 'Đã đăng ký: 1/3' sau khi bấm." }
 }
 ```
-> Tổng `weight` nên = 10. Mỗi key vẫn trùng tên test trong `exam_test.dart`.
+> `weight` suy ra TỪ `difficulty`, không tự chọn. Không cần tổng = 10 (grader chuẩn hóa). Mỗi key trùng tên test.
 
 - Mỗi `TC_*` ở trên tương ứng 1 `test()`/`testWidgets()` cùng tên trong `exam_test.dart`,
   kiểm tra một tiêu chí (khởi tạo Event, logic `canRegister`, `register()`, render ListView,

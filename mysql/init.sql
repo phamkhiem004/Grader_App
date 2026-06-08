@@ -100,6 +100,44 @@ CREATE TABLE IF NOT EXISTS teachers (
 -- bởi AuthService để mật khẩu được băm BCrypt đúng cách.
 
 
+-- ── Bảng 5: Category năng lực (syllabus) ────────────────────────
+-- Lưu ý: SyllabusService tự SEED dữ liệu từ resources/syllabus.json khi DB rỗng,
+-- và Hibernate (ddl-auto=update) tự tạo/đồng bộ bảng. Định nghĩa dưới đây chỉ để
+-- tài liệu hóa & cài mới sạch.
+CREATE TABLE IF NOT EXISTS skill_category (
+    code             VARCHAR(40)  PRIMARY KEY              COMMENT 'ID ổn định: DART, UI, VALIDATION...',
+    name             VARCHAR(120) NOT NULL                 COMMENT 'Tên đầy đủ',
+    competency_label VARCHAR(80)                           COMMENT 'Nhãn năng lực: Code Dart, Giao diện, Validate',
+    description      TEXT,
+    display_order    INT          DEFAULT 0,
+    weak_threshold   DOUBLE       DEFAULT 0.4              COMMENT 'ratio < weak => YẾU',
+    good_threshold   DOUBLE       DEFAULT 0.7              COMMENT 'ratio >= good => TỐT',
+    active           BOOLEAN      DEFAULT TRUE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Category năng lực (mảng kiến thức lớn)';
+
+-- ── Bảng 6: Skill chi tiết (syllabus) ───────────────────────────
+CREATE TABLE IF NOT EXISTS skill (
+    code               VARCHAR(60)  PRIMARY KEY            COMMENT 'ID ổn định: DART_LOGIC, UI_BASIC...',
+    category_code      VARCHAR(40)  NOT NULL,
+    name               VARCHAR(120) NOT NULL,
+    description        TEXT,
+    default_difficulty VARCHAR(20)  DEFAULT 'basic'        COMMENT 'basic | intermediate | advanced',
+    testable           VARCHAR(10)  DEFAULT 'auto'         COMMENT 'auto | manual (cần package ngoài/mạng)',
+    resources_json     TEXT                                COMMENT 'JSON array học liệu',
+    display_order      INT          DEFAULT 0,
+    deprecated         BOOLEAN      DEFAULT FALSE          COMMENT 'Xóa mềm: đề cũ vẫn map được',
+
+    INDEX idx_skill_category (category_code)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Kỹ năng chi tiết (testcase trỏ vào đây bằng skill_code)';
+
+-- ── Bảng 7: Version syllabus đã seed (1 dòng, id=1) ─────────────
+CREATE TABLE IF NOT EXISTS syllabus_meta (
+    id          BIGINT      PRIMARY KEY              COMMENT 'Luôn = 1',
+    version     VARCHAR(20)                          COMMENT 'Version syllabus đã áp dụng',
+    updated_at  TIMESTAMP   DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Đánh dấu version syllabus để re-seed khi đổi';
+
+
 -- ── Dữ liệu mẫu để test ─────────────────────────────────────────
 INSERT IGNORE INTO exams (exam_id, exam_name, image_name, status, created_by)
 VALUES (

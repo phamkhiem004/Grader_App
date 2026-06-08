@@ -2,6 +2,7 @@ package com.example.grader.controller;
 
 import com.example.grader.repository.ExamRepository;
 import com.example.grader.service.ExamService;
+import com.example.grader.service.SyllabusService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -18,6 +19,8 @@ public class ExamSetupController {
     private ExamService examService;
     @Autowired
     private ExamRepository examRepo;
+    @Autowired
+    private SyllabusService syllabusService;
 
     @PostMapping("/upload-testcase")
     public ResponseEntity<?> uploadTestcase(
@@ -45,6 +48,29 @@ public class ExamSetupController {
         return examRepo.findByExamId(examId)
                 .map(ResponseEntity::ok)
                 .orElse(ResponseEntity.notFound().build());
+    }
+
+    /** Danh sách đề đã cấu hình — cho bộ chọn đánh giá độ phủ theo syllabus. */
+    @GetMapping("/list")
+    public ResponseEntity<?> list() {
+        return ResponseEntity.ok(examService.listExams());
+    }
+
+    /**
+     * ĐÁNH GIÁ ĐỘ PHỦ của đề theo SYLLABUS hiện tại (resolve trực tiếp → sửa syllabus là
+     * phản chiếu ngay). Trả: testcase ↔ kiến thức/độ khó, độ phủ theo category & độ khó,
+     * skill chưa phủ (gaps), issues.
+     */
+    @GetMapping("/coverage/{examId}")
+    public ResponseEntity<?> coverage(@PathVariable String examId) {
+        try {
+            String matrix = examService.readSkillsMatrixJson(examId);
+            return ResponseEntity.ok(syllabusService.evaluateCoverage(matrix));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.status(404).body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
+        }
     }
 
     /** Rubric (danh sách tiêu chí) của đề — cho trang chấm tay. */

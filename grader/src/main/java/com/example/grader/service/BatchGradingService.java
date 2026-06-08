@@ -52,6 +52,8 @@ public class BatchGradingService {
     @Autowired private ExamResultRepository resultRepo;
     @Autowired private GradingBatchRepository batchRepo;
     @Autowired private ExamRepository examRepo;
+    @Autowired private SyllabusService    syllabusService;
+    @Autowired private CompetencyService  competencyService;
 
     private final ObjectMapper mapper = new ObjectMapper();
     private ExecutorService executor;
@@ -261,18 +263,32 @@ public class BatchGradingService {
             }
 
             // test_cases: ưu tiên từ grader (mới, có skill/expected/actual); fallback từ chiTiet
+            List<Map<String, Object>> testCases = new ArrayList<>();
             if (g.has("test_cases")) {
-                root.put("test_cases", mapper.convertValue(g.get("test_cases"), Object.class));
+                testCases = toListOfMap(g.get("test_cases"));
             } else if (g.has("chiTiet")) {
-                List<Map<String, Object>> tcs = new ArrayList<>();
                 for (JsonNode c : g.get("chiTiet")) {
                     Map<String, Object> tc = new LinkedHashMap<>();
                     tc.put("test_id", c.path("name").asText());
                     tc.put("name", c.path("name").asText());
                     tc.put("status", "PASS".equals(c.path("status").asText()) ? "passed" : "failed");
-                    tcs.add(tc);
+                    testCases.add(tc);
                 }
-                root.put("test_cases", tcs);
+            }
+            // Bổ sung skill_code/difficulty từ skills_matrix.json của đề (nguồn sự thật) cho mỗi testcase
+            enrichTestCases(testCases, exam);
+
+            // Gắn nhãn KIẾN THỨC (skill_name/category/category_label) + ĐỘ KHÓ cho từng testcase,
+            // rồi tính NĂNG LỰC theo category — dùng chung 1 resolver.
+            try {
+                SyllabusService.Resolver resolver = syllabusService.resolver();
+                competencyService.annotateTestCases(testCases, resolver);
+                if (!testCases.isEmpty()) root.put("test_cases", testCases);
+                List<Map<String, Object>> comp = competencyService.assess(testCases, resolver);
+                if (!comp.isEmpty()) root.put("competency_assessment", comp);
+            } catch (Exception ce) {
+                if (!testCases.isEmpty()) root.put("test_cases", testCases);
+                log.warn("Tính competency/annotate lỗi cho {}: {}", job.studentId(), ce.getMessage());
             }
 
             if (g.has("analyze_result"))
@@ -285,6 +301,48 @@ public class BatchGradingService {
             log.warn("Không dựng được result_json cho {}: {}", job.studentId(), e.getMessage());
             return null;
         }
+    }
+
+    /** Chuyển JsonNode mảng test_cases → List&lt;Map&gt; để enrich & tính năng lực. */
+    @SuppressWarnings("unchecked")
+    private List<Map<String, Object>> toListOfMap(JsonNode arr) {
+        List<Map<String, Object>> out = new ArrayList<>();
+        if (arr == null || !arr.isArray()) return out;
+        for (JsonNode n : arr) {
+            try { out.add(mapper.convertValue(n, Map.class)); } catch (Exception ignored) {}
+        }
+        return out;
+    }
+
+    /**
+     * Bổ sung skill_code / difficulty / skill (tên hiển thị) cho mỗi testcase, đọc từ
+     * skills_matrix.json của đề. Chỉ điền khi testcase CHƯA có (không ghi đè dữ liệu grader).
+     */
+    @SuppressWarnings("unchecked")
+    private void enrichTestCases(List<Map<String, Object>> tcs, Exam exam) {
+        if (tcs.isEmpty() || exam == null || exam.getTestcasePath() == null) return;
+        Map<String, Object> matrix;
+        try {
+            Path f = Path.of(exam.getTestcasePath()).resolve("skills_matrix.json");
+            if (!Files.exists(f)) return;
+            matrix = mapper.convertValue(mapper.readTree(Files.readString(f)), Map.class);
+        } catch (Exception e) {
+            return;
+        }
+        for (Map<String, Object> tc : tcs) {
+            Object meta = matrix.get(String.valueOf(tc.get("test_id")));
+            if (meta instanceof Map<?, ?> m) {
+                putIfAbsent(tc, "skill_code", m.get("skill_code"));
+                putIfAbsent(tc, "difficulty", m.get("difficulty"));
+                putIfAbsent(tc, "skill",      m.get("skill"));
+            }
+        }
+    }
+
+    private void putIfAbsent(Map<String, Object> tc, String key, Object val) {
+        if (val == null) return;
+        Object cur = tc.get(key);
+        if (cur == null || String.valueOf(cur).isBlank()) tc.put(key, val);
     }
 
     /** Giới hạn độ dài log lỗi để không phình DB / không tràn cột. */

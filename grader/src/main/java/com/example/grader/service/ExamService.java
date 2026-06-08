@@ -52,6 +52,8 @@ public class ExamService {
 
     @Autowired
     private ExamRepository examRepository;
+    @Autowired
+    private SyllabusService syllabusService;
 
     // ── Rubric chấm tay: đọc tiêu chí từ skills_matrix.json của đề ──
     public List<Map<String, Object>> getCriteria(String examId) throws Exception {
@@ -78,6 +80,73 @@ public class ExamService {
         return out;
     }
 
+    /** Thư mục gốc chứa các đề (exams/), nơi mỗi đề là <exams>/<id>/testcase/. */
+    private Path examsRoot() {
+        return resolveExamsDir(locateTemplateDir());
+    }
+
+    /**
+     * Đọc nguyên văn skills_matrix.json của 1 đề. Ưu tiên testcasePath trong DB; nếu không
+     * có thì đọc trực tiếp thư mục trên đĩa <exams>/<examId>/testcase/ (đề mẫu chưa upload).
+     */
+    public String readSkillsMatrixJson(String examId) throws Exception {
+        Exam exam = examRepository.findByExamId(examId).orElse(null);
+        if (exam != null && exam.getTestcasePath() != null && !exam.getTestcasePath().isBlank()) {
+            Path f = Path.of(exam.getTestcasePath()).resolve("skills_matrix.json");
+            if (Files.exists(f)) return Files.readString(f);
+        }
+        Path disk = examsRoot().resolve(examId).resolve("testcase").resolve("skills_matrix.json");
+        if (Files.exists(disk)) return Files.readString(disk);
+        throw new IllegalArgumentException("Không tìm thấy skills_matrix.json của đề " + examId);
+    }
+
+    /**
+     * Danh sách đề có testcase — gộp đề đã cấu hình trong DB và các thư mục đề trên đĩa
+     * (exams/&lt;id&gt;/testcase/skills_matrix.json), để đánh giá độ phủ ngay cả khi chưa upload.
+     */
+    public List<Map<String, Object>> listExams() {
+        Map<String, Map<String, Object>> byId = new LinkedHashMap<>();
+
+        // 1) Đề trong DB
+        for (Exam e : examRepository.findAll()) {
+            boolean hasTc = e.getTestcasePath() != null && !e.getTestcasePath().isBlank()
+                    && Files.exists(Path.of(e.getTestcasePath()).resolve("skills_matrix.json"));
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("examId", e.getExamId());
+            m.put("examName", e.getExamName() != null ? e.getExamName() : e.getExamId());
+            m.put("status", e.getStatus() != null ? e.getStatus().name() : null);
+            m.put("hasTestcase", hasTc);
+            byId.put(e.getExamId(), m);
+        }
+
+        // 2) Thư mục đề trên đĩa
+        try {
+            Path root = examsRoot();
+            if (Files.isDirectory(root)) {
+                try (Stream<Path> s = Files.list(root)) {
+                    for (Path d : s.filter(Files::isDirectory).toList()) {
+                        if (!Files.exists(d.resolve("testcase").resolve("skills_matrix.json"))) continue;
+                        String id = d.getFileName().toString();
+                        Map<String, Object> existing = byId.get(id);
+                        if (existing != null) { existing.put("hasTestcase", true); continue; }
+                        Map<String, Object> m = new LinkedHashMap<>();
+                        m.put("examId", id);
+                        m.put("examName", id);
+                        m.put("status", "ON_DISK");
+                        m.put("hasTestcase", true);
+                        byId.put(id, m);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Quét thư mục exams lỗi: {}", e.getMessage());
+        }
+
+        List<Map<String, Object>> out = new ArrayList<>(byId.values());
+        out.sort((a, b) -> String.valueOf(a.get("examId")).compareTo(String.valueOf(b.get("examId"))));
+        return out;
+    }
+
     // ── Setup đề: chỉ lưu testcase (mount lúc chấm), KHÔNG build image ──
     public ExamSetupResponse setupExam(String examId, String examName,
                                        String teacherNote, MultipartFile testcaseZip) throws Exception {
@@ -90,6 +159,7 @@ public class ExamService {
 
         unzip(testcaseZip.getBytes(), testcaseDir);
         validateRequiredFiles(testcaseDir);
+        validateSkillCodes(testcaseDir);   // skill_code (nếu khai) phải nằm trong syllabus
 
         Exam exam = examRepository.findByExamId(examId).orElse(new Exam());
         exam.setExamId(examId);
@@ -236,6 +306,22 @@ public class ExamService {
         if (!Files.readString(dir.resolve("grader.dart")).contains("main"))
             throw new IllegalArgumentException(
                     "grader.dart không có hàm main() — file có thể sai nội dung/encoding.");
+    }
+
+    /**
+     * Kiểm tra skill_code trong skills_matrix.json (nếu giảng viên có khai) phải nằm trong
+     * syllabus và chưa bị deprecate. Testcase KHÔNG khai skill_code được bỏ qua (tương thích đề cũ).
+     */
+    private void validateSkillCodes(Path testcaseDir) throws Exception {
+        Path f = testcaseDir.resolve("skills_matrix.json");
+        if (!Files.exists(f)) return;
+        List<Map<String, Object>> problems = syllabusService.validateSkillsMatrix(Files.readString(f));
+        if (!problems.isEmpty()) {
+            String detail = problems.stream()
+                    .map(p -> p.get("testId") + " → " + p.get("skillCode") + " (" + p.get("issue") + ")")
+                    .collect(java.util.stream.Collectors.joining("; "));
+            throw new IllegalArgumentException("skills_matrix.json có skill_code không hợp lệ: " + detail);
+        }
     }
 
     private void deleteRecursively(Path dir) throws Exception {

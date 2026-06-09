@@ -29,6 +29,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.*;
+import java.util.stream.Stream;
 
 @Slf4j
 @Service
@@ -165,6 +166,9 @@ public class BatchGradingService {
         batch.setTotalFiles(pendingJobs.size());
         batchRepo.save(batch);
 
+        // Lưu lại đúng testcase đã dùng cho đợt chấm này (audit / đối chiếu khi nghi ngờ chấm sai)
+        if (!pendingJobs.isEmpty()) snapshotTestcase(examId, batchId, exam.getTestcasePath());
+
         // Đưa vào hàng đợi SAU khi đã chốt totalFiles (để worker không hoàn tất trước khi totalFiles đúng)
         pendingJobs.forEach(jobQueue::add);
 
@@ -204,10 +208,12 @@ public class BatchGradingService {
             success = true;
 
         } catch (Exception e) {
-            log.error("[{}] ERROR {} → {}", job.batchId(), job.studentId(), e.getMessage());
+            // errorLog KHÔNG được rỗng: nếu exception thiếu message thì dùng e.toString() (tên lớp)
+            String emsg = (e.getMessage() != null && !e.getMessage().isBlank()) ? e.getMessage() : e.toString();
+            log.error("[{}] ERROR {} → {}", job.batchId(), job.studentId(), emsg);
             try { updateStatus(job, GradingStatus.ERROR, 0f, null, null); }
             catch (Exception ex) { log.warn("[{}] Không ghi được ERROR cho {}: {}", job.batchId(), job.studentId(), ex.getMessage()); }
-            updateErrorLog(job, e.getMessage());     // đã tự bọc try/catch + cắt ngắn bên trong
+            updateErrorLog(job, emsg);               // đã tự bọc try/catch + cắt ngắn bên trong
         } finally {
             // Bookkeeping luôn chạy & có bọc lỗi → 1 lỗi ghi DB không làm kẹt batch
             try { if (!saveSubmissions) deleteQuietly(Path.of(job.zipPath())); } catch (Exception ignored) {}
@@ -377,9 +383,39 @@ public class BatchGradingService {
     }
 
     // ── Staging zip ra đĩa (cũng là nơi lưu audit) ──────────────
+    /** Thư mục của 1 batch: submissions/&lt;đề&gt;/&lt;batch&gt;/ (chứa zip bài nộp + snapshot testcase). */
+    private Path batchDir(String examId, String batchId) {
+        return examService.resolveSibling(submissionsDir).resolve(examId).resolve(batchId);
+    }
+
     private Path stagedZipPath(String examId, String batchId, String studentId) {
-        return examService.resolveSibling(submissionsDir)
-                .resolve(examId).resolve(batchId).resolve(studentId + ".zip");
+        return batchDir(examId, batchId).resolve(studentId + ".zip");
+    }
+
+    /**
+     * Snapshot testcase ĐANG dùng vào folder batch (submissions/&lt;đề&gt;/&lt;batch&gt;/_testcase/) để
+     * sau này đối chiếu / tra lại đúng bộ đề đã chấm, kể cả khi GV upload đè testcase mới. Rất nhẹ.
+     */
+    private void snapshotTestcase(String examId, String batchId, String testcasePath) {
+        try {
+            if (testcasePath == null || testcasePath.isBlank()) return;
+            Path src = Path.of(testcasePath);
+            if (!Files.exists(src)) return;
+            Path dst = batchDir(examId, batchId).resolve("_testcase");
+            Files.createDirectories(dst);
+            try (Stream<Path> walk = Files.walk(src)) {
+                for (Path p : walk.toList()) {
+                    Path target = dst.resolve(src.relativize(p).toString());
+                    if (Files.isDirectory(p)) Files.createDirectories(target);
+                    else {
+                        if (target.getParent() != null) Files.createDirectories(target.getParent());
+                        Files.copy(p, target, StandardCopyOption.REPLACE_EXISTING);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.warn("[{}] Snapshot testcase lỗi: {}", batchId, e.getMessage());
+        }
     }
 
     /** Stream zip ra đĩa (KHÔNG nạp toàn bộ vào RAM) → trả về đường dẫn. */
@@ -494,6 +530,100 @@ public class BatchGradingService {
             return a.get("name").compareTo(b.get("name"));
         });
         return out;
+    }
+
+    /**
+     * Đọc các file TESTCASE đã dùng để chấm 1 SV (để đối chiếu khi bài bị 0/0). Ưu tiên snapshot
+     * của batch đã chấm (_testcase/); nếu chưa có (batch cũ) thì đọc testcase HIỆN TẠI của đề.
+     */
+    public List<Map<String, String>> readTestcaseFiles(String examId, String studentId) {
+        List<Map<String, String>> out = new ArrayList<>();
+        Path dir = null;
+
+        ExamResult r = resultRepo.findByStudentIdAndExamIdAndMode(studentId, examId, "submit").orElse(null);
+        if (r != null && r.getBatchId() != null) {
+            Path snap = batchDir(examId, r.getBatchId()).resolve("_testcase");
+            if (Files.exists(snap)) dir = snap;
+        }
+        if (dir == null) {
+            String tc = examRepo.findByExamId(examId).map(Exam::getTestcasePath).orElse(null);
+            if (tc != null && !tc.isBlank() && Files.exists(Path.of(tc))) dir = Path.of(tc);
+        }
+        if (dir == null) return out;
+
+        final Path base = dir;
+        final int MAX_BYTES = 200_000;
+        try (Stream<Path> s = Files.walk(base)) {
+            for (Path p : s.filter(Files::isRegularFile).toList()) {
+                String name = base.relativize(p).toString().replace('\\', '/');
+                String lower = name.toLowerCase();
+                if (!(lower.endsWith(".dart") || lower.endsWith(".json") || lower.endsWith(".yaml")
+                        || lower.endsWith(".yml") || lower.endsWith(".md") || lower.endsWith(".txt"))) continue;
+                String content = new String(Files.readAllBytes(p), java.nio.charset.StandardCharsets.UTF_8);
+                if (content.length() > MAX_BYTES) content = content.substring(0, MAX_BYTES) + "\n… (đã cắt bớt)";
+                Map<String, String> m = new LinkedHashMap<>();
+                m.put("name", name);
+                m.put("content", content);
+                out.add(m);
+            }
+        } catch (Exception ex) {
+            log.warn("Đọc testcase {}/{} lỗi: {}", examId, studentId, ex.getMessage());
+        }
+        out.sort((a, b) -> rankTestcaseFile(a.get("name")) - rankTestcaseFile(b.get("name")));
+        return out;
+    }
+
+    /** exam_test.dart → skills_matrix.json → grader.dart → còn lại (cho dễ đối chiếu). */
+    private int rankTestcaseFile(String name) {
+        String n = name.toLowerCase();
+        if (n.endsWith("exam_test.dart"))     return 0;
+        if (n.endsWith("skills_matrix.json")) return 1;
+        if (n.endsWith("grader.dart"))        return 2;
+        return 3;
+    }
+
+    /**
+     * CHẤM LẠI 1 bài từ zip ĐÃ LƯU (không cần upload lại). Tạo batch mới (số liệu sạch + để lại
+     * dấu vết chấm lại), copy zip + snapshot testcase hiện tại, rồi đưa vào hàng đợi. Trả batchId mới.
+     */
+    public String regradeStudent(String examId, String studentId) throws Exception {
+        Exam exam = examRepo.findByExamId(examId)
+                .orElseThrow(() -> new IllegalArgumentException("Không tìm thấy đề thi: " + examId));
+        ExamResult r = resultRepo.findByStudentIdAndExamIdAndMode(studentId, examId, "submit")
+                .orElseThrow(() -> new IllegalArgumentException("Không tìm thấy bài nộp của " + studentId));
+        if (r.getBatchId() == null)
+            throw new IllegalArgumentException("Bài nộp thiếu batchId — không thể chấm lại.");
+
+        Path oldZip = stagedZipPath(examId, r.getBatchId(), studentId);
+        if (!Files.exists(oldZip))
+            throw new IllegalArgumentException("Bài nộp không còn được lưu trên đĩa — không thể chấm lại.");
+
+        String newBatchId = "BATCH_" + System.currentTimeMillis();
+        GradingBatch batch = new GradingBatch();
+        batch.setBatchId(newBatchId);
+        batch.setExamId(examId);
+        batch.setTotalFiles(1);
+        batch.setCreatedBy("regrade");
+        batchRepo.save(batch);
+
+        // Copy zip sang folder batch mới + snapshot testcase đang dùng (audit lần chấm lại)
+        Path newZip = stagedZipPath(examId, newBatchId, studentId);
+        Files.createDirectories(newZip.getParent());
+        Files.copy(oldZip, newZip, StandardCopyOption.REPLACE_EXISTING);
+        snapshotTestcase(examId, newBatchId, exam.getTestcasePath());
+
+        // Ghi đè chính bản ghi này: trỏ sang batch mới, reset kết quả lần chấm trước
+        r.setBatchId(newBatchId);
+        r.setStatus(GradingStatus.QUEUED);
+        r.setScore(null);
+        r.setDetails(null);
+        r.setErrorLog(null);
+        r.setResultJson(null);
+        resultRepo.save(r);
+
+        jobQueue.add(new GradingJob(studentId, r.getStudentName(), newBatchId, examId, newZip.toString()));
+        log.info("[{}] Chấm lại {} (đề {})", newBatchId, studentId, examId);
+        return newBatchId;
     }
 
     public BatchProgressResponse getBatchProgress(String batchId) {

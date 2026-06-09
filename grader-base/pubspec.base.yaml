@@ -9,6 +9,9 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  # Package được CHO PHÉP dùng trong testcase (vd DateFormat). Thêm package ở đây + build lại
+  # ảnh nền là testcase được phép import; backend tự đọc danh sách này để validate lúc upload đề.
+  intl: ^0.20.2
 
 dev_dependencies:
   flutter_test:

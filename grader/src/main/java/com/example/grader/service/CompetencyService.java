@@ -25,6 +25,9 @@ public class CompetencyService {
     @Autowired private SyllabusService syllabusService;
 
     private static final String[] DIFFS = {"basic", "intermediate", "advanced"};
+    /** Nhãn độ khó đọc-được (cho JSON + AI nhận xét). Khớp difficulty_levels.label trong syllabus.json. */
+    private static final Map<String, String> DIFF_LABEL = Map.of(
+            "basic", "Cơ bản", "intermediate", "Trung bình", "advanced", "Nâng cao");
 
     public List<Map<String, Object>> assess(List<Map<String, Object>> testCases) {
         Resolver resolver = syllabusService.resolver();
@@ -52,14 +55,20 @@ public class CompetencyService {
             if (diff == null && s != null) diff = normDiff(s.getDefaultDifficulty());
             if (diff == null) diff = "basic";
             tc.put("difficulty", diff);
+            tc.put("difficulty_label", DIFF_LABEL.getOrDefault(diff, diff));   // Cơ bản/Trung bình/Nâng cao
 
             if (resolved != null) tc.put("skill_code", resolved);   // chuẩn hóa code
-            if (s != null)        tc.put("skill_name", s.getName());
+            // skill_name = tên kỹ năng CHI TIẾT từ syllabus; nếu không resolve được → lấy tên thân thiện trong matrix
+            if (s != null) {
+                tc.put("skill_name", s.getName());
+            } else if (str(tc.get("skill_name")) == null && legacy != null && !legacy.isBlank()) {
+                tc.put("skill_name", legacy);
+            }
             if (c != null) {
-                tc.put("category", c.getCode());
+                tc.put("category", c.getCode());            // mã category (vd DART_ESSENTIALS)
                 String label = c.getCompetencyLabel() != null && !c.getCompetencyLabel().isBlank()
                         ? c.getCompetencyLabel() : c.getName();
-                tc.put("category_label", label);
+                tc.put("category_label", label);            // tên category đọc-được (vd "Dart Essentials")
             }
         }
     }

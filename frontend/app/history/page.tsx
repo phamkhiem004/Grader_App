@@ -18,7 +18,7 @@ interface TestCaseItem {
   test_id?: string; name?: string; status?: string; weight?: number;
   skill_code?: string; skill_name?: string; category_label?: string;
   difficulty?: string; skill?: string;
-  expected?: string; actual?: string;
+  expected?: string; actual?: string; error_log?: string;
 }
 
 const DIFF_BADGE: Record<string, string> = {
@@ -46,6 +46,38 @@ interface ResultRow {
   hasJson: boolean;
 }
 interface CodeFile { name: string; content: string; }
+
+/**
+ * Khối ĐỎ chi tiết lỗi 1 testcase fail: Yêu cầu (rubric) · Expected · Actual (thực tế) · Lý do.
+ * `actual` là output thô của flutter test → tách Expected/Actual/lý do; nếu là exception widget thì diễn giải.
+ */
+function FailureDetail({ requirement, actual }: { requirement?: string; actual?: string }) {
+  const t = (actual || "").trim();
+  const isWidget = /Test failed\.?\s*See exception logs above/i.test(t);
+  const tcId = t.match(/TC_[A-Z0-9_]+/)?.[0];
+  const exp = t.match(/Expected:\s*([^\n]+)/i)?.[1]?.trim();
+  const act = t.match(/Actual:\s*([^\n]+)/i)?.[1]?.trim();
+  const reason = t.split("\n").map((s) => s.trim())
+    .filter((s) => s && !/^(Expected:|Actual:|Which:)/i.test(s)).pop();
+
+  // Lý do: ưu tiên diễn giải exception widget; rồi tới reason; rồi tới actual thô (khi không parse được).
+  const lyDo = isWidget
+    ? `Test ném exception khi chạy (thiếu/sai widget, nhãn UI hoặc luồng mà test cần)${tcId ? ` [${tcId}]` : ""}.`
+    : (reason && reason !== exp && reason !== act ? reason
+      : (!exp && !act && t ? (t.length > 300 ? t.slice(0, 300) + "…" : t) : ""));
+
+  const Row = ({ label, value }: { label: string; value?: string }) =>
+    value ? <p><span className="font-semibold">{label}:</span> <span className="font-mono">{value}</span></p> : null;
+
+  return (
+    <div className="mt-1 space-y-0.5 pl-3.5 text-[11px] text-rose-500">
+      {requirement && <p><span className="font-semibold">Yêu cầu:</span> {requirement}</p>}
+      <Row label="Expected" value={exp} />
+      <Row label="Actual (thực tế)" value={act} />
+      {lyDo && <p><span className="font-semibold">Lý do:</span> {lyDo}</p>}
+    </div>
+  );
+}
 
 /** Lấy pass/total từ field details (JSON gọn của grader). */
 function passInfo(details: string | null): { pass: number; total: number } {
@@ -78,6 +110,7 @@ export default function HistoryPage() {
   const [activeSub, setActiveSub] = useState(0);
   const [activeTc, setActiveTc] = useState(0);
   const [regradingId, setRegradingId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   // Khóa cuộn trang nền khi mở modal
   useEffect(() => {
@@ -126,6 +159,14 @@ export default function HistoryPage() {
   }, [selected]);
 
   useEffect(() => { loadRows(); }, [loadRows]);
+
+  // Có bài đang GRADING/QUEUED (vd vừa chấm lại rồi rời trang quay lại) → tự poll tới khi xong.
+  const hasPending = rows.some((r) => r.status === "GRADING" || r.status === "QUEUED");
+  useEffect(() => {
+    if (!hasPending) return;
+    const id = setInterval(() => loadRows(false), 4000);
+    return () => clearInterval(id);
+  }, [hasPending, loadRows]);
 
   const selectedName = exams.find((e) => e.examId === selected)?.examName || selected || "";
 
@@ -213,6 +254,32 @@ export default function HistoryPage() {
       alert((e as Error).message);
     } finally {
       setRegradingId(null);
+    }
+  };
+
+  // Bỏ chọn khi đổi đề
+  useEffect(() => { setSelectedIds(new Set()); }, [selected]);
+
+  const toggleSel = (id: string) =>
+    setSelectedIds((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+
+  // Chấm lại NHIỀU bài đã chọn (gộp 1 batch); auto-poll tự cập nhật tới khi xong.
+  const regradeSelected = async () => {
+    if (!selected || selectedIds.size === 0) return;
+    const ids = [...selectedIds];
+    setRows((list) => list.map((r) => (ids.includes(r.studentId) ? { ...r, status: "GRADING", score: null, errorLog: null } : r)));
+    setSelectedIds(new Set());
+    try {
+      const res = await fetch(`${API_BASE}/batch/regrade-batch/${encodeURIComponent(selected)}`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ studentIds: ids }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Chấm lại thất bại");
+      if (Array.isArray(data.skipped) && data.skipped.length)
+        alert(`Đã bỏ qua ${data.skipped.length} bài (mất file/đề): ${data.skipped.join(", ")}`);
+    } catch (e) {
+      await loadRows(false);
+      alert((e as Error).message);
     }
   };
 
@@ -368,6 +435,15 @@ export default function HistoryPage() {
                 >
                   <DownloadCloud size={15} /> Xuất CSV
                 </button>
+                {selectedIds.size > 0 && (
+                  <button
+                    onClick={regradeSelected}
+                    title="Chấm lại các bài đã chọn (gộp 1 đợt)"
+                    className="flex items-center gap-2 rounded-lg bg-amber-500 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-all hover:bg-amber-600 active:scale-95"
+                  >
+                    <RotateCcw size={15} /> Chấm lại ({selectedIds.size})
+                  </button>
+                )}
               </div>
             </div>
 
@@ -375,7 +451,24 @@ export default function HistoryPage() {
               <table className="w-full border-collapse text-left">
                 <thead>
                   <tr className="border-b border-slate-100 bg-white text-xs font-bold uppercase tracking-wider text-slate-500">
-                    <th className="px-6 py-3.5">Sinh viên</th>
+                    <th className="px-6 py-3.5">
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={filtered.length > 0 && filtered.every((r) => selectedIds.has(r.studentId))}
+                          onChange={() =>
+                            setSelectedIds((s) => {
+                              const n = new Set(s);
+                              const all = filtered.every((r) => n.has(r.studentId));
+                              filtered.forEach((r) => (all ? n.delete(r.studentId) : n.add(r.studentId)));
+                              return n;
+                            })
+                          }
+                          className="h-3.5 w-3.5 rounded border-slate-300 accent-indigo-600"
+                        />
+                        Sinh viên
+                      </div>
+                    </th>
                     <th className="px-6 py-3.5 text-center">Trạng thái</th>
                     <th className="px-6 py-3.5">Pass</th>
                     <th className="px-6 py-3.5 text-right">Điểm</th>
@@ -412,6 +505,12 @@ export default function HistoryPage() {
                         <tr key={r.id} className="transition-colors hover:bg-slate-50/70">
                           <td className="px-6 py-3.5">
                             <div className="flex items-center gap-3">
+                              <input
+                                type="checkbox"
+                                checked={selectedIds.has(r.studentId)}
+                                onChange={() => toggleSel(r.studentId)}
+                                className="h-3.5 w-3.5 shrink-0 rounded border-slate-300 accent-indigo-600"
+                              />
                               <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-slate-100 to-slate-200 text-xs font-bold text-slate-500">
                                 {initials}
                               </div>
@@ -571,7 +670,7 @@ export default function HistoryPage() {
                     <div>
                       <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Điểm tự động</p>
                       <p className="text-2xl font-bold text-slate-800">
-                        {detail.grading_result?.score != null ? detail.grading_result.score.toFixed(2) : "—"}
+                        {detail.grading_result?.score != null ? detail.grading_result.score.toFixed(1) : "—"}
                         <span className="text-sm font-medium text-slate-400">/10</span>
                       </p>
                     </div>
@@ -628,10 +727,8 @@ export default function HistoryPage() {
                                   {tc.skill_code}
                                 </p>
                               )}
-                              {!passed && tc.actual && (
-                                <p className="mt-1 line-clamp-2 pl-3.5 text-[11px] text-rose-500" title={tc.actual}>
-                                  {tc.actual}
-                                </p>
+                              {!passed && (tc.expected || tc.actual || tc.error_log) && (
+                                <FailureDetail requirement={tc.expected} actual={tc.actual || tc.error_log} />
                               )}
                             </div>
                           );

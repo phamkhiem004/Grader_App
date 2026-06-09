@@ -46,6 +46,7 @@ export default function WorkspacePage() {
   const [loadingDetail, setLoadingDetail] = useState(false);
 
   const [points, setPoints] = useState<Record<string, number>>({});
+  const [touched, setTouched] = useState(false);   // GV đã chỉnh điểm tiêu chí chưa
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
@@ -134,13 +135,21 @@ export default function WorkspacePage() {
 
     const init: Record<string, number> = {};
     criteria.forEach((c) => {
-      const mx = c.weight || 0;
+      const w = c.weight || 0;
       const saved = savedCriteria?.find((x) => x.testId === c.testId);
-      if (saved && typeof saved.points === "number") init[c.testId] = saved.points;
-      else init[c.testId] = autoStatus[c.testId] ? mx : 0;
+      if (saved && typeof saved.points === "number") {
+        // Điểm đã lưu có thể theo THANG CŨ (đã chuẩn hoá /10) → quy về thang weight hiện tại theo
+        // TỈ LỆ đạt được (points/maxPoints) để total không lệch với điểm chấm tay đã lưu.
+        const oldMax = typeof saved.maxPoints === "number" && saved.maxPoints > 0 ? saved.maxPoints : w;
+        const frac = oldMax > 0 ? Math.max(0, Math.min(1, saved.points / oldMax)) : 0;
+        init[c.testId] = round2(frac * w);
+      } else {
+        init[c.testId] = autoStatus[c.testId] ? w : 0;
+      }
     });
     setPoints(init);
     setNote(savedNote);
+    setTouched(false);   // vừa nạp từ DB → coi như chưa chỉnh
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [detail, criteria]);
 
@@ -154,14 +163,20 @@ export default function WorkspacePage() {
     [rawTotal, sumW]
   );
 
+  // Điểm "Chấm tay" hiển thị: CHƯA chỉnh tay → lấy ĐÚNG điểm đã lưu (manualScore) cho khớp danh sách
+  // (tránh tự suy lại sai khi dữ liệu cũ lưu thiếu tiêu chí); GV bắt đầu chỉnh → lấy total tính trực tiếp.
+  const manualDisplay = touched || detail?.manualScore == null ? total : detail.manualScore;
+
   const setPoint = (testId: string, val: number, max: number) => {
     const v = Math.max(0, Math.min(max, round2(isNaN(val) ? 0 : val)));
+    setTouched(true);
     setPoints((p) => ({ ...p, [testId]: v }));
   };
 
   const resetAuto = () => {
     const init: Record<string, number> = {};
     criteria.forEach((c) => { init[c.testId] = autoStatus[c.testId] ? maxPointsOf(c) : 0; });
+    setTouched(true);
     setPoints(init);
   };
 
@@ -176,14 +191,15 @@ export default function WorkspacePage() {
       const res = await fetch(`${API_BASE}/results/${encodeURIComponent(examId)}/${encodeURIComponent(studentId)}/manual`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ score: total, criteria: criteriaPayload, note, gradedBy: teacher?.email }),
+        body: JSON.stringify({ score: manualDisplay, criteria: criteriaPayload, note, gradedBy: teacher?.email }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Lưu thất bại");
-      setSaveMsg({ type: "ok", text: `Đã lưu điểm chấm tay: ${total.toFixed(2)}` });
+      setSaveMsg({ type: "ok", text: `Đã lưu điểm chấm tay: ${manualDisplay.toFixed(1)}` });
       // cập nhật badge trong danh sách + detail
-      setStudents((list) => list.map((s) => (s.studentId === studentId ? { ...s, manualScore: total } : s)));
-      setDetail((d) => (d ? { ...d, manualScore: total } : d));
+      setStudents((list) => list.map((s) => (s.studentId === studentId ? { ...s, manualScore: manualDisplay } : s)));
+      setDetail((d) => (d ? { ...d, manualScore: manualDisplay } : d));
+      setTouched(false);
     } catch (e: any) {
       setSaveMsg({ type: "err", text: e?.message || "Lưu thất bại" });
     } finally {
@@ -287,7 +303,7 @@ export default function WorkspacePage() {
                 </div>
                 <div className="flex items-center gap-5">
                   <ScorePill label="Tự động" value={detail?.autoScore} tone="slate" />
-                  <ScorePill label="Chấm tay" value={total} tone="violet" highlight />
+                  <ScorePill label="Chấm tay" value={manualDisplay} tone="violet" highlight />
                 </div>
               </div>
 
@@ -421,9 +437,9 @@ export default function WorkspacePage() {
                     <div className="flex items-center justify-between">
                       <div className="text-sm">
                         <span className="text-slate-500">Tổng: </span>
-                        <span className={`text-xl font-bold ${total >= PASS_THRESHOLD ? "text-emerald-600" : "text-rose-600"}`}>{total.toFixed(2)}</span>
+                        <span className={`text-xl font-bold ${manualDisplay >= PASS_THRESHOLD ? "text-emerald-600" : "text-rose-600"}`}>{manualDisplay.toFixed(1)}</span>
                         <span className="text-slate-400"> / 10</span>
-                        {sumW > 0 && Math.abs(sumW - 10) > 0.001 && (
+                        {touched && sumW > 0 && Math.abs(sumW - 10) > 0.001 && (
                           <span className="ml-2 text-[11px] text-slate-400">
                             (thô {round2(rawTotal)}/{round2(sumW)}, đã chuẩn hoá về 10)
                           </span>

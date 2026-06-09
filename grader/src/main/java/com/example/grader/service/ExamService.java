@@ -54,6 +54,14 @@ public class ExamService {
     private final AtomicBoolean baseImageReady = new AtomicBoolean(false);
     private final ObjectMapper mapper = new ObjectMapper();
 
+    // ── Trạng thái build môi trường chấm (thêm/xóa thư viện) — chỉ 1 build tại 1 thời điểm ──
+    private final Object envLock = new Object();
+    private volatile boolean envBuilding = false;
+    private volatile String envStatus  = "IDLE";   // IDLE|RESOLVING|BUILDING|READY|FAILED
+    private volatile String envMessage = "";
+    private volatile String envLog     = "";
+    private volatile long   envAt      = 0;
+
     @Autowired
     private ExamRepository examRepository;
     @Autowired
@@ -295,6 +303,228 @@ public class ExamService {
             while ((line = r.readLine()) != null) log.debug("[{}] {}", tag, line);
         }
         return process.waitFor();
+    }
+
+    // ════════════════════════════════════════════════════════════════════════════
+    //  QUẢN LÝ THƯ VIỆN MÔI TRƯỜNG CHẤM (thêm/xóa package trong pubspec.base.yaml)
+    // ════════════════════════════════════════════════════════════════════════════
+
+    private Path basePubspec() { return locateTemplateDir().resolve("pubspec.base.yaml"); }
+
+    /** Danh sách package trong khối dependencies: [{name, version, protected}]. `flutter` = lõi (không xóa). */
+    public List<Map<String, Object>> listManagedPackages() {
+        List<Map<String, Object>> out = new ArrayList<>();
+        try {
+            Path pubspec = basePubspec();
+            if (!Files.exists(pubspec)) return out;
+            boolean inDeps = false;
+            java.util.regex.Pattern entry = java.util.regex.Pattern.compile("^ {2}([A-Za-z0-9_]+):\\s*(.*)$");
+            for (String raw : Files.readAllLines(pubspec)) {
+                String line = raw.replace("\t", "  ");
+                if (line.isBlank() || line.trim().startsWith("#")) continue;
+                if (!line.startsWith(" ")) { inDeps = line.split(":")[0].trim().equals("dependencies"); continue; }
+                if (!inDeps) continue;
+                java.util.regex.Matcher m = entry.matcher(line);
+                if (!m.find()) continue;
+                String name = m.group(1), val = m.group(2).trim();
+                Map<String, Object> p = new LinkedHashMap<>();
+                p.put("name", name);
+                boolean isBlock = val.isEmpty();                 // vd flutter: → sdk block ở dòng dưới
+                p.put("version", isBlock ? "(flutter sdk)" : val);
+                p.put("protected", isBlock || name.equals("flutter") || name.equals("flutter_test"));
+                out.add(p);
+            }
+        } catch (Exception e) {
+            log.warn("listManagedPackages lỗi: {}", e.getMessage());
+        }
+        return out;
+    }
+
+    public Map<String, Object> buildStatus() {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("status", envStatus);
+        m.put("message", envMessage);
+        m.put("log", envLog);
+        m.put("at", envAt);
+        m.put("building", envBuilding);
+        return m;
+    }
+
+    private void setEnv(String status, String message, String logTail) {
+        envStatus = status; envMessage = message;
+        if (logTail != null) envLog = logTail;
+        envAt = System.currentTimeMillis();
+    }
+
+    /**
+     * Ghi danh sách package (desired = các package SỬA ĐƯỢC, không gồm flutter lõi) vào
+     * pubspec.base.yaml rồi BUILD LẠI ảnh nền — chạy nền. Lỗi resolve/build → HOÀN TÁC pubspec.
+     */
+    public Map<String, Object> applyPackages(List<Map<String, Object>> desired) {
+        synchronized (envLock) {
+            if (envBuilding) throw new IllegalStateException("Đang build môi trường, vui lòng đợi build xong.");
+            envBuilding = true;
+            setEnv("RESOLVING", "Đang chuẩn bị môi trường...", "");
+        }
+        new Thread(() -> {
+            try { doApplyPackages(desired); }
+            catch (Exception e) { log.warn("applyPackages thread lỗi: {}", e.getMessage()); }
+            finally { envBuilding = false; }
+        }, "env-build").start();
+        return buildStatus();
+    }
+
+    private void doApplyPackages(List<Map<String, Object>> desired) {
+        Path pubspec = basePubspec();
+        String snapshot = null;
+        try {
+            snapshot = Files.readString(pubspec);
+
+            // 1) Resolve version cho package chưa khai version (flutter pub add trong container ephemeral)
+            List<String[]> resolved = resolveVersions(desired);
+
+            // 2) Ghi khối dependencies
+            writeDependenciesBlock(pubspec, resolved);
+
+            // 3) Build lại ảnh nền (capture log live)
+            setEnv("BUILDING", "Đang build ảnh nền (vài phút)...", envLog);
+            Path tmpl = locateTemplateDir();
+            StringBuilder log = new StringBuilder();
+            int exit = runDockerCapture(List.of(
+                    "docker", "build",
+                    "-f", tmpl.resolve("Dockerfile.base").toAbsolutePath().toString(),
+                    "-t", baseImage,
+                    tmpl.toAbsolutePath().toString()), log);
+            if (exit != 0) throw new RuntimeException("docker build thất bại (exit " + exit + ")");
+
+            baseImageReady.set(true);
+            setEnv("READY", "Đã cập nhật môi trường chấm (" + resolved.size() + " thư viện).", tail(log.toString()));
+            ExamService.log.info("✅ Build lại môi trường chấm xong: {} thư viện", resolved.size());
+
+        } catch (Exception e) {
+            if (snapshot != null) {
+                try { Files.writeString(pubspec, snapshot); }     // HOÀN TÁC để không kẹt pubspec hỏng
+                catch (Exception ex) { log.warn("Revert pubspec lỗi: {}", ex.getMessage()); }
+            }
+            setEnv("FAILED", "Lỗi: " + e.getMessage() + " — đã hoàn tác thay đổi.", envLog);
+            ExamService.log.warn("❌ Build lại môi trường chấm thất bại: {}", e.getMessage());
+        }
+    }
+
+    /** Trả [name, versionConstraint] theo thứ tự desired; resolve version qua `flutter pub add` khi để trống. */
+    private List<String[]> resolveVersions(List<Map<String, Object>> desired) throws Exception {
+        List<String> toResolve = new ArrayList<>();
+        Map<String, String> given = new LinkedHashMap<>();
+        List<String> order = new ArrayList<>();
+        for (Map<String, Object> p : desired) {
+            String name = p.get("name") == null ? "" : p.get("name").toString().trim();
+            if (name.isEmpty()) continue;
+            if (name.equals("flutter") || name.equals("flutter_test")) continue;   // lõi, bỏ qua
+            if (!name.matches("[a-z][a-z0-9_]*"))
+                throw new IllegalArgumentException("Tên package không hợp lệ: '" + name + "' (chỉ a-z, 0-9, _).");
+            if (order.contains(name)) continue;
+            order.add(name);
+            String ver = p.get("version") == null ? "" : p.get("version").toString().trim();
+            if (ver.isEmpty() || ver.equals("(flutter sdk)")) toResolve.add(name); else given.put(name, ver);
+        }
+        Map<String, String> resolved = toResolve.isEmpty() ? Map.of() : runPubAddResolve(toResolve);
+        List<String[]> out = new ArrayList<>();
+        for (String name : order) out.add(new String[]{ name, given.getOrDefault(name, resolved.getOrDefault(name, "any")) });
+        return out;
+    }
+
+    /** Chạy `flutter pub add` trong container để lấy version tương thích (đồng thời validate package tồn tại). */
+    private Map<String, String> runPubAddResolve(List<String> names) throws Exception {
+        setEnv("RESOLVING", "Đang resolve version: " + String.join(", ", names) + " ...", envLog);
+        List<String> cmd = new ArrayList<>(List.of(
+                "docker", "run", "--rm", "--entrypoint", "bash", baseImage,
+                "-c", "cd /app && flutter pub add " + String.join(" ", names)
+                    + " 2>&1; echo '---PUBSPEC---'; cat pubspec.yaml"));
+        StringBuilder out = new StringBuilder();
+        runDockerCapture(cmd, out);
+        String s = out.toString();
+        int idx = s.indexOf("---PUBSPEC---");
+        String pubspecPart = idx >= 0 ? s.substring(idx) : "";
+        Map<String, String> res = new LinkedHashMap<>();
+        for (String name : names) {
+            java.util.regex.Matcher m = java.util.regex.Pattern
+                    .compile("(?m)^ {2}" + java.util.regex.Pattern.quote(name) + ":\\s*(\\S+)").matcher(pubspecPart);
+            if (m.find()) res.put(name, m.group(1));
+            else throw new IllegalArgumentException(
+                    "Không thêm được thư viện '" + name + "' (sai tên hoặc không tương thích Flutter SDK). "
+                  + "Chi tiết: " + firstError(s));
+        }
+        return res;
+    }
+
+    private String firstError(String out) {
+        for (String line : out.split("\n")) {
+            String t = line.trim();
+            if (t.contains("not found") || t.contains("version solving failed")
+                    || t.toLowerCase().contains("error") || t.contains("Because")) {
+                return t.length() > 200 ? t.substring(0, 200) : t;
+            }
+        }
+        return "không rõ (xem log).";
+    }
+
+    /** Ghi lại khối `dependencies:` của pubspec.base.yaml (giữ nguyên các phần khác của file). */
+    private void writeDependenciesBlock(Path pubspec, List<String[]> deps) throws Exception {
+        List<String> lines = Files.readAllLines(pubspec);
+        List<String> out = new ArrayList<>();
+        boolean done = false;
+        int i = 0;
+        while (i < lines.size()) {
+            String line = lines.get(i);
+            if (!done && line.stripTrailing().equals("dependencies:")) {
+                out.add("dependencies:");
+                out.add("  # Quản lý qua trang \"Thư viện chấm\". 'flutter' là lõi (không xóa).");
+                out.add("  flutter:");
+                out.add("    sdk: flutter");
+                for (String[] d : deps) out.add("  " + d[0] + ": " + d[1]);
+                out.add("");
+                // bỏ qua khối dependencies cũ tới section kế (dòng ở cột 0) hoặc hết file
+                i++;
+                while (i < lines.size()) {
+                    String l = lines.get(i);
+                    if (!l.isEmpty() && !l.startsWith(" ") && !l.startsWith("\t")) break;
+                    i++;
+                }
+                done = true;
+                continue;
+            }
+            out.add(line);
+            i++;
+        }
+        Files.writeString(pubspec, String.join("\n", out) + "\n");
+    }
+
+    /** Như runDocker nhưng GOM output (giữ ~120 dòng cuối) để hiển thị tiến độ build cho GV. */
+    private int runDockerCapture(List<String> command, StringBuilder out) throws Exception {
+        ProcessBuilder pb = new ProcessBuilder(command);
+        pb.environment().put("DOCKER_BUILDKIT", "1");
+        pb.redirectErrorStream(true);
+        Process process = pb.start();
+        java.util.Deque<String> ring = new java.util.ArrayDeque<>();
+        try (BufferedReader r = new BufferedReader(
+                new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = r.readLine()) != null) {
+                out.append(line).append("\n");
+                ring.addLast(line);
+                while (ring.size() > 120) ring.removeFirst();
+                if ("BUILDING".equals(envStatus)) envLog = String.join("\n", ring);
+            }
+        }
+        return process.waitFor();
+    }
+
+    private String tail(String s) {
+        String[] arr = s.split("\n");
+        int from = Math.max(0, arr.length - 40);
+        StringBuilder sb = new StringBuilder();
+        for (int i = from; i < arr.length; i++) sb.append(arr[i]).append("\n");
+        return sb.toString().trim();
     }
 
     // ── Validate + unzip + xóa đệ quy ───────────────────────────

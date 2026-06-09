@@ -88,4 +88,20 @@ public class BatchController {
             return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
         }
     }
+
+    /** Chấm lại NHIỀU bài cùng lúc (gộp 1 batch). Body: { studentIds:[...] }. */
+    @SuppressWarnings("unchecked")
+    @PostMapping("/regrade-batch/{examId}")
+    public ResponseEntity<?> regradeBatch(@PathVariable String examId, @RequestBody Map<String, Object> body) {
+        try {
+            Object ids = body.get("studentIds");
+            List<String> studentIds = (ids instanceof List)
+                    ? ((List<Object>) ids).stream().map(String::valueOf).toList() : List.of();
+            return ResponseEntity.ok(batchService.regradeStudents(examId, studentIds));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
+        }
+    }
 }

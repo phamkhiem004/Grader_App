@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import {
   Settings, FileText, CheckSquare, BarChart2, LogOut, Bell, Search,
   GraduationCap, UserCircle, Loader2, History, PanelLeftClose, PanelLeftOpen,
-  Clock, CheckCircle2, AlertCircle, BookOpen,
+  Clock, CheckCircle2, AlertCircle, BookOpen, Package,
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { useAuth } from '@/components/auth/AuthProvider';
@@ -40,6 +40,7 @@ const PRIMARY_NAV = [
   { name: 'Chấm bài (Batch)', path: '/', icon: CheckSquare },
   { name: 'Cấu hình Đề thi', path: '/teacher', icon: Settings },
   { name: 'Khung năng lực', path: '/syllabus', icon: BookOpen },
+  { name: 'Thư viện chấm', path: '/teacher/libraries', icon: Package },
   { name: 'Không gian chấm', path: '/teacher/workspace', icon: FileText },
 ];
 

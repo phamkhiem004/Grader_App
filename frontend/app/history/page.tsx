@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import SidebarLayout from "@/components/layout/SidebarLayout";
 import { API_BASE, PASS_THRESHOLD } from "@/lib/config";
@@ -10,7 +10,7 @@ import CompetencyPanel, { CompetencyItem } from "@/components/grading/Competency
 import {
   History, FileJson, DownloadCloud, Search, ChevronRight,
   CheckCircle, AlertCircle, Clock, Users, FileText, FileArchive,
-  BarChart3, X, Loader2,
+  BarChart3, X, Loader2, FileCode2, RotateCcw,
 } from "lucide-react";
 
 interface ExamOption { examId: string; examName: string; }
@@ -45,6 +45,7 @@ interface ResultRow {
   errorLog: string | null;
   hasJson: boolean;
 }
+interface CodeFile { name: string; content: string; }
 
 /** Lấy pass/total từ field details (JSON gọn của grader). */
 function passInfo(details: string | null): { pass: number; total: number } {
@@ -69,13 +70,22 @@ export default function HistoryPage() {
   const [detail, setDetail] = useState<DetailData | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
 
+  // Modal xem bài làm + testcase (đối chiếu khi 0/0) & trạng thái chấm lại
+  const [viewRow, setViewRow] = useState<ResultRow | null>(null);
+  const [subFiles, setSubFiles] = useState<CodeFile[]>([]);
+  const [tcFiles, setTcFiles] = useState<CodeFile[]>([]);
+  const [viewLoading, setViewLoading] = useState(false);
+  const [activeSub, setActiveSub] = useState(0);
+  const [activeTc, setActiveTc] = useState(0);
+  const [regradingId, setRegradingId] = useState<string | null>(null);
+
   // Khóa cuộn trang nền khi mở modal
   useEffect(() => {
-    if (!detailRow) return;
+    if (!detailRow && !viewRow) return;
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     return () => { document.body.style.overflow = prev; };
-  }, [detailRow]);
+  }, [detailRow, viewRow]);
 
   // Đọc query param từ thanh search header (?exam=...&q=...) — ưu tiên trước khi chọn mặc định
   useEffect(() => {
@@ -101,17 +111,21 @@ export default function HistoryPage() {
       .finally(() => setLoadingExams(false));
   }, []);
 
-  // Nạp danh sách bài đã chấm của đề được chọn
-  useEffect(() => {
+  // Nạp danh sách bài đã chấm của đề được chọn (tách hàm để chấm lại xong refetch không chớp spinner)
+  const loadRows = useCallback(async (showSpinner = true) => {
     if (!selected) return;
-    setLoadingRows(true);
-    setRows([]);
-    fetch(`${API_BASE}/results/exam/${encodeURIComponent(selected)}`)
-      .then((r) => r.json())
-      .then((data: ResultRow[]) => setRows(Array.isArray(data) ? data : []))
-      .catch(() => setRows([]))
-      .finally(() => setLoadingRows(false));
+    if (showSpinner) { setLoadingRows(true); setRows([]); }
+    try {
+      const data = await fetch(`${API_BASE}/results/exam/${encodeURIComponent(selected)}`).then((r) => r.json());
+      setRows(Array.isArray(data) ? data : []);
+    } catch {
+      setRows([]);
+    } finally {
+      if (showSpinner) setLoadingRows(false);
+    }
   }, [selected]);
+
+  useEffect(() => { loadRows(); }, [loadRows]);
 
   const selectedName = exams.find((e) => e.examId === selected)?.examName || selected || "";
 
@@ -156,6 +170,51 @@ export default function HistoryPage() {
     }
   };
   const closeDetail = () => { setDetailRow(null); setDetail(null); };
+
+  // Mở modal đối chiếu: tải song song mã nguồn SV + testcase đã dùng để chấm
+  const openView = async (r: ResultRow) => {
+    if (!selected) return;
+    setViewRow(r); setSubFiles([]); setTcFiles([]); setActiveSub(0); setActiveTc(0); setViewLoading(true);
+    try {
+      const [sf, tf] = await Promise.all([
+        fetch(`${API_BASE}/batch/submission/${encodeURIComponent(selected)}/${encodeURIComponent(r.studentId)}/files`).then((x) => (x.ok ? x.json() : [])),
+        fetch(`${API_BASE}/batch/testcase/${encodeURIComponent(selected)}/${encodeURIComponent(r.studentId)}/files`).then((x) => (x.ok ? x.json() : [])),
+      ]);
+      setSubFiles(Array.isArray(sf) ? sf : []);
+      setTcFiles(Array.isArray(tf) ? tf : []);
+    } catch {
+      /* bỏ qua */
+    } finally {
+      setViewLoading(false);
+    }
+  };
+  const closeView = () => { setViewRow(null); setSubFiles([]); setTcFiles([]); };
+
+  // Chấm lại 1 bài từ zip đã lưu, rồi poll tiến độ đến khi xong → refetch danh sách
+  const regrade = async (r: ResultRow) => {
+    if (!selected || regradingId) return;
+    setRegradingId(r.studentId);
+    setRows((list) => list.map((x) => (x.studentId === r.studentId ? { ...x, status: "GRADING", score: null, errorLog: null } : x)));
+    try {
+      const res = await fetch(`${API_BASE}/batch/regrade/${encodeURIComponent(selected)}/${encodeURIComponent(r.studentId)}`, { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Chấm lại thất bại");
+      const batchId = data.batchId as string;
+      for (let i = 0; i < 90; i++) {
+        await new Promise((rs) => setTimeout(rs, 2000));
+        const pr = await fetch(`${API_BASE}/batch/progress/${encodeURIComponent(batchId)}`).then((x) => (x.ok ? x.json() : null)).catch(() => null);
+        if (!pr) continue;
+        const me = (pr.results || []).find((x: { studentId: string; status: string }) => x.studentId === r.studentId);
+        if ((me && me.status !== "GRADING" && me.status !== "QUEUED") || pr.done + pr.error >= pr.total) break;
+      }
+      await loadRows(false);
+    } catch (e) {
+      await loadRows(false);
+      alert((e as Error).message);
+    } finally {
+      setRegradingId(null);
+    }
+  };
 
   // Tải JSON của 1 sinh viên
   const downloadStudentJson = async (r: ResultRow) => {
@@ -422,28 +481,45 @@ export default function HistoryPage() {
                             {r.updatedAt ? new Date(r.updatedAt).toLocaleString("vi-VN") : "—"}
                           </td>
                           <td className="px-4 py-3.5">
-                            {r.hasJson ? (
-                              <div className="flex items-center justify-center gap-1">
-                                <Tooltip label={`Xem năng lực ${r.studentId}`} side="left">
-                                  <button
-                                    onClick={() => openDetail(r)}
-                                    className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-indigo-50 hover:text-indigo-600"
-                                  >
-                                    <BarChart3 size={15} />
-                                  </button>
-                                </Tooltip>
-                                <Tooltip label={`Tải JSON của ${r.studentId}`} side="left">
-                                  <button
-                                    onClick={() => downloadStudentJson(r)}
-                                    className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-indigo-50 hover:text-indigo-600"
-                                  >
-                                    <FileJson size={15} />
-                                  </button>
-                                </Tooltip>
-                              </div>
-                            ) : (
-                              <span className="block text-center text-slate-300">—</span>
-                            )}
+                            <div className="flex items-center justify-center gap-1">
+                              <Tooltip label="Xem bài làm & testcase" side="left">
+                                <button
+                                  onClick={() => openView(r)}
+                                  className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-indigo-50 hover:text-indigo-600"
+                                >
+                                  <FileCode2 size={15} />
+                                </button>
+                              </Tooltip>
+                              <Tooltip label="Chấm lại bài này" side="left">
+                                <button
+                                  onClick={() => regrade(r)}
+                                  disabled={regradingId === r.studentId}
+                                  className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-amber-50 hover:text-amber-600 disabled:opacity-50"
+                                >
+                                  {regradingId === r.studentId ? <Loader2 size={15} className="animate-spin" /> : <RotateCcw size={15} />}
+                                </button>
+                              </Tooltip>
+                              {r.hasJson && (
+                                <>
+                                  <Tooltip label={`Xem năng lực ${r.studentId}`} side="left">
+                                    <button
+                                      onClick={() => openDetail(r)}
+                                      className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-indigo-50 hover:text-indigo-600"
+                                    >
+                                      <BarChart3 size={15} />
+                                    </button>
+                                  </Tooltip>
+                                  <Tooltip label={`Tải JSON của ${r.studentId}`} side="left">
+                                    <button
+                                      onClick={() => downloadStudentJson(r)}
+                                      className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-indigo-50 hover:text-indigo-600"
+                                    >
+                                      <FileJson size={15} />
+                                    </button>
+                                  </Tooltip>
+                                </>
+                              )}
+                            </div>
                           </td>
                         </tr>
                       );
@@ -545,6 +621,13 @@ export default function HistoryPage() {
                                   </span>
                                 )}
                               </div>
+                              {(tc.category_label || tc.skill_code) && (
+                                <p className="mt-0.5 pl-3.5 text-[10px] text-slate-400">
+                                  {tc.category_label}
+                                  {tc.category_label && tc.skill_code ? " · " : ""}
+                                  {tc.skill_code}
+                                </p>
+                              )}
                               {!passed && tc.actual && (
                                 <p className="mt-1 line-clamp-2 pl-3.5 text-[11px] text-rose-500" title={tc.actual}>
                                   {tc.actual}
@@ -567,7 +650,110 @@ export default function HistoryPage() {
         </div>,
         document.body
       )}
+
+      {/* Modal ĐỐI CHIẾU: bài làm SV (trái) ↔ testcase đã dùng (phải) + lý do lỗi + Chấm lại */}
+      {viewRow && typeof document !== "undefined" && createPortal(
+        <div
+          className="animate-modal-overlay fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm"
+          onClick={closeView}
+        >
+          <div
+            className="animate-modal-pop flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex shrink-0 items-center justify-between border-b border-slate-100 px-6 py-4">
+              <div className="min-w-0">
+                <h3 className="truncate text-sm font-bold text-slate-800">{viewRow.studentName || viewRow.studentId}</h3>
+                <p className="font-mono text-xs text-slate-400">{viewRow.studentId} · {selected}</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => regrade(viewRow)}
+                  disabled={regradingId === viewRow.studentId}
+                  className="flex items-center gap-1.5 rounded-lg bg-amber-500 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-amber-600 disabled:opacity-50"
+                >
+                  {regradingId === viewRow.studentId ? <Loader2 size={14} className="animate-spin" /> : <RotateCcw size={14} />} Chấm lại
+                </button>
+                <button
+                  onClick={closeView}
+                  className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+            </div>
+
+            {viewRow.status === "ERROR" && viewRow.errorLog && (
+              <div className="shrink-0 border-b border-rose-100 bg-rose-50 px-6 py-3">
+                <p className="mb-1 flex items-center gap-1.5 text-xs font-bold text-rose-700">
+                  <AlertCircle size={13} /> Lý do lỗi
+                </p>
+                <p className="custom-scrollbar max-h-28 overflow-y-auto whitespace-pre-wrap text-[11px] leading-relaxed text-rose-600">
+                  {viewRow.errorLog}
+                </p>
+              </div>
+            )}
+
+            <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-2">
+              <div className="flex min-h-0 flex-col border-b border-slate-100 md:border-b-0 md:border-r">
+                <div className="flex shrink-0 items-center gap-2 border-b border-slate-100 bg-slate-50/60 px-4 py-2">
+                  <FileCode2 size={14} className="text-indigo-500" />
+                  <span className="text-xs font-bold text-slate-700">Bài làm của SV</span>
+                </div>
+                {viewLoading ? (
+                  <div className="flex h-full items-center justify-center py-10 text-slate-400"><Loader2 size={18} className="animate-spin" /></div>
+                ) : (
+                  <FileViewer files={subFiles} active={activeSub} setActive={setActiveSub}
+                    empty="Không đọc được bài nộp (có thể đã bị dọn hoặc không lưu)." />
+                )}
+              </div>
+              <div className="flex min-h-0 flex-col">
+                <div className="flex shrink-0 items-center gap-2 border-b border-slate-100 bg-slate-50/60 px-4 py-2">
+                  <FileText size={14} className="text-violet-500" />
+                  <span className="text-xs font-bold text-slate-700">Testcase đã dùng để chấm</span>
+                </div>
+                {viewLoading ? (
+                  <div className="flex h-full items-center justify-center py-10 text-slate-400"><Loader2 size={18} className="animate-spin" /></div>
+                ) : (
+                  <FileViewer files={tcFiles} active={activeTc} setActive={setActiveTc}
+                    empty="Không đọc được testcase đã lưu." />
+                )}
+              </div>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
     </SidebarLayout>
+  );
+}
+
+// Khung xem mã nguồn: tab file + vùng code (dùng cho cả bài làm SV lẫn testcase)
+function FileViewer({ files, active, setActive, empty }: {
+  files: CodeFile[]; active: number; setActive: (i: number) => void; empty: string;
+}) {
+  if (files.length === 0)
+    return <div className="flex h-full items-center justify-center p-6 text-center text-xs text-slate-400">{empty}</div>;
+  const safe = Math.min(active, files.length - 1);
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="custom-scrollbar flex shrink-0 gap-1 overflow-x-auto border-b border-slate-100 px-2 py-2">
+        {files.map((f, i) => (
+          <button
+            key={f.name}
+            onClick={() => setActive(i)}
+            className={`shrink-0 rounded-md px-2.5 py-1 font-mono text-[11px] transition-colors ${
+              i === safe ? "bg-indigo-100 text-indigo-700" : "text-slate-500 hover:bg-slate-100"
+            }`}
+          >
+            {f.name.split("/").pop()}
+          </button>
+        ))}
+      </div>
+      <pre className="custom-scrollbar min-h-0 flex-1 overflow-auto bg-slate-900 p-3 text-[11px] leading-relaxed text-slate-100">
+        <code>{files[safe]?.content}</code>
+      </pre>
+    </div>
   );
 }
 

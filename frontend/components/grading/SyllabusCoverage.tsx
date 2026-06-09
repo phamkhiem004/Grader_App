@@ -93,7 +93,9 @@ export default function SyllabusCoverage({ refreshKey = 0 }: { refreshKey?: numb
           >
             {exams.length === 0 && <option value="">— chưa có đề cấu hình —</option>}
             {exams.map((e) => (
-              <option key={e.examId} value={e.examId}>{e.examName || e.examId}</option>
+              <option key={e.examId} value={e.examId}>
+                {e.examName ? `${e.examId} — ${e.examName}` : e.examId}
+              </option>
             ))}
           </select>
           <button onClick={loadCoverage} title="Làm mới" className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-indigo-50 hover:text-indigo-600">

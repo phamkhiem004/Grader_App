@@ -81,15 +81,11 @@ export default function WorkspacePage() {
     return () => { ignore = true; };
   }, [examId]);
 
-  // maxPoints mỗi tiêu chí, chuẩn hoá tổng = 10
-  const maxPointsOf = useMemo(() => {
-    const sumW = criteria.reduce((s, c) => s + (c.weight || 0), 0);
-    return (c: Criterion) => {
-      if (!criteria.length) return 0;
-      if (sumW > 0) return round2(((c.weight || 0) / sumW) * 10);
-      return round2(10 / criteria.length);
-    };
-  }, [criteria]);
+  // Điểm tối đa mỗi tiêu chí = ĐÚNG weight giảng viên đặt trong skills_matrix (số đẹp: 0.5, 0.2…).
+  // KHÔNG chia lại tỉ lệ ở đây (trước kia chia weight/Σweight×10 nên 0.5 thành 0.47, 0.2 thành 0.19).
+  // Điểm cuối được CHUẨN HOÁ về thang 10 ở `total` — giống hệt điểm tự động (Σđạt/Σweight×10).
+  const sumW = useMemo(() => criteria.reduce((s, c) => s + (c.weight || 0), 0), [criteria]);
+  const maxPointsOf = (c: Criterion) => c.weight || 0;
 
   // auto pass/fail theo test_id (từ result_json)
   const autoStatus = useMemo(() => {
@@ -136,13 +132,9 @@ export default function WorkspacePage() {
       savedNote = mj.note || "";
     } catch { /* bỏ qua */ }
 
-    const sumW = criteria.reduce((s, c) => s + (c.weight || 0), 0);
-    const maxOf = (c: Criterion) =>
-      !criteria.length ? 0 : sumW > 0 ? round2(((c.weight || 0) / sumW) * 10) : round2(10 / criteria.length);
-
     const init: Record<string, number> = {};
     criteria.forEach((c) => {
-      const mx = maxOf(c);
+      const mx = c.weight || 0;
       const saved = savedCriteria?.find((x) => x.testId === c.testId);
       if (saved && typeof saved.points === "number") init[c.testId] = saved.points;
       else init[c.testId] = autoStatus[c.testId] ? mx : 0;
@@ -152,9 +144,14 @@ export default function WorkspacePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [detail, criteria]);
 
-  const total = useMemo(
-    () => round2(Object.values(points).reduce((s, p) => s + (p || 0), 0)),
+  // Tổng điểm THÔ (thang Σweight) → CHUẨN HOÁ về 10 cho khớp điểm tự động. Pass hết = đúng 10.
+  const rawTotal = useMemo(
+    () => Object.values(points).reduce((s, p) => s + (p || 0), 0),
     [points]
+  );
+  const total = useMemo(
+    () => (sumW > 0 ? round2((rawTotal / sumW) * 10) : 0),
+    [rawTotal, sumW]
   );
 
   const setPoint = (testId: string, val: number, max: number) => {
@@ -426,6 +423,11 @@ export default function WorkspacePage() {
                         <span className="text-slate-500">Tổng: </span>
                         <span className={`text-xl font-bold ${total >= PASS_THRESHOLD ? "text-emerald-600" : "text-rose-600"}`}>{total.toFixed(2)}</span>
                         <span className="text-slate-400"> / 10</span>
+                        {sumW > 0 && Math.abs(sumW - 10) > 0.001 && (
+                          <span className="ml-2 text-[11px] text-slate-400">
+                            (thô {round2(rawTotal)}/{round2(sumW)}, đã chuẩn hoá về 10)
+                          </span>
+                        )}
                       </div>
                       <button
                         onClick={save}

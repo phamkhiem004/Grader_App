@@ -18,32 +18,27 @@ text UI. Rà lại đề rồi đưa thẳng vào **Prompt 1**.
 
 ````text
 Bạn là trợ lý RA ĐỀ THI THỰC HÀNH FLUTTER cho hệ thống chấm tự động "Grader App".
-Từ Ý TƯỞNG/YÊU CẦU THÔ ở cuối, viết lại thành ĐỀ BÀI HOÀN CHỈNH — GIỮ NGUYÊN văn phong TƯỜNG THUẬT
-(dạng "Hãy viết chương trình Flutter ... gồm các yêu cầu sau" + gạch đầu dòng), NHƯNG bổ sung INLINE
-ngay trong câu cho rõ tên file/class/hàm và text UI, để sinh testcase chấm tự động chính xác.
+Biến Ý TƯỞNG THÔ ở cuối thành ĐỀ BÀI HOÀN CHỈNH: giữ văn phong TƯỜNG THUẬT, nhưng ghi rõ INLINE
+ngay trong câu tên file/class/hàm và text UI — để sinh testcase chấm tự động chính xác.
 
-## GIỮ ĐÚNG ĐỊNH DẠNG ĐỀ (RẤT QUAN TRỌNG)
+## ĐỊNH DẠNG ĐỀ
 - Mở đầu đúng câu: "Hãy viết chương trình Flutter chạy trên Android gồm các yêu cầu sau".
-- Dùng kiểu gạch đầu dòng tường thuật: "-" cho mục lớn, "+" cho chức năng con, "*" cho từng ràng buộc.
-- TUYỆT ĐỐI KHÔNG tách thành section kiểu "Hợp đồng kỹ thuật / Rubric / Bảng / Bối cảnh".
-  Mọi tên & UI text phải nằm NGAY TRONG câu tường thuật.
-- Cuối đề giữ nguyên mục "Hướng dẫn:" + code helper (nếu đề gốc có).
-- Chỉ xuất DUY NHẤT đề bài (không thêm lời dẫn/giải thích/đầu mục ngoài đề).
+- Gạch đầu dòng tường thuật: "-" mục lớn, "+" chức năng con, "*" từng ràng buộc. KHÔNG tách section
+  kiểu "Hợp đồng/Rubric/Bảng" — mọi tên & UI text nằm NGAY trong câu.
+- Giữ mục "Hướng dẫn:" + code helper nếu đề gốc có. CHỈ xuất đề bài, không thêm lời dẫn/giải thích.
 
-## TRONG MỖI YÊU CẦU PHẢI NÊU RÕ (inline)
-1. Tên FILE trong lib/ (vd `lib/expense.dart`), tên CLASS/Widget, tên thuộc tính + KIỂU, tên HÀM + signature.
-2. Constructor model (named + required) và constructor mỗi Widget. Widget nhận dữ liệu qua constructor và
-   trả kết quả qua callback để test pump riêng — vd `ExpenseFormScreen({Expense? initial, required ValueChanged<Expense> onSubmit})`.
-3. Tách phần LOGIC ra HÀM THUẦN đặt trong file model để dễ unit test (vd `int nextId(List<Expense>)`,
-   `bool isFutureDate(String)`, `List<Expense> filterExpenses(...)`) và nêu rõ hành vi.
-4. CHUỖI UI CHÍNH XÁC trong ngoặc kép cho: tiêu đề màn hình, nhãn nút, nhãn ô nhập, tiêu đề/nội dung/nút
-   hộp thoại, và THÔNG BÁO LỖI ứng với từng ràng buộc.
+## MỖI YÊU CẦU GHI RÕ (inline)
+- File trong `lib/` + class/widget + thuộc tính (kèm KIỂU) + hàm (kèm SIGNATURE).
+- Constructor: model dùng named + required; widget nhận dữ liệu qua constructor, trả kết quả qua callback
+  (vd `ExpenseFormScreen({Expense? initial, required ValueChanged<Expense> onSubmit})`).
+- Tách LOGIC ra HÀM THUẦN trong file model để dễ unit test (vd `int nextId(List<Expense>)`) + nêu rõ hành vi.
+- CHUỖI UI chính xác (trong ngoặc kép): tiêu đề, nhãn nút/ô nhập, hộp thoại, và THÔNG BÁO LỖI mỗi ràng buộc.
 
-## RÀNG BUỘC KỸ THUẬT
-- CHỈ Flutter + flutter_test. KHÔNG package ngoài, mạng, DB/file, plugin nền tảng. Model là class Dart thuần.
-- Mọi ĐỊNH DANH (class/field/method/file) dùng tiếng Anh KHÔNG DẤU. Chuỗi UI hiển thị có thể là tiếng Việt.
-- Tránh animation/timer vô hạn. Mỗi màn hình kiểm thử được độc lập (không cần Navigator/persistence).
-- Nếu yêu cầu thô thiếu thông tin (tên/UI) → TỰ CHỌN quy ước hợp lý và ghi rõ NGAY trong câu đó.
+## RÀNG BUỘC
+- Chỉ Flutter + flutter_test (không package ngoài/mạng/DB/plugin). Model là class Dart thuần.
+- Định danh (class/field/method/file) tiếng Anh KHÔNG DẤU; chuỗi UI hiển thị có thể tiếng Việt.
+- Tránh animation/timer vô hạn; mỗi màn hình test độc lập (không cần Navigator/persistence).
+- Thiếu thông tin (tên/UI) → tự chọn quy ước hợp lý và ghi rõ NGAY trong câu đó.
 
 =========================== Ý TƯỞNG / YÊU CẦU THÔ ===========================
 <DÁN yêu cầu thô vào đây — vd đề "Quản lý thu chi" dạng gạch đầu dòng>
@@ -83,8 +78,9 @@ Từ ĐỀ BÀI ở cuối, hãy sinh ra ĐÚNG 3 file: `exam_test.dart`, `grade
    ```
    - `skill_code` (BẮT BUỘC): chọn CHÍNH XÁC từ **DANH MỤC KỸ NĂNG (SYLLABUS)** ở mục bên dưới.
    - `difficulty` (BẮT BUỘC): `basic` | `intermediate` | `advanced` (xem tiêu chí ở mục "ĐỘ KHÓ").
-   - `weight` = **ĐIỂM THEO ĐỘ KHÓ** — quy ĐÚNG theo độ khó, KHÔNG tự chọn tùy ý:
-     **`basic` → 1, `intermediate` → 2, `advanced` → 3** (testcase càng khó càng nhiều điểm).
+     **`difficulty` LÀ NGUỒN SỰ THẬT CHO ĐIỂM** — grader TỰ suy `weight` = điểm theo độ khó khi chấm.
+   - `weight` (nên có, để matrix dễ đọc): ghi ĐÚNG theo độ khó **`basic`→1, `intermediate`→2, `advanced`→3**.
+     Nếu ghi lệch độ khó, grader vẫn lấy theo `difficulty` (weight chỉ là fallback khi không khai difficulty).
    - **KHÔNG cần tổng = 10.** Grader tự chuẩn hóa: điểm cuối = `Σweight_pass / Σweight × 10`.
    - Nên có thêm `skill` (tên kỹ năng thân thiện), `name`, `description`, `expected`.
 3. **`grader.dart`**: COPY NGUYÊN VĂN template ở mục "GRADER.DART CHUẨN" bên dưới. KHÔNG chỉnh sửa.
@@ -101,17 +97,17 @@ Từ ĐỀ BÀI ở cuối, hãy sinh ra ĐÚNG 3 file: `exam_test.dart`, `grade
 5. Mỗi test phải ĐỘC LẬP (không phụ thuộc thứ tự chạy, không chia sẻ state toàn cục).
 
 ## ĐỘ KHÓ & CHO ĐIỂM (BẮT BUỘC theo đây)
-Mỗi testcase gán `difficulty` rồi suy ra `weight`:
+Chỉ cần gán đúng `difficulty` — grader tự quy ra điểm (`weight`):
 
-| difficulty | Khi nào gán | weight (điểm) |
+| difficulty | Khi nào gán | điểm |
 |---|---|---|
 | `basic` | Kiến thức 1 buổi học, áp dụng thẳng, không kết hợp. | **1** |
 | `intermediate` | Kết hợp 2–3 khái niệm, có điều kiện/edge case. | **2** |
 | `advanced` | Tổng hợp nhiều phần, edge case khó, tối ưu/async. | **3** |
 
-→ Testcase càng khó càng nhiều điểm. KHÔNG tự chọn weight tùy ý; KHÔNG ép tổng = 10
-(grader tự chuẩn hóa: điểm = Σweight_pass / Σweight × 10). Nên phủ nhiều mức độ khó để
-đánh giá năng lực có chiều sâu (đừng để toàn `basic`).
+→ Testcase càng khó càng nhiều điểm; KHÔNG ép tổng = 10 (grader tự chuẩn hóa:
+điểm = Σweight_pass / Σweight × 10). Nên phủ nhiều mức độ khó để đánh giá năng lực
+có chiều sâu (đừng để toàn `basic`).
 
 ## DANH MỤC KỸ NĂNG (SYLLABUS v2026.2) — chọn `skill_code` từ đây
 Mỗi testcase PHẢI gắn `skill_code` lấy CHÍNH XÁC từ danh sách dưới (không tự bịa code mới).
@@ -214,11 +210,14 @@ void main() async {
     if (meta == null) continue; // test không nằm trong rubric → bỏ qua
 
     double weight = 1.0;
-    String? skill, description, human, expected;
+    String? skill, description, human, expected, difficulty;
     if (meta is num) {
       weight = meta.toDouble();
     } else if (meta is Map) {
-      weight = (meta['weight'] as num?)?.toDouble() ?? 1.0;
+      difficulty = meta['difficulty']?.toString();
+      // ĐIỂM THEO ĐỘ KHÓ: weight suy TRỰC TIẾP từ difficulty (basic=1, intermediate=2, advanced=3).
+      // 'weight' trong matrix chỉ là FALLBACK khi không khai difficulty → difficulty là NGUỒN SỰ THẬT.
+      weight = _difficultyPoints(difficulty) ?? (meta['weight'] as num?)?.toDouble() ?? 1.0;
       skill = meta['skill']?.toString();
       description = meta['description']?.toString();
       human = meta['name']?.toString();
@@ -241,6 +240,7 @@ void main() async {
       'status': ok ? 'passed' : 'failed',
       'weight': weight,
     };
+    if (difficulty != null) tc['difficulty'] = difficulty;
     if (skill != null) tc['skill'] = skill;
     if (description != null) tc['description'] = description;
     if (!ok) {
@@ -300,6 +300,19 @@ String _clean(String s) {
       .replaceAll(RegExp(r'\s+'), ' ')
       .trim();
   return t.length > 600 ? t.substring(0, 600) : t;
+}
+
+// ĐIỂM THEO ĐỘ KHÓ: basic=1, intermediate=2, advanced=3 (null nếu không khai difficulty → dùng weight).
+double? _difficultyPoints(String? d) {
+  switch (d?.trim().toLowerCase()) {
+    case 'basic':
+      return 1;
+    case 'intermediate':
+      return 2;
+    case 'advanced':
+      return 3;
+  }
+  return null;
 }
 
 Future<Map<String, dynamic>> _analyzeLib() async {

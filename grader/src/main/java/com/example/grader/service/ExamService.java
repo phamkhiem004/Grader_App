@@ -17,11 +17,15 @@ import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Stream;
@@ -154,11 +158,12 @@ public class ExamService {
         ensureBaseImage(tmplDir);   // vẫn cần ảnh nền (container chạy từ đây)
 
         Path testcaseDir = resolveExamsDir(tmplDir).resolve(examId).resolve("testcase");
-        if (Files.exists(testcaseDir)) deleteRecursively(testcaseDir);
+        if (Files.exists(testcaseDir)) archiveTestcase(examId, testcaseDir);   // giữ lịch sử thay vì xoá hẳn
         Files.createDirectories(testcaseDir);
 
         unzip(testcaseZip.getBytes(), testcaseDir);
         validateRequiredFiles(testcaseDir);
+        validateTestcaseImports(testcaseDir);   // CHẶN package ngoài (vd intl) → tránh 0/0 oan cả lớp
         validateSkillCodes(testcaseDir);   // skill_code (nếu khai) phải nằm trong syllabus
 
         Exam exam = examRepository.findByExamId(examId).orElse(new Exam());
@@ -309,6 +314,60 @@ public class ExamService {
     }
 
     /**
+     * CHẶN testcase import package KHÔNG có trong môi trường chấm (chỉ có những gì khai trong
+     * pubspec.base.yaml: flutter, flutter_test...). Đây là nguyên nhân khiến CẢ LỚP bị 0/0 oan
+     * (vd đề import 'package:intl/intl.dart' → exam_test.dart không biên dịch được). Bắt ngay lúc upload.
+     */
+    private void validateTestcaseImports(Path testcaseDir) throws Exception {
+        Set<String> allowed = allowedPackages();
+        java.util.regex.Pattern p =
+                java.util.regex.Pattern.compile("import\\s+['\"]package:([A-Za-z0-9_]+)/");
+        Set<String> bad = new LinkedHashSet<>();
+        List<Path> dartFiles;
+        try (Stream<Path> s = Files.walk(testcaseDir)) {
+            dartFiles = s.filter(f -> f.toString().endsWith(".dart")).toList();
+        }
+        for (Path f : dartFiles) {
+            for (String line : Files.readAllLines(f)) {
+                java.util.regex.Matcher m = p.matcher(line);
+                if (m.find() && !allowed.contains(m.group(1))) bad.add(m.group(1));
+            }
+        }
+        if (!bad.isEmpty())
+            throw new IllegalArgumentException(
+                    "Testcase dùng package KHÔNG có trong môi trường chấm: " + String.join(", ", bad)
+                  + ". Môi trường chỉ có: " + String.join(", ", allowed)
+                  + ". Hãy bỏ các package này khỏi testcase (chỉ dùng flutter/flutter_test, định dạng/parse "
+                  + "bằng Dart thuần), hoặc thêm chúng vào grader-base/pubspec.base.yaml rồi build lại ảnh nền.");
+    }
+
+    /** Tập package được phép = các dependency khai trong pubspec.base.yaml (nguồn sự thật của ảnh nền). */
+    private Set<String> allowedPackages() {
+        Set<String> allowed = new HashSet<>(Set.of("flutter", "flutter_test"));
+        try {
+            Path pubspec = locateTemplateDir().resolve("pubspec.base.yaml");
+            if (Files.exists(pubspec)) {
+                boolean inDeps = false;
+                java.util.regex.Pattern dep = java.util.regex.Pattern.compile("^ {2}([A-Za-z0-9_]+)\\s*:");
+                for (String raw : Files.readAllLines(pubspec)) {
+                    String line = raw.replace("\t", "  ");
+                    if (line.isBlank() || line.trim().startsWith("#")) continue;
+                    if (!line.startsWith(" ")) {                       // header ở cột 0
+                        String key = line.split(":")[0].trim();
+                        inDeps = key.equals("dependencies") || key.equals("dev_dependencies");
+                        continue;
+                    }
+                    java.util.regex.Matcher m = dep.matcher(line);     // entry "  name:" (2 space)
+                    if (inDeps && m.find()) allowed.add(m.group(1));
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Đọc pubspec.base.yaml để lấy danh sách package cho phép lỗi: {}", e.getMessage());
+        }
+        return allowed;
+    }
+
+    /**
      * Kiểm tra skill_code trong skills_matrix.json (nếu giảng viên có khai) phải nằm trong
      * syllabus và chưa bị deprecate. Testcase KHÔNG khai skill_code được bỏ qua (tương thích đề cũ).
      */
@@ -316,11 +375,43 @@ public class ExamService {
         Path f = testcaseDir.resolve("skills_matrix.json");
         if (!Files.exists(f)) return;
         List<Map<String, Object>> problems = syllabusService.validateSkillsMatrix(Files.readString(f));
-        if (!problems.isEmpty()) {
-            String detail = problems.stream()
-                    .map(p -> p.get("testId") + " → " + p.get("skillCode") + " (" + p.get("issue") + ")")
-                    .collect(java.util.stream.Collectors.joining("; "));
-            throw new IllegalArgumentException("skills_matrix.json có skill_code không hợp lệ: " + detail);
+        if (problems.isEmpty()) return;
+
+        // "error" (skill_code sai/deprecated, difficulty không hợp lệ) → CHẶN upload.
+        // "warning" (vd weight lệch độ khó) → chỉ ghi log, vẫn cho upload (grader tự suy weight từ difficulty).
+        List<Map<String, Object>> errors   = problems.stream()
+                .filter(p -> !"warning".equals(p.get("severity"))).toList();
+        List<Map<String, Object>> warnings = problems.stream()
+                .filter(p ->  "warning".equals(p.get("severity"))).toList();
+
+        if (!warnings.isEmpty())
+            log.warn("⚠️ skills_matrix.json có {} cảnh báo: {}", warnings.size(), describeProblems(warnings));
+        if (!errors.isEmpty())
+            throw new IllegalArgumentException(
+                    "skills_matrix.json có skill_code không hợp lệ: " + describeProblems(errors));
+    }
+
+    private String describeProblems(List<Map<String, Object>> problems) {
+        return problems.stream()
+                .map(p -> p.get("testId") + " → " + p.get("skillCode") + " (" + p.get("issue") + ")")
+                .collect(java.util.stream.Collectors.joining("; "));
+    }
+
+    /**
+     * Lưu phiên bản testcase CŨ trước khi upload đè (di chuyển sang testcase-archive/&lt;epochMillis&gt;/)
+     * để sau này còn tra lại đúng bộ đề đã từng dùng nếu nghi ngờ ra đề/chấm sai. Lỗi archive → xoá đè.
+     */
+    private void archiveTestcase(String examId, Path testcaseDir) {
+        try {
+            Path archiveDir = testcaseDir.resolveSibling("testcase-archive")
+                    .resolve(String.valueOf(Instant.now().toEpochMilli()));
+            Files.createDirectories(archiveDir.getParent());
+            Files.move(testcaseDir, archiveDir);
+            log.info("🗂️ Đã lưu phiên bản testcase cũ của {} → {}", examId, archiveDir);
+        } catch (Exception e) {
+            log.warn("Không lưu được phiên bản testcase cũ của {}: {} — chuyển sang xoá đè.",
+                    examId, e.getMessage());
+            try { deleteRecursively(testcaseDir); } catch (Exception ignored) {}
         }
     }
 

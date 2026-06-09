@@ -377,9 +377,20 @@ public class SyllabusService {
                 }
                 // difficulty hợp lệ?
                 JsonNode diff = v.get("difficulty");
-                if (diff != null && !diff.asText().isBlank()
-                        && normDifficulty(diff.asText()) == null) {
+                String normDiff = diff != null ? normDifficulty(diff.asText()) : null;
+                if (diff != null && !diff.asText().isBlank() && normDiff == null) {
                     problems.add(problem(e.getKey(), code, "difficulty không hợp lệ: " + diff.asText()));
+                }
+                // CẢNH BÁO (không chặn): weight nên = points(difficulty) (basic=1/intermediate=2/advanced=3).
+                // grader đã tự suy weight từ difficulty khi chấm, nên đây chỉ là nhắc GV sửa matrix cho khớp.
+                JsonNode w = v.get("weight");
+                if (normDiff != null && w != null && w.isNumber()) {
+                    int expected = difficultyPoints(normDiff);
+                    if (w.asDouble() != expected) {
+                        problems.add(problem(e.getKey(), code,
+                                "weight=" + w.asText() + " lệch độ khó " + normDiff
+                                        + " (nên là " + expected + ")", "warning"));
+                    }
                 }
             }
         } catch (Exception ex) {
@@ -390,10 +401,15 @@ public class SyllabusService {
     }
 
     private Map<String, Object> problem(String testId, String code, String issue) {
+        return problem(testId, code, issue, "error");
+    }
+
+    private Map<String, Object> problem(String testId, String code, String issue, String severity) {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("testId", testId);
         m.put("skillCode", code);
         m.put("issue", issue);
+        m.put("severity", severity);   // "error" = chặn upload; "warning" = chỉ nhắc, vẫn cho upload
         return m;
     }
 

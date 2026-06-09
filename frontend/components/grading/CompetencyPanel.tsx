@@ -66,8 +66,8 @@ export default function CompetencyPanel({ items }: { items?: CompetencyItem[] })
               <div className="h-2 flex-1 overflow-hidden rounded-full bg-slate-100">
                 <div className={`h-full rounded-full ${style.bar}`} style={{ width: `${pct}%` }} />
               </div>
-              <span className="w-24 shrink-0 text-right text-xs font-semibold text-slate-500">
-                {pct}% · {fmt(it.passed_weight)}/{fmt(it.total_weight)} đ
+              <span className="w-28 shrink-0 text-right text-xs font-semibold text-slate-500">
+                {pct}% · {it.passed_tests ?? fmt(it.passed_weight)}/{it.total_tests ?? fmt(it.total_weight)} testcase
               </span>
             </div>
 

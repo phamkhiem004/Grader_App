@@ -61,7 +61,8 @@ public class BatchGradingService {
     private final BlockingQueue<GradingJob> jobQueue = new LinkedBlockingQueue<>();
 
     record GradingJob(String studentId, String studentName,
-                      String batchId, String examId, String zipPath) {}
+                      String batchId, String examId, String zipPath,
+                      String testcasePath) {}   // testcasePath != null = ép dùng (chấm lại đề cũ)
     record StudentInfo(String studentId, String studentName) {}
 
     @PostConstruct
@@ -152,7 +153,7 @@ public class BatchGradingService {
 
                 pendingJobs.add(new GradingJob(
                         info.studentId(), info.studentName(),
-                        batchId, examId, zip.toString()
+                        batchId, examId, zip.toString(), null
                 ));
                 queued.add(info.studentId() + " — " + info.studentName());
 
@@ -195,8 +196,9 @@ public class BatchGradingService {
                 throw new IllegalStateException("Mất file bài nộp: " + zipPath);
 
             Path tempDir = Files.createTempDirectory("grading_" + job.studentId() + "_");
-            String testcasePath = examRepo.findByExamId(job.examId())
-                    .map(Exam::getTestcasePath).orElse(null);
+            // Ép testcase (chấm lại đề cũ dùng snapshot); mặc định lấy testcase hiện tại của đề.
+            String testcasePath = job.testcasePath() != null ? job.testcasePath()
+                    : examRepo.findByExamId(job.examId()).map(Exam::getTestcasePath).orElse(null);
             String resultJson = gradingService.gradeSubmission(
                     job.studentId(), job.examId(), testcasePath, tempDir, zipPath);
 
@@ -444,7 +446,7 @@ public class BatchGradingService {
                     r.setStatus(GradingStatus.QUEUED);
                     resultRepo.save(r);
                     jobQueue.add(new GradingJob(r.getStudentId(), r.getStudentName(),
-                            r.getBatchId(), r.getExamId(), zip.toString()));
+                            r.getBatchId(), r.getExamId(), zip.toString(), null));
                     recovered++;
                 } else {
                     r.setStatus(GradingStatus.ERROR);
@@ -584,11 +586,12 @@ public class BatchGradingService {
 
     /**
      * CHẤM LẠI 1 bài từ zip ĐÃ LƯU (không cần upload lại). Tạo batch mới (số liệu sạch + để lại
-     * dấu vết chấm lại), copy zip + snapshot testcase hiện tại, rồi đưa vào hàng đợi. Trả batchId mới.
+     * dấu vết chấm lại), copy zip + snapshot testcase, rồi đưa vào hàng đợi. Trả batchId mới.
+     *
+     * Testcase: ưu tiên testcase HIỆN TẠI của đề; nếu đề đã xóa / testcase mất thì DÙNG SNAPSHOT của
+     * batch gốc (submissions/&lt;đề&gt;/&lt;batch&gt;/_testcase/) → vẫn chấm lại được bài của ĐỀ CŨ.
      */
     public String regradeStudent(String examId, String studentId) throws Exception {
-        Exam exam = examRepo.findByExamId(examId)
-                .orElseThrow(() -> new IllegalArgumentException("Không tìm thấy đề thi: " + examId));
         ExamResult r = resultRepo.findByStudentIdAndExamIdAndMode(studentId, examId, "submit")
                 .orElseThrow(() -> new IllegalArgumentException("Không tìm thấy bài nộp của " + studentId));
         if (r.getBatchId() == null)
@@ -598,6 +601,12 @@ public class BatchGradingService {
         if (!Files.exists(oldZip))
             throw new IllegalArgumentException("Bài nộp không còn được lưu trên đĩa — không thể chấm lại.");
 
+        // Resolve testcase: hiện tại của đề → nếu mất thì snapshot của batch gốc (đề cũ vẫn chấm lại được)
+        String tc = resolveTestcasePath(examId, r.getBatchId());
+        if (tc == null)
+            throw new IllegalArgumentException(
+                    "Đề đã bị xóa và không còn snapshot testcase của bài này — không thể chấm lại.");
+
         String newBatchId = "BATCH_" + System.currentTimeMillis();
         GradingBatch batch = new GradingBatch();
         batch.setBatchId(newBatchId);
@@ -606,11 +615,11 @@ public class BatchGradingService {
         batch.setCreatedBy("regrade");
         batchRepo.save(batch);
 
-        // Copy zip sang folder batch mới + snapshot testcase đang dùng (audit lần chấm lại)
+        // Copy zip sang folder batch mới + snapshot testcase đã resolve (audit lần chấm lại)
         Path newZip = stagedZipPath(examId, newBatchId, studentId);
         Files.createDirectories(newZip.getParent());
         Files.copy(oldZip, newZip, StandardCopyOption.REPLACE_EXISTING);
-        snapshotTestcase(examId, newBatchId, exam.getTestcasePath());
+        snapshotTestcase(examId, newBatchId, tc);
 
         // Ghi đè chính bản ghi này: trỏ sang batch mới, reset kết quả lần chấm trước
         r.setBatchId(newBatchId);
@@ -621,9 +630,82 @@ public class BatchGradingService {
         r.setResultJson(null);
         resultRepo.save(r);
 
-        jobQueue.add(new GradingJob(studentId, r.getStudentName(), newBatchId, examId, newZip.toString()));
+        jobQueue.add(new GradingJob(studentId, r.getStudentName(), newBatchId, examId, newZip.toString(), tc));
         log.info("[{}] Chấm lại {} (đề {})", newBatchId, studentId, examId);
         return newBatchId;
+    }
+
+    /** Testcase để chấm lại: ưu tiên testcase HIỆN TẠI của đề; mất thì dùng SNAPSHOT của batch gốc. null = không có. */
+    private String resolveTestcasePath(String examId, String batchId) {
+        String tc = examRepo.findByExamId(examId).map(Exam::getTestcasePath).orElse(null);
+        if (tc != null && !tc.isBlank() && Files.exists(Path.of(tc))) return tc;
+        Path snap = batchDir(examId, batchId).resolve("_testcase");
+        if (Files.exists(snap)) return snap.toAbsolutePath().toString();
+        return null;
+    }
+
+    /**
+     * CHẤM LẠI NHIỀU bài cùng lúc → gộp vào MỘT batch mới (theo dõi tiến độ chung). Bỏ qua bài mất
+     * file/đề. Trả { batchId, queued, skipped:[...] }.
+     */
+    public Map<String, Object> regradeStudents(String examId, List<String> studentIds) throws Exception {
+        if (studentIds == null || studentIds.isEmpty())
+            throw new IllegalArgumentException("Chưa chọn bài nào để chấm lại.");
+
+        String newBatchId = "BATCH_" + System.currentTimeMillis();
+        GradingBatch batch = new GradingBatch();
+        batch.setBatchId(newBatchId);
+        batch.setExamId(examId);
+        batch.setCreatedBy("regrade");
+        batchRepo.save(batch);
+
+        List<GradingJob> jobs = new ArrayList<>();
+        List<String> skipped = new ArrayList<>();
+        String snapTc = null;
+        for (String sid : new java.util.LinkedHashSet<>(studentIds)) {
+            try {
+                ExamResult r = resultRepo.findByStudentIdAndExamIdAndMode(sid, examId, "submit").orElse(null);
+                if (r == null || r.getBatchId() == null) { skipped.add(sid); continue; }
+                Path oldZip = stagedZipPath(examId, r.getBatchId(), sid);
+                if (!Files.exists(oldZip)) { skipped.add(sid); continue; }
+                String tc = resolveTestcasePath(examId, r.getBatchId());
+                if (tc == null) { skipped.add(sid); continue; }
+                if (snapTc == null) snapTc = tc;
+
+                Path newZip = stagedZipPath(examId, newBatchId, sid);
+                Files.createDirectories(newZip.getParent());
+                Files.copy(oldZip, newZip, StandardCopyOption.REPLACE_EXISTING);
+
+                r.setBatchId(newBatchId);
+                r.setStatus(GradingStatus.QUEUED);
+                r.setScore(null); r.setDetails(null); r.setErrorLog(null); r.setResultJson(null);
+                resultRepo.save(r);
+
+                jobs.add(new GradingJob(sid, r.getStudentName(), newBatchId, examId, newZip.toString(), tc));
+            } catch (Exception e) {
+                skipped.add(sid);
+            }
+        }
+
+        batch.setTotalFiles(jobs.size());
+        batchRepo.save(batch);
+        if (snapTc != null) snapshotTestcase(examId, newBatchId, snapTc);
+
+        if (jobs.isEmpty()) {
+            batch.setStatus(BatchStatus.COMPLETED);
+            batch.setCompletedAt(Instant.now());
+            batchRepo.save(batch);
+            throw new IllegalArgumentException(
+                    "Không bài nào chấm lại được (mất file bài nộp hoặc testcase). Bỏ qua: " + String.join(", ", skipped));
+        }
+        jobs.forEach(jobQueue::add);
+        log.info("[{}] Chấm lại {} bài (đề {}), bỏ qua {}", newBatchId, jobs.size(), examId, skipped.size());
+
+        Map<String, Object> res = new LinkedHashMap<>();
+        res.put("batchId", newBatchId);
+        res.put("queued", jobs.size());
+        res.put("skipped", skipped);
+        return res;
     }
 
     public BatchProgressResponse getBatchProgress(String batchId) {

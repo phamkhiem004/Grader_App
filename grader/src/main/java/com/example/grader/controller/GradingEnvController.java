@@ -13,7 +13,8 @@ import java.util.Map;
 /**
  * Quản lý THƯ VIỆN môi trường chấm (pubspec.base.yaml của ảnh nền grading-base).
  *  - Đọc (GET): mở cho frontend hiển thị.
- *  - Ghi (POST /apply): cần đăng nhập; ghi pubspec + build lại ảnh nền (chạy nền), lỗi thì hoàn tác.
+ *  - Ghi (POST /apply): cần đăng nhập; ghi pubspec + cập nhật thư viện vào ảnh nền HIỆN CÓ
+ *    (docker commit, chạy nền — không tạo ảnh mới), lỗi thì hoàn tác.
  */
 @RestController
 @RequestMapping("/api/grading-env")

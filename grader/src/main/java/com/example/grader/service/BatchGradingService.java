@@ -57,6 +57,15 @@ public class BatchGradingService {
     @Autowired private CompetencyService  competencyService;
 
     private final ObjectMapper mapper = new ObjectMapper();
+    /** Bộ phân loại lỗi testcase (log thô → code/actual/message) — bao quát nhiều loại lỗi Dart/Flutter. */
+    private final TestErrorClassifier errorClassifier = new TestErrorClassifier();
+
+    /** Bộ đếm đảm bảo batchId DUY NHẤT ngay cả khi 2 request cùng mili-giây (cùng cột UNIQUE ở DB). */
+    private static final java.util.concurrent.atomic.AtomicLong BATCH_SEQ =
+            new java.util.concurrent.atomic.AtomicLong();
+    private static String genBatchId() {
+        return "BATCH_" + System.currentTimeMillis() + "_" + Long.toHexString(BATCH_SEQ.incrementAndGet());
+    }
     private ExecutorService executor;
     private final BlockingQueue<GradingJob> jobQueue = new LinkedBlockingQueue<>();
 
@@ -110,7 +119,7 @@ public class BatchGradingService {
         if (exam.getStatus() != ExamStatus.READY)
             throw new IllegalStateException("Đề thi chưa READY: " + exam.getStatus());
 
-        String batchId = "BATCH_" + System.currentTimeMillis();
+        String batchId = genBatchId();
         GradingBatch batch = new GradingBatch();
         batch.setBatchId(batchId);
         batch.setExamId(examId);
@@ -286,6 +295,10 @@ public class BatchGradingService {
             // Bổ sung skill_code/difficulty từ skills_matrix.json của đề (nguồn sự thật) cho mỗi testcase
             enrichTestCases(testCases, exam);
 
+            // Chuẩn hoá lỗi từng testcase FAIL: log thô của flutter test (Expected/Actual + stack trace
+            // dài như "log backend") → { code, message } gọn, sạch để AI nhận xét tốt & FE hiển thị đẹp.
+            sanitizeTestCaseErrors(testCases);
+
             // Gắn nhãn KIẾN THỨC (skill_name/category/category_label) + ĐỘ KHÓ cho từng testcase,
             // rồi tính NĂNG LỰC theo category — dùng chung 1 resolver.
             try {
@@ -353,6 +366,45 @@ public class BatchGradingService {
         if (cur == null || String.valueOf(cur).isBlank()) tc.put(key, val);
     }
 
+    // ════════════════════════════════════════════════════════════════════════════
+    //  CHUẨN HOÁ LỖI TESTCASE: log thô flutter test → actual (giá trị thực) + error{code,message}
+    // ════════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Với mỗi testcase FAIL, biến `actual` (log THÔ của flutter test — Expected/Actual rồi stack
+     * trace dài, "EXCEPTION CAUGHT BY...", cây widget → trông như "log backend") thành:
+     *   - `actual`      = KẾT QUẢ THỰC TẾ gọn (giá trị/để so với `expected` của rubric), vd "1".
+     *   - `error.code`  = loại lỗi (VALUE_MISMATCH | WIDGET_NOT_FOUND | EXCEPTION_THROWN | ASSERTION_FAILED).
+     *   - `error.message` = LÝ DO/giải thích vì sao sai (reason của assertion) — KHÔNG lặp lại giá trị.
+     * Nhờ vậy 4 trường bổ sung nhau, không trùng nhau, AI & GV đọc đều rõ.
+     */
+    private void sanitizeTestCaseErrors(List<Map<String, Object>> tcs) {
+        for (Map<String, Object> tc : tcs) {
+            String status = String.valueOf(tc.getOrDefault("status", "")).toLowerCase();
+            if (!status.contains("fail")) continue;                 // chỉ xử lý câu fail
+            Object rawObj = tc.get("actual");
+            if (rawObj == null || String.valueOf(rawObj).isBlank()) rawObj = tc.get("error_log");
+            String raw = rawObj == null ? "" : String.valueOf(rawObj);
+            if (raw.isBlank()) continue;
+            applyStructuredError(tc, raw);
+        }
+    }
+
+    /**
+     * Chuẩn hoá 1 lỗi: nhờ {@link TestErrorClassifier} phân loại log thô → { code, actual, message }
+     * rồi gắn vào testcase. Mọi logic phân loại nằm tập trung trong classifier (dễ mở rộng loại lỗi).
+     */
+    private void applyStructuredError(Map<String, Object> tc, String raw) {
+        TestErrorClassifier.Result res = errorClassifier.classify(raw);
+        String actual = res.actual();
+        if (actual != null && !actual.isBlank()) tc.put("actual", actual);
+        else tc.remove("actual");                       // không có giá trị thực → bỏ field cho gọn
+        Map<String, Object> err = new LinkedHashMap<>();
+        err.put("code", res.code());
+        err.put("message", TestErrorClassifier.shorten(res.message(), 240));
+        tc.put("error", err);
+    }
+
     /** Giới hạn độ dài log lỗi để không phình DB / không tràn cột. */
     private static final int MAX_ERROR_LOG = 60_000;
 
@@ -372,15 +424,22 @@ public class BatchGradingService {
 
     private void checkBatchComplete(String batchId) {
         batchRepo.findByBatchId(batchId).ifPresent(b -> {
-            int done  = b.getDoneCount()  != null ? b.getDoneCount()  : 0;
-            int error = b.getErrorCount() != null ? b.getErrorCount() : 0;
-            int total = b.getTotalFiles() != null ? b.getTotalFiles() : 0;
-            if (done + error >= total) {
+            // Đếm TRẠNG THÁI THẬT từ exam_results → tự lành nếu bộ đếm trên batch bị lệch (crash
+            // giữa lúc lưu status và incrementCounts) → batch không còn kẹt IN_PROGRESS vĩnh viễn.
+            long done    = resultRepo.countByBatchIdAndStatus(batchId, GradingStatus.DONE);
+            long error   = resultRepo.countByBatchIdAndStatus(batchId, GradingStatus.ERROR);
+            long pending = resultRepo.countByBatchIdAndStatus(batchId, GradingStatus.QUEUED)
+                         + resultRepo.countByBatchIdAndStatus(batchId, GradingStatus.GRADING);
+            b.setDoneCount((int) done);      // đồng bộ lại bộ đếm hiển thị (thông báo) theo số THẬT
+            b.setErrorCount((int) error);
+            // Hoàn tất khi KHÔNG còn bài chờ/đang chấm (không phụ thuộc totalFiles có thể lệch).
+            // Guard completedAt: chỉ đóng batch + ghi mốc 1 lần (tránh 2 worker cuối đóng 2 lần).
+            if (pending == 0 && b.getCompletedAt() == null) {
                 b.setStatus(error == 0 ? BatchStatus.COMPLETED : BatchStatus.PARTIAL);
                 b.setCompletedAt(Instant.now());
-                batchRepo.save(b);
-                log.info("[{}] Batch hoàn tất {}/{}", batchId, done, total);
+                log.info("[{}] Batch hoàn tất: {} đạt / {} lỗi", batchId, done, error);
             }
+            batchRepo.save(b);
         });
     }
 
@@ -592,6 +651,7 @@ public class BatchGradingService {
      * batch gốc (submissions/&lt;đề&gt;/&lt;batch&gt;/_testcase/) → vẫn chấm lại được bài của ĐỀ CŨ.
      */
     public String regradeStudent(String examId, String studentId) throws Exception {
+        ExamService.safeId(examId, "đề"); ExamService.safeId(studentId, "SV");
         ExamResult r = resultRepo.findByStudentIdAndExamIdAndMode(studentId, examId, "submit")
                 .orElseThrow(() -> new IllegalArgumentException("Không tìm thấy bài nộp của " + studentId));
         if (r.getBatchId() == null)
@@ -607,7 +667,7 @@ public class BatchGradingService {
             throw new IllegalArgumentException(
                     "Đề đã bị xóa và không còn snapshot testcase của bài này — không thể chấm lại.");
 
-        String newBatchId = "BATCH_" + System.currentTimeMillis();
+        String newBatchId = genBatchId();
         GradingBatch batch = new GradingBatch();
         batch.setBatchId(newBatchId);
         batch.setExamId(examId);
@@ -649,10 +709,11 @@ public class BatchGradingService {
      * file/đề. Trả { batchId, queued, skipped:[...] }.
      */
     public Map<String, Object> regradeStudents(String examId, List<String> studentIds) throws Exception {
+        ExamService.safeId(examId, "đề");
         if (studentIds == null || studentIds.isEmpty())
             throw new IllegalArgumentException("Chưa chọn bài nào để chấm lại.");
 
-        String newBatchId = "BATCH_" + System.currentTimeMillis();
+        String newBatchId = genBatchId();
         GradingBatch batch = new GradingBatch();
         batch.setBatchId(newBatchId);
         batch.setExamId(examId);
@@ -708,13 +769,24 @@ public class BatchGradingService {
         return res;
     }
 
+    /** Chấm lại TOÀN BỘ bài đã nộp của 1 đề (gom 1 batch). Dùng cho nút "Chấm lại đề" ở Kho đề. */
+    public Map<String, Object> regradeExam(String examId) throws Exception {
+        ExamService.safeId(examId, "đề");
+        List<String> ids = resultRepo.findSubmitStudentIds(examId);
+        if (ids.isEmpty())
+            throw new IllegalArgumentException("Đề " + examId + " chưa có bài nộp nào để chấm lại.");
+        return regradeStudents(examId, ids);
+    }
+
     public BatchProgressResponse getBatchProgress(String batchId) {
-        List<ExamResult> all = resultRepo.findByBatchIdOrderByStudentId(batchId);
-        long done    = all.stream().filter(r -> r.getStatus() == GradingStatus.DONE).count();
-        long grading = all.stream().filter(r -> r.getStatus() == GradingStatus.GRADING).count();
-        long queued  = all.stream().filter(r -> r.getStatus() == GradingStatus.QUEUED).count();
-        long error   = all.stream().filter(r -> r.getStatus() == GradingStatus.ERROR).count();
-        return new BatchProgressResponse(batchId, all.size(), done, grading, queued, error, all);
+        // Đếm trạng thái bằng COUNT ở DB; danh sách dùng projection NHẸ (không kéo result_json) →
+        // poll 3s với batch lớn không còn tốn RAM/băng thông.
+        long done    = resultRepo.countByBatchIdAndStatus(batchId, GradingStatus.DONE);
+        long grading = resultRepo.countByBatchIdAndStatus(batchId, GradingStatus.GRADING);
+        long queued  = resultRepo.countByBatchIdAndStatus(batchId, GradingStatus.QUEUED);
+        long error   = resultRepo.countByBatchIdAndStatus(batchId, GradingStatus.ERROR);
+        List<com.example.grader.dto.ResultRow> rows = resultRepo.findRowsByBatchId(batchId);
+        return new BatchProgressResponse(batchId, rows.size(), done, grading, queued, error, rows);
     }
 
     // ── Helpers ──────────────────────────────────────────────────
@@ -732,7 +804,7 @@ public class BatchGradingService {
         int sep = name.indexOf('_');
         if (sep < 1) throw new IllegalArgumentException("Sai format — cần: MaSV_Ten.zip");
         return new StudentInfo(
-                name.substring(0, sep).trim().toUpperCase(),
+                ExamService.safeId(name.substring(0, sep).trim().toUpperCase(), "SV"),  // chặn path traversal
                 name.substring(sep + 1).replace("_", " ").trim()
         );
     }

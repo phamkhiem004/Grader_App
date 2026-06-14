@@ -92,8 +92,10 @@ Từ ĐỀ BÀI ở cuối, hãy sinh ra ĐÚNG 3 file: `exam_test.dart`, `grade
      `await tester.pumpWidget(MaterialApp(home: ...))` rồi `await tester.pumpAndSettle()`
      (nếu có animation lặp vô hạn thì dùng `pump(Duration(...))` thay vì `pumpAndSettle`).
    - Mỗi test kiểm tra một tiêu chí rõ ràng, dùng `expect(...)`.
-   - NÊN thêm `reason:` vào `expect(...)` để khi fail có thông báo dễ hiểu (grader lưu vào trường
-     `actual` cho AI đọc): `expect(found, isTrue, reason: 'Phải hiển thị nút Đăng ký');`
+   - **QUAN TRỌNG: thêm `reason:` rõ nghĩa vào MỌI `expect(...)`** — grader đưa câu này vào log lỗi,
+     backend tự tách thành `error.message` (lý do) + `error.code` (loại lỗi) + `actual` (giá trị thực)
+     cho AI/GV đọc: `expect(found, isTrue, reason: 'Phải hiển thị nút Đăng ký');`. Thiếu `reason:` thì
+     `error.message` chỉ còn câu mặc định chung chung.
 5. Mỗi test phải ĐỘC LẬP (không phụ thuộc thứ tự chạy, không chia sẻ state toàn cục).
 
 ## ĐỘ KHÓ & CHO ĐIỂM (BẮT BUỘC theo đây)
@@ -297,9 +299,12 @@ String _clean(String s) {
   final t = s
       .replaceAll(RegExp(r'[═╡╞║╔╗╚╝╠╣╬─│┌┐└┘├┤┬┴┼]+'), ' ')
       .replaceAll('EXCEPTION CAUGHT BY FLUTTER TEST FRAMEWORK', '')
-      .replaceAll(RegExp(r'\s+'), ' ')
+      // GỘP space/tab trong dòng nhưng GIỮ '\n' — để backend tách được Expected:/Actual:/reason
+      // → phân loại lỗi (error.code) + actual gọn chính xác. ĐỪNG gộp '\n' thành ' '.
+      .replaceAll(RegExp(r'[ \t]+'), ' ')
+      .replaceAll(RegExp(r'\n{2,}'), '\n')
       .trim();
-  return t.length > 600 ? t.substring(0, 600) : t;
+  return t.length > 1200 ? '${t.substring(0, 1200)}…' : t;
 }
 
 // ĐIỂM THEO ĐỘ KHÓ: basic=1, intermediate=2, advanced=3 (null nếu không khai difficulty → dùng weight).

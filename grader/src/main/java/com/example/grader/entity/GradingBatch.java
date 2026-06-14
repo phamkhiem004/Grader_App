@@ -17,7 +17,7 @@ public class GradingBatch {
     @Column(name = "id", nullable = false)
     private Long id;
 
-    @Column(name = "batch_id", nullable = false, length = 60)
+    @Column(name = "batch_id", nullable = false, length = 80, unique = true)
     private String batchId;
 
     @Column(name = "exam_id", nullable = false, length = 50)

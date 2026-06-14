@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import SidebarLayout from "@/components/layout/SidebarLayout";
 import { API_BASE, PASS_THRESHOLD } from "@/lib/config";
+import { getToken } from "@/lib/auth";
 import { Skeleton, SkeletonRow } from "@/components/ui/Skeleton";
 import { Tooltip } from "@/components/ui/Tooltip";
 import CompetencyPanel, { CompetencyItem } from "@/components/grading/CompetencyPanel";
@@ -14,11 +15,13 @@ import {
 } from "lucide-react";
 
 interface ExamOption { examId: string; examName: string; }
+interface TestError { code?: string; message?: string; }
 interface TestCaseItem {
   test_id?: string; name?: string; status?: string; weight?: number;
   skill_code?: string; skill_name?: string; category_label?: string;
   difficulty?: string; skill?: string;
   expected?: string; actual?: string; error_log?: string;
+  error?: TestError;
 }
 
 const DIFF_BADGE: Record<string, string> = {
@@ -47,11 +50,51 @@ interface ResultRow {
 }
 interface CodeFile { name: string; content: string; }
 
+// Màu badge theo nhóm: sai giá trị (rose) · widget/UI (amber/orange) · exception runtime (red) · khác (slate).
+const ERR_BADGE: Record<string, string> = {
+  VALUE_MISMATCH: "bg-rose-100 text-rose-700",
+  ASSERTION_FAILED: "bg-slate-100 text-slate-600",
+  WIDGET_NOT_FOUND: "bg-amber-100 text-amber-700",
+  WIDGET_UNEXPECTED: "bg-amber-100 text-amber-700",
+  WIDGET_COUNT: "bg-amber-100 text-amber-700",
+  LAYOUT_OVERFLOW: "bg-orange-100 text-orange-700",
+  TIMEOUT: "bg-orange-100 text-orange-700",
+  NULL_ERROR: "bg-red-100 text-red-700",
+  TYPE_ERROR: "bg-red-100 text-red-700",
+  RANGE_ERROR: "bg-red-100 text-red-700",
+  NO_SUCH_METHOD: "bg-red-100 text-red-700",
+  FORMAT_ERROR: "bg-red-100 text-red-700",
+  STATE_ERROR: "bg-red-100 text-red-700",
+  BUILD_ERROR: "bg-red-100 text-red-700",
+  EXCEPTION_THROWN: "bg-red-100 text-red-700",
+};
+
 /**
- * Khối ĐỎ chi tiết lỗi 1 testcase fail: Yêu cầu (rubric) · Expected · Actual (thực tế) · Lý do.
- * `actual` là output thô của flutter test → tách Expected/Actual/lý do; nếu là exception widget thì diễn giải.
+ * Khối ĐỎ chi tiết lỗi 1 testcase fail.
+ * Ưu tiên `error` có cấu trúc { code, message } (backend mới đã làm sạch); nếu không có thì fallback
+ * parse log THÔ của flutter test (bài cũ): tách Expected/Actual/lý do, diễn giải exception widget.
  */
-function FailureDetail({ requirement, actual }: { requirement?: string; actual?: string }) {
+function FailureDetail({ requirement, actual, error }:
+  { requirement?: string; actual?: string; error?: TestError }) {
+  // Đường mới: Mong đợi (rubric) · Thực tế (giá trị) · Lỗi [code] + lý do — không còn stack trace.
+  if (error && (error.code || error.message)) {
+    return (
+      <div className="mt-1 space-y-0.5 pl-3.5 text-[11px] text-rose-500">
+        {requirement && <p><span className="font-semibold">Mong đợi:</span> <span className="font-mono">{requirement}</span></p>}
+        {actual && <p><span className="font-semibold">Thực tế:</span> <span className="font-mono">{actual}</span></p>}
+        <p className="flex flex-wrap items-baseline gap-1.5">
+          <span className="font-semibold">Lỗi:</span>
+          {error.code && (
+            <span className={`rounded px-1.5 py-0.5 font-mono text-[10px] font-semibold ${ERR_BADGE[error.code] || "bg-slate-100 text-slate-600"}`}>
+              {error.code}
+            </span>
+          )}
+          {error.message && <span>{error.message}</span>}
+        </p>
+      </div>
+    );
+  }
+
   const t = (actual || "").trim();
   const isWidget = /Test failed\.?\s*See exception logs above/i.test(t);
   const tcId = t.match(/TC_[A-Z0-9_]+/)?.[0];
@@ -237,7 +280,7 @@ export default function HistoryPage() {
     setRegradingId(r.studentId);
     setRows((list) => list.map((x) => (x.studentId === r.studentId ? { ...x, status: "GRADING", score: null, errorLog: null } : x)));
     try {
-      const res = await fetch(`${API_BASE}/batch/regrade/${encodeURIComponent(selected)}/${encodeURIComponent(r.studentId)}`, { method: "POST" });
+      const res = await fetch(`${API_BASE}/batch/regrade/${encodeURIComponent(selected)}/${encodeURIComponent(r.studentId)}`, { method: "POST", headers: { Authorization: `Bearer ${getToken() ?? ""}` } });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Chấm lại thất bại");
       const batchId = data.batchId as string;
@@ -271,7 +314,7 @@ export default function HistoryPage() {
     setSelectedIds(new Set());
     try {
       const res = await fetch(`${API_BASE}/batch/regrade-batch/${encodeURIComponent(selected)}`, {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ studentIds: ids }),
+        method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` }, body: JSON.stringify({ studentIds: ids }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Chấm lại thất bại");
@@ -727,8 +770,8 @@ export default function HistoryPage() {
                                   {tc.skill_code}
                                 </p>
                               )}
-                              {!passed && (tc.expected || tc.actual || tc.error_log) && (
-                                <FailureDetail requirement={tc.expected} actual={tc.actual || tc.error_log} />
+                              {!passed && (tc.error || tc.expected || tc.actual || tc.error_log) && (
+                                <FailureDetail requirement={tc.expected} actual={tc.actual || tc.error_log} error={tc.error} />
                               )}
                             </div>
                           );

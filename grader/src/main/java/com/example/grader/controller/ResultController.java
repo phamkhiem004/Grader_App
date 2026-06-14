@@ -26,6 +26,8 @@ public class ResultController {
 
     @Autowired
     private ExamResultRepository resultRepo;
+    @Autowired
+    private com.example.grader.service.AuthService authService;
 
     private final ObjectMapper mapper = new ObjectMapper();
 
@@ -72,8 +74,16 @@ public class ResultController {
 
     /** Lưu điểm chấm TAY theo tiêu chí. Body: { score, criteria:[...], note, gradedBy }. */
     @PostMapping("/{examId}/{studentId}/manual")
-    public ResponseEntity<?> saveManual(@PathVariable String examId, @PathVariable String studentId,
+    public ResponseEntity<?> saveManual(@RequestHeader(value = "Authorization", required = false) String authz,
+                                        @PathVariable String examId, @PathVariable String studentId,
                                         @RequestBody Map<String, Object> body) {
+        // GV chấm tay phải đăng nhập; tên người chấm LẤY TỪ TOKEN (không tin "gradedBy" trong body
+        // → tránh mạo danh GV khác khi sửa điểm).
+        String token = (authz != null && authz.startsWith("Bearer ")) ? authz.substring(7).trim() : null;
+        String gradedBy;
+        try { gradedBy = authService.me(token).email(); }
+        catch (Exception e) { return ResponseEntity.status(401).body(Map.of("error", "Cần đăng nhập để lưu điểm chấm tay.")); }
+
         ExamResult r = resultRepo.findByStudentIdAndExamIdAndMode(studentId, examId, "submit").orElse(null);
         if (r == null) return ResponseEntity.status(404).body(Map.of("error", "Không tìm thấy bài nộp"));
         try {
@@ -83,8 +93,7 @@ public class ResultController {
             payload.put("criteria", body.get("criteria"));
             payload.put("note", body.get("note"));
             r.setManualJson(mapper.writeValueAsString(payload));
-            Object by = body.get("gradedBy");
-            if (by != null) r.setManualBy(by.toString());
+            r.setManualBy(gradedBy);                 // từ token, KHÔNG từ body
             r.setManualAt(java.time.Instant.now());
             resultRepo.save(r);
             return ResponseEntity.ok(Map.of("ok", true, "manualScore",

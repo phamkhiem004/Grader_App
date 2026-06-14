@@ -16,6 +16,21 @@ public interface ExamResultRepository extends JpaRepository<ExamResult, Long> {
     // Lấy toàn bộ bài trong 1 batch
     List<ExamResult> findByBatchIdOrderByStudentId(String batchId);
 
+    // NHẸ cho /batch/progress (poll 3s): bỏ cột LONGTEXT result_json/manual_json
+    @Query("select new com.example.grader.dto.ResultRow(r.id, r.studentId, r.studentName, " +
+           "r.status, r.score, r.details, r.errorLog) from ExamResult r " +
+           "where r.batchId = :batchId order by r.studentId")
+    List<com.example.grader.dto.ResultRow> findRowsByBatchId(@Param("batchId") String batchId);
+
+    // NHẸ cho Thống kê: chỉ điểm/trạng thái/mốc thời gian (không kéo LONGTEXT)
+    @Query("select new com.example.grader.dto.ResultStat(r.studentId, r.mode, r.score, r.status, " +
+           "r.submittedAt, r.updatedAt) from ExamResult r")
+    List<com.example.grader.dto.ResultStat> findAllStats();
+
+    @Query("select new com.example.grader.dto.ResultStat(r.studentId, r.mode, r.score, r.status, " +
+           "r.submittedAt, r.updatedAt) from ExamResult r where r.examId = :examId")
+    List<com.example.grader.dto.ResultStat> findStatsByExamId(@Param("examId") String examId);
+
     // Lấy toàn bộ bài của 1 đề thi — dùng cho thống kê
     List<ExamResult> findByExamId(String examId);
 
@@ -32,6 +47,11 @@ public interface ExamResultRepository extends JpaRepository<ExamResult, Long> {
     // Danh sách examId đã từng được chấm — dùng để lọc dropdown thống kê
     @Query("select distinct r.examId from ExamResult r where r.examId is not null")
     List<String> findDistinctExamIds();
+
+    // Danh sách mã SV đã NỘP của 1 đề (nhẹ — không kéo resultJson). Dùng cho trang Kho đề + chấm lại cả đề.
+    @Query("select distinct r.studentId from ExamResult r " +
+           "where r.examId = :examId and (r.mode is null or r.mode = 'submit')")
+    List<String> findSubmitStudentIds(@Param("examId") String examId);
 
     // Tìm 1 bài cụ thể trong batch
     Optional<ExamResult> findByStudentIdAndBatchId(String studentId, String batchId);

@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import SidebarLayout from "@/components/layout/SidebarLayout";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { API_BASE, PASS_THRESHOLD } from "@/lib/config";
+import { getToken } from "@/lib/auth";
 import { Skeleton, SkeletonRow } from "@/components/ui/Skeleton";
 import { Tooltip } from "@/components/ui/Tooltip";
 import {
@@ -190,8 +191,8 @@ export default function WorkspacePage() {
     try {
       const res = await fetch(`${API_BASE}/results/${encodeURIComponent(examId)}/${encodeURIComponent(studentId)}/manual`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ score: manualDisplay, criteria: criteriaPayload, note, gradedBy: teacher?.email }),
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` },
+        body: JSON.stringify({ score: manualDisplay, criteria: criteriaPayload, note }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Lưu thất bại");

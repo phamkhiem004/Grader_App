@@ -51,6 +51,9 @@ public class ExamService {
     @Value("${grader.image.prefix:grading-env}")
     private String imagePrefix;
 
+    @Value("${grader.submissions-dir:submissions}")
+    private String submissionsDir;
+
     private final AtomicBoolean baseImageReady = new AtomicBoolean(false);
     private final ObjectMapper mapper = new ObjectMapper();
 
@@ -66,6 +69,19 @@ public class ExamService {
     private ExamRepository examRepository;
     @Autowired
     private SyllabusService syllabusService;
+    @Autowired
+    private com.example.grader.repository.ExamResultRepository resultRepository;
+
+    /**
+     * Chặn PATH TRAVERSAL: mã đề/SV chỉ được chứa chữ/số/_/- (vd PE_50, FLUTTER_PE_01, HE123456).
+     * Mọi nơi ghép id vào đường dẫn file/lệnh docker PHẢI gọi hàm này trước.
+     */
+    public static String safeId(String id, String what) {
+        if (id == null || !id.matches("[A-Za-z0-9_-]{1,60}"))
+            throw new IllegalArgumentException(
+                    "Mã " + what + " không hợp lệ: '" + id + "' (chỉ gồm a-z, A-Z, 0-9, _, -).");
+        return id;
+    }
 
     // ── Rubric chấm tay: đọc tiêu chí từ skills_matrix.json của đề ──
     public List<Map<String, Object>> getCriteria(String examId) throws Exception {
@@ -102,6 +118,7 @@ public class ExamService {
      * có thì đọc trực tiếp thư mục trên đĩa <exams>/<examId>/testcase/ (đề mẫu chưa upload).
      */
     public String readSkillsMatrixJson(String examId) throws Exception {
+        safeId(examId, "đề");
         Exam exam = examRepository.findByExamId(examId).orElse(null);
         if (exam != null && exam.getTestcasePath() != null && !exam.getTestcasePath().isBlank()) {
             Path f = Path.of(exam.getTestcasePath()).resolve("skills_matrix.json");
@@ -154,14 +171,70 @@ public class ExamService {
             log.warn("Quét thư mục exams lỗi: {}", e.getMessage());
         }
 
+        // Bổ sung số bài đã nộp của mỗi đề (cho trang Kho đề biết đề nào còn dữ liệu)
+        for (Map<String, Object> m : byId.values()) {
+            try { m.put("resultCount", resultRepository.findSubmitStudentIds(String.valueOf(m.get("examId"))).size()); }
+            catch (Exception e) { m.put("resultCount", 0); }
+        }
+
         List<Map<String, Object>> out = new ArrayList<>(byId.values());
         out.sort((a, b) -> String.valueOf(a.get("examId")).compareTo(String.valueOf(b.get("examId"))));
         return out;
     }
 
+    /**
+     * Đọc các file testcase của 1 ĐỀ (theo examId) để xem/đối chiếu trong trang Kho đề:
+     * exam_test.dart, skills_matrix.json, grader.dart... Ưu tiên testcasePath trong DB, fallback đĩa.
+     */
+    public List<Map<String, String>> readExamTestcaseFiles(String examId) {
+        safeId(examId, "đề");
+        List<Map<String, String>> out = new ArrayList<>();
+        Path dir = null;
+        Exam exam = examRepository.findByExamId(examId).orElse(null);
+        if (exam != null && exam.getTestcasePath() != null && !exam.getTestcasePath().isBlank()
+                && Files.exists(Path.of(exam.getTestcasePath()))) {
+            dir = Path.of(exam.getTestcasePath());
+        } else {
+            Path disk = examsRoot().resolve(examId).resolve("testcase");
+            if (Files.exists(disk)) dir = disk;
+        }
+        if (dir == null) return out;
+
+        final Path base = dir;
+        final int MAX_BYTES = 200_000;
+        try (Stream<Path> s = Files.walk(base)) {
+            for (Path p : s.filter(Files::isRegularFile).toList()) {
+                String name = base.relativize(p).toString().replace('\\', '/');
+                String lower = name.toLowerCase();
+                if (!(lower.endsWith(".dart") || lower.endsWith(".json") || lower.endsWith(".yaml")
+                        || lower.endsWith(".yml") || lower.endsWith(".md") || lower.endsWith(".txt"))) continue;
+                String content = Files.readString(p);
+                if (content.length() > MAX_BYTES) content = content.substring(0, MAX_BYTES) + "\n… (đã cắt bớt)";
+                Map<String, String> m = new LinkedHashMap<>();
+                m.put("name", name);
+                m.put("content", content);
+                out.add(m);
+            }
+        } catch (Exception e) {
+            log.warn("Đọc testcase đề {} lỗi: {}", examId, e.getMessage());
+        }
+        out.sort((a, b) -> rankTestcaseFile(a.get("name")) - rankTestcaseFile(b.get("name")));
+        return out;
+    }
+
+    /** exam_test.dart → skills_matrix.json → grader.dart → còn lại (cho dễ đọc trên UI). */
+    private int rankTestcaseFile(String name) {
+        String n = name.toLowerCase();
+        if (n.endsWith("exam_test.dart"))     return 0;
+        if (n.endsWith("skills_matrix.json")) return 1;
+        if (n.endsWith("grader.dart"))        return 2;
+        return 3;
+    }
+
     // ── Setup đề: chỉ lưu testcase (mount lúc chấm), KHÔNG build image ──
     public ExamSetupResponse setupExam(String examId, String examName,
                                        String teacherNote, MultipartFile testcaseZip) throws Exception {
+        safeId(examId, "đề");                 // chặn path traversal khi tạo exams/<examId>/testcase
         Path tmplDir = locateTemplateDir();
         ensureBaseImage(tmplDir);   // vẫn cần ảnh nền (container chạy từ đây)
 
@@ -187,8 +260,9 @@ public class ExamService {
         return new ExamSetupResponse(examId, baseImage, "READY");
     }
 
-    // ── Xóa đề: gỡ ảnh per-exam cũ (legacy) nếu còn + testcase + DB ──
+    // ── Xóa đề: gỡ ảnh legacy + testcase + TOÀN BỘ bài nộp (submissions) + bản ghi đề (DB) ──
     public Map<String, Object> deleteExam(String examId) {
+        safeId(examId, "đề");
         boolean imageRemoved = false;
         try {
             imageRemoved = runDocker(
@@ -202,14 +276,25 @@ public class ExamService {
             if (Files.exists(examDir)) deleteRecursively(examDir);
         } catch (Exception ignored) {}
 
+        // Xóa CẢ thư mục bài nộp submissions/<đề>/ (zip + snapshot testcase) → giải phóng dung lượng.
+        boolean submissionsRemoved = false;
+        try {
+            Path subDir = resolveSibling(submissionsDir).resolve(examId);
+            if (Files.exists(subDir)) { deleteRecursively(subDir); submissionsRemoved = true; }
+        } catch (Exception e) {
+            log.warn("Không xóa được submissions của {}: {}", examId, e.getMessage());
+        }
+
         boolean dbRemoved = examRepository.findByExamId(examId)
                 .map(e -> { examRepository.delete(e); return true; })
                 .orElse(false);
 
-        log.info("🗑️ Đã xóa đề {} (ảnh legacy: {}, DB: {})", examId, imageRemoved, dbRemoved);
+        log.info("🗑️ Đã xóa đề {} (ảnh legacy: {}, submissions: {}, DB: {})",
+                examId, imageRemoved, submissionsRemoved, dbRemoved);
         Map<String, Object> r = new LinkedHashMap<>();
         r.put("examId", examId);
         r.put("imageRemoved", imageRemoved);
+        r.put("submissionsRemoved", submissionsRemoved);
         r.put("dbRecordRemoved", dbRemoved);
         return r;
     }
@@ -358,7 +443,8 @@ public class ExamService {
 
     /**
      * Ghi danh sách package (desired = các package SỬA ĐƯỢC, không gồm flutter lõi) vào
-     * pubspec.base.yaml rồi BUILD LẠI ảnh nền — chạy nền. Lỗi resolve/build → HOÀN TÁC pubspec.
+     * pubspec.base.yaml rồi CẬP NHẬT thư viện vào ảnh nền HIỆN CÓ (docker commit, KHÔNG build
+     * ảnh mới) — chạy nền. Lỗi resolve/pub get → HOÀN TÁC pubspec, ảnh nền giữ nguyên.
      */
     public Map<String, Object> applyPackages(List<Map<String, Object>> desired) {
         synchronized (envLock) {
@@ -377,29 +463,27 @@ public class ExamService {
     private void doApplyPackages(List<Map<String, Object>> desired) {
         Path pubspec = basePubspec();
         String snapshot = null;
+        StringBuilder logBuf = new StringBuilder();
         try {
+            // Đảm bảo ĐÃ CÓ ảnh nền (build 1 lần duy nhất nếu máy chưa có); sau đó chỉ CẬP NHẬT tại chỗ.
+            ensureBaseImage(locateTemplateDir());
+
             snapshot = Files.readString(pubspec);
 
             // 1) Resolve version cho package chưa khai version (flutter pub add trong container ephemeral)
             List<String[]> resolved = resolveVersions(desired);
 
-            // 2) Ghi khối dependencies
+            // 2) Ghi khối dependencies vào pubspec.base.yaml (nguồn sự thật để validate khi upload đề)
             writeDependenciesBlock(pubspec, resolved);
 
-            // 3) Build lại ảnh nền (capture log live)
-            setEnv("BUILDING", "Đang build ảnh nền (vài phút)...", envLog);
-            Path tmpl = locateTemplateDir();
-            StringBuilder log = new StringBuilder();
-            int exit = runDockerCapture(List.of(
-                    "docker", "build",
-                    "-f", tmpl.resolve("Dockerfile.base").toAbsolutePath().toString(),
-                    "-t", baseImage,
-                    tmpl.toAbsolutePath().toString()), log);
-            if (exit != 0) throw new RuntimeException("docker build thất bại (exit " + exit + ")");
+            // 3) CẬP NHẬT thư viện vào ẢNH NỀN HIỆN CÓ bằng docker commit — KHÔNG build/tạo ảnh mới,
+            //    nên không tích tụ image dangling, không phình dung lượng đĩa.
+            setEnv("BUILDING", "Đang cập nhật thư viện vào ảnh nền chấm...", envLog);
+            updateBaseImageInPlace(pubspec, logBuf);
 
             baseImageReady.set(true);
-            setEnv("READY", "Đã cập nhật môi trường chấm (" + resolved.size() + " thư viện).", tail(log.toString()));
-            ExamService.log.info("✅ Build lại môi trường chấm xong: {} thư viện", resolved.size());
+            setEnv("READY", "Đã cập nhật môi trường chấm (" + resolved.size() + " thư viện).", tail(logBuf.toString()));
+            ExamService.log.info("✅ Cập nhật thư viện vào ảnh nền xong: {} thư viện", resolved.size());
 
         } catch (Exception e) {
             if (snapshot != null) {
@@ -407,8 +491,51 @@ public class ExamService {
                 catch (Exception ex) { log.warn("Revert pubspec lỗi: {}", ex.getMessage()); }
             }
             setEnv("FAILED", "Lỗi: " + e.getMessage() + " — đã hoàn tác thay đổi.", envLog);
-            ExamService.log.warn("❌ Build lại môi trường chấm thất bại: {}", e.getMessage());
+            ExamService.log.warn("❌ Cập nhật thư viện vào ảnh nền thất bại: {}", e.getMessage());
         }
+    }
+
+    /**
+     * Cập nhật danh sách thư viện vào CHÍNH ảnh nền {@code grading-base:latest} đang có, thay vì
+     * build một ảnh mới. Cách làm:
+     *   1) chạy 1 container "giữ-sống" từ chính ảnh nền hiện có,
+     *   2) ghi pubspec mới vào /app rồi {@code flutter pub get} (tải gói về pub-cache + cập nhật
+     *      pubspec.lock và .dart_tool/package_config.json) — y như bước build gốc,
+     *   3) {@code docker commit} container đó NGƯỢC LẠI đúng tag {@code grading-base:latest}.
+     * Layer nền (~4.5GB) được DÙNG CHUNG nên chỉ phát sinh 1 lớp diff nhỏ; ảnh cũ trở thành lớp cha
+     * của ảnh mới (không tốn dung lượng riêng) → "tạo image 1 lần, dùng mãi mãi".
+     */
+    private void updateBaseImageInPlace(Path pubspec, StringBuilder out) throws Exception {
+        String content = Files.readString(pubspec);
+        String cid = "grader-env-update-" + System.currentTimeMillis();
+        try {
+            // 1) Container giữ-sống từ CHÍNH ảnh nền hiện có (ghi đè CMD = sleep, ENTRYPOINT vẫn null).
+            if (runDockerCapture(List.of(
+                    "docker", "run", "-d", "--name", cid, baseImage, "sleep", "infinity"), out) != 0)
+                throw new RuntimeException("Không khởi động được container cập nhật môi trường.");
+
+            // 2) Ghi pubspec mới vào /app (qua stdin để khỏi phụ thuộc mount/đường dẫn Windows) rồi pub get.
+            String script = "cat > /app/pubspec.yaml"
+                    + " && cp /app/pubspec.yaml /app/pubspec_base.yaml"
+                    + " && cd /app && flutter pub get";
+            if (runDockerWithStdin(List.of("docker", "exec", "-i", "-w", "/app", cid, "bash", "-c", script),
+                    content, out) != 0)
+                throw new RuntimeException("flutter pub get thất bại trong ảnh nền (xem log).");
+
+            // 3) Đóng băng thay đổi vào ĐÚNG tag ảnh nền. --change khôi phục CMD chấm bài (vì CMD đã bị
+            //    ghi đè thành "sleep infinity" ở bước 1). Dùng CMD dạng SHELL (không có dấu nháy kép)
+            //    vì dạng JSON exec ["..."] không sống sót qua cách quote tham số của Windows.
+            //    ENTRYPOINT/WORKDIR/ENV giữ nguyên.
+            if (runDockerCapture(List.of("docker", "commit",
+                    "--change", "CMD ./run_grader.sh", cid, baseImage), out) != 0)
+                throw new RuntimeException("docker commit thất bại.");
+        } finally {
+            try { runDocker(List.of("docker", "rm", "-f", cid), "rm-env-update"); }
+            catch (Exception ignored) {}
+        }
+        // Best-effort: dọn các ảnh <none> rác còn sót lại (vd từ cơ chế build cũ) để thu hồi dung lượng.
+        try { runDocker(List.of("docker", "image", "prune", "-f"), "img-prune"); }
+        catch (Exception ignored) {}
     }
 
     /** Trả [name, versionConstraint] theo thứ tự desired; resolve version qua `flutter pub add` khi để trống. */
@@ -505,6 +632,31 @@ public class ExamService {
         pb.environment().put("DOCKER_BUILDKIT", "1");
         pb.redirectErrorStream(true);
         Process process = pb.start();
+        java.util.Deque<String> ring = new java.util.ArrayDeque<>();
+        try (BufferedReader r = new BufferedReader(
+                new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = r.readLine()) != null) {
+                out.append(line).append("\n");
+                ring.addLast(line);
+                while (ring.size() > 120) ring.removeFirst();
+                if ("BUILDING".equals(envStatus)) envLog = String.join("\n", ring);
+            }
+        }
+        return process.waitFor();
+    }
+
+    /** Như runDockerCapture nhưng ĐẨY {@code stdin} vào tiến trình (vd ghi pubspec qua `cat > file`). */
+    private int runDockerWithStdin(List<String> command, String stdin, StringBuilder out) throws Exception {
+        ProcessBuilder pb = new ProcessBuilder(command);
+        pb.environment().put("DOCKER_BUILDKIT", "1");
+        pb.redirectErrorStream(true);
+        Process process = pb.start();
+        // Ghi & ĐÓNG stdin trước (gửi EOF cho `cat`) — nội dung nhỏ nên không nghẽn pipe.
+        try (var w = process.getOutputStream()) {
+            w.write(stdin.getBytes(StandardCharsets.UTF_8));
+            w.flush();
+        } catch (Exception ignored) {}
         java.util.Deque<String> ring = new java.util.ArrayDeque<>();
         try (BufferedReader r = new BufferedReader(
                 new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {

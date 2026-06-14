@@ -4,6 +4,7 @@ import { useState, useRef, useCallback, useEffect } from "react";
 import SidebarLayout from "@/components/layout/SidebarLayout";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { API_BASE, PASS_THRESHOLD } from "@/lib/config";
+import { getToken } from "@/lib/auth";
 
 // Khóa lưu phiên chấm đang/ vừa chạy → rời trang rồi quay lại KHÔNG mất kết quả
 const ACTIVE_BATCH_KEY = "grader_active_batch";
@@ -22,29 +23,30 @@ export default function DashboardPage() {
   const fileRef = useRef();
   const pollRef = useRef(null);
 
-  // ── Khôi phục phiên chấm khi quay lại trang (đọc lại từ backend theo batchId đã lưu) ──
+  // ── Khôi phục phiên chấm khi quay lại trang — CHỈ khi batch còn ĐANG chấm dở ──
+  // Batch đã chấm XONG (hoặc rỗng/đã xóa) sẽ KHÔNG khôi phục → F5 cho ra trang nhập mới;
+  // muốn xem lại kết quả thì vào trang Lịch sử.
   useEffect(() => {
     let saved = null;
     try { saved = JSON.parse(localStorage.getItem(ACTIVE_BATCH_KEY) || "null"); } catch (_) {}
     if (!saved?.batchId) return;
 
-    if (saved.examId) setExamId(saved.examId);
-    if (saved.parseErrors) setParseErrors(saved.parseErrors);
-    setBatchId(saved.batchId);
-
     fetch(`${API_BASE}/batch/progress/${saved.batchId}`)
       .then(r => r.json())
       .then(data => {
-        if (!data || data.total == null) return;
-        // Batch cũ đã bị xóa/không còn dữ liệu → bỏ phiên đã lưu, về trạng thái nhập mới
-        if ((data.total || 0) === 0 && !(saved.parseErrors?.length)) {
+        const pending = (data?.queued || 0) + (data?.grading || 0);
+        // Lỗi đọc tiến độ / batch rỗng-đã xóa / đã chấm xong → bỏ phiên lưu, giữ nguyên trang nhập mới.
+        if (!data || data.total == null || pending === 0) {
           try { localStorage.removeItem(ACTIVE_BATCH_KEY); } catch (_) {}
           return;
         }
+        // Còn bài đang/chờ chấm → khôi phục để theo dõi tiếp tiến độ.
+        setExamId(saved.examId || "");
+        setParseErrors(saved.parseErrors || []);
+        setBatchId(saved.batchId);
         setProgress(data);
-        const pending = (data.queued || 0) + (data.grading || 0);
-        if (pending > 0) { setPhase("polling"); startPolling(saved.batchId); }
-        else setPhase("done");
+        setPhase("polling");
+        startPolling(saved.batchId);
       })
       .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -104,7 +106,7 @@ export default function DashboardPage() {
     files.forEach(f => form.append("files", f));
 
     try {
-      const res = await fetch(`${API_BASE}/batch/upload`, { method: "POST", body: form });
+      const res = await fetch(`${API_BASE}/batch/upload`, { method: "POST", headers: { Authorization: `Bearer ${getToken() ?? ""}` }, body: form });
       const data = await res.json();
 
       if (!res.ok) { setUploadErr(data.error || "Lỗi server."); setPhase("idle"); return; }
@@ -138,6 +140,8 @@ export default function DashboardPage() {
         if (pending === 0) {
           clearInterval(pollRef.current);
           setPhase("done");
+          // Đã chấm xong → xóa phiên lưu để lần F5 sau ra trang mới (kết quả vẫn xem ở trang Lịch sử).
+          try { localStorage.removeItem(ACTIVE_BATCH_KEY); } catch (_) {}
         }
       } catch (_) { }
     }, 3000);

@@ -133,8 +133,8 @@ export default function LibrariesPage() {
       <div className="mb-5 flex items-start gap-2.5 rounded-xl border border-indigo-100 bg-indigo-50/60 p-4 text-xs text-indigo-700">
         <Info size={16} className="mt-0.5 shrink-0" />
         <div className="space-y-1">
-          <p>Thư viện ở đây quyết định package nào được phép dùng trong <span className="font-mono">exam_test.dart</span>. Thêm package (vd <span className="font-mono">intl</span>, <span className="font-mono">collection</span>) rồi bấm <b>Áp dụng &amp; build lại</b> — chỉ cần gõ TÊN, hệ thống tự chọn version tương thích.</p>
-          <p className="text-indigo-600/80">Build lại mất vài phút; <b>bài đang chấm không bị ảnh hưởng</b>. Lỗi build sẽ tự hoàn tác.</p>
+          <p>Thư viện ở đây quyết định package nào được phép dùng trong <span className="font-mono">exam_test.dart</span>. Thêm package (vd <span className="font-mono">intl</span>, <span className="font-mono">collection</span>) rồi bấm <b>Áp dụng &amp; cập nhật</b> — chỉ cần gõ TÊN, hệ thống tự chọn version tương thích.</p>
+          <p className="text-indigo-600/80">Thay đổi được <b>cập nhật thẳng vào ảnh nền hiện có</b> (không tạo ảnh mới nên không phình dung lượng); <b>bài đang chấm không bị ảnh hưởng</b>. Lỗi sẽ tự hoàn tác.</p>
         </div>
       </div>
 
@@ -245,7 +245,7 @@ export default function LibrariesPage() {
               )}
               <button onClick={apply} disabled={!teacher || !dirty || busy}
                 className="flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-all hover:bg-indigo-700 active:scale-95 disabled:opacity-50">
-                {busy ? <Loader2 size={15} className="animate-spin" /> : <Hammer size={15} />} Áp dụng &amp; build lại
+                {busy ? <Loader2 size={15} className="animate-spin" /> : <Hammer size={15} />} Áp dụng &amp; cập nhật
               </button>
             </div>
           </div>

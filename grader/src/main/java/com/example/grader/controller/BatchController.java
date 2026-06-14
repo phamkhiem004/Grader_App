@@ -89,6 +89,18 @@ public class BatchController {
         }
     }
 
+    /** Chấm lại TOÀN BỘ bài đã nộp của 1 đề (gộp 1 batch). Trả batchId mới để theo dõi. */
+    @PostMapping("/regrade-exam/{examId}")
+    public ResponseEntity<?> regradeExam(@PathVariable String examId) {
+        try {
+            return ResponseEntity.ok(batchService.regradeExam(examId));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
+        }
+    }
+
     /** Chấm lại NHIỀU bài cùng lúc (gộp 1 batch). Body: { studentIds:[...] }. */
     @SuppressWarnings("unchecked")
     @PostMapping("/regrade-batch/{examId}")

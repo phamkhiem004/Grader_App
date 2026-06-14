@@ -85,6 +85,18 @@ public class ExamSetupController {
         }
     }
 
+    /** Đọc các file testcase của 1 đề (exam_test.dart, skills_matrix.json, grader.dart) — cho trang Kho đề. */
+    @GetMapping("/{examId}/testcase")
+    public ResponseEntity<?> testcaseFiles(@PathVariable String examId) {
+        try {
+            return ResponseEntity.ok(examService.readExamTestcaseFiles(examId));
+        } catch (IllegalArgumentException e) {     // mã đề không hợp lệ (allowlist)
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().body(Map.of("error", "Lỗi máy chủ"));
+        }
+    }
+
     /** Xóa 1 đề không dùng nữa: gỡ ảnh Docker + bản ghi DB (giải phóng dung lượng). */
     @DeleteMapping("/{examId}")
     public ResponseEntity<?> deleteExam(@PathVariable String examId) {

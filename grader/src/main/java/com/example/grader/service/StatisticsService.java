@@ -4,7 +4,7 @@ import com.example.grader.dto.ExamOption;
 import com.example.grader.dto.StatisticsResponse;
 import com.example.grader.dto.StatisticsResponse.Bucket;
 import com.example.grader.dto.StatisticsResponse.TrendPoint;
-import com.example.grader.entity.ExamResult;
+import com.example.grader.dto.ResultStat;
 import com.example.grader.entity.GradingStatus;
 import com.example.grader.repository.ExamRepository;
 import com.example.grader.repository.ExamResultRepository;
@@ -49,7 +49,7 @@ public class StatisticsService {
     // ── Tổng hợp số liệu ────────────────────────────────────────
     public StatisticsResponse getStatistics(String examId) {
         boolean all = examId == null || examId.isBlank() || examId.equalsIgnoreCase("ALL");
-        List<ExamResult> results = all ? resultRepo.findAll() : resultRepo.findByExamId(examId);
+        List<ResultStat> results = all ? resultRepo.findAllStats() : resultRepo.findStatsByExamId(examId);
 
         // Chỉ tính bài NỘP CHÍNH THỨC (mode submit), bỏ các lần chạy thử (mode test) → số liệu chính xác
         results = results.stream()
@@ -58,14 +58,14 @@ public class StatisticsService {
 
         long submissions = results.size();                       // số lượt chấm (dòng)
         long total = results.stream()                            // SỐ THÍ SINH thật (distinct)
-                .map(ExamResult::getStudentId).distinct().count();
+                .map(ResultStat::getStudentId).distinct().count();
         long graded  = countStatus(results, GradingStatus.DONE);
         long errors  = countStatus(results, GradingStatus.ERROR);
         long pending = countStatus(results, GradingStatus.QUEUED)
                      + countStatus(results, GradingStatus.GRADING);
 
         // Chỉ tính điểm trên bài đã chấm xong & có điểm
-        List<ExamResult> done = results.stream()
+        List<ResultStat> done = results.stream()
                 .filter(r -> r.getStatus() == GradingStatus.DONE && r.getScore() != null)
                 .toList();
 
@@ -88,9 +88,9 @@ public class StatisticsService {
     }
 
     // ── Phổ điểm 5 khoảng ───────────────────────────────────────
-    private List<Bucket> buildDistribution(List<ExamResult> done) {
+    private List<Bucket> buildDistribution(List<ResultStat> done) {
         long[] counts = new long[RANGES.length];
-        for (ExamResult r : done) {
+        for (ResultStat r : done) {
             int idx = (int) Math.floor(r.getScore() / 2.0);
             if (idx < 0) idx = 0;
             if (idx >= RANGES.length) idx = RANGES.length - 1;
@@ -102,12 +102,12 @@ public class StatisticsService {
     }
 
     // ── Tiến độ chấm 7 ngày gần nhất ────────────────────────────
-    private List<TrendPoint> buildTrend(List<ExamResult> results) {
+    private List<TrendPoint> buildTrend(List<ResultStat> results) {
         LocalDate today = LocalDate.now(ZONE);
         Map<LocalDate, long[]> byDay = new HashMap<>(); // [graded, errors]
         for (int i = 6; i >= 0; i--) byDay.put(today.minusDays(i), new long[2]);
 
-        for (ExamResult r : results) {
+        for (ResultStat r : results) {
             Instant ts = r.getUpdatedAt() != null ? r.getUpdatedAt() : r.getSubmittedAt();
             if (ts == null) continue;
             long[] cell = byDay.get(ts.atZone(ZONE).toLocalDate());
@@ -125,7 +125,7 @@ public class StatisticsService {
         return out;
     }
 
-    private long countStatus(List<ExamResult> rs, GradingStatus s) {
+    private long countStatus(List<ResultStat> rs, GradingStatus s) {
         return rs.stream().filter(r -> r.getStatus() == s).count();
     }
 

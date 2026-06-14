@@ -127,6 +127,7 @@ public class GradingService {
                 "docker", "run", "--rm", "--memory", runMemory, "--cpus", runCpus));
         command.addAll(mounts);
         command.add(image);
+        command.add("./run_grader.sh");   // chạy chấm tường minh — không phụ thuộc CMD baked trong ảnh
 
         ProcessBuilder pb = new ProcessBuilder(command);
         Process process = pb.start();
@@ -269,16 +270,21 @@ public class GradingService {
 
     // ── Parse output ─────────────────────────────────────────────
     private String parseGraderOutput(String output) {
-        try {
-            int s = output.indexOf("--- GRADE_RESULT_START ---");
-            int e = output.indexOf("--- GRADE_RESULT_END ---");
-            if (s != -1 && e != -1) {
-                String json = output.substring(s + "--- GRADE_RESULT_START ---".length(), e).trim();
-                mapper.readTree(json);
+        final String START = "--- GRADE_RESULT_START ---", END = "--- GRADE_RESULT_END ---";
+        int s = output.indexOf(START);
+        int e = output.indexOf(END);
+        if (s != -1 && e != -1 && e > s) {
+            String json = output.substring(s + START.length(), e).trim();
+            try {
+                mapper.readTree(json);             // validate JSON kết quả chấm
                 return json;
+            } catch (Exception ex) {
+                // CÓ marker nhưng JSON HỎNG → KHÔNG đoán điểm bằng trọng số ĐỀU (sẽ ra điểm SAI mà
+                // vẫn lưu DONE, không ai phát hiện). Ném lỗi để bài vào ERROR cho GV chấm lại.
+                throw new RuntimeException("grader.dart xuất JSON kết quả HỎNG — không đọc được điểm chính xác.");
             }
-        } catch (Exception ignored) {
         }
+        // Hoàn toàn KHÔNG có marker (đề rất cũ / grader lỗi nặng) → mới dùng cơ chế ước lượng cũ.
         return fallbackParse(output);
     }
 

@@ -8,7 +8,7 @@ import { API_BASE } from "@/lib/config";
 import { getToken } from "@/lib/auth";
 import {
   Archive, Eye, RotateCcw, Trash2, Loader2, AlertTriangle, CheckCircle2,
-  Info, FileCode, X, Database,
+  Info, FileCode, X, Database, Download, FileText, FileArchive, Lightbulb,
 } from "lucide-react";
 
 interface ExamRow {
@@ -16,6 +16,9 @@ interface ExamRow {
   examName?: string;
   status?: string;
   hasTestcase?: boolean;
+  hasDeBai?: boolean;
+  hasStarter?: boolean;
+  hasSolution?: boolean;
   resultCount?: number;
 }
 interface CodeFile { name: string; content: string; }
@@ -122,6 +125,26 @@ export default function ArchivePage() {
     }, 3000);
   };
 
+  // Tải file của đề (đề bài .md / exam_test .zip / starter .zip) — backend gắn sẵn tên file.
+  const doDownload = async (path: string, filename: string) => {
+    setErr(null); setMsg(null);
+    try {
+      const res = await fetch(`${API_BASE}${path}`);
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        setErr(d.error || "Không tải được file.");
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = filename; a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      setErr("Không tải được file.");
+    }
+  };
+
   const doDelete = async (examId: string) => {
     setErr(null); setMsg(null); setDeleting(examId);
     try {
@@ -146,6 +169,7 @@ export default function ArchivePage() {
         <Info size={16} className="mt-0.5 shrink-0" />
         <div className="space-y-1">
           <p>Mỗi đề lưu sẵn <span className="font-mono">exam_test.dart</span>, <span className="font-mono">skills_matrix.json</span>, <span className="font-mono">grader.dart</span> trên đĩa — bấm <b>Xem</b> để đối chiếu, <b>Chấm lại</b> để chấm lại toàn bộ bài đã nộp (vd sau khi cập nhật cách báo lỗi).</p>
+          <p className="text-indigo-600/80">Nhóm nút <b>Tải</b> cho phép tải <b>Đề bài</b> (de_bai.md), <b>starter</b> (khung lib/ phát cho SV) &amp; <b>lời giải</b> (lời giải mẫu AI sinh — chỉ GV tham khảo, KHÔNG phát SV) — chỉ đề tạo bằng <b>AI</b> mới có; và <b>exam_test</b> (ZIP 3 file testcase) để dùng/upload lại.</p>
           <p className="text-indigo-600/80"><b>Xóa đề</b> sẽ gỡ testcase + ảnh Docker để giải phóng dung lượng — sau khi xóa sẽ KHÔNG chấm lại được đề đó nữa.</p>
         </div>
       </div>
@@ -203,7 +227,31 @@ export default function ArchivePage() {
                       <span className="font-mono text-xs text-slate-600">{e.resultCount ?? 0}</span>
                     </td>
                     <td className="px-5 py-3">
-                      <div className="flex items-center justify-end gap-1.5">
+                      <div className="flex flex-wrap items-center justify-end gap-1.5">
+                        {/* Tải về: đề bài (.md) · exam_test (zip 3 file) · starter (zip khung lib/) */}
+                        <div className="inline-flex items-center overflow-hidden rounded-lg border border-slate-200 bg-white text-[11px] font-semibold">
+                          <span className="px-1.5 py-1.5 text-slate-400" title="Tải về"><Download size={12} /></span>
+                          <button onClick={() => doDownload(`/exam-setup/${encodeURIComponent(e.examId)}/download/de-bai`, `${e.examId}_de_bai.md`)}
+                            disabled={!e.hasDeBai} title="Tải đề bài (de_bai.md) phát cho sinh viên"
+                            className="flex items-center gap-1 border-l border-slate-200 px-2 py-1.5 text-slate-600 transition-colors hover:bg-indigo-50 hover:text-indigo-600 disabled:opacity-30 disabled:hover:bg-white disabled:hover:text-slate-600">
+                            <FileText size={12} /> Đề bài
+                          </button>
+                          <button onClick={() => doDownload(`/exam-setup/${encodeURIComponent(e.examId)}/download/exam-test`, `${e.examId}_exam_test.zip`)}
+                            disabled={!e.hasTestcase} title="Tải testcase: exam_test.dart + grader.dart + skills_matrix.json"
+                            className="flex items-center gap-1 border-l border-slate-200 px-2 py-1.5 text-slate-600 transition-colors hover:bg-indigo-50 hover:text-indigo-600 disabled:opacity-30 disabled:hover:bg-white disabled:hover:text-slate-600">
+                            <FileArchive size={12} /> exam_test
+                          </button>
+                          <button onClick={() => doDownload(`/exam-setup/${encodeURIComponent(e.examId)}/download/starter`, `${e.examId}_starter.zip`)}
+                            disabled={!e.hasStarter} title="Tải khung code (lib/) phát cho sinh viên làm"
+                            className="flex items-center gap-1 border-l border-slate-200 px-2 py-1.5 text-slate-600 transition-colors hover:bg-emerald-50 hover:text-emerald-600 disabled:opacity-30 disabled:hover:bg-white disabled:hover:text-slate-600">
+                            <FileArchive size={12} /> starter
+                          </button>
+                          <button onClick={() => doDownload(`/exam-setup/${encodeURIComponent(e.examId)}/download/solution`, `${e.examId}_solution.zip`)}
+                            disabled={!e.hasSolution} title="Tải lời giải mẫu (lib/) AI sinh — chỉ GV tham khảo, KHÔNG phát cho SV"
+                            className="flex items-center gap-1 border-l border-slate-200 px-2 py-1.5 text-slate-600 transition-colors hover:bg-amber-50 hover:text-amber-600 disabled:opacity-30 disabled:hover:bg-white disabled:hover:text-slate-600">
+                            <Lightbulb size={12} /> lời giải
+                          </button>
+                        </div>
                         <button onClick={() => openView(e.examId)} title="Xem exam_test"
                           disabled={!e.hasTestcase}
                           className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-600 transition-colors hover:text-indigo-600 disabled:opacity-40">

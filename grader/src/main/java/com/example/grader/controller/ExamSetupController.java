@@ -4,10 +4,13 @@ import com.example.grader.repository.ExamRepository;
 import com.example.grader.service.ExamService;
 import com.example.grader.service.SyllabusService;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.nio.charset.StandardCharsets;
 import java.util.Map;
 
 @RestController
@@ -95,6 +98,94 @@ public class ExamSetupController {
         } catch (Exception e) {
             return ResponseEntity.internalServerError().body(Map.of("error", "Lỗi máy chủ"));
         }
+    }
+
+    /** Tải ĐỀ BÀI (de_bai.md) phát cho SV — chỉ đề tạo bằng AI mới có. 404 nếu đề chưa lưu kèm. */
+    @GetMapping("/{examId}/download/de-bai")
+    public ResponseEntity<?> downloadDeBai(@PathVariable String examId) {
+        try {
+            String md = examService.readDeBai(examId);
+            if (md == null)
+                return ResponseEntity.status(404).body(Map.of("error",
+                        "Đề này chưa có đề bài (de_bai.md) — chỉ đề tạo bằng AI và lưu lại mới có."));
+            return ResponseEntity.ok()
+                    .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + examId + "_de_bai.md\"")
+                    .contentType(MediaType.parseMediaType("text/markdown; charset=UTF-8"))
+                    .body(utf8WithBom(md));   // BOM để Notepad/Word trên Windows nhận đúng UTF-8 (không lỗi font TV)
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().body(Map.of("error", "Lỗi máy chủ"));
+        }
+    }
+
+    /** Tải EXAM_TEST: ZIP 3 file testcase (exam_test.dart + grader.dart + skills_matrix.json) — upload lại được. */
+    @GetMapping("/{examId}/download/exam-test")
+    public ResponseEntity<?> downloadExamTest(@PathVariable String examId) {
+        try {
+            byte[] zip = examService.zipTestcase(examId);
+            if (zip == null)
+                return ResponseEntity.status(404).body(Map.of("error", "Không tìm thấy testcase của đề " + examId));
+            return zipResponse(examId + "_exam_test.zip", zip);
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().body(Map.of("error", "Lỗi máy chủ"));
+        }
+    }
+
+    /** Tải STARTER: ZIP khung code (lib/…) phát cho SV — chỉ đề tạo bằng AI mới có. 404 nếu đề chưa lưu kèm. */
+    @GetMapping("/{examId}/download/starter")
+    public ResponseEntity<?> downloadStarter(@PathVariable String examId) {
+        try {
+            byte[] zip = examService.zipStarter(examId);
+            if (zip == null)
+                return ResponseEntity.status(404).body(Map.of("error",
+                        "Đề này chưa có khung starter — chỉ đề tạo bằng AI và lưu lại mới có."));
+            return zipResponse(examId + "_starter.zip", zip);
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().body(Map.of("error", "Lỗi máy chủ"));
+        }
+    }
+
+    /** Tải LỜI GIẢI MẪU: ZIP lib/ do AI sinh — KHÔNG phát SV, chỉ GV tham khảo. 404 nếu đề chưa lưu kèm. */
+    @GetMapping("/{examId}/download/solution")
+    public ResponseEntity<?> downloadSolution(@PathVariable String examId) {
+        try {
+            byte[] zip = examService.zipSolution(examId);
+            if (zip == null)
+                return ResponseEntity.status(404).body(Map.of("error",
+                        "Đề này chưa có lời giải mẫu — chỉ đề tạo bằng AI và lưu lại mới có."));
+            return zipResponse(examId + "_solution.zip", zip);
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().body(Map.of("error", "Lỗi máy chủ"));
+        }
+    }
+
+    /**
+     * Mã hoá chuỗi thành UTF-8 KÈM BOM (EF BB BF). File .md tiếng Việt thiếu BOM hay bị Notepad/Word/Excel
+     * trên Windows đọc theo bảng mã ANSI (CP1258) → lỗi font. BOM giúp các app này tự nhận UTF-8.
+     * (KHÔNG thêm BOM cho .dart/.json trong ZIP — một số parser/JSON nghiêm ngặt không chịu BOM.)
+     */
+    private byte[] utf8WithBom(String s) {
+        if (s == null) s = "";
+        if (!s.isEmpty() && s.charAt(0) == '﻿') return s.getBytes(StandardCharsets.UTF_8);   // đã có BOM
+        byte[] text = s.getBytes(StandardCharsets.UTF_8);
+        byte[] out = new byte[3 + text.length];
+        out[0] = (byte) 0xEF; out[1] = (byte) 0xBB; out[2] = (byte) 0xBF;
+        System.arraycopy(text, 0, out, 3, text.length);
+        return out;
+    }
+
+    private ResponseEntity<byte[]> zipResponse(String filename, byte[] data) {
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
+                .contentType(MediaType.parseMediaType("application/zip"))
+                .body(data);
     }
 
     /** Xóa 1 đề không dùng nữa: gỡ ảnh Docker + bản ghi DB (giải phóng dung lượng). */

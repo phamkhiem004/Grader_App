@@ -13,6 +13,7 @@ Hệ thống chấm bài thi thực hành **Flutter/Dart** tự động trong m�
 | **Lịch sử chấm** | Xem lại theo từng đề: danh sách bài + điểm + trạng thái; tải JSON từng bài; **xuất CSV** |
 | **Thống kê** | Tổng hợp pass/fail, điểm trung bình, biểu đồ; tối ưu O(log N) bằng Flag Pattern |
 | **Tài khoản GV** | Đăng nhập/đăng ký; token 7 ngày; trang hồ sơ + số liệu chấm theo từng giáo viên |
+| **Tạo đề bằng AI** | Nhập đề bài → AI sinh testcase + lời giải mẫu, **tự biên dịch trong Docker & sửa** tới khi chạy được, lưu thẳng thành đề (cắm API key Gemini/GPT) |
 | **Giao diện** | Sáng/Tối (dark mode); responsive; xuất CSV & JSON (cho AI nhận xét) |
 
 ---
@@ -88,6 +89,49 @@ Mở **http://localhost:3000** → đăng nhập → bắt đầu chấm.
 
 > 💡 **Triển khai trọn gói trên 1 máy Linux**: `docker compose --profile full up -d --build` (bật cả service backend).
 
+### Bước 5 — (Tuỳ chọn) Bật **Tạo đề bằng AI** · tạo file `secret.properties`
+
+Tính năng *Tạo đề bằng AI* cần **API key** của một nhà cung cấp LLM (OpenAI/GPT hoặc Google/Gemini).
+Key được đặt ở file **`grader/secret.properties`** — file này **đã được `.gitignore`** nên **KHÔNG bao giờ
+bị commit lên GitHub**. `application.properties` tự nạp nó lúc khởi động (`spring.config.import`).
+
+```powershell
+# 1) Tạo file secret từ template (chạy ở thư mục gốc repo)
+Copy-Item grader/secret.properties.example grader/secret.properties
+
+# 2) Mở rồi DÁN API KEY của bạn vào
+notepad grader/secret.properties
+```
+
+Nội dung `grader/secret.properties` cần điền:
+
+```properties
+# Chọn nhà cung cấp: openai (GPT) | gemini (Google)
+grader.ai.provider=openai
+# DÁN KEY THẬT vào đây (file này không bị commit):
+grader.ai.openai.api-key=sk-...key-cua-ban...
+# Nếu dùng Gemini:
+#grader.ai.provider=gemini
+#grader.ai.gemini.api-key=...key-gemini...
+```
+
+- Lấy key **OpenAI (GPT)**: https://platform.openai.com/api-keys
+- Lấy key **Gemini (Google, có free tier)**: https://aistudio.google.com/app/apikey
+
+Khởi động lại backend → vào trang **Tạo đề bằng AI** ở sidebar. Nếu **không** tạo file / để trống key ⇒
+tính năng tắt (trang báo *"Chưa cắm API key"*), mọi phần khác vẫn chạy bình thường.
+
+> 🔒 **Tuyệt đối KHÔNG** dán key vào `application.properties` (file đó được commit lên git). Lỡ commit key →
+> **revoke key ngay** ở trang nhà cung cấp rồi tạo key mới. Thay vì file, có thể dùng biến môi trường:
+> `$env:GRADER_AI_OPENAI_API_KEY = "sk-..."` (Spring tự map sang `grader.ai.openai.api-key`).
+>
+> 🧩 Dùng được **model open-source/local**: đặt `provider=openai` rồi trỏ `grader.ai.openai.base-url` tới
+> endpoint tương thích OpenAI (Ollama `http://localhost:11434/v1`, vLLM, OpenRouter, Groq...).
+> Chi tiết kiến trúc + vòng compile-fix: [`docs/ai-generator.md`](docs/ai-generator.md).
+
+**Mỗi người clone/pull code về** chỉ cần lặp lại Bước 5 (copy `.example` → dán key của mình → chạy) —
+không ai thấy key của ai vì `secret.properties` không nằm trong git.
+
 ---
 
 ## 🔑 Tài khoản mặc định
@@ -117,6 +161,19 @@ Upload file ZIP testcase chứa: `exam_test.dart`, `grader.dart`, `skills_matrix
 
 ### 4. Thống kê (trang **Thống kê**)
 Chọn đề (hoặc tất cả) để xem pass/fail, điểm trung bình, phân bố điểm.
+
+### 5. Tạo đề bằng AI (trang **Tạo đề bằng AI**) — tuỳ chọn
+1. Nhập **mã đề** + **đề bài/ý tưởng** (ghi rõ tên file/class/hàm + text UI càng tốt), số testcase, độ khó.
+2. Bấm **Tạo đề**, AI chạy **2 pha** (xem tiến trình từng vòng trực tiếp):
+   - **Pha A** — sinh `exam_test.dart` + `skills_matrix.json` + lời giải mẫu, **tự biên dịch trong Docker và
+     sửa** tới khi mọi testcase PASS (tối đa hoá số testcase, phủ syllabus, trộn độ khó để chia điểm hợp lý).
+   - **Pha B** — từ testcase đã chốt, sinh **đề bài** (phát SV) + **khung code starter** và kiểm tra khung **biên dịch sạch**.
+3. **Xem trước** → **Lưu thành đề** (vào *Kho đề thi* để chấm). Khu **Tải về** có 3 nút ZIP:
+   **testcase** (3 file để upload đề) · **đề bài + khung code** (phát SV: `de_bai.md` + `lib/`) · **tất cả**.
+   *Lời giải mẫu* chỉ để kiểm thử, không phát cho SV.
+
+> Cần cắm API key trước (xem **Bước 5** ở mục Cài đặt). `grader.dart` luôn là bản chuẩn của hệ thống
+> (AI không sinh phần chấm) và đề chỉ được lưu khi lời giải mẫu PASS hết → đề tạo ra an toàn, đúng hợp đồng.
 
 ---
 
@@ -165,6 +222,8 @@ Tất cả có giá trị mặc định — chỉ ghi đè khi cần.
 | `GET` | `/api/results/{examId}/{studentId}` | JSON đầy đủ 1 bài |
 | `GET` | `/api/results/batch/{batchId}` | JSON đầy đủ cả phiên chấm |
 | `GET` | `/api/statistics` · `/statistics/exams` | Thống kê & danh sách đề đã chấm |
+| `GET` | `/api/ai-generator/status` · `/job/{id}` | Trạng thái AI + tiến trình job sinh đề |
+| `POST` | `/api/ai-generator/generate` · `/save` | Tạo đề bằng AI (sinh + lưu thành đề) |
 
 ---
 
@@ -192,9 +251,11 @@ docker run --rm --memory 2048m --cpus 2.0 \
 ```
 Grader_App/
 ├── grader/                 # Backend Spring Boot
+│   ├── secret.properties.example  # Mẫu cắm API key AI (copy → secret.properties; đã .gitignore)
 │   └── src/main/java/com/example/grader/
-│       ├── controller/     # REST API (Auth, Batch, Result, ExamSetup, Statistics)
+│       ├── controller/     # REST API (Auth, Batch, Result, ExamSetup, Statistics, AiGenerator)
 │       ├── service/        # BatchGradingService (hàng đợi), GradingService (docker), AuthService
+│       │   └── ai/         # Tạo đề bằng AI: LlmClient (Gemini/GPT), compile-fix loop
 │       ├── entity/         # Exam, ExamResult, GradingBatch, Teacher
 │       └── repository/     # JPA repositories
 ├── frontend/               # Next.js
@@ -202,7 +263,8 @@ Grader_App/
 │       ├── page.jsx        # Chấm bài (dashboard)
 │       ├── history/        # Lịch sử chấm
 │       ├── statistics/     # Thống kê
-│       ├── login·register·profile·teacher/
+│       ├── teacher/        # Cấu hình đề, Kho đề, Tạo đề bằng AI (ai-generator), Thư viện chấm
+│       ├── login·register·profile/
 │       └── components/     # SidebarLayout, AuthProvider
 ├── grader-base/            # Dockerfile.base + script chấm + pubspec base
 ├── exams/                  # Testcase từng đề (mount lúc chấm)

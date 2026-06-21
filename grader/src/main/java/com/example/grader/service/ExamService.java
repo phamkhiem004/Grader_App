@@ -171,10 +171,15 @@ public class ExamService {
             log.warn("Quét thư mục exams lỗi: {}", e.getMessage());
         }
 
-        // Bổ sung số bài đã nộp của mỗi đề (cho trang Kho đề biết đề nào còn dữ liệu)
+        // Bổ sung số bài đã nộp + có sẵn đề bài/starter để tải hay không (cho trang Kho đề)
         for (Map<String, Object> m : byId.values()) {
-            try { m.put("resultCount", resultRepository.findSubmitStudentIds(String.valueOf(m.get("examId"))).size()); }
+            String id = String.valueOf(m.get("examId"));
+            try { m.put("resultCount", resultRepository.findSubmitStudentIds(id).size()); }
             catch (Exception e) { m.put("resultCount", 0); }
+            Path h = handoutDirOf(id);
+            m.put("hasDeBai", Files.exists(h.resolve("de_bai.md")));
+            m.put("hasStarter", Files.isDirectory(h.resolve("starter")));
+            m.put("hasSolution", Files.isDirectory(h.resolve("solution")));
         }
 
         List<Map<String, Object>> out = new ArrayList<>(byId.values());
@@ -231,9 +236,149 @@ public class ExamService {
         return 3;
     }
 
+    // ════════════════════════════════════════════════════════════════════════════
+    //  BỘ PHÁT CHO SV (handout = đề bài + khung starter) — LƯU RIÊNG ngoài testcase/
+    //  testcase/ được MOUNT vào container lúc chấm → nhét file lạ vào sẽ lẫn vào bài chấm,
+    //  nên đề bài & starter lưu ở <exams>/<examId>/handout/ (KHÔNG mount).
+    // ════════════════════════════════════════════════════════════════════════════
+
+    /** Thư mục testcase của 1 đề (ưu tiên DB, fallback đĩa); null nếu chưa có. */
+    private Path testcaseDirOf(String examId) {
+        Exam exam = examRepository.findByExamId(examId).orElse(null);
+        if (exam != null && exam.getTestcasePath() != null && !exam.getTestcasePath().isBlank()
+                && Files.exists(Path.of(exam.getTestcasePath()))) return Path.of(exam.getTestcasePath());
+        Path disk = examsRoot().resolve(examId).resolve("testcase");
+        return Files.exists(disk) ? disk : null;
+    }
+
+    /** Thư mục handout (đề bài + starter) của 1 đề — luôn nằm CẠNH testcase/ (<exams>/<id>/handout). */
+    private Path handoutDirOf(String examId) {
+        Exam exam = examRepository.findByExamId(examId).orElse(null);
+        if (exam != null && exam.getTestcasePath() != null && !exam.getTestcasePath().isBlank()) {
+            Path parent = Path.of(exam.getTestcasePath()).getParent();
+            if (parent != null) return parent.resolve("handout");
+        }
+        return examsRoot().resolve(examId).resolve("handout");
+    }
+
+    /**
+     * Lưu BỘ PHÁT CHO SV của 1 đề: đề bài (de_bai.md) + khung starter (lib/…). Gọi SAU khi
+     * {@link #setupExamFromZipBytes} thành công. Ghi đè bản cũ. Lỗi ghi handout KHÔNG làm hỏng đề
+     * (testcase đã lưu xong) — chỉ log cảnh báo.
+     *   <exams>/<examId>/handout/de_bai.md
+     *   <exams>/<examId>/handout/starter/<lib/...>
+     *   <exams>/<examId>/handout/solution/<lib/...>   (lời giải mẫu AI sinh — để GV tải về tham khảo)
+     */
+    public void saveHandout(String examId, String deBai, List<Map<String, String>> starter,
+                            List<Map<String, String>> solution) {
+        safeId(examId, "đề");
+        try {
+            Path handout = handoutDirOf(examId);
+            if (Files.exists(handout)) deleteRecursively(handout);   // làm mới (đề có thể lưu lại nhiều lần)
+
+            boolean any = false;
+            if (deBai != null && !deBai.isBlank()) {
+                Files.createDirectories(handout);
+                Files.writeString(handout.resolve("de_bai.md"), deBai);
+                any = true;
+            }
+            any |= writeHandoutFiles(handout.resolve("starter"), starter);     // khung code phát SV
+            any |= writeHandoutFiles(handout.resolve("solution"), solution);   // lời giải mẫu (KHÔNG phát SV)
+            if (any) log.info("📄 Đã lưu bộ phát SV (đề bài + starter + lời giải mẫu) cho đề {} → {}", examId, handout);
+        } catch (IllegalArgumentException e) {
+            throw e;   // tên file xấu → để caller biết (không nuốt lỗi bảo mật)
+        } catch (Exception e) {
+            log.warn("Lưu handout cho đề {} lỗi: {} — bỏ qua (testcase vẫn lưu được).", examId, e.getMessage());
+        }
+    }
+
+    /**
+     * Ghi danh sách file {name, content} (lib/…) vào 1 thư mục con của handout (starter/ hoặc solution/).
+     * Chặn path traversal ('../') trong tên file. Trả {@code true} nếu có ghi ít nhất 1 file.
+     */
+    private boolean writeHandoutFiles(Path subRoot, List<Map<String, String>> files) throws Exception {
+        if (files == null) return false;
+        boolean any = false;
+        for (Map<String, String> f : files) {
+            String name = f == null ? null : f.get("name");
+            if (name == null || name.isBlank()) continue;
+            Path out = subRoot.resolve(name).normalize();
+            if (!out.startsWith(subRoot))   // chặn path traversal ('../') trong tên file
+                throw new IllegalArgumentException("Tên file không hợp lệ: " + name);
+            Files.createDirectories(out.getParent());
+            Files.writeString(out, f.getOrDefault("content", ""));
+            any = true;
+        }
+        return any;
+    }
+
+    /** ZIP 3 file testcase (exam_test.dart + grader.dart + skills_matrix.json) để tải về / upload lại; null nếu thiếu. */
+    public byte[] zipTestcase(String examId) throws Exception {
+        safeId(examId, "đề");
+        Path dir = testcaseDirOf(examId);
+        if (dir == null) return null;
+        Map<String, String> files = new LinkedHashMap<>();
+        for (String f : List.of("exam_test.dart", "grader.dart", "skills_matrix.json")) {
+            Path p = dir.resolve(f);
+            if (Files.exists(p)) files.put(f, Files.readString(p));
+        }
+        return files.isEmpty() ? null : zipBytes(files);
+    }
+
+    /** Đọc đề bài (de_bai.md) đã lưu trong handout/; null nếu đề chưa có (đề cũ / upload tay). */
+    public String readDeBai(String examId) throws Exception {
+        safeId(examId, "đề");
+        Path f = handoutDirOf(examId).resolve("de_bai.md");
+        return Files.exists(f) ? Files.readString(f) : null;
+    }
+
+    /** ZIP khung starter (handout/starter/<lib/…>) để phát SV; null nếu đề chưa có starter. */
+    public byte[] zipStarter(String examId) throws Exception {
+        return zipHandoutSubdir(examId, "starter");
+    }
+
+    /** ZIP lời giải mẫu (handout/solution/<lib/…>) do AI sinh — để GV tải về tham khảo; null nếu đề chưa có. */
+    public byte[] zipSolution(String examId) throws Exception {
+        return zipHandoutSubdir(examId, "solution");
+    }
+
+    /** ZIP toàn bộ file trong 1 thư mục con của handout (starter/ hoặc solution/); null nếu thư mục trống/không có. */
+    private byte[] zipHandoutSubdir(String examId, String sub) throws Exception {
+        safeId(examId, "đề");
+        Path root = handoutDirOf(examId).resolve(sub);
+        if (!Files.isDirectory(root)) return null;
+        Map<String, String> files = new LinkedHashMap<>();
+        try (Stream<Path> s = Files.walk(root)) {
+            for (Path p : s.filter(Files::isRegularFile).toList())
+                files.put(root.relativize(p).toString().replace('\\', '/'), Files.readString(p));
+        }
+        return files.isEmpty() ? null : zipBytes(files);
+    }
+
+    private byte[] zipBytes(Map<String, String> files) throws Exception {
+        var bos = new java.io.ByteArrayOutputStream();
+        try (var zos = new java.util.zip.ZipOutputStream(bos)) {
+            for (var e : files.entrySet()) {
+                zos.putNextEntry(new java.util.zip.ZipEntry(e.getKey()));
+                zos.write((e.getValue() == null ? "" : e.getValue()).getBytes(StandardCharsets.UTF_8));
+                zos.closeEntry();
+            }
+        }
+        return bos.toByteArray();
+    }
+
     // ── Setup đề: chỉ lưu testcase (mount lúc chấm), KHÔNG build image ──
     public ExamSetupResponse setupExam(String examId, String examName,
                                        String teacherNote, MultipartFile testcaseZip) throws Exception {
+        return setupExamFromZipBytes(examId, examName, teacherNote, testcaseZip.getBytes());
+    }
+
+    /**
+     * Như {@link #setupExam} nhưng nhận thẳng BYTES của file zip — để bộ sinh đề bằng AI lưu
+     * artifacts (đóng gói 3 file trong bộ nhớ) qua đúng pipeline validate hiện có.
+     */
+    public ExamSetupResponse setupExamFromZipBytes(String examId, String examName,
+                                                   String teacherNote, byte[] zipBytes) throws Exception {
         safeId(examId, "đề");                 // chặn path traversal khi tạo exams/<examId>/testcase
         Path tmplDir = locateTemplateDir();
         ensureBaseImage(tmplDir);   // vẫn cần ảnh nền (container chạy từ đây)
@@ -242,7 +387,7 @@ public class ExamService {
         if (Files.exists(testcaseDir)) archiveTestcase(examId, testcaseDir);   // giữ lịch sử thay vì xoá hẳn
         Files.createDirectories(testcaseDir);
 
-        unzip(testcaseZip.getBytes(), testcaseDir);
+        unzip(zipBytes, testcaseDir);
         validateRequiredFiles(testcaseDir);
         validateTestcaseImports(testcaseDir);   // CHẶN package ngoài (vd intl) → tránh 0/0 oan cả lớp
         validateSkillCodes(testcaseDir);   // skill_code (nếu khai) phải nằm trong syllabus

@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import {
   Settings, FileText, CheckSquare, BarChart2, LogOut, Bell, Search,
   GraduationCap, UserCircle, Loader2, History, PanelLeftClose, PanelLeftOpen,
-  Clock, CheckCircle2, AlertCircle, BookOpen, Package, Archive,
+  Clock, CheckCircle2, AlertCircle, BookOpen, Package, Archive, Sparkles,
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { useAuth } from '@/components/auth/AuthProvider';
@@ -39,6 +39,7 @@ interface SearchRow {
 const PRIMARY_NAV = [
   { name: 'Chấm bài (Batch)', path: '/', icon: CheckSquare },
   { name: 'Cấu hình Đề thi', path: '/teacher', icon: Settings },
+  { name: 'Tạo đề bằng AI', path: '/teacher/ai-generator', icon: Sparkles },
   { name: 'Kho đề thi', path: '/teacher/archive', icon: Archive },
   { name: 'Khung năng lực', path: '/syllabus', icon: BookOpen },
   { name: 'Thư viện chấm', path: '/teacher/libraries', icon: Package },

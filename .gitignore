@@ -28,3 +28,21 @@ Thumbs.db
 # ── Logs / tạm ──────────────────────────────────────────────────
 *.log
 *.tmp
+# Thư mục output thử nghiệm của bộ sinh đề AI (cục bộ)
+grader/ai-test-output/
+grader/ai-zip-test/
+
+# ── Tài liệu cục bộ (không commit) ──────────────────────────────
+docs/context-diagram.md
+docs/context-diagram.drawio
+
+# ── BÍ MẬT: API key AI (TUYỆT ĐỐI không commit) ─────────────────
+# Key nằm ở secret.properties (Spring tự nạp qua spring.config.import).
+# File .example là TEMPLATE (được commit) — KHÔNG ignore.
+secret.properties
+**/secret.properties
+**/application-local.properties
+**/application-secret.properties
+**/config/application.properties
+.env
+.env.local

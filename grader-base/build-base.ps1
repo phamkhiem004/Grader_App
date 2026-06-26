@@ -1,4 +1,4 @@
-# build-base.ps1 — Build ảnh nền dùng chung (chạy 1 lần, hoặc khi đổi pubspec.base.yaml)
+﻿# build-base.ps1 — Build ảnh nền dùng chung (chạy 1 lần, hoặc khi đổi pubspec.base.yaml)
 # Dùng:  ./build-base.ps1
 $ErrorActionPreference = "Stop"
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path

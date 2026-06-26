@@ -1,4 +1,4 @@
-<#
+﻿<#
   stop-all.ps1 — DỪNG app: bot(:8000) + backend(:8080) + frontend(:3000) và đóng các cửa sổ service.
   MySQL/Ollama (hạ tầng) vẫn để chạy cho lần mở sau nhanh. Mở lại app: .\run
   Dùng: .\stop   (hoặc .\pause)

@@ -12,8 +12,9 @@ Grader_App/                  ← repo duy nhất (clone 1 cái là đủ)
 ├── grader-base/   Dockerfile ảnh nền chấm (Flutter SDK) → image `grading-base:latest`
 ├── exams/  submissions/   dữ liệu runtime (gitignore, rỗng khi mới clone)
 ├── bot-model.txt  ← 1 dòng: model Ollama cho bot nhận xét
-├── run.cmd · start-all.ps1 · GraderLauncher.exe  ← chạy tất cả
-└── installer/     bộ cài Inno Setup cho máy trống (build: build-installer.cmd)
+├── grader-setup.cmd  ← MÁY TRỐNG: cài Docker/Node/Java/Python/Ollama + model (gọi installer/setup-prereqs.ps1, tự UAC)
+├── run.cmd · start-all.ps1 · GraderLauncher.exe  ← chạy tất cả (chạy NGAY trong repo, không nhân bản)
+└── installer/     setup-prereqs.ps1 (cài thành phần nền) · README-INSTALLER.md
 ```
 
 ## Chạy & build

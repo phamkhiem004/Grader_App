@@ -1,4 +1,4 @@
-<#
+﻿<#
   start-all.ps1 — Chạy CẢ hệ thống chỉ bằng 1 lệnh (đặt ở GỐC repo Grader_App).
   Điều phối: Ollama (model) -> MySQL (docker) -> Feedback bot -> Backend -> Frontend.
   Mỗi service mở trong 1 cửa sổ PowerShell riêng (đóng cửa sổ = tắt service đó).
@@ -188,7 +188,10 @@ if (-not (Test-PortFree 8080)) {
 $apiBase  = "http://localhost:$bePort/api"
 $envLocal = Join-Path $feDir ".env.local"
 $keep = @(); if (Test-Path $envLocal) { $keep = Get-Content $envLocal | Where-Object { $_ -notmatch '^\s*NEXT_PUBLIC_API_BASE\s*=' } }
-Set-Content -Path $envLocal -Value ($keep + "NEXT_PUBLIC_API_BASE=$apiBase") -Encoding utf8
+# Ghi KHONG BOM: 'Set-Content -Encoding utf8' tren PS 5.1 chen BOM -> Next.js doc sai bien
+# dau dong (NEXT_PUBLIC_API_BASE) -> FE goi sai cong backend. Dung UTF8 khong BOM (giong .env o tren).
+$lines = @($keep) + "NEXT_PUBLIC_API_BASE=$apiBase"
+[System.IO.File]::WriteAllText($envLocal, (($lines -join "`r`n") + "`r`n"), (New-Object System.Text.UTF8Encoding($false)))
 
 # powershell.exe ĐẦY ĐỦ ĐƯỜNG DẪN (tránh 'không thấy file'); python launcher (tránh store-stub 'python')
 $psExe = (Get-Command powershell -ErrorAction SilentlyContinue).Source

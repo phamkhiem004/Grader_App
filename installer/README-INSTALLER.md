@@ -1,46 +1,40 @@
-# Bộ cài Grader (Inno Setup) — cho máy trống
+# Cài Grader trên máy TRỐNG — clone repo + `grader-setup.cmd`
 
-Tạo một file **`Grader-Setup.exe`** để giáo viên cài như phần mềm bình thường. Bộ cài tự
-chép app + (tùy chọn) cài Docker/Node/Java/Python/Ollama + tải model AI, rồi tạo shortcut.
+Luồng: **clone repo → chạy `grader-setup.cmd` (cài thành phần nền) → chạy `GraderLauncher.exe`**.
+Mọi thứ chạy **tại chỗ trong repo**, không nhân bản, không cần đóng gói installer riêng.
 
-## A. Bên bạn (người đóng gói) — build 1 lần
+## A. Cài thành phần nền (1 lần)
 
-Tại `D:\FPT\Capstone`, chạy:
-
-```
-build-installer.cmd
-```
-
-Nó tự: tạo `GraderLauncher.exe` → cài Inno Setup nếu thiếu (winget) → biên dịch
-`installer\grader-setup.iss` → xuất ra:
+Tại thư mục repo (vd `D:\FPT\Capstone\Grader_App`), chạy:
 
 ```
-installer\Output\Grader-Setup.exe
+grader-setup.cmd
 ```
 
-Gửi **một file** `Grader-Setup.exe` đó cho giáo viên.
+Nó tự **xin quyền admin (UAC)** rồi gọi `installer\setup-prereqs.ps1`:
 
-## B. Bên giáo viên — cài & chạy
+- Dùng **winget** cài (nếu thiếu): Docker Desktop, Node.js LTS, Temurin JDK 17, Python 3, Ollama.
+- Tải model Ollama: model ghi trong `bot-model.txt` (mặc định `qwen3:14b`) + `bge-m3` (embedding RAG).
+- Nếu Docker đã sẵn sàng → build ảnh nền chấm bài `grading-base` (Flutter SDK, lần đầu rất lâu).
 
-1. Chạy `Grader-Setup.exe` (chuột phải → Run as administrator nếu cần).
-   - Tích **"Cài các thành phần cần thiết…"** nếu máy **chưa có** Docker/Node/Java/Python/Ollama.
-   - Bỏ tích nếu máy đã có sẵn.
-2. Bộ cài chép app vào `C:\Grader`, rồi (nếu đã tích) chạy `setup-prereqs.ps1`:
-   cài runtime bằng winget + tải model `qwen3:14b` + `bge-m3` + build ảnh chấm `grading-base`.
-3. **Nếu vừa cài Docker lần đầu**: khởi động lại máy → mở Docker Desktop 1 lần →
-   chạy lại shortcut **"Cài lại thành phần nền"** (để build `grading-base` + tải model còn thiếu).
-4. Xong: bấm shortcut **"Khởi động Grader"** (hoặc icon ngoài Desktop) → mở
-   `http://localhost:3000`.
+> **Vừa cài Docker lần đầu?** Docker Desktop thường cần **khởi động lại máy** + mở Docker Desktop 1 lần.
+> Sau khi reboot, chạy lại `grader-setup.cmd` để build `grading-base` + tải nốt model còn thiếu.
 
-## Yêu cầu để build / cài
+## B. Chạy app
 
-- **Build (bên bạn)**: Windows + winget (có sẵn Win10/11). Inno Setup tự cài.
-- **Cài (giáo viên)**: Windows 10 1809+ (cần winget để tự cài runtime). Quyền admin.
-  Docker Desktop cần WSL2/ảo hoá bật trong BIOS — đây là giới hạn của Docker, không phải app.
+Sau khi A xong, ngay trong repo:
+
+- Double-click **`GraderLauncher.exe`**, hoặc gõ **`run`** trong terminal.
+- Nó bật MySQL (Docker) + bot AI (`:8000`) + backend (`:8080`) + frontend (`:3000`).
+- Mở **http://localhost:3000**.
+
+## Yêu cầu
+
+- Windows 10 1809+ (cần **winget** / App Installer để tự cài runtime). Quyền admin.
+- Docker Desktop cần WSL2 / ảo hoá bật trong BIOS — giới hạn của Docker, không phải app.
 
 ## Ghi chú
 
-- Bộ cài **không nhúng** Docker/Ollama/JDK… vào trong nó (sẽ vài GB). Nó **cài hộ** qua winget.
-- Cài vào `C:\Grader` và cấp quyền ghi cho User để launcher tạo được `.venv`, `node_modules`,
-  `submissions`… lúc chạy.
-- Tải lại code mới: chạy `build-installer.cmd` lại để ra `Grader-Setup.exe` mới.
+- `grader-setup.cmd` **không nhúng** Docker/Ollama/JDK… (sẽ vài GB) — nó **cài hộ** qua winget.
+- Chạy được **nhiều lần** (idempotent): thứ gì đã có thì bỏ qua.
+- `.venv`, `node_modules`, `submissions/`, `exams/` được sinh ra **trong repo** lúc chạy (đã `.gitignore`).

@@ -1,6 +1,7 @@
 package com.example.grader.service.ai;
 
 import com.example.grader.service.ExamService;
+import com.example.grader.service.SyllabusService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -58,6 +59,7 @@ public class AiExamGenService {
     @Autowired private TestcaseCompiler compiler;
     @Autowired private TestPruner pruner;
     @Autowired private ExamService examService;
+    @Autowired private SyllabusService syllabusService;   // tự sửa skill_code AI bịa trước khi lưu
 
     private final Map<String, GenJob> jobs = new ConcurrentHashMap<>();
     private final AtomicLong seq = new AtomicLong();
@@ -134,6 +136,9 @@ public class AiExamGenService {
                                           String deBai, List<Map<String, String>> starter,
                                           List<Map<String, String>> solution) throws Exception {
         ExamService.safeId(examId, "đề");
+        // BẢO HIỂM: nếu AI lỡ "bịa" skill_code không có trong syllabus → tự thay bằng code hợp lệ,
+        // để bước lưu KHÔNG bao giờ fail vì skill_code (skill_code chỉ gom năng lực, không ảnh hưởng chấm).
+        skillsMatrix = syllabusService.sanitizeSkillsMatrix(skillsMatrix);
         Map<String, String> files = new LinkedHashMap<>();
         files.put("exam_test.dart", examTest);
         files.put("grader.dart", (graderDart == null || graderDart.isBlank()) ? canonicalGrader() : graderDart);

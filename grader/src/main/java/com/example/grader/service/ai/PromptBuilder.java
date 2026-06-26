@@ -1,9 +1,15 @@
 package com.example.grader.service.ai;
 
+import com.example.grader.entity.Skill;
+import com.example.grader.service.SyllabusService;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -23,18 +29,30 @@ public class PromptBuilder {
     @Value("${grader.ai.allow-widget-tests:false}")
     private boolean allowWidgetTests;
 
-    /** Danh mục skill_code hợp lệ (SYLLABUS v2026.2) — model chỉ được chọn trong đây. */
-    private static final String SKILL_CODES = """
-            [DART_ESSENTIALS]   DART_SYNTAX, DART_FUNCTIONS, DART_CLASSES, DART_COLLECTIONS, DART_NULL_SAFETY
-            [OOP_ASYNC]         OOP_INHERITANCE, OOP_PATTERNS, OOP_MODEL, ASYNC_FUTURE, ASYNC_STREAM
-            [UI_FUNDAMENTALS]   UI_WIDGETS, UI_MATERIAL, UI_LISTS, UI_PICKERS
-            [NAV_STATE]         NAV_BASIC, NAV_NAMED, NAV_ADVANCED, STATE_BASIC, STATE_LIFTING
-            [LAYOUT_RESPONSIVE] LAYOUT_FLEX, LAYOUT_STACK, LAYOUT_GRID, LAYOUT_RESPONSIVE
-            [FORMS_VALIDATION]  FORM_INPUT, FORM_VALIDATE, FORM_BUSINESS
-            [NETWORKING]        NET_JSON, NET_FUTUREBUILDER
-            [STORAGE]           STORE_CACHE
-            [AUTH]              AUTH_GUARD
-            """;
+    // Đọc syllabus ĐỘNG (DB) để liệt kê skill_code hợp lệ → AI sinh đề theo Khung năng lực HIỆN TẠI,
+    // KHÔNG khóa cứng. Sửa Khung năng lực là lần sinh đề sau tự áp danh mục mới.
+    @Autowired private SyllabusService syllabus;
+
+    /** Danh mục skill_code hợp lệ — dựng TỪ DB syllabus mỗi lần (category + mã + tên kỹ năng). */
+    private String buildSkillCatalog() {
+        List<com.example.grader.entity.SkillCategory> cats = syllabus.categories();
+        List<Skill> skills = syllabus.skills();
+        Map<String, List<Skill>> byCat = new LinkedHashMap<>();
+        for (var c : cats) byCat.put(c.getCode(), new ArrayList<>());
+        for (var s : skills) byCat.computeIfAbsent(s.getCategoryCode(), k -> new ArrayList<>()).add(s);
+        StringBuilder sb = new StringBuilder();
+        for (var c : cats) {
+            List<Skill> list = byCat.get(c.getCode());
+            if (list == null || list.isEmpty()) continue;
+            sb.append("[").append(c.getCode()).append(" — ").append(c.getName()).append("]\n  ");
+            for (int i = 0; i < list.size(); i++) {
+                if (i > 0) sb.append(", ");
+                sb.append(list.get(i).getCode()).append(" (").append(list.get(i).getName()).append(")");
+            }
+            sb.append("\n");
+        }
+        return sb.toString().trim();
+    }
 
     // ════════════════════════════════════════════════════════════
     //  PHA A — TESTCASE + LỜI GIẢI MẪU
@@ -59,16 +77,9 @@ public class PromptBuilder {
             - Tự CHỌN cấu trúc app + số màn hình hợp lý; tự ĐẶT TÊN file lib/, class, field, hàm (kèm signature) và TEXT UI cụ thể.
             - GHI TẤT CẢ lựa chọn đó vào 'assumptions' (đây là HỢP ĐỒNG để exam_test ↔ starter ↔ solution dùng CHUNG).
             - "2 màn hình"/"3 screens" → tạo ĐÚNG số màn hình đó, mỗi màn hình ≥1 file lib/ + ≥1 testcase widget.
-            - ÁNH XẠ cụm kiến thức GV nêu (Việt/Anh) sang skill_code ĐÚNG, ví dụ:
-              "dart essential(s) / cú pháp / hàm / class / list-map / null"  → DART_SYNTAX, DART_FUNCTIONS, DART_CLASSES, DART_COLLECTIONS, DART_NULL_SAFETY
-              "form / validate / kiểm tra nhập liệu"                          → FORM_INPUT, FORM_VALIDATE, FORM_BUSINESS
-              "list view / danh sách"                                         → UI_LISTS ;  "widget / material / giao diện" → UI_WIDGETS, UI_MATERIAL ;  "date/time picker" → UI_PICKERS
-              "điều hướng / nhiều màn hình / navigation"                      → NAV_BASIC, NAV_NAMED, NAV_ADVANCED
-              "state / setState / quản lý trạng thái / lifting"               → STATE_BASIC, STATE_LIFTING
-              "async / future / stream / api / json / mạng"                   → ASYNC_FUTURE, ASYNC_STREAM, NET_JSON, NET_FUTUREBUILDER
-              "layout / responsive / grid / stack / flex"                     → LAYOUT_FLEX, LAYOUT_STACK, LAYOUT_GRID, LAYOUT_RESPONSIVE
-              "kế thừa / OOP / model / pattern"                               → OOP_INHERITANCE, OOP_PATTERNS, OOP_MODEL
-              "lưu / cache / local storage"  → STORE_CACHE ;  "đăng nhập / phân quyền / guard" → AUTH_GUARD
+            - ÁNH XẠ cụm kiến thức GV nêu (Việt/Anh) sang skill_code ĐÚNG bằng cách SO KHỚP Ý NGHĨA với
+              TÊN kỹ năng trong "DANH MỤC skill_code HỢP LỆ" ở bên dưới. CHỈ được chọn mã CÓ trong danh mục đó
+              (phân biệt hoa/thường), TUYỆT ĐỐI không bịa mã ngoài danh mục.
             - Nếu GV có nêu category/skill ưu tiên thì BÁM vào đó trước, rồi mở rộng thêm cho đủ độ phủ.
 
             # SỐ LƯỢNG & ĐỘ PHỦ (RẤT QUAN TRỌNG — đừng làm ít)
@@ -118,7 +129,7 @@ public class PromptBuilder {
             # LỜI GIẢI MẪU (solution) — để hệ thống tự kiểm thử
             Code lib/ ĐÚNG để KHI chạy mọi test đều PASS: đủ class/field/method đúng signature; text UI khớp tuyệt đối.
             Hệ thống sẽ chạy thử; nếu lỗi biên dịch hoặc còn test FAIL, bạn nhận lỗi và phải SỬA rồi trả lại JSON đầy đủ.
-            """.formatted(SKILL_CODES);
+            """.formatted(buildSkillCatalog());
     }
 
     /** Prompt LÔ ĐẦU: sinh {@code firstN} testcase (tổng mục tiêu {@code target}; các lô sau xin thêm). */

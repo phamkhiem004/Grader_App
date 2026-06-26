@@ -1,6 +1,35 @@
 # 🎓 Grader App — Hệ thống chấm thi Flutter tự động
 
-Hệ thống chấm bài thi thực hành **Flutter/Dart** tự động trong môi trường **Docker cô lập**. Giáo viên upload hàng loạt bài nộp (file ZIP), hệ thống tự biên dịch, chạy testcase và trả về điểm + log chi tiết cho từng sinh viên.
+Hệ thống chấm bài thi thực hành **Flutter/Dart** tự động trong môi trường **Docker cô lập**. Giáo viên upload hàng loạt bài nộp (file ZIP), hệ thống tự biên dịch, chạy testcase và trả về điểm + log chi tiết cho từng sinh viên. **AI feedback bot** (Ollama, nằm trong `feedback-bot/`) đọc kết quả chấm và viết lời nhận xét cho từng sinh viên.
+
+> **Repo này là MỘT gói hoàn chỉnh**: backend (`grader/`) · frontend (`frontend/`) · AI feedback bot (`feedback-bot/`) · script chạy (`run.cmd`, `start-all.ps1`) · bộ cài (`installer/`). Clone 1 repo là đủ.
+
+---
+
+## 🚀 Chạy nhanh — luồng cho người mới
+
+**Cấu hình DUY NHẤT cần biết:** model AI ghi ở 1 dòng trong **`bot-model.txt`** (mặc định `qwen3:14b`; máy không có GPU nên đổi sang `qwen2.5-coder:3b` cho nhanh).
+
+### Cách A — máy đã có sẵn Docker + Node + Java + Python + Ollama
+```powershell
+# 1) Cài model AI (1 lần)
+ollama pull qwen3:14b      # hoặc model nhỏ hơn ghi trong bot-model.txt
+ollama pull bge-m3         # model embedding cho RAG (bắt buộc)
+# 2) Chạy TẤT CẢ bằng 1 lệnh (mở terminal tại thư mục Grader_App)
+run                        # = run.cmd: bật MySQL + bot + backend + frontend
+```
+Mở **http://localhost:3000** → đăng nhập → dùng.
+
+### Cách B — máy TRỐNG (chưa có Docker/Node/Java/Python/Ollama)
+Chạy bộ cài: **`installer/Output/Grader-Setup.exe`** (tự cài hết bằng winget + tải model + tạo shortcut).
+Tự build bộ cài: `build-installer.cmd`. Chi tiết: [`installer/README-INSTALLER.md`](installer/README-INSTALLER.md).
+
+### Luồng sử dụng đầy đủ (chấm → nhận xét)
+1. **Cấu hình Đề thi** → upload ZIP testcase (`exam_test.dart`, `grader.dart`, `skills_matrix.json`).
+2. **Chấm bài (Batch)** → nhập mã đề + kéo thả ZIP bài nộp (`MaSV_HoTen.zip`) → chấm.
+3. **Nhận xét AI** (sidebar) → nhập mã đề → bấm **“Đọc & nhận xét bài làm”** → AI viết nhận xét từng SV → **Tải Excel (.xls)**.
+
+> ⏱️ **Tốc độ AI**: trên máy CPU‑only, `qwen3:14b` rất chậm (>300s/bài, dễ rơi về nhận xét mẫu). Đã kiểm thử `qwen2.5-coder:3b` cho nhận xét AI thật (~270s/bài). Không có GPU → đổi `bot-model.txt` sang model nhỏ.
 
 ---
 

@@ -21,8 +21,7 @@ run                        # = run.cmd: bật MySQL + bot + backend + frontend
 Mở **http://localhost:3000** → đăng nhập → dùng.
 
 ### Cách B — máy TRỐNG (chưa có Docker/Node/Java/Python/Ollama)
-Chạy bộ cài: **`installer/Output/Grader-Setup.exe`** (tự cài hết bằng winget + tải model + tạo shortcut).
-Tự build bộ cài: `build-installer.cmd`. Chi tiết: [`installer/README-INSTALLER.md`](installer/README-INSTALLER.md).
+Sau khi **clone repo**, chạy **`grader-setup.cmd`** (tự xin quyền admin → winget cài Docker/Node/Java/Python/Ollama + tải model + build ảnh chấm `grading-base`). Xong → chạy **`GraderLauncher.exe`** (hoặc `run`) ngay trong repo. Chi tiết: [`installer/README-INSTALLER.md`](installer/README-INSTALLER.md).
 
 ### Luồng sử dụng đầy đủ (chấm → nhận xét)
 1. **Cấu hình Đề thi** → upload ZIP testcase (`exam_test.dart`, `grader.dart`, `skills_matrix.json`).

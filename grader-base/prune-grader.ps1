@@ -1,4 +1,4 @@
-# prune-grader.ps1 — Dọn rác Docker AN TOÀN cho app chấm thi
+﻿# prune-grader.ps1 — Dọn rác Docker AN TOÀN cho app chấm thi
 # Chỉ xóa: image dangling (<none>) + build cache. KHÔNG đụng volume / dự án khác.
 Write-Host "== Trước ==" -ForegroundColor Cyan
 docker system df

@@ -1,4 +1,4 @@
-<#
+﻿<#
   setup-prereqs.ps1 — Cai cac THANH PHAN NEN cho may TRONG (chay 1 lan, idempotent).
   Inno Setup goi file nay khi cai (co quyen admin). Cung co the chay lai bang tay sau khi reboot.
 

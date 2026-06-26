@@ -1,0 +1,654 @@
+{
+  "DART_VARIABLES_TYPES": {
+    "passed": [
+      "Em đã khai báo biến với kiểu phù hợp và dùng var khi kiểu đã rõ ràng. Việc dùng final cho các giá trị không đổi cho thấy em hiểu rõ cách quản lý dữ liệu.",
+      "Em sử dụng generics như List<T> đúng kiểu phần tử. Cách đặt tên biến cũng gọn gàng, dễ đọc."
+    ],
+    "failed": [
+      "Một vài biến chọn kiểu chưa hợp lý hoặc dùng var ở chỗ nên khai báo kiểu rõ ràng. Có biến late được dùng trước khi khởi tạo nên dễ gây crash.",
+      "Còn thiếu final hoặc const ở những giá trị không thay đổi nên trình lint cảnh báo. Việc này làm code khó tối ưu hơn."
+    ],
+    "recommendations": [
+      "Em nên ưu tiên final/const cho giá trị cố định và chọn int/double/String/bool cho đúng ngữ cảnh. Hãy đảm bảo biến late luôn được khởi tạo trước khi dùng.",
+      "Em xem lại phần kiểu dựng sẵn và generics để dùng List, Map đúng kiểu phần tử. Điều này giúp code an toàn và rõ ràng hơn."
+    ]
+  },
+  "DART_NULL_SAFETY": {
+    "passed": [
+      "Em đã khai báo biến nullable bằng Type? và truy cập an toàn qua ?. rất hợp lý. Cách dùng ?? để cung cấp giá trị mặc định cho thấy em nắm vững null safety.",
+      "Em hạn chế dùng ! và chỉ dùng khi chắc chắn biến không null. Đây là thói quen tốt giúp tránh crash."
+    ],
+    "failed": [
+      "Có chỗ em dùng dấu ! trên biến có thể đang null nên dễ làm ứng dụng crash. Một số biến nullable lại được truy cập trực tiếp mà không qua ?..",
+      "Em còn quên thêm ? cho kiểu trong khi giá trị có thể là null. Điều này khiến chương trình không biên dịch được."
+    ],
+    "recommendations": [
+      "Em nên dùng ?. và ?? để xử lý biến nullable thay vì ép kiểu bằng !. Chỉ dùng ! khi đã kiểm tra chắc chắn biến khác null.",
+      "Em hãy rà lại các kiểu để thêm ? khi biến có thể null. Việc tuân thủ null safety sẽ giúp giảm hẳn lỗi null pointer."
+    ]
+  },
+  "DART_CONTROL_FLOW": {
+    "passed": [
+      "Em dùng if/else if/else và switch đúng tình huống, có cả nhánh default. Cách dùng for-in để duyệt danh sách giúp tránh lỗi chỉ số.",
+      "Em điều khiển vòng lặp bằng break và continue hợp lý, đúng mục đích. Logic luồng chương trình mạch lạc và dễ theo dõi."
+    ],
+    "failed": [
+      "Switch của em còn thiếu nhánh default hoặc bỏ sót một số trường hợp nên kết quả chưa đầy đủ. Một số điều kiện trong if cũng chưa bao quát hết.",
+      "Vòng for truyền thống của em có sai sót về chỉ số nên lặp chưa đúng. Có chỗ dùng do...while khiến đoạn code luôn chạy ít nhất một lần ngoài ý muốn."
+    ],
+    "recommendations": [
+      "Em nên thêm nhánh default cho switch và kiểm tra đủ các trường hợp, nhất là với enum. Hãy ưu tiên for-in khi duyệt danh sách để tránh lỗi chỉ số.",
+      "Em xem lại điều kiện dừng và bước nhảy của vòng for để lặp đúng số lần. Cân nhắc dùng while hay do...while tùy theo việc có cần chạy trước khi kiểm tra hay không."
+    ]
+  },
+  "DART_FUNCTIONS": {
+    "passed": [
+      "Em khai báo hàm với kiểu trả về và kiểu tham số rõ ràng, dùng void khi không cần trả giá trị. Cách dùng arrow syntax cho hàm một dòng rất gọn gàng.",
+      "Em vận dụng named parameter và optional parameter đúng nhu cầu. Việc dùng anonymous function cho callback cũng hợp lý."
+    ],
+    "failed": [
+      "Có hàm em quên return dù đã khai báo kiểu trả về nên không biên dịch được. Một vài chỗ gọi named parameter sai tên hoặc thiếu tham số bắt buộc.",
+      "Em truyền sai kiểu cho tham số nên hàm báo lỗi. Cách tổ chức tham số đôi khi chưa rõ ràng giữa plain, named và optional."
+    ],
+    "recommendations": [
+      "Em nên đảm bảo mọi hàm có kiểu trả về đều có return tương ứng, và dùng void khi không trả giá trị. Hãy chọn named parameter cho các hàm nhiều tham số để gọi dễ đọc hơn.",
+      "Em xem lại cách dùng {} cho named và [] cho optional parameter sao cho phù hợp. Dùng arrow => cho hàm ngắn sẽ giúp code súc tích."
+    ]
+  },
+  "DART_CLASSES_OOP": {
+    "passed": [
+      "Em thiết kế class rõ ràng, constructor khởi tạo đầy đủ các field final và dùng required đúng chỗ. Cách kế thừa bằng extends và truyền lên cha bằng super cho thấy em nắm vững OOP.",
+      "Em đánh dấu @override khi ghi đè method và dùng static cho thành viên của lớp hợp lý. String interpolation cũng được dùng gọn gàng."
+    ],
+    "failed": [
+      "Có field final chưa được khởi tạo trong constructor nên code không biên dịch. Một số named parameter bắt buộc còn thiếu từ khóa required.",
+      "Em quên gọi super khi lớp cha cần tham số nên báo lỗi. Việc ghi đè method đôi khi thiếu @override khiến ý định chưa rõ."
+    ],
+    "recommendations": [
+      "Em nên khởi tạo đủ các field final trong constructor và thêm required cho tham số bắt buộc. Khi kế thừa, hãy nhớ truyền giá trị cần thiết lên lớp cha qua super.",
+      "Em hãy luôn ghi @override khi ghi đè method và dùng static cho field/method thuộc về lớp. Điều này giúp code rõ ràng và đúng chuẩn hướng đối tượng."
+    ]
+  },
+  "DART_ENUMS_MIXINS_EXT": {
+    "passed": [
+      "Em định nghĩa enum với tập giá trị rõ ràng và biết dùng .values cùng index khi cần. Cách dùng mixin với with để chia sẻ chức năng cho thấy em hiểu kế thừa linh hoạt trong Dart.",
+      "Em dùng extension on để bổ sung method cho lớp có sẵn rất hợp lý. Các thành phần được tổ chức gọn gàng, dễ tái sử dụng."
+    ],
+    "failed": [
+      "Có mixin của em lại khai báo constructor hoặc cố extends lớp khác nên không biên dịch được. Một số chỗ truy cập giá trị enum chưa đúng hoặc quên .values.",
+      "Em còn thiếu từ khóa on khi khai báo extension nên báo lỗi. Việc dùng enum có field đôi khi chưa khai báo const constructor đầy đủ."
+    ],
+    "recommendations": [
+      "Em nhớ rằng mixin không được có constructor và không extends lớp khác; hãy dùng with để gắn vào class. Khi cần dữ liệu kèm enum, hãy khai báo field cùng const constructor.",
+      "Em nên dùng .values và index để duyệt hoặc lấy vị trí enum cho đúng. Khi viết extension, đừng quên cú pháp extension Tên on KiểuĐích."
+    ]
+  },
+  "DART_EXCEPTIONS": {
+    "passed": [
+      "Em bọc đoạn code có thể lỗi trong try/catch và bắt ngoại lệ hợp lý. Cách dùng finally để dọn dẹp sau xử lý lỗi cho thấy em quan tâm đến độ ổn định của chương trình.",
+      "Em dùng throw Exception với thông điệp rõ ràng khi cần báo lỗi. Việc lọc loại lỗi bằng on ... catch cũng được vận dụng đúng."
+    ],
+    "failed": [
+      "Có ngoại lệ được ném ra nhưng chưa được bắt nên ứng dụng dễ crash. Một số chỗ em bắt sai loại trong on ... catch khiến lỗi vẫn lọt qua.",
+      "Em còn quên finally nên tài nguyên chưa được dọn dẹp đúng cách. Thông điệp lỗi đôi khi chưa đủ rõ để gỡ lỗi."
+    ],
+    "recommendations": [
+      "Em nên bọc các thao tác dễ lỗi trong try/catch và cân nhắc dùng on Type catch để bắt đúng loại ngoại lệ. Vì Dart chỉ có unchecked exception, hãy chủ động xử lý và ghi chú các hàm có thể ném lỗi.",
+      "Em hãy dùng finally cho phần dọn dẹp tài nguyên và đưa thông điệp rõ ràng khi throw. Điều này giúp chương trình bền vững và dễ bảo trì hơn."
+    ]
+  },
+  "PROJ_PUBSPEC_DEPENDENCIES": {
+    "passed": [
+      "Em đã khai báo dependencies trong pubspec.yaml đúng cú pháp và thụt lề hai khoảng trắng.",
+      "Em đã tách đúng các package test vào dev_dependencies và cấu hình environment SDK hợp lý."
+    ],
+    "failed": [
+      "Bài làm có pubspec.yaml sai thụt lề (dùng tab hoặc ba khoảng trắng) khiến build không chạy.",
+      "Em đặt package test ngoài dev_dependencies hoặc thiếu khai báo flutter: sdk: flutter."
+    ],
+    "recommendations": [
+      "Em nên luôn thụt lề hai khoảng trắng (không dùng tab) và chạy Pub get sau mỗi lần thêm package.",
+      "Em nên đặt flutter_test, integration_test, flutter_lints vào dev_dependencies và khai báo environment SDK constraint."
+    ]
+  },
+  "PROJ_FOLDER_STRUCTURE": {
+    "passed": [
+      "Em đã tổ chức code trong lib/ theo các layer rõ ràng như data, network, router, ui và utils.",
+      "Em đã tuân thủ dependency rule, giữ business logic độc lập với UI và database."
+    ],
+    "failed": [
+      "Bài làm gộp toàn bộ code vào một file/folder, vi phạm separation of concerns và khó test.",
+      "Em để business logic phụ thuộc trực tiếp vào UI hoặc database, vi phạm dependency rule của clean architecture."
+    ],
+    "recommendations": [
+      "Em nên chia code thành các folder data/, ui/ (screens, themes, widgets), network/, router/, utils/ theo gợi ý của sách.",
+      "Em nên dùng abstraction (interface) để các thành phần độc lập và dễ thay thế khi test."
+    ]
+  },
+  "PROJ_STATELESS_VS_STATEFUL": {
+    "passed": [
+      "Em đã phân biệt và dùng đúng StatelessWidget/StatefulWidget cho từng trường hợp.",
+      "Em đã override build và khai báo State cùng createState() đúng chuẩn cho StatefulWidget."
+    ],
+    "failed": [
+      "Bài làm chọn loại widget chưa phù hợp với việc có hay không có trạng thái thay đổi.",
+      "Em quên khai báo createState() hoặc lớp State khiến StatefulWidget không khởi tạo được."
+    ],
+    "recommendations": [
+      "Em nên dùng StatefulWidget khi UI cần thay đổi theo trạng thái, và StatelessWidget khi giao diện tĩnh.",
+      "Em nên giữ widget tĩnh là StatelessWidget immutable để tránh thừa boilerplate State."
+    ]
+  },
+  "UI_SCAFFOLD_APPBAR": {
+    "passed": [
+      "Em đã bọc màn hình trong Scaffold và đặt nội dung vào body rất gọn gàng.",
+      "Em dùng AppBar và BottomNavigationBar đúng vai trò, điều hướng giữa các màn hình mạch lạc."
+    ],
+    "failed": [
+      "Màn hình của em thiếu Scaffold bọc ngoài nên test tìm AppBar bị fail.",
+      "Em đặt nội dung ngoài body khiến thân màn hình không hiển thị đúng như yêu cầu."
+    ],
+    "recommendations": [
+      "Em nên bắt đầu mỗi màn hình bằng Scaffold rồi mới đưa nội dung vào body.",
+      "Em hãy dùng appBar cho tiêu đề và bottomNavigationBar khi app có ba đến bốn màn hình."
+    ]
+  },
+  "UI_CONTAINER_ROW_COLUMN": {
+    "passed": [
+      "Em sắp xếp Column và Row rõ ràng, danh sách children đầy đủ và đúng thứ tự.",
+      "Em dùng Container để đặt màu nền và padding cho widget con rất hợp lý."
+    ],
+    "failed": [
+      "Em quên đặt mainAxisSize nên Column chiếm hết màn hình, bố cục không như thiết kế.",
+      "Children của em vượt quá không gian gây overflow, test layout bị fail."
+    ],
+    "recommendations": [
+      "Em nên cân nhắc mainAxisSize.min và dùng Spacer để chia không gian trong Row.",
+      "Em hãy dùng mainAxisAlignment và crossAxisAlignment để căn chỉnh widget cho đúng."
+    ]
+  },
+  "UI_TEXT_IMAGE_ICON": {
+    "passed": [
+      "Em đặt đúng nội dung Text kèm TextStyle về size và màu sắc rõ ràng.",
+      "Em chọn đúng constructor ảnh và đặt BoxFit hợp lý nên ảnh hiển thị cân đối."
+    ],
+    "failed": [
+      "Chuỗi trong Text của em chưa khớp yêu cầu nên test tìm widget theo text fail.",
+      "Em thiếu fit cho Image khiến ảnh bị méo tỉ lệ, không đạt thiết kế."
+    ],
+    "recommendations": [
+      "Em nên dùng overflow ellipsis và maxLines để tránh text bị tràn.",
+      "Em hãy đặt Icon trong IconButton khi cần xử lý sự kiện nhấn."
+    ]
+  },
+  "UI_BUTTONS_SELECTION": {
+    "passed": [
+      "Em chọn đúng loại button theo thiết kế và truyền onPressed xử lý hành động.",
+      "Em dùng FilterChip để chọn lọc và PopupMenuButton với itemBuilder rất chuẩn."
+    ],
+    "failed": [
+      "Em để onPressed null nên nhấn nút không đổi trạng thái, test bị fail.",
+      "Em dùng sai loại chip so với yêu cầu nên test tìm widget theo loại fail."
+    ],
+    "recommendations": [
+      "Em nên gắn onPressed/onSelected cho mọi button để xử lý sự kiện đầy đủ.",
+      "Em hãy phân biệt rõ ChoiceChip, FilterChip và ActionChip theo đúng mục đích."
+    ]
+  },
+  "UI_TEXT_INPUT": {
+    "passed": [
+      "Em tạo TextEditingController trong initState và giải phóng trong dispose rất chuẩn.",
+      "Em gán controller cho TextField và đặt keyboardType phù hợp với loại dữ liệu."
+    ],
+    "failed": [
+      "Em quên gọi dispose() cho controller nên gây rò rỉ tài nguyên.",
+      "Em chưa gắn controller vào TextField nên test đọc giá trị nhập liệu fail."
+    ],
+    "recommendations": [
+      "Em nên luôn dispose controller trong State để tránh rò rỉ bộ nhớ.",
+      "Em hãy chọn keyboardType đúng như email hay number cho từng ô nhập."
+    ]
+  },
+  "UI_DRAWER_SNACKBAR": {
+    "passed": [
+      "Em gắn Drawer vào tham số drawer của Scaffold nên menu trượt hoạt động tốt.",
+      "Em hiển thị snackbar trong cây có Scaffold cha nên thông báo hiện đúng."
+    ],
+    "failed": [
+      "Em gọi snackbar khi không có Scaffold cha nên thông báo không hiển thị.",
+      "Em quên gắn Drawer vào Scaffold nên menu không mở được, test fail."
+    ],
+    "recommendations": [
+      "Em nên đảm bảo luôn có Scaffold cha trước khi hiển thị SnackBar.",
+      "Em hãy gắn Drawer vào Scaffold để menu tùy chọn trượt ra đúng cách."
+    ]
+  },
+  "THEME_COLORS_COLORSCHEME": {
+    "passed": [
+      "Em đã định nghĩa các biến màu bằng Color(0xFF...) và đặt tên rõ nghĩa, rất sạch sẽ.",
+      "Em dùng ColorScheme.fromSeed với seedColor và brightness đúng cách để Flutter sinh bảng màu."
+    ],
+    "failed": [
+      "Em còn để màu hard-code rải rác trong widget thay vì gom vào biến hoặc ColorScheme.",
+      "Em đặt màu chữ trực tiếp ngoài TextStyle nên màu không áp dụng đúng cho Text."
+    ],
+    "recommendations": [
+      "Em nên gom toàn bộ màu vào một file theme và tham chiếu qua tên biến hoặc ColorScheme.",
+      "Em hãy luôn bọc app bằng MaterialApp và set brightness để bảng màu nhất quán."
+    ]
+  },
+  "THEME_TYPOGRAPHY_FONTS": {
+    "passed": [
+      "Em đã thêm package google_fonts và tạo các TextStyle dùng chung bằng GoogleFonts.roboto().copyWith(...).",
+      "Em đặt fontSize và fontWeight hợp lý, tái sử dụng style thay vì viết tay từng chỗ."
+    ],
+    "failed": [
+      "Em lặp lại các TextStyle dài ở nhiều nơi nên code bị trùng và khó bảo trì.",
+      "Em dùng sai fontWeight khiến chữ hiển thị đậm nhạt không đúng thiết kế."
+    ],
+    "recommendations": [
+      "Em nên định nghĩa style một lần trong theme.dart rồi import dùng lại ở mọi màn hình.",
+      "Em hãy nhớ w400 là normal, w600 semibold, w700 bold và không để cỡ chữ dưới 10px."
+    ]
+  },
+  "THEME_LIGHT_DARK": {
+    "passed": [
+      "Em đã tạo hàm createTheme trả về ThemeData và gắn vào tham số theme của MaterialApp.",
+      "Em định nghĩa textTheme qua Typography.material2021().englishLike.copyWith(...) đầy đủ các style."
+    ],
+    "failed": [
+      "Em quên gắn theme vào MaterialApp nên app vẫn dùng theme mặc định.",
+      "Em đặt format trực tiếp trên widget làm ghi đè theme và mất tính nhất quán."
+    ],
+    "recommendations": [
+      "Em nên dùng platformBrightness để chọn theme.light() hay theme.dark() theo thiết bị.",
+      "Em hãy để widget kế thừa theme và chỉ override khi thật sự cần thiết."
+    ]
+  },
+  "STATE_SETSTATE_STATEFUL": {
+    "passed": [
+      "Em dùng StatefulWidget và gọi setState đúng chỗ nên UI cập nhật mượt khi state thay đổi.",
+      "Em khởi tạo dữ liệu trong initState và đặt setState ở widget con, giúp chỉ phần thay đổi được vẽ lại."
+    ],
+    "failed": [
+      "Em đổi biến state nhưng quên gọi setState nên giao diện không cập nhật theo dữ liệu mới.",
+      "Em đặt setState ở widget quá cao trong cây làm cả màn hình bị vẽ lại không cần thiết."
+    ],
+    "recommendations": [
+      "Em hãy luôn bọc thay đổi state trong setState và tách widget có state thành class riêng ở vị trí thấp nhất.",
+      "Em nên chuyển phần khởi tạo dữ liệu vào initState để giá trị ban đầu sẵn sàng trước khi build chạy."
+    ]
+  },
+  "STATE_INHERITED_WIDGET": {
+    "passed": [
+      "Em cài đặt static method of trả về instance qua dependOnInheritedWidgetOfExactType rất đúng mẫu InheritedWidget.",
+      "Em truyền state xuống cây qua BuildContext mà không cần đẩy tham số qua từng widget."
+    ],
+    "failed": [
+      "Em gọi dependOnInheritedWidgetOfExactType sai kiểu nên giá trị trả về null và phần đọc state lỗi.",
+      "Em vẫn truyền state thủ công qua tham số nên chưa tận dụng được InheritedWidget."
+    ],
+    "recommendations": [
+      "Em hãy kiểm tra lại kiểu generic khi gọi dependOnInheritedWidgetOfExactType để chắc chắn lấy đúng instance.",
+      "Em nên dùng static of(context) làm điểm truy cập state thay vì truyền qua nhiều lớp tham số."
+    ]
+  },
+  "STATE_PROVIDER": {
+    "passed": [
+      "Em đặt class state extends ChangeNotifier và gọi notifyListeners nên widget cập nhật khi giá trị đổi.",
+      "Em tạo đối tượng một lần trong create và dùng MultiProvider gọn gàng khi có nhiều provider."
+    ],
+    "failed": [
+      "Em quên gọi notifyListeners sau khi đổi giá trị nên UI không phản ánh trạng thái mới.",
+      "Em khởi tạo lại class trong mỗi lần build thay vì dùng create nên state bị reset liên tục."
+    ],
+    "recommendations": [
+      "Em hãy đảm bảo mọi hàm thay đổi state đều kết thúc bằng notifyListeners để widget được thông báo.",
+      "Em nên khởi tạo model trong tham số create của Provider để giữ một instance duy nhất."
+    ]
+  },
+  "STATE_RIVERPOD": {
+    "passed": [
+      "Em bọc app trong ProviderScope và định nghĩa provider bằng @riverpod đúng quy trình của Riverpod.",
+      "Em dùng ref.watch trong build và ConsumerWidget nên UI tự cập nhật khi provider thay đổi."
+    ],
+    "failed": [
+      "Em dùng ref.read trong build thay vì ref.watch nên UI không lắng nghe thay đổi của provider.",
+      "Em chưa chạy build_runner nên thiếu file .g.dart và project không build được."
+    ],
+    "recommendations": [
+      "Em hãy dùng ref.watch trong build cho phần cần phản ứng, để ref.read cho các hành động ngoài build.",
+      "Em nên chạy dart run build_runner build sau khi thêm @riverpod để sinh file provider cần thiết."
+    ]
+  },
+  "STATE_BLOC_OTHER": {
+    "passed": [
+      "Em tách business logic khỏi UI qua cubit và phát state mới đúng tinh thần mẫu BLoC.",
+      "Em đăng ký dependency bằng GetIt registerSingleton và lấy lại gọn gàng khi cần dùng."
+    ],
+    "failed": [
+      "Em trộn logic xử lý vào widget UI nên chưa tách biệt như mẫu BLoC yêu cầu.",
+      "Em sửa state trực tiếp trong Redux thay vì qua reducer thuần nên vi phạm nguyên tắc state read-only."
+    ],
+    "recommendations": [
+      "Em hãy giữ mọi xử lý nghiệp vụ trong cubit/BLoC và để widget chỉ hiển thị và gửi action.",
+      "Em nên thay đổi state Redux qua reducer thuần, và với MobX nhớ đánh dấu @observable, @action đầy đủ."
+    ]
+  },
+  "STATE_IMMUTABLE": {
+    "passed": [
+      "Em phân biệt rõ local state trong widget và app state chia sẻ toàn app nên cấu trúc dữ liệu rõ ràng.",
+      "Em lưu selection của FilterChip trong StatefulWidget và tạo bản copy mới khi cập nhật state immutable."
+    ],
+    "failed": [
+      "Em đưa local state lên global không cần thiết khiến trạng thái khó kiểm soát và khó test cô lập.",
+      "Em sửa trực tiếp state dùng chung nên các phần app thấy giá trị khác nhau và hành vi không nhất quán."
+    ],
+    "recommendations": [
+      "Em hãy giữ dữ liệu riêng của một widget ở local state và chỉ nâng lên app state khi thật sự cần chia sẻ.",
+      "Em nên thiết kế state dùng chung là immutable và tạo bản sao mới mỗi lần cập nhật để tránh bug đồng bộ."
+    ]
+  },
+  "ADVUI_LISTVIEW": {
+    "passed": [
+      "Em dùng ListView.builder với itemCount và itemBuilder rất chuẩn, danh sách cuộn mượt và không bị overflow.",
+      "Em đã biết đặt scrollDirection: Axis.horizontal để dựng danh sách ngang đúng yêu cầu."
+    ],
+    "failed": [
+      "Em vẫn dùng Column cho danh sách dài nên xuất hiện sọc overflow khi nội dung vượt màn hình.",
+      "itemCount của em không khớp độ dài danh sách nên thiếu item khi hiển thị."
+    ],
+    "recommendations": [
+      "Em hãy thay Column bằng ListView.builder cho mọi danh sách có số phần tử thay đổi.",
+      "Em nên gán itemCount đúng bằng movies.length và lấy phần tử qua index trong itemBuilder."
+    ]
+  },
+  "ADVUI_GRIDVIEW": {
+    "passed": [
+      "Em cấu hình GridView.builder với gridDelegate và SliverGridDelegateWithMaxCrossAxisExtent rất hợp lý.",
+      "Lưới của em tự giãn lấp đầy vùng khi đổi kích thước màn hình, đúng tinh thần bài học."
+    ],
+    "failed": [
+      "Em quên shrinkWrap: true khi lồng GridView trong vùng cao không xác định nên bị lỗi unbounded.",
+      "Em thiếu gridDelegate nên lưới không dựng được và báo lỗi compile."
+    ],
+    "recommendations": [
+      "Em hãy luôn khai báo gridDelegate cùng childAspectRatio và spacing cho GridView.builder.",
+      "Sau khi đổi dữ liệu trong initState, Em nhớ hot restart thay vì hot reload để lưới cập nhật."
+    ]
+  },
+  "ADVUI_STACK_INDEXEDSTACK": {
+    "passed": [
+      "Em dùng Stack kèm Align để chồng text lên ảnh đúng vị trí topCenter như sách hướng dẫn.",
+      "Em điều khiển IndexedStack qua index để đổi trang rất gọn gàng."
+    ],
+    "failed": [
+      "Em đặt sai thứ tự children trong Stack nên phần tử quan trọng bị che mất.",
+      "Em không cập nhật index của IndexedStack nên màn hình không đổi trang khi tương tác."
+    ],
+    "recommendations": [
+      "Em hãy nhớ child đầu danh sách Stack nằm dưới cùng, đặt nội dung nổi bật ở sau.",
+      "Em nên dùng setState để đổi index cho IndexedStack mỗi khi người dùng chọn trang khác."
+    ]
+  },
+  "ADVUI_EXPANDED_LAYOUTBUILDER": {
+    "passed": [
+      "Em bọc ListView trong Expanded nên đã xử lý triệt để lỗi unbounded height.",
+      "Em dùng LayoutBuilder đọc constraints.maxWidth để chọn layout cho tablet và phone rất tốt."
+    ],
+    "failed": [
+      "Em chưa bọc danh sách bằng Expanded nên gặp lỗi Vertical viewport was given unbounded height.",
+      "Em đặt Expanded ngoài Row/Column nên ứng dụng báo lỗi runtime."
+    ],
+    "recommendations": [
+      "Em hãy bọc widget cần chiếm hết không gian bằng Expanded và chỉ đặt nó trong Row hoặc Column.",
+      "Em nên dùng LayoutBuilder với ngưỡng maxWidth > 600 để phân biệt layout tablet và phone."
+    ]
+  },
+  "ADVUI_TABLE_CARD": {
+    "passed": [
+      "Em dựng Table với các TableRow khớp số cột và dùng columnWidths rất chính xác.",
+      "Em dùng Card với elevation để làm nổi bật vùng nội dung đúng mục đích của widget."
+    ],
+    "failed": [
+      "Số widget trong TableRow của Em không khớp số cột nên bảng dựng lỗi.",
+      "Em quên dùng TableCell khi cần căn chỉnh nên ô hiển thị sai alignment."
+    ],
+    "recommendations": [
+      "Em hãy đảm bảo mỗi TableRow có đúng số widget bằng số cột đã khai báo.",
+      "Khi cần định dạng thêm cho ô, Em nên bọc nội dung trong TableCell và đặt verticalAlignment."
+    ]
+  },
+  "ADVUI_BOTTOMSHEET": {
+    "passed": [
+      "Em gọi showModalBottomSheet với context và builder trả về widget nội dung rất đúng cách.",
+      "Em phân biệt được bottom sheet persistent và modal nên chọn loại phù hợp với tình huống."
+    ],
+    "failed": [
+      "Em thiếu tham số context hoặc builder nên bottom sheet không hiện.",
+      "Builder của Em không trả về widget hợp lệ nên không thấy nội dung sheet."
+    ],
+    "recommendations": [
+      "Em hãy luôn truyền context và một builder trả về widget khi gọi showModalBottomSheet.",
+      "Em nên dùng backgroundColor và cân nhắc drag handle để sheet thân thiện hơn."
+    ]
+  },
+  "ADVUI_SLIVERS": {
+    "passed": [
+      "Em đặt các sliver trong CustomScrollView và dùng SliverToBoxAdapter để chuyển widget thường rất đúng.",
+      "Em chọn SliverChildBuilderDelegate cho SliverList với childCount hợp lý."
+    ],
+    "failed": [
+      "Em đưa widget không phải sliver vào slivers nên gặp lỗi RenderViewport expected a child of type RenderSliver.",
+      "Em còn dùng Expanded và ListView trong danh sách slivers nên ứng dụng báo lỗi runtime."
+    ],
+    "recommendations": [
+      "Em hãy bọc mọi widget thường bằng SliverToBoxAdapter trước khi đặt vào danh sách slivers.",
+      "Em nên thay Expanded/ListView bằng SliverList với delegate phù hợp khi làm việc trong CustomScrollView."
+    ]
+  },
+  "NAV_NAVIGATOR_PUSH_POP": {
+    "passed": [
+      "Em dùng Navigator với push và pop đúng cơ chế stack, đẩy và lấy trang ra hợp lý.",
+      "Em khai báo MaterialPage có key và child rõ ràng, onPopPage gọi route.didPop chuẩn."
+    ],
+    "failed": [
+      "Em chưa gọi pop nên người dùng không quay lại được màn hình trước.",
+      "Em quên gọi route.didPop trong onPopPage làm stack trang sai lệch."
+    ],
+    "recommendations": [
+      "Em hãy đảm bảo mỗi lần push đều có đường pop tương ứng để điều hướng hai chiều.",
+      "Em nên dùng Navigator.of(context) khi không có global key và kiểm tra stack sau mỗi thao tác."
+    ]
+  },
+  "NAV_NAMED_ROUTES": {
+    "passed": [
+      "Em khai báo map routes trong MaterialApp và điều hướng bằng pushNamed gọn gàng.",
+      "Em truyền arguments và đọc lại qua ModalRoute đúng kiểu dữ liệu."
+    ],
+    "failed": [
+      "Em đặt tên route khi push không khớp key trong map nên app báo lỗi không tìm thấy route.",
+      "Em ép kiểu arguments sai khiến màn hình đích bị crash khi đọc dữ liệu."
+    ],
+    "recommendations": [
+      "Em nên gom tên route thành hằng số dùng chung để tránh gõ sai chuỗi.",
+      "Em hãy await kết quả của pushNamed khi cần dữ liệu trả về từ trang con."
+    ]
+  },
+  "NAV_GOROUTER_AUTOROUTE": {
+    "passed": [
+      "Em cấu hình MaterialApp.router với routerConfig và khai báo route bằng package rất gọn.",
+      "Em gắn annotation RoutePage đầy đủ và chạy build_runner sinh code thành công."
+    ],
+    "failed": [
+      "Em quên chạy dart run build_runner build nên file .gr.dart thiếu làm app không build.",
+      "Em đặt path hoặc tên RoutePage không khớp route khai báo nên push không tìm thấy trang."
+    ],
+    "recommendations": [
+      "Em hãy chạy lại build_runner mỗi khi thêm hoặc sửa route để code sinh luôn cập nhật.",
+      "Em nên dùng context.router.push với route đã sinh thay vì tự ghép chuỗi path."
+    ]
+  },
+  "NAV_BOTTOM_NAVIGATION": {
+    "passed": [
+      "Em dựng thanh điều hướng dưới với ba mục icon và label rõ ràng.",
+      "Em cập nhật index trong onDestinationSelected qua setState nên tab đổi đúng."
+    ],
+    "failed": [
+      "Em không gọi setState khi đổi index nên chạm tab mà màn hình không thay đổi.",
+      "Em dùng NavigationBar nhưng vẫn để currentIndex và onTap nên sai API và tab không phản hồi."
+    ],
+    "recommendations": [
+      "Em nên giữ số mục trong khoảng ba đến năm để thanh điều hướng dễ dùng.",
+      "Em hãy chỉnh màu chữ và icon qua theme khi chuyển sang NavigationBar của Material 3."
+    ]
+  },
+  "NAV_DEEP_LINKING": {
+    "passed": [
+      "Em khai báo intent-filter trên Android và URL types trên iOS cho scheme đúng.",
+      "Em chuẩn bị file xác minh domain đặt tại thư mục .well-known cho link https."
+    ],
+    "failed": [
+      "Em thiếu intent-filter hoặc đặt sai scheme nên deep link không mở đúng trang.",
+      "Em chưa cấu hình autoVerify và file assetlinks nên link https không vào được app."
+    ],
+    "recommendations": [
+      "Em hãy test deep link bằng adb hoặc xcrun simctl openurl để xác nhận mở đúng màn hình.",
+      "Em nên ưu tiên App Links và Universal Links với domain sở hữu để link an toàn và đáng tin hơn."
+    ]
+  },
+  "ANIM_IMPLICIT": {
+    "passed": [
+      "Em dùng AnimatedContainer rất gọn, có duration và đổi giá trị qua setState nên hiệu ứng chạy mượt.",
+      "Em chọn đúng widget AnimatedXXXX cho thuộc tính cần đổi và thêm curve easeInOut cho chuyển động tự nhiên."
+    ],
+    "failed": [
+      "Em quên khai báo duration nên AnimatedContainer báo lỗi và không có hoạt ảnh nào chạy.",
+      "Em đặt AnimatedPositioned ngoài Stack nên widget đứng yên, không di chuyển như yêu cầu."
+    ],
+    "recommendations": [
+      "Em nên kiểm tra lại danh sách AnimatedXXXX để chọn đúng widget cho từng thuộc tính (opacity, size, position).",
+      "Em nhớ luôn đổi giá trị thuộc tính bên trong setState để implicit animation được kích hoạt."
+    ]
+  },
+  "ANIM_TWEEN": {
+    "passed": [
+      "Em dùng TweenAnimationBuilder với begin và end rõ ràng, value được áp đúng vào widget trong builder.",
+      "Em tận dụng child truyền vào builder nên cây widget không bị rebuild thừa, hiệu năng tốt."
+    ],
+    "failed": [
+      "Em dùng ColorTween nhưng quên khai báo kiểu nullable Color? nên báo lỗi kiểu dữ liệu.",
+      "Em không sử dụng child truyền vào builder khiến toàn bộ widget rebuild mỗi frame, hoạt ảnh bị giật."
+    ],
+    "recommendations": [
+      "Em nên khai báo TweenAnimationBuilder<Color?> khi dùng ColorTween để tránh lỗi kiểu.",
+      "Em hãy dùng tham số child trong builder cho phần widget tĩnh để tối ưu hiệu năng."
+    ]
+  },
+  "ANIM_EXPLICIT_CONTROLLER": {
+    "passed": [
+      "Em khai báo AnimationController với vsync và mixin ticker đúng, gọi forward để khởi động hoạt ảnh.",
+      "Em dispose controller trong dispose() đầy đủ và dùng CurvedAnimation với AnimatedBuilder rất bài bản."
+    ],
+    "failed": [
+      "Em quên gọi _controller.dispose() trong dispose() nên có cảnh báo Ticker leak khi rời màn hình.",
+      "Em thiếu vsync hoặc ticker mixin nên controller báo lỗi no TickerProvider lúc chạy."
+    ],
+    "recommendations": [
+      "Em luôn nhớ dispose AnimationController giống như dispose TextEditingController để tránh rò rỉ bộ nhớ.",
+      "Em nên thêm SingleTickerProviderStateMixin và truyền vsync: this khi tạo controller."
+    ]
+  },
+  "ANIM_HERO": {
+    "passed": [
+      "Em bọc ảnh bằng Hero ở cả trang nguồn và trang đích với tag trùng khớp nên hiệu ứng bay rất mượt.",
+      "Em tạo tag duy nhất từ movieUrl ghép loại phim nên tránh được trùng tag giữa các section."
+    ],
+    "failed": [
+      "Em để hai Hero cùng tag trong một trang nên báo lỗi multiple heroes share the same tag.",
+      "Em đặt tag ở hai trang không khớp nhau nên ảnh chuyển trang bị nhảy đột ngột, không có hoạt ảnh."
+    ],
+    "recommendations": [
+      "Em nên đảm bảo mỗi tag là duy nhất trong một trang và trùng khớp giữa trang nguồn với trang đích.",
+      "Em hãy dùng provider để đồng bộ hero tag khi tag được tạo động lúc người dùng chạm."
+    ]
+  },
+  "ANIM_PACKAGES": {
+    "passed": [
+      "Em thêm flutter_animate vào pubspec, chạy pub get và dùng chuỗi .animate().scaleXY().then() đúng cách.",
+      "Em viết CustomPainter override paint và shouldRepaint hợp lý, dùng CustomRoute cho chuyển trang đẹp mắt."
+    ],
+    "failed": [
+      "Em dùng controller cho flutter_animate nhưng quên ticker mixin nên báo lỗi lúc chạy.",
+      "Em để shouldRepaint trả về sai khiến canvas vẽ lại liên tục gây giật hoặc không cập nhật."
+    ],
+    "recommendations": [
+      "Em nhớ chạy pub get sau khi thêm gói và gắn ticker mixin khi flutter_animate dùng controller.",
+      "Em nên trả về shouldRepaint chính xác và dùng CustomRoute với transitionsBuilder cho hiệu ứng chuyển trang."
+    ]
+  },
+  "ASYNC_FUTURE_ASYNC_AWAIT": {
+    "passed": [
+      "Em đã biết khai báo hàm bất đồng bộ với async và dùng await để chờ kết quả đúng cách.",
+      "Bài làm thể hiện khả năng xử lý tác vụ chờ (gọi mạng/I/O) mà không làm gián đoạn luồng chính."
+    ],
+    "failed": [
+      "Bài làm chưa xử lý đúng tác vụ bất đồng bộ: dữ liệu được dùng khi chưa sẵn sàng.",
+      "Có dấu hiệu thiếu await hoặc không bắt lỗi cho hàm trả về Future."
+    ],
+    "recommendations": [
+      "Em nên rà lại các hàm trả về Future để đảm bảo đã await trước khi dùng kết quả.",
+      "Em nên bọc tác vụ bất đồng bộ trong try/catch (hoặc dùng catchError) để xử lý lỗi mạng/thời gian chờ."
+    ]
+  },
+  "ASYNC_EVENT_LOOP": {
+    "passed": [
+      "Em đã giữ cho luồng chính không bị chặn, giúp giao diện phản hồi tốt."
+    ],
+    "failed": [
+      "Có tác vụ nặng chạy đồng bộ trên luồng chính khiến giao diện có thể bị treo."
+    ],
+    "recommendations": [
+      "Em nên đẩy các tính toán nặng ra khỏi luồng chính (dùng Future/microtask hoặc isolate) để UI luôn mượt."
+    ]
+  },
+  "ASYNC_FUTUREBUILDER": {
+    "passed": [
+      "Em đã dùng FutureBuilder và xử lý trạng thái của Future một cách hợp lý.",
+      "Bài làm có hiển thị trạng thái chờ và dữ liệu sau khi tải xong."
+    ],
+    "failed": [
+      "Phần hiển thị dữ liệu bất đồng bộ chưa xử lý đầy đủ trạng thái của FutureBuilder.",
+      "Giao diện chưa có trạng thái chờ (loading) hoặc đọc dữ liệu khi Future chưa hoàn tất."
+    ],
+    "recommendations": [
+      "Em nên kiểm tra snapshot.connectionState và snapshot.hasError trước khi đọc snapshot.data.",
+      "Em nên khởi tạo Future ở initState hoặc ViewModel thay vì trong build() để tránh gọi lại liên tục."
+    ]
+  },
+  "ASYNC_STREAMS_STREAMBUILDER": {
+    "passed": [
+      "Em đã biết dùng Stream/StreamBuilder để cập nhật giao diện theo dữ liệu thay đổi liên tục."
+    ],
+    "failed": [
+      "Phần xử lý Stream chưa đúng: có thể lắng nghe sai cách hoặc đọc dữ liệu khi chưa có.",
+      "Bài làm chưa quản lý vòng đời của StreamSubscription."
+    ],
+    "recommendations": [
+      "Em nên kiểm tra connectionState trong StreamBuilder trước khi dùng dữ liệu của snapshot.",
+      "Em nên hủy (cancel) StreamSubscription khi không dùng nữa để tránh rò rỉ tài nguyên."
+    ]
+  },
+  "ASYNC_ISOLATES": {
+    "passed": [
+      "Em đã biết tách tác vụ nặng sang isolate để không làm chậm giao diện."
+    ],
+    "failed": [
+      "Phần xử lý tác vụ nền bằng isolate chưa đúng cơ chế giao tiếp qua Port."
+    ],
+    "recommendations": [
+      "Em nên dùng SendPort/ReceivePort để trao đổi dữ liệu với isolate và chỉ gửi các kiểu dữ liệu được hỗ trợ.",
+      "Em nên đóng isolate (kill) sau khi hoàn tất để tránh rò rỉ tài nguyên."
+    ]
+  }
+}

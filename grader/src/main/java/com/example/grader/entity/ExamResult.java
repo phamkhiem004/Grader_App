@@ -66,6 +66,13 @@ public class ExamResult {
     @Column(name = "manual_at")
     private Instant manualAt;
 
+    // ── Cache nhận xét AI (tránh sinh lại khi chấm hàng loạt / mở lại trang) ──
+    @Column(name = "feedback_json", columnDefinition = "LONGTEXT")
+    private String feedbackJson;      // FeedbackRow đã sinh (JSON)
+
+    @Column(name = "feedback_src_hash", length = 40)
+    private String feedbackSrcHash;   // hash của result_json lúc sinh → result đổi (chấm lại) thì sinh lại
+
     @Column(name = "submitted_at")
     private Instant submittedAt;
 

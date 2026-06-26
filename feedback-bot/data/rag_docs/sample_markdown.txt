@@ -1,0 +1,37 @@
+# Skill: Tên kỹ năng
+
+## Mục đích của kỹ năng
+
+Kỹ năng này dùng để đánh giá điều gì trong bài thi Flutter.
+
+## Dấu hiệu đạt yêu cầu
+
+Sinh viên được xem là làm tốt khi có các biểu hiện nào.
+
+## Lỗi thường gặp
+
+Các lỗi phổ biến sinh viên hay mắc.
+
+## Dấu hiệu trong kết quả chấm
+
+Nếu hệ thống chấm ghi nhận các dấu hiệu này, có thể liên quan đến kỹ năng này.
+
+## Nguyên nhân có thể
+
+Các nguyên nhân thường gặp, nhưng không khẳng định tuyệt đối nếu không có evidence.
+
+## Gợi ý học lại
+
+Các kiến thức sinh viên nên ôn.
+
+## Cách viết feedback cho sinh viên
+
+Các câu hoặc hướng diễn đạt nên dùng.
+
+## Không nên viết
+
+Các kiểu nhận xét không nên dùng.
+
+## Từ khóa liên quan
+
+Danh sách keyword để RAG dễ truy xuất.

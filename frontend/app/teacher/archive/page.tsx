@@ -46,8 +46,11 @@ export default function ArchivePage() {
   const [err, setErr] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
 
-  // Modal xem exam_test
+  // Modal xem đề: mặc định hiện ĐỀ BÀI (de_bai); có tab phụ để xem 3 file testcase khi cần
   const [viewExam, setViewExam] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<"debai" | "files">("debai");
+  const [deBai, setDeBai] = useState<string | null>(null);
+  const [deBaiMissing, setDeBaiMissing] = useState(false);
   const [files, setFiles] = useState<CodeFile[]>([]);
   const [activeFile, setActiveFile] = useState(0);
   const [viewLoading, setViewLoading] = useState(false);
@@ -86,17 +89,39 @@ export default function ArchivePage() {
     return () => { document.body.style.overflow = prev; };
   }, [viewExam]);
 
-  const openView = async (examId: string) => {
-    setViewExam(examId); setFiles([]); setActiveFile(0); setViewLoading(true);
+  // Mở modal xem đề: ưu tiên ĐỀ BÀI; đề upload tay (không có đề bài) thì mở thẳng tab testcase.
+  const openView = (examId: string, hasDeBai?: boolean) => {
+    setViewExam(examId); setDeBai(null); setDeBaiMissing(false);
+    setFiles([]); setActiveFile(0);
+    if (hasDeBai) { setViewMode("debai"); loadDeBai(examId); }
+    else { setViewMode("files"); loadFiles(examId); }
+  };
+
+  // Đọc ĐỀ BÀI (de_bai.md) để hiển thị — tái dùng endpoint tải, bỏ BOM nếu có.
+  const loadDeBai = async (examId: string) => {
+    setViewLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/exam-setup/${encodeURIComponent(examId)}/download/de-bai`);
+      if (res.ok) {
+        const txt = await res.text();
+        setDeBai(txt.charCodeAt(0) === 0xFEFF ? txt.slice(1) : txt);   // bỏ BOM (U+FEFF) nếu có
+      } else setDeBaiMissing(true);
+    } catch { setDeBaiMissing(true); }
+    finally { setViewLoading(false); }
+  };
+
+  // Đọc 3 file testcase (exam_test.dart, grader.dart, skills_matrix.json) — tải khi cần.
+  const loadFiles = async (examId: string) => {
+    setViewLoading(true);
     try {
       const d = await fetch(`${API_BASE}/exam-setup/${encodeURIComponent(examId)}/testcase`).then((r) => r.json());
       setFiles(Array.isArray(d) ? d : []);
-    } catch {
-      setFiles([]);
-    } finally {
-      setViewLoading(false);
-    }
+    } catch { setFiles([]); }
+    finally { setViewLoading(false); }
   };
+
+  const showDeBai = () => { setViewMode("debai"); if (deBai === null && !deBaiMissing) loadDeBai(viewExam!); };
+  const showFiles = () => { setViewMode("files"); if (files.length === 0) loadFiles(viewExam!); };
 
   const doRegrade = async (examId: string) => {
     setErr(null); setMsg(null);
@@ -168,7 +193,7 @@ export default function ArchivePage() {
       <div className="mb-5 flex items-start gap-2.5 rounded-xl border border-indigo-100 bg-indigo-50/60 p-4 text-xs text-indigo-700">
         <Info size={16} className="mt-0.5 shrink-0" />
         <div className="space-y-1">
-          <p>Mỗi đề lưu sẵn <span className="font-mono">exam_test.dart</span>, <span className="font-mono">skills_matrix.json</span>, <span className="font-mono">grader.dart</span> trên đĩa — bấm <b>Xem</b> để đối chiếu, <b>Chấm lại</b> để chấm lại toàn bộ bài đã nộp (vd sau khi cập nhật cách báo lỗi).</p>
+          <p>Mỗi đề lưu sẵn <span className="font-mono">exam_test.dart</span>, <span className="font-mono">skills_matrix.json</span>, <span className="font-mono">grader.dart</span> trên đĩa — bấm <b>Xem</b> để xem <b>đề bài</b> (và đối chiếu testcase), <b>Chấm lại</b> để chấm lại toàn bộ bài đã nộp (vd sau khi cập nhật cách báo lỗi).</p>
           <p className="text-indigo-600/80">Nhóm nút <b>Tải</b> cho phép tải <b>Đề bài</b> (de_bai.md), <b>starter</b> (khung lib/ phát cho SV) &amp; <b>lời giải</b> (lời giải mẫu AI sinh — chỉ GV tham khảo, KHÔNG phát SV) — chỉ đề tạo bằng <b>AI</b> mới có; và <b>exam_test</b> (ZIP 3 file testcase) để dùng/upload lại.</p>
           <p className="text-indigo-600/80"><b>Xóa đề</b> sẽ gỡ testcase + ảnh Docker để giải phóng dung lượng — sau khi xóa sẽ KHÔNG chấm lại được đề đó nữa.</p>
         </div>
@@ -252,8 +277,8 @@ export default function ArchivePage() {
                             <Lightbulb size={12} /> lời giải
                           </button>
                         </div>
-                        <button onClick={() => openView(e.examId)} title="Xem exam_test"
-                          disabled={!e.hasTestcase}
+                        <button onClick={() => openView(e.examId, e.hasDeBai)} title="Xem đề bài"
+                          disabled={!e.hasDeBai && !e.hasTestcase}
                           className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-600 transition-colors hover:text-indigo-600 disabled:opacity-40">
                           <Eye size={13} /> Xem
                         </button>
@@ -284,18 +309,43 @@ export default function ArchivePage() {
         </div>
       )}
 
-      {/* Modal xem exam_test — portal ra <body> để overlay phủ toàn màn hình */}
+      {/* Modal xem đề — mặc định ĐỀ BÀI; đổi tab để xem 3 file testcase. Portal ra <body>. */}
       {mounted && viewExam && createPortal(
         <div className="animate-modal-overlay fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm" onClick={() => setViewExam(null)}>
           <div className="animate-modal-pop flex max-h-[85vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-black/5" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3.5">
               <h3 className="flex items-center gap-2 text-sm font-bold text-slate-700">
-                <FileCode size={16} className="text-indigo-500" /> Testcase đề <span className="font-mono">{viewExam}</span>
+                <FileText size={16} className="text-indigo-500" /> Đề <span className="font-mono">{viewExam}</span>
               </h3>
               <button onClick={() => setViewExam(null)} className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"><X size={18} /></button>
             </div>
+
+            {/* Tab: Đề bài | Testcase (3 file) */}
+            <div className="flex shrink-0 items-center gap-1 border-b border-slate-100 bg-slate-50/60 px-3 py-2">
+              <button onClick={showDeBai}
+                className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${viewMode === "debai" ? "bg-indigo-50 text-indigo-700" : "text-slate-500 hover:bg-slate-100"}`}>
+                <FileText size={13} /> Đề bài
+              </button>
+              <button onClick={showFiles}
+                className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${viewMode === "files" ? "bg-indigo-50 text-indigo-700" : "text-slate-500 hover:bg-slate-100"}`}>
+                <FileCode size={13} /> Testcase (3 file)
+              </button>
+            </div>
+
             {viewLoading ? (
               <div className="flex items-center justify-center py-20 text-slate-400"><Loader2 size={22} className="animate-spin" /></div>
+            ) : viewMode === "debai" ? (
+              deBai ? (
+                <pre className="custom-scrollbar flex-1 overflow-auto whitespace-pre-wrap p-5 text-sm leading-relaxed text-slate-700">{deBai}</pre>
+              ) : (
+                <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-16 text-center">
+                  <FileText size={30} className="text-slate-300" />
+                  <p className="max-w-sm text-sm text-slate-500">Đề này chưa có <b>đề bài</b> (de_bai.md) — chỉ đề tạo bằng <b>AI</b> và lưu lại mới có.</p>
+                  <button onClick={showFiles} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 hover:text-indigo-600">
+                    <FileCode size={13} /> Xem 3 file testcase
+                  </button>
+                </div>
+              )
             ) : files.length === 0 ? (
               <div className="py-16 text-center text-sm text-slate-500">Không đọc được file testcase của đề này.</div>
             ) : (
@@ -303,7 +353,7 @@ export default function ArchivePage() {
                 <div className="flex shrink-0 gap-1 overflow-x-auto border-b border-slate-100 bg-slate-50/60 px-3 py-2">
                   {files.map((f, i) => (
                     <button key={f.name} onClick={() => setActiveFile(i)}
-                      className={`shrink-0 rounded-md px-2.5 py-1 font-mono text-xs transition-colors ${i === activeFile ? "bg-indigo-100 text-indigo-700" : "text-slate-500 hover:bg-slate-100"}`}>
+                      className={`shrink-0 rounded-md px-2.5 py-1 font-mono text-xs transition-colors ${i === activeFile ? "bg-indigo-50 text-indigo-700" : "text-slate-500 hover:bg-slate-100"}`}>
                       {f.name}
                     </button>
                   ))}

@@ -12,6 +12,7 @@ import {
 import { clsx } from 'clsx';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { API_BASE } from '@/lib/config';
+import ThemeToggle from '@/components/layout/ThemeToggle';
 
 interface SidebarLayoutProps {
   children: React.ReactNode;
@@ -359,16 +360,19 @@ export default function SidebarLayout({ children, activePath = '/', title, subti
               )}
             </div>
 
+            {/* Nút đổi giao diện sáng/tối — hiển thị trên mọi trang dùng layout này */}
+            <ThemeToggle />
+
             {/* Chuông thông báo */}
             <div ref={notifRef} className="relative">
               <button
                 onClick={toggleNotif}
-                className="relative text-slate-500 transition-colors hover:text-slate-800"
+                className="relative flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 transition-all hover:border-indigo-300 hover:text-indigo-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:text-indigo-300"
                 title="Thông báo"
               >
-                <Bell size={20} />
+                <Bell size={18} />
                 {unread > 0 && (
-                  <span className="absolute -right-1.5 -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-bold text-white ring-2 ring-white">
+                  <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-bold text-white ring-2 ring-white dark:ring-slate-800">
                     {unread > 9 ? '9+' : unread}
                   </span>
                 )}

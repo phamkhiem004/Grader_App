@@ -4,6 +4,7 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 :root {
+  color-scheme: light;            /* form controls (select/option…) render theo nền sáng */
   --background: #f5f6fb;          /* nền dashboard sáng */
   --foreground: #0f172a;          /* chữ chính */
   --card: #ffffff;                /* nền card */
@@ -22,15 +23,18 @@
 }
 
 .dark {
-  --background: #070b14;
-  --foreground: #e5e7eb;
-  --card: #0f1729;
-  --card-border: #1e2a42;
-  --muted: #94a3b8;
-  --chart-grid: #1e293b;
-  --chart-tick: #94a3b8;
-  --shadow-card: 0 1px 2px rgba(0, 0, 0, .5), 0 12px 34px -20px rgba(0, 0, 0, .8);
-  --shadow-card-hover: 0 1px 3px rgba(0, 0, 0, .6), 0 22px 50px -22px rgba(2, 6, 23, .9);
+  color-scheme: dark;             /* form controls render theo nền tối (tránh select trắng-trên-trắng) */
+  /* Palette tối DỊU MẮT: nền charcoal (không đen kịt) + chữ off-white (không trắng gắt)
+     + elevation tinh tế → giảm chói, tương phản vừa phải (~12:1), nhìn chuyên nghiệp. */
+  --background: #0f1217;          /* nền app: charcoal mềm (was #070b14 gần đen) */
+  --foreground: #d4d9e2;          /* chữ chính: off-white dịu, rõ */
+  --card: #181d26;                /* surface nổi nhẹ trên nền */
+  --card-border: #2a3039;         /* viền mềm, tương phản thấp */
+  --muted: #a3abb9;               /* chữ phụ (nâng sáng cho rõ trên nền xám) */
+  --chart-grid: #242b35;
+  --chart-tick: #8b93a1;
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, .28), 0 8px 24px -18px rgba(0, 0, 0, .5);
+  --shadow-card-hover: 0 1px 3px rgba(0, 0, 0, .38), 0 18px 42px -24px rgba(0, 0, 0, .62);
 }
 
 @theme inline {
@@ -58,6 +62,25 @@ body {
 /* Vùng bôi chọn đồng bộ với màu thương hiệu */
 ::selection {
   background: color-mix(in srgb, var(--brand) 24%, transparent);
+  color: var(--foreground);
+}
+
+/* ── Form controls theo theme ─────────────────────────────────────
+   Tránh <select>/<option> hiện "trắng tinh không thấy chữ" trên máy có
+   giao diện HỆ THỐNG tối. color-scheme (ở :root/.dark) đồng bộ control;
+   thêm màu chữ/nền rõ cho input/textarea/select ở chế độ tối. ── */
+select,
+input,
+textarea {
+  color: var(--foreground);
+}
+.dark select {
+  background-color: var(--card);
+  border-color: var(--card-border);
+}
+.dark select option,
+.dark select optgroup {
+  background-color: var(--card);
   color: var(--foreground);
 }
 
@@ -93,17 +116,12 @@ body {
    (Card/nền dùng biến ở trên; phần này lo chữ, viền, nền phụ, tint.)
    ════════════════════════════════════════════════════════════════ */
 .dark .text-slate-900,
-.dark .text-slate-800 { color: #e5e7eb; }
+.dark .text-slate-800 { color: #e1e5ec; }   /* tiêu đề */
 .dark .text-slate-700,
-.dark .text-slate-600 { color: #cbd5e1; }
+.dark .text-slate-600 { color: #c2c9d4; }   /* chữ thường — nâng sáng cho rõ */
 .dark .text-slate-500,
-.dark .text-slate-400 { color: #94a3b8; }
-.dark .text-slate-300 { color: #64748b; }
-
-.dark .text-indigo-900,
-.dark .text-emerald-900, .dark .text-emerald-800,
-.dark .text-amber-900,   .dark .text-amber-800,
-.dark .text-rose-900 { color: #e2e8f0; }
+.dark .text-slate-400 { color: #a3abb9; }   /* chữ phụ — hết mờ trên nền xám */
+.dark .text-slate-300 { color: #6b7383; }
 
 .dark .border-slate-200,
 .dark .border-slate-100 { border-color: var(--card-border); }
@@ -113,29 +131,94 @@ body {
 .dark .bg-white\/90, .dark .bg-white\/80, .dark .bg-white\/70,
 .dark .bg-white\/60, .dark .bg-white\/50 { background-color: color-mix(in srgb, var(--card) 85%, transparent); }
 
-.dark .bg-slate-50,
-.dark .bg-slate-50\/50, .dark .bg-slate-50\/70, .dark .bg-slate-50\/80 { background-color: #0b1322; }
-.dark .hover\:bg-slate-50:hover, .dark .hover\:bg-slate-50\/70:hover { background-color: #0e1830; }
-.dark .bg-slate-100 { background-color: #1b2740; }
-.dark .hover\:bg-slate-100:hover { background-color: #243352; }
+.dark .bg-slate-50 { background-color: #14171e; }
+.dark .bg-slate-100 { background-color: #20262f; }
 
-/* Tint sáng (…-50) → bản tối mờ cùng tông để không bị lóa */
-.dark .bg-indigo-50 { background-color: color-mix(in srgb, var(--brand) 18%, transparent); }
-.dark .bg-emerald-50 { background-color: color-mix(in srgb, #10b981 16%, transparent); }
-.dark .bg-rose-50   { background-color: color-mix(in srgb, #f43f5e 16%, transparent); }
-.dark .bg-amber-50  { background-color: color-mix(in srgb, #f59e0b 16%, transparent); }
+/* ── Biến thể CÓ OPACITY (vd bg-slate-50/60, bg-indigo-50/60, text-amber-700/90) ──
+   Override theo class đơn KHÔNG phủ biến thể /NN → nền vẫn sáng + chữ nhạt = mờ. Dùng
+   [class^=]/[class*=" "] để bắt MỌI mức opacity nhưng CHỪA biến thể hover:/group-hover:. ── */
+.dark [class^="bg-slate-50/"],      .dark [class*=" bg-slate-50/"]      { background-color: #14171e; }
+.dark [class^="bg-slate-100/"],     .dark [class*=" bg-slate-100/"]     { background-color: #20262f; }
+.dark [class^="bg-slate-200/"],     .dark [class*=" bg-slate-200/"]     { background-color: #2a313c; }
+.dark [class^="bg-indigo-50/"],     .dark [class*=" bg-indigo-50/"]     { background-color: color-mix(in srgb, var(--brand) 15%, transparent); }
+.dark [class^="bg-blue-50/"],       .dark [class*=" bg-blue-50/"]       { background-color: color-mix(in srgb, #3b82f6 14%, transparent); }
+.dark [class^="bg-emerald-50/"],    .dark [class*=" bg-emerald-50/"]    { background-color: color-mix(in srgb, #10b981 13%, transparent); }
+.dark [class^="bg-rose-50/"],       .dark [class*=" bg-rose-50/"]       { background-color: color-mix(in srgb, #f43f5e 13%, transparent); }
+.dark [class^="bg-amber-50/"],      .dark [class*=" bg-amber-50/"]      { background-color: color-mix(in srgb, #f59e0b 13%, transparent); }
+.dark [class^="border-slate-200/"], .dark [class*=" border-slate-200/"],
+.dark [class^="border-slate-100/"], .dark [class*=" border-slate-100/"] { border-color: var(--card-border); }
+.dark [class^="text-indigo-600/"],  .dark [class*=" text-indigo-600/"],
+.dark [class^="text-indigo-700/"],  .dark [class*=" text-indigo-700/"]  { color: #a5b4fc; }
+.dark [class^="text-amber-600/"],   .dark [class*=" text-amber-600/"],
+.dark [class^="text-amber-700/"],   .dark [class*=" text-amber-700/"]   { color: #fcd34d; }
+.dark [class^="text-emerald-600/"], .dark [class*=" text-emerald-600/"],
+.dark [class^="text-emerald-700/"], .dark [class*=" text-emerald-700/"] { color: #6ee7b7; }
+
+/* ── HOVER ở chế độ tối ──────────────────────────────────────────────
+   Mặc định Tailwind: hover nền SÁNG (bg-*-50/100/white) + chữ TỐI (slate-700/800/900)
+   → rê chuột bị lóa và mất chữ. Ép: nền hover → tối/tint dịu; chữ hover → sáng rõ.
+   (Nút accent hover:bg-*-600/700 và hover:text-white giữ nguyên.) ── */
+.dark [class*="hover:bg-white"]:hover      { background-color: #20262f; }
+.dark [class*="hover:bg-slate-50"]:hover   { background-color: #1b212b; }
+.dark [class*="hover:bg-slate-100"]:hover  { background-color: #283039; }
+.dark [class*="hover:bg-slate-200"]:hover  { background-color: #2f3743; }
+.dark [class*="hover:bg-indigo-50"]:hover,  .dark [class*="hover:bg-indigo-100"]:hover  { background-color: color-mix(in srgb, var(--brand) 20%, transparent); }
+.dark [class*="hover:bg-blue-50"]:hover,    .dark [class*="hover:bg-blue-100"]:hover    { background-color: color-mix(in srgb, #3b82f6 18%, transparent); }
+.dark [class*="hover:bg-emerald-50"]:hover, .dark [class*="hover:bg-emerald-100"]:hover { background-color: color-mix(in srgb, #10b981 17%, transparent); }
+.dark [class*="hover:bg-rose-50"]:hover,    .dark [class*="hover:bg-rose-100"]:hover    { background-color: color-mix(in srgb, #f43f5e 17%, transparent); }
+.dark [class*="hover:bg-amber-50"]:hover,   .dark [class*="hover:bg-amber-100"]:hover   { background-color: color-mix(in srgb, #f59e0b 17%, transparent); }
+.dark .group:hover [class*="group-hover:bg-slate-50"] { background-color: #1b212b; }
+
+.dark [class*="hover:text-slate-600"]:hover,
+.dark [class*="hover:text-slate-700"]:hover,
+.dark [class*="hover:text-slate-800"]:hover,
+.dark [class*="hover:text-slate-900"]:hover { color: #e1e5ec; }
+.dark [class*="hover:text-indigo-600"]:hover,  .dark [class*="hover:text-indigo-700"]:hover  { color: #a5b4fc; }
+.dark [class*="hover:text-blue-600"]:hover     { color: #93c5fd; }
+.dark [class*="hover:text-emerald-600"]:hover, .dark [class*="hover:text-emerald-800"]:hover { color: #6ee7b7; }
+.dark [class*="hover:text-amber-600"]:hover    { color: #fcd34d; }
+.dark [class*="hover:text-rose-500"]:hover,    .dark [class*="hover:text-rose-600"]:hover,   .dark [class*="hover:text-rose-700"]:hover { color: #fda4af; }
+
+/* ── Màu nhấn ở chế độ tối ───────────────────────────────────────────
+   Nền pastel (…-50 / …-100) → tint tối cùng tông; chữ & icon màu (MỌI mức
+   400–900) → ép về sắc sáng (~300) để đọc rõ trên nền tối, không bị lóa. ── */
+.dark .bg-indigo-50  { background-color: color-mix(in srgb, var(--brand) 15%, transparent); }
+.dark .bg-blue-50    { background-color: color-mix(in srgb, #3b82f6 14%, transparent); }
+.dark .bg-emerald-50 { background-color: color-mix(in srgb, #10b981 13%, transparent); }
+.dark .bg-rose-50    { background-color: color-mix(in srgb, #f43f5e 13%, transparent); }
+.dark .bg-amber-50   { background-color: color-mix(in srgb, #f59e0b 13%, transparent); }
+.dark .bg-violet-50  { background-color: color-mix(in srgb, #8b5cf6 14%, transparent); }
 .dark [class*="from-indigo-50"] {
   background-image: none !important;
-  background-color: color-mix(in srgb, var(--brand) 14%, transparent) !important;
+  background-color: color-mix(in srgb, var(--brand) 12%, transparent) !important;
 }
+
+.dark .bg-indigo-100  { background-color: color-mix(in srgb, var(--brand) 22%, transparent); }
+.dark .bg-blue-100    { background-color: color-mix(in srgb, #3b82f6 20%, transparent); }
+.dark .bg-emerald-100 { background-color: color-mix(in srgb, #10b981 18%, transparent); }
+.dark .bg-amber-100   { background-color: color-mix(in srgb, #f59e0b 18%, transparent); }
+.dark .bg-rose-100    { background-color: color-mix(in srgb, #f43f5e 18%, transparent); }
+.dark .bg-violet-100  { background-color: color-mix(in srgb, #8b5cf6 20%, transparent); }
+.dark .bg-red-100     { background-color: color-mix(in srgb, #ef4444 18%, transparent); }
+.dark .bg-orange-100  { background-color: color-mix(in srgb, #f97316 18%, transparent); }
+.dark .bg-slate-200   { background-color: #2a313c; }
+
+.dark .text-indigo-400,  .dark .text-indigo-500,  .dark .text-indigo-600,  .dark .text-indigo-700,  .dark .text-indigo-800,  .dark .text-indigo-900  { color: #a5b4fc; }
+.dark .text-blue-400,    .dark .text-blue-500,    .dark .text-blue-600,    .dark .text-blue-700,    .dark .text-blue-800     { color: #93c5fd; }
+.dark .text-emerald-400, .dark .text-emerald-500, .dark .text-emerald-600, .dark .text-emerald-700, .dark .text-emerald-800, .dark .text-emerald-900 { color: #6ee7b7; }
+.dark .text-amber-400,   .dark .text-amber-500,   .dark .text-amber-600,   .dark .text-amber-700,   .dark .text-amber-800    { color: #fcd34d; }
+.dark .text-rose-400,    .dark .text-rose-500,    .dark .text-rose-600,    .dark .text-rose-700,    .dark .text-rose-900     { color: #fda4af; }
+.dark .text-violet-400,  .dark .text-violet-500,  .dark .text-violet-600,  .dark .text-violet-700   { color: #c4b5fd; }
+.dark .text-red-400,     .dark .text-red-500,     .dark .text-red-600,     .dark .text-red-700      { color: #fca5a5; }
+.dark .text-orange-400,  .dark .text-orange-500,  .dark .text-orange-600,  .dark .text-orange-700   { color: #fdba74; }
 
 /* Custom Scrollbar */
 .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
 .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
 .custom-scrollbar::-webkit-scrollbar-thumb { background-color: #cbd5e1; border-radius: 10px; }
 .custom-scrollbar::-webkit-scrollbar-thumb:hover { background-color: #94a3b8; }
-.dark .custom-scrollbar::-webkit-scrollbar-thumb { background-color: #334155; }
-.dark .custom-scrollbar::-webkit-scrollbar-thumb:hover { background-color: #475569; }
+.dark .custom-scrollbar::-webkit-scrollbar-thumb { background-color: #2f3743; }
+.dark .custom-scrollbar::-webkit-scrollbar-thumb:hover { background-color: #3b4453; }
 
 /* Tiện ích hiệu ứng dùng lại */
 @keyframes fade-in-up {

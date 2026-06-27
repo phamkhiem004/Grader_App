@@ -516,7 +516,7 @@ export default function HistoryPage() {
                     <th className="px-6 py-3.5">Pass</th>
                     <th className="px-6 py-3.5 text-right">Điểm</th>
                     <th className="px-6 py-3.5">Thời gian</th>
-                    <th className="px-4 py-3.5 text-center">Chi tiết</th>
+                    <th className="sticky right-0 z-20 border-l border-slate-100 bg-white px-4 py-3.5 text-center">Chi tiết</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -528,7 +528,7 @@ export default function HistoryPage() {
                         <td className="px-6 py-3.5"><Skeleton className="h-3 w-24" /></td>
                         <td className="px-6 py-3.5"><Skeleton className="ml-auto h-6 w-10 rounded-lg" /></td>
                         <td className="px-6 py-3.5"><Skeleton className="h-3 w-24" /></td>
-                        <td className="px-4 py-3.5"><Skeleton className="mx-auto h-7 w-7 rounded-lg" /></td>
+                        <td className="sticky right-0 z-10 border-l border-slate-100 bg-white px-4 py-3.5"><Skeleton className="mx-auto h-7 w-7 rounded-lg" /></td>
                       </tr>
                     ))
                   ) : filtered.length === 0 ? (
@@ -545,7 +545,7 @@ export default function HistoryPage() {
                       const isError = r.status === "ERROR";
                       const initials = (r.studentName || r.studentId || "?").trim().charAt(0).toUpperCase();
                       return (
-                        <tr key={r.id} className="transition-colors hover:bg-slate-50/70">
+                        <tr key={r.id} className="group transition-colors hover:bg-slate-50/70">
                           <td className="px-6 py-3.5">
                             <div className="flex items-center gap-3">
                               <input
@@ -622,7 +622,7 @@ export default function HistoryPage() {
                           <td className="px-6 py-3.5 text-xs text-slate-500">
                             {r.updatedAt ? new Date(r.updatedAt).toLocaleString("vi-VN") : "—"}
                           </td>
-                          <td className="px-4 py-3.5">
+                          <td className="sticky right-0 z-10 border-l border-slate-100 bg-white px-4 py-3.5 transition-colors group-hover:bg-slate-50/70">
                             <div className="flex items-center justify-center gap-1">
                               <Tooltip label="Xem bài làm & testcase" side="left">
                                 <button

@@ -6,8 +6,9 @@ import { API_BASE } from "@/lib/config";
 import { getToken } from "@/lib/auth";
 import {
   MessageSquareText, Play, Square, Download, Loader2, CheckCircle2,
-  AlertCircle, XCircle, Sparkles, Search, ShieldAlert, RefreshCw,
+  AlertCircle, XCircle, Sparkles, ShieldAlert, RefreshCw,
 } from "lucide-react";
+import ExamCombobox from "@/components/ui/ExamCombobox";
 
 interface ExamOption { examId: string; examName: string; }
 interface StudentLite {
@@ -289,23 +290,14 @@ export default function FeedbackPage() {
               <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500">
                 Mã đề thi
               </label>
-              <div className="relative">
-                <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                <input
-                  list="exam-options"
-                  value={examId}
-                  onChange={(e) => setExamId(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter" && !running) run(); }}
-                  placeholder="VD: PE_01"
-                  disabled={running}
-                  className="w-full rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm font-medium text-slate-800 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 disabled:bg-slate-50"
-                />
-                <datalist id="exam-options">
-                  {exams.map((e) => (
-                    <option key={e.examId} value={e.examId}>{e.examName}</option>
-                  ))}
-                </datalist>
-              </div>
+              <ExamCombobox
+                options={exams}
+                value={examId}
+                onChange={setExamId}
+                onEnter={() => { if (!running) run(); }}
+                disabled={running}
+                placeholder="VD: PE_01"
+              />
             </div>
 
             {!running ? (

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { GraduationCap, Mail, Lock, User, Loader2, AlertCircle, UserPlus } from "lucide-react";
+import ThemeToggle from "@/components/layout/ThemeToggle";
 
 export default function RegisterPage() {
   const { teacher, loading: authLoading, register } = useAuth();
@@ -37,6 +38,9 @@ export default function RegisterPage() {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-900 via-[#0b1120] to-indigo-950 p-4">
+      <div className="fixed right-4 top-4 z-50">
+        <ThemeToggle />
+      </div>
       <div className="w-full max-w-md">
         <div className="mb-8 flex flex-col items-center text-center">
           <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500 to-blue-600 shadow-lg shadow-indigo-600/40 ring-1 ring-white/15">

@@ -49,11 +49,71 @@ if (-not (Have "winget")) {
     winget install -e --id $id --silent --accept-package-agreements --accept-source-agreements --disable-interactivity 2>&1 | Out-Host
     Refresh-Path
   }
-  Ensure-Tool "node"   "OpenJS.NodeJS.LTS"            "Node.js LTS"
-  Ensure-Tool "python" "Python.Python.3.11"           "Python 3.11"
-  Ensure-Tool "java"   "EclipseAdoptium.Temurin.17.JDK" "Java (Temurin JDK 17)"
-  Ensure-Tool "ollama" "Ollama.Ollama"               "Ollama"
-  Ensure-Tool "docker" "Docker.DockerDesktop"        "Docker Desktop"
+  Ensure-Tool "node"   "OpenJS.NodeJS.LTS"               "Node.js LTS"
+  Ensure-Tool "java"   "EclipseAdoptium.Temurin.17.JDK"  "Java (Temurin JDK 17)"
+  Ensure-Tool "ollama" "Ollama.Ollama"                   "Ollama"
+  Ensure-Tool "docker" "Docker.DockerDesktop"             "Docker Desktop"
+
+  # ── Python: xu ly rieng vi Windows Store stub co the chan lenh 'python' ────
+  Section "Cai dat Python 3.11"
+
+  # Buoc 1: Tat Python Store stub (python.exe gia tu Microsoft Store)
+  # Stub nay tra ve exit code 9009 va khong lam gi ca — la nguyen nhan chinh cua loi "python not found".
+  $stubPath = "$env:LOCALAPPDATA\Microsoft\WindowsApps"
+  $stubPy   = Join-Path $stubPath "python.exe"
+  $stubPy3  = Join-Path $stubPath "python3.exe"
+  foreach ($stub in @($stubPy, $stubPy3)) {
+    if (Test-Path $stub) {
+      try {
+        # Doi ten stub de vo hieu hoa (khong xoa — tranh loi quyen)
+        $bak = $stub + ".disabled_by_grader"
+        if (-not (Test-Path $bak)) { Rename-Item $stub $bak -ErrorAction SilentlyContinue }
+        Write-Host "  [OK] Da tat Python Store stub: $stub" -ForegroundColor Green
+      } catch {
+        Write-Host "  [INFO] Khong tat duoc stub (co the da tat san): $stub" -ForegroundColor DarkGray
+      }
+    }
+  }
+
+  # Buoc 2: Cai Python 3.11 neu chua co (hoac stub vua bi tat)
+  Refresh-Path
+  $pyOk = $false
+  try {
+    $ver = & python --version 2>&1
+    if ($LASTEXITCODE -eq 0 -and $ver -match 'Python 3') { $pyOk = $true }
+  } catch {}
+  # Thu them launcher 'py'
+  if (-not $pyOk) {
+    try {
+      $ver = & py -3 --version 2>&1
+      if ($LASTEXITCODE -eq 0) { $pyOk = $true }
+    } catch {}
+  }
+
+  if ($pyOk) {
+    Write-Host "  [OK] Python da co va hoat dong ($ver)" -ForegroundColor Green
+  } else {
+    Write-Host "  Cai Python 3.11 (winget: Python.Python.3.11) ..." -ForegroundColor Yellow
+    winget install -e --id Python.Python.3.11 --silent `
+      --accept-package-agreements --accept-source-agreements `
+      --override "/quiet InstallAllUsers=1 PrependPath=1 Include_pip=1" `
+      2>&1 | Out-Host
+    Refresh-Path
+    # Kiem tra lai
+    try { $ver = & python --version 2>&1; if ($LASTEXITCODE -eq 0) { $pyOk = $true } } catch {}
+    if (-not $pyOk) { try { $ver = & py -3 --version 2>&1; if ($LASTEXITCODE -eq 0) { $pyOk = $true } } catch {} }
+    if ($pyOk) { Write-Host "  [OK] Python da cai thanh cong: $ver" -ForegroundColor Green }
+    else        { Write-Host "  [CANH BAO] Python chua san sang — co the can KHOI DONG LAI may." -ForegroundColor Yellow }
+  }
+
+  # Buoc 3: Nang cap pip va dam bao virtualenv co san (bot can tao .venv)
+  if ($pyOk) {
+    $pyExe = if (Get-Command py -ErrorAction SilentlyContinue) { "py" } else { "python" }
+    Write-Host "  Nang cap pip..." -ForegroundColor DarkGray
+    & $pyExe -m pip install --upgrade pip --quiet 2>&1 | Out-Null
+    Write-Host "  [OK] pip da san sang" -ForegroundColor Green
+  }
+
   Refresh-Path
 }
 

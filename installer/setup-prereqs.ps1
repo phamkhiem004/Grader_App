@@ -1,4 +1,4 @@
-﻿<#
+<#
   setup-prereqs.ps1 — Cai cac THANH PHAN NEN cho may TRONG (chay 1 lan, idempotent).
   Inno Setup goi file nay khi cai (co quyen admin). Cung co the chay lai bang tay sau khi reboot.
 
@@ -12,9 +12,10 @@
 #>
 
 param(
-  [string]$AppDir = (Split-Path $PSScriptRoot -Parent),   # thu muc cai = goc Grader_App
-  [string]$Model  = "",                                   # rong = doc tu bot-model.txt
-  [string]$Embed  = "bge-m3",
+  [string]$AppDir        = (Split-Path $PSScriptRoot -Parent),  # thu muc cai = goc Grader_App
+  [string]$Model         = "",                                  # rong = doc tu bot-model.txt
+  [string]$Embed         = "bge-m3",
+  [string]$DockerDataRoot = "",                                 # rong = dung mac dinh Docker (C:\ProgramData\docker)
   [switch]$SkipModels
 )
 
@@ -56,6 +57,44 @@ if (-not (Have "winget")) {
   Refresh-Path
 }
 
+# ── 1b) Cau hinh Docker data-root sang o khac (neu duoc chi dinh) ────────────
+if ($DockerDataRoot -and $DockerDataRoot -ne "") {
+  Section "Cau hinh Docker data-root: $DockerDataRoot"
+  $daemonDir  = "$env:ProgramData\Docker\config"
+  $daemonFile = "$daemonDir\daemon.json"
+  New-Item -ItemType Directory -Force -Path $daemonDir | Out-Null
+
+  # Doc hoac tao moi daemon.json
+  if (Test-Path $daemonFile) {
+    try   { $cfg = Get-Content $daemonFile -Raw | ConvertFrom-Json }
+    catch { $cfg = [PSCustomObject]@{} }
+  } else  { $cfg = [PSCustomObject]@{} }
+
+  # Gan data-root
+  if ($cfg.PSObject.Properties['data-root']) {
+    $cfg.'data-root' = $DockerDataRoot
+  } else {
+    $cfg | Add-Member -MemberType NoteProperty -Name 'data-root' -Value $DockerDataRoot
+  }
+
+  $cfg | ConvertTo-Json -Depth 5 | Set-Content $daemonFile -Encoding UTF8
+  Write-Host "  [OK] daemon.json da cap nhat: data-root = $DockerDataRoot" -ForegroundColor Green
+  Write-Host "  Tao thu muc neu chua co: $DockerDataRoot" -ForegroundColor Yellow
+  New-Item -ItemType Directory -Force -Path $DockerDataRoot | Out-Null
+
+  # Restart Docker Desktop neu dang chay de ap dung cai dat
+  $ddProc = Get-Process -Name "Docker Desktop" -ErrorAction SilentlyContinue
+  if ($ddProc) {
+    Write-Host "  Restart Docker Desktop de ap dung data-root moi..." -ForegroundColor Yellow
+    Stop-Process -Name "Docker Desktop" -Force -ErrorAction SilentlyContinue
+    Start-Sleep 3
+    $ddExe = Join-Path $env:ProgramFiles "Docker\Docker\Docker Desktop.exe"
+    if (Test-Path $ddExe) { Start-Process $ddExe | Out-Null; Start-Sleep 5 }
+  } else {
+    Write-Host "  Docker Desktop chua chay -> cai dat se co hieu luc lan khoi dong tiep theo." -ForegroundColor DarkGray
+  }
+}
+
 # ── 2) Tai model Ollama ──────────────────────────────────────────────────────
 if (-not $SkipModels -and (Have "ollama")) {
   Section "Tai model Ollama ($Model + $Embed)"
@@ -79,6 +118,10 @@ if (-not (Have "docker")) {
   try { & docker info *> $null; if ($LASTEXITCODE -eq 0) { $dockerOk = $true } } catch {}
   if (-not $dockerOk) {
     $dd = Join-Path $env:ProgramFiles "Docker\Docker\Docker Desktop.exe"
+    if (-not (Test-Path $dd)) {
+      # Thu them duong dan khac (cai vao o khac qua winget custom location)
+      $dd = Join-Path $env:LOCALAPPDATA "Docker\Docker Desktop.exe"
+    }
     if (Test-Path $dd) {
       Write-Host "  Mo Docker Desktop, cho engine..." -ForegroundColor Yellow
       Start-Process $dd | Out-Null

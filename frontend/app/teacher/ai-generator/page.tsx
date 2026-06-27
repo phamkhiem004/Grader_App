@@ -27,6 +27,10 @@ interface Job {
 
 const TERMINAL = ["SUCCESS", "NEEDS_REVIEW", "FAILED", "ERROR", "NO_API_KEY", "CANCELLED"];
 
+// Khoá localStorage lưu jobId đang chạy: rời trang rồi quay lại vẫn khôi phục được tiến trình
+// (việc tạo đề chạy SERVER-SIDE theo jobId, không phụ thuộc trang có đang mở hay không).
+const ACTIVE_JOB_KEY = "ai_gen_active_job";
+
 async function api(path: string, method: string, body?: unknown) {
   const token = getToken();
   const res = await fetch(`${API_BASE}${path}`, {
@@ -147,6 +151,8 @@ export default function AiGeneratorPage() {
       setJob({ jobId: d.jobId, status: "RUNNING" });
       setStep("running");
       startPoll(d.jobId);
+      // Nhớ jobId (+ thông tin để Lưu/đặt tên) để rời trang rồi quay lại vẫn thấy đang tạo
+      try { localStorage.setItem(ACTIVE_JOB_KEY, JSON.stringify({ jobId: d.jobId, examId: examId.trim(), examName: examName.trim(), topic })); } catch { /* ignore */ }
     } catch (e) { setErr((e as Error).message); }
   };
 
@@ -164,6 +170,31 @@ export default function AiGeneratorPage() {
       } catch { /* giữ trạng thái, thử lại nhịp sau */ }
     }, 1500);
   };
+
+  // ── Khôi phục job khi quay lại trang ─────────────────────────────
+  // Tạo đề chạy SERVER-SIDE (theo jobId). Rời trang chỉ làm mất state React + dừng polling,
+  // KHÔNG dừng việc tạo. Đọc lại jobId đã lưu để hiện tiếp tiến trình (đang chạy hoặc đã xong).
+  useEffect(() => {
+    let saved: { jobId?: string; examId?: string; examName?: string; topic?: string } | null = null;
+    try { saved = JSON.parse(localStorage.getItem(ACTIVE_JOB_KEY) || "null"); } catch { saved = null; }
+    if (!saved?.jobId) return;
+    const jobId = saved.jobId;
+    // Phục hồi form để nút "Lưu thành đề" / đặt tên vẫn dùng được sau khi quay lại
+    if (saved.examId) setExamId(saved.examId);
+    if (saved.examName) setExamName(saved.examName);
+    if (saved.topic) setTopic(saved.topic);
+    (async () => {
+      try {
+        const r = await fetch(`${API_BASE}/ai-generator/job/${jobId}`);
+        const s: Job = await r.json().catch(() => null as unknown as Job);
+        if (!r.ok || !s || !s.status) { try { localStorage.removeItem(ACTIVE_JOB_KEY); } catch { /* ignore */ } return; }
+        setJob(s);
+        if (TERMINAL.includes(s.status)) { setActiveFile(0); setStep("review"); }
+        else { setStep("running"); startPoll(jobId); }
+      } catch { /* để nguyên, lần mở sau thử lại */ }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const doCancel = async () => {
     if (!job) return;
@@ -186,6 +217,7 @@ export default function AiGeneratorPage() {
   const resetAll = () => {
     stopPoll(); setJob(null); setErr(null); setSaveMsg(null); setCancelling(false);
     setRefinePrompt(""); setRefining(false); setStep("config");
+    try { localStorage.removeItem(ACTIVE_JOB_KEY); } catch { /* ignore */ }
   };
 
   const doSave = async () => {

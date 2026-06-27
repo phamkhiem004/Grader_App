@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { GraduationCap, Mail, Lock, Loader2, AlertCircle, LogIn } from "lucide-react";
+import ThemeToggle from "@/components/layout/ThemeToggle";
 
 export default function LoginPage() {
   const { teacher, loading: authLoading, login } = useAuth();
@@ -34,6 +35,9 @@ export default function LoginPage() {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-900 via-[#0b1120] to-indigo-950 p-4">
+      <div className="fixed right-4 top-4 z-50">
+        <ThemeToggle />
+      </div>
       <div className="w-full max-w-md">
         {/* Brand */}
         <div className="mb-8 flex flex-col items-center text-center">

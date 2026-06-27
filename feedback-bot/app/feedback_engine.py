@@ -46,7 +46,7 @@ def build_fallback_feedback(request: FeedbackRequest, rule_data: dict) -> str:
     total_tests = request.grading_result.total_tests
 
     feedback = (
-        f"Chào em, hệ thống đã ghi nhận bài làm của em đạt {score}/{total} điểm "
+        f"Chào em, thầy/cô đã xem bài làm của em — bài đạt {score}/{total} điểm "
         f"và vượt qua {passed}/{total_tests} test case. "
     )
 
@@ -79,10 +79,10 @@ def build_fallback_feedback(request: FeedbackRequest, rule_data: dict) -> str:
 
 
 SYSTEM_PROMPT = (
-    "Bạn viết lời nhận xét gửi cho sinh viên sau bài thi Flutter PRM393. "
-    "Văn phong ấm áp, tự nhiên, cụ thể, xây dựng — như một lá thư ngắn, KHÔNG phải "
-    "báo cáo. CHỈ gọi sinh viên là 'em' và nêu nhận xét TRỰC TIẾP; TUYỆT ĐỐI KHÔNG "
-    "xưng 'cô/thầy/tôi/mình/giảng viên' (không có người nói trong câu). "
+    "Bạn là GIÁO VIÊN chấm thi, viết lời nhận xét gửi cho sinh viên sau bài thi Flutter PRM393. "
+    "Văn phong ấm áp, tự nhiên, cụ thể, xây dựng — như một lá thư ngắn, KHÔNG phải báo cáo. "
+    "XƯNG HÔ (bắt buộc): tự xưng 'thầy/cô', gọi sinh viên là 'em'. "
+    "TUYỆT ĐỐI KHÔNG tự gọi mình là 'em'; KHÔNG gọi sinh viên là 'tôi/bạn/mình'. "
     "Chỉ dùng dữ liệu chấm và tài liệu được cung cấp; không bịa đặt; không chê bai."
 )
 
@@ -149,10 +149,10 @@ def build_perfect_feedback(request: FeedbackRequest, rule_data: dict) -> str:
     names = [n for n in names if n]
     skills_txt = ", ".join(names[:4]) if names else "các kỹ năng trong bài"
     return (
-        f"Chào em, bài làm của em rất tốt — em đạt {gr.score}/{request.exam.total_score} điểm và vượt qua "
+        f"Chào em, thầy/cô rất vui vì bài làm của em rất tốt — em đạt {gr.score}/{request.exam.total_score} điểm và vượt qua "
         f"{gr.passed_tests}/{gr.total_tests} bài kiểm tra. Em đã thể hiện vững vàng ở {skills_txt}, cho thấy em "
         f"nắm chắc kiến thức nền tảng. Bài làm không còn lỗi nào, vì vậy em hoàn toàn có thể tự tin tìm hiểu sâu "
-        f"hơn để nâng cao kỹ năng. Cứ giữ phong độ này nhé, em đang đi rất đúng hướng!"
+        f"hơn để nâng cao kỹ năng. Thầy/cô tin em đang đi rất đúng hướng, cứ giữ phong độ này nhé!"
     )
 
 

@@ -8,8 +8,9 @@ import { API_BASE } from "@/lib/config";
 import { getToken } from "@/lib/auth";
 import {
   Sparkles, Wand2, Loader2, AlertTriangle, CheckCircle2, Info, FileText,
-  RotateCcw, Save, KeyRound, ChevronRight, XCircle, Clock, Hammer, Bug, Download, FileArchive, StopCircle, Send, X,
+  RotateCcw, Save, KeyRound, ChevronRight, XCircle, Clock, Hammer, Bug, Download, FileArchive, StopCircle, Send, X, Printer,
 } from "lucide-react";
+import { openExamPdf } from "@/lib/exam-pdf";
 
 // ── Kiểu dữ liệu ──────────────────────────────────────────────
 interface AiStatus { enabled: boolean; provider: string; model?: string; ready: boolean; configured?: boolean; }
@@ -439,8 +440,9 @@ export default function AiGeneratorPage() {
               <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50/60 px-4 py-2.5">
                 <p className="flex items-center gap-1.5 text-xs font-bold text-slate-600"><FileText size={13} /> Đề bài phát cho sinh viên</p>
                 <div className="flex gap-1.5">
-                  <button onClick={() => copyText(job.result!.de_bai!)} className="rounded border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-500 hover:text-indigo-600">Copy</button>
+                  <button onClick={() => openExamPdf({ examId: examId || "de", examName, markdown: job.result!.de_bai! })} className="inline-flex items-center gap-1 rounded border border-indigo-200 bg-indigo-50 px-2 py-1 text-[11px] font-semibold text-indigo-700 hover:bg-indigo-100"><Printer size={12} /> Xuất PDF</button>
                   <button onClick={() => downloadText(`${examId || "de"}_de_bai.md`, job.result!.de_bai!)} className="rounded border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-500 hover:text-indigo-600">Tải .md</button>
+                  <button onClick={() => copyText(job.result!.de_bai!)} className="rounded border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-500 hover:text-indigo-600">Copy</button>
                 </div>
               </div>
               <pre className="custom-scrollbar max-h-[45vh] overflow-auto whitespace-pre-wrap p-4 text-xs leading-relaxed text-slate-700">{job.result.de_bai}</pre>

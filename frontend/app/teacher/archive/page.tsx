@@ -8,8 +8,9 @@ import { API_BASE } from "@/lib/config";
 import { getToken } from "@/lib/auth";
 import {
   Archive, Eye, RotateCcw, Trash2, Loader2, AlertTriangle, CheckCircle2,
-  Info, FileCode, X, Database, Download, FileText, FileArchive, Lightbulb,
+  Info, FileCode, X, Database, Download, FileText, FileArchive, Lightbulb, Printer,
 } from "lucide-react";
+import { openExamPdf } from "@/lib/exam-pdf";
 
 interface ExamRow {
   examId: string;
@@ -170,6 +171,18 @@ export default function ArchivePage() {
     }
   };
 
+  // Xuất ĐỀ BÀI ra PDF: tải nội dung de_bai (bỏ BOM nếu có) rồi mở hộp thoại in của trình duyệt (Lưu thành PDF).
+  const exportPdf = async (examId: string, examName?: string) => {
+    setErr(null); setMsg(null);
+    try {
+      const res = await fetch(`${API_BASE}/exam-setup/${encodeURIComponent(examId)}/download/de-bai`);
+      if (!res.ok) { setErr("Không tải được đề bài để xuất PDF."); return; }
+      let txt = await res.text();
+      if (txt.charCodeAt(0) === 0xFEFF) txt = txt.slice(1);   // bỏ BOM (U+FEFF) nếu có
+      openExamPdf({ examId, examName, markdown: txt });
+    } catch { setErr("Không xuất được PDF."); }
+  };
+
   const doDelete = async (examId: string) => {
     setErr(null); setMsg(null); setDeleting(examId);
     try {
@@ -194,7 +207,7 @@ export default function ArchivePage() {
         <Info size={16} className="mt-0.5 shrink-0" />
         <div className="space-y-1">
           <p>Mỗi đề lưu sẵn <span className="font-mono">exam_test.dart</span>, <span className="font-mono">skills_matrix.json</span>, <span className="font-mono">grader.dart</span> trên đĩa — bấm <b>Xem</b> để xem <b>đề bài</b> (và đối chiếu testcase), <b>Chấm lại</b> để chấm lại toàn bộ bài đã nộp (vd sau khi cập nhật cách báo lỗi).</p>
-          <p className="text-indigo-600/80">Nhóm nút <b>Tải</b> cho phép tải <b>Đề bài</b> (de_bai.md), <b>starter</b> (khung lib/ phát cho SV) &amp; <b>lời giải</b> (lời giải mẫu AI sinh — chỉ GV tham khảo, KHÔNG phát SV) — chỉ đề tạo bằng <b>AI</b> mới có; và <b>exam_test</b> (ZIP 3 file testcase) để dùng/upload lại.</p>
+          <p className="text-indigo-600/80">Nhóm nút <b>Tải</b> cho phép tải <b>Đề bài</b> (de_bai.md) hoặc xuất <b>PDF</b> (in → Lưu thành PDF), <b>starter</b> (khung lib/ phát cho SV) &amp; <b>lời giải</b> (lời giải mẫu AI sinh — chỉ GV tham khảo, KHÔNG phát SV) — chỉ đề tạo bằng <b>AI</b> mới có; và <b>exam_test</b> (ZIP 3 file testcase) để dùng/upload lại.</p>
           <p className="text-indigo-600/80"><b>Xóa đề</b> sẽ gỡ testcase + ảnh Docker để giải phóng dung lượng — sau khi xóa sẽ KHÔNG chấm lại được đề đó nữa.</p>
         </div>
       </div>
@@ -260,6 +273,11 @@ export default function ArchivePage() {
                             disabled={!e.hasDeBai} title="Tải đề bài (de_bai.md) phát cho sinh viên"
                             className="flex items-center gap-1 border-l border-slate-200 px-2 py-1.5 text-slate-600 transition-colors hover:bg-indigo-50 hover:text-indigo-600 disabled:opacity-30 disabled:hover:bg-white disabled:hover:text-slate-600">
                             <FileText size={12} /> Đề bài
+                          </button>
+                          <button onClick={() => exportPdf(e.examId, e.examName)}
+                            disabled={!e.hasDeBai} title="Xuất đề bài ra PDF (mở hộp thoại in → chọn Lưu thành PDF)"
+                            className="flex items-center gap-1 border-l border-slate-200 px-2 py-1.5 text-slate-600 transition-colors hover:bg-indigo-50 hover:text-indigo-600 disabled:opacity-30 disabled:hover:bg-white disabled:hover:text-slate-600">
+                            <Printer size={12} /> PDF
                           </button>
                           <button onClick={() => doDownload(`/exam-setup/${encodeURIComponent(e.examId)}/download/exam-test`, `${e.examId}_exam_test.zip`)}
                             disabled={!e.hasTestcase} title="Tải testcase: exam_test.dart + grader.dart + skills_matrix.json"

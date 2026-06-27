@@ -181,17 +181,17 @@ def build_student_feedback_prompt(
             "TUYỆT ĐỐI KHÔNG viết câu nào kiểu 'cần cải thiện / chưa tốt / cần ôn lại / chưa tối ưu / cần chú ý / "
             "tập trung kiểm soát lỗi' — vì bài KHÔNG có lỗi. Đừng bịa nhược điểm."
         )
-        example = ("Chào em, bài làm của em rất tốt khi đạt điểm cao và vượt qua các bài kiểm tra. Em thể hiện "
-                   "vững vàng ở phần nền tảng và cách tổ chức code, cho thấy em nắm chắc kiến thức. Vì bài không "
-                   "còn lỗi nào, em có thể tự tin đi xa hơn — thử tìm hiểu thêm những kỹ thuật nâng cao để mở rộng "
-                   "kỹ năng. Cứ giữ phong độ này nhé, em đang đi rất đúng hướng!")
+        example = ("Chào em, thầy/cô đã xem bài và rất vui vì bài làm của em rất tốt, đạt điểm cao và vượt qua các "
+                   "bài kiểm tra. Em thể hiện vững vàng ở phần nền tảng và cách tổ chức code, cho thấy em nắm chắc "
+                   "kiến thức. Vì bài không còn lỗi nào, em có thể tự tin đi xa hơn — thử tìm hiểu thêm những kỹ thuật "
+                   "nâng cao để mở rộng kỹ năng. Thầy/cô tin em đang đi rất đúng hướng, cứ giữ phong độ này nhé!")
     else:
         mode_block = (
             f"CHẾ ĐỘ BÀI: CÓ {n_fail} LỖI THẬT (xem 'CÁC LỖI THỰC TẾ'). Phần cần cải thiện chỉ nói về ĐÚNG các "
             "lỗi đó, mỗi lỗi kèm 1 gợi ý sửa cụ thể. KHÔNG thêm bất kỳ lỗi nào ngoài danh sách; KHÔNG nói chung "
             "chung kiểu 'có thể chưa tối ưu' cho kỹ năng đã đạt."
         )
-        example = ("Chào em, bài làm của em cho thấy em đã nắm khá chắc phần nền tảng Dart, cách khai báo lớp và "
+        example = ("Chào em, thầy/cô đã xem bài và thấy em đã nắm khá chắc phần nền tảng Dart, cách khai báo lớp và "
                    "xử lý null đều gọn gàng, đây là điểm rất đáng ghi nhận. Về phần giao diện, bố cục còn bị tràn "
                    "khi nội dung dài, thường do chưa cho danh sách cuộn; em thử bọc phần đó trong một widget cuộn "
                    "được xem sao nhé. Em đã có nền tốt, cố gắng thêm chút ở phần này là bài sẽ tròn trịa hơn. Cố lên em nhé!")
@@ -200,7 +200,7 @@ def build_student_feedback_prompt(
     total_n = request.grading_result.total_tests
 
     return f"""
-Bạn viết lời nhận xét cho một sinh viên sau bài thi Flutter PRM393.
+Bạn là GIÁO VIÊN chấm thi, viết lời nhận xét gửi cho sinh viên sau bài thi Flutter PRM393.
 
 ================ DỮ LIỆU THẬT TỪ KẾT QUẢ CHẤM — BÁM CHẶT VÀO ĐÂY ================
 Điểm: {score}/{total}. Số test đạt: {passed_n}/{total_n}.{note_text}{warn_text}
@@ -225,13 +225,14 @@ VÍ DỤ GIỌNG VĂN cho ĐÚNG chế độ bài này (chỉ tham khảo cách 
 \"\"\"
 
 CÁCH VIẾT:
-- Tiếng Việt, gọi sinh viên là "em", giọng ấm áp, tự nhiên, cụ thể, khích lệ.
-- KHÔNG xưng "cô/thầy/tôi/mình/giảng viên" — nêu nhận xét trực tiếp, không có người nói trong câu.
+- Tiếng Việt, giọng ấm áp, tự nhiên, cụ thể, khích lệ.
+- XƯNG HÔ (bắt buộc): người viết LÀ GIÁO VIÊN — tự xưng "thầy/cô", gọi sinh viên là "em". TUYỆT ĐỐI KHÔNG tự gọi mình là "em", KHÔNG gọi sinh viên là "tôi/bạn/mình". Nếu KIẾN THỨC NỀN có cách xưng khác thì BỎ QUA.
+- KHÔNG chèn câu mang giọng sinh viên (vd "em rất mong nhận xét", "xin cảm ơn") — đây là lời GIÁO VIÊN gửi sinh viên.
 - 3–5 ĐOẠN VĂN LIỀN MẠCH như một lá thư ngắn: mở đầu ghi nhận → điểm làm tốt → từng lỗi thật cần cải thiện (kèm 1 gợi ý sửa cụ thể) → động viên.
 - KHÔNG tiêu đề in đậm, KHÔNG đánh số, KHÔNG gạch đầu dòng, KHÔNG markdown, KHÔNG JSON — chỉ văn xuôi liền mạch.
 - Test ẩn: chỉ nói khái quát. Nếu dữ liệu quá ít/cảnh báo chất lượng: nói rõ nhận xét chỉ mang tính tham khảo.
 
-NHẮC LẠI (bắt buộc): chỉ gọi sinh viên là "em" (KHÔNG "bạn/cô/thầy/tôi"); viết LIỀN MẠCH như một lá thư ngắn, KHÔNG đánh số, KHÔNG in đậm, KHÔNG gạch đầu dòng.
+NHẮC LẠI (bắt buộc): tự xưng "thầy/cô", gọi sinh viên là "em" — KHÔNG tự gọi mình là "em", KHÔNG gọi sinh viên là "tôi/bạn"; viết LIỀN MẠCH như một lá thư ngắn, KHÔNG đánh số, KHÔNG in đậm, KHÔNG gạch đầu dòng.
 
 Bây giờ viết lời nhận xét (chỉ trả về phần văn xuôi):
 """

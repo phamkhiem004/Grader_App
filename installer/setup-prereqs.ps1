@@ -120,6 +120,35 @@ if (-not (Have "winget")) {
 # -- 1b) Cau hinh Docker data-root sang o khac (neu duoc chi dinh) -------------
 if ($DockerDataRoot -and $DockerDataRoot -ne "") {
   Section "Cau hinh Docker data-root: $DockerDataRoot"
+  $dockerRootOk = $true
+  try {
+    $driveRoot = [System.IO.Path]::GetPathRoot($DockerDataRoot)
+    $driveLetter = $driveRoot.Substring(0, 1)
+    $vol = Get-Volume -DriveLetter $driveLetter -ErrorAction SilentlyContinue
+    $drive = Get-PSDrive -Name $driveLetter -ErrorAction SilentlyContinue
+    if ($vol) {
+      if ($vol.FileSystem -ne "NTFS") {
+        Write-Host "  [CANH BAO] Docker data-root can o dia NTFS. O $driveLetter dang la $($vol.FileSystem) -> bo qua tuy chon nay." -ForegroundColor Yellow
+        $dockerRootOk = $false
+      }
+      if ($vol.DriveType -and $vol.DriveType -ne "Fixed") {
+        Write-Host "  [CANH BAO] Docker data-root khong nen dat tren USB/network drive -> bo qua tuy chon nay." -ForegroundColor Yellow
+        $dockerRootOk = $false
+      }
+    }
+    if ($drive -and $drive.Free -lt 30GB) {
+      Write-Host "  [CANH BAO] O $driveLetter con it hon 30GB trong. Build Docker co the loi input/output." -ForegroundColor Yellow
+    }
+  } catch {
+    Write-Host "  [CANH BAO] Khong kiem tra duoc o dia Docker data-root: $($_.Exception.Message)" -ForegroundColor Yellow
+  }
+
+  if (-not $dockerRootOk) {
+    $DockerDataRoot = ""
+  }
+}
+
+if ($DockerDataRoot -and $DockerDataRoot -ne "") {
   $daemonDir  = "$env:ProgramData\Docker\config"
   $daemonFile = "$daemonDir\daemon.json"
   New-Item -ItemType Directory -Force -Path $daemonDir | Out-Null
@@ -196,7 +225,14 @@ if (-not (Have "docker")) {
     } elseif (Test-Path $base) {
       Write-Host "  Build grading-base (Flutter SDK, lan dau RAT LAU ~10-20 phut)..." -ForegroundColor Yellow
       Push-Location (Split-Path $base)
-      try { & powershell -NoProfile -ExecutionPolicy Bypass -File $base } catch { Write-Host "  [LOI] build-base: $_" -ForegroundColor Yellow }
+      try {
+        & powershell -NoProfile -ExecutionPolicy Bypass -File $base
+        if ($LASTEXITCODE -ne 0) {
+          Write-Host "  [CANH BAO] Chua build duoc grading-base. Xem huong dan loi phia tren, sau do chay lai grader-setup.cmd." -ForegroundColor Yellow
+        }
+      } catch {
+        Write-Host "  [LOI] build-base: $_" -ForegroundColor Yellow
+      }
       Pop-Location
     }
   } else {

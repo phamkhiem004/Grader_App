@@ -20,7 +20,7 @@ if errorlevel 1 (
   exit /b
 )
 
-REM ── CHON O CAI DAT DOCKER DATA (images/containers/volumes) ──────────────────
+REM -- CHON O CAI DAT DOCKER DATA (images/containers/volumes) -----------------
 echo.
 echo ============================================================
 echo   CHON O DIA LUU DATA DOCKER

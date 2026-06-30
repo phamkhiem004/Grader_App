@@ -1,5 +1,5 @@
 <#
-  setup-prereqs.ps1 — Cai cac THANH PHAN NEN cho may TRONG (chay 1 lan, idempotent).
+  setup-prereqs.ps1 - Cai cac THANH PHAN NEN cho may TRONG (chay 1 lan, idempotent).
   Inno Setup goi file nay khi cai (co quyen admin). Cung co the chay lai bang tay sau khi reboot.
 
   Lam gi:
@@ -38,7 +38,7 @@ function Refresh-Path {
   $env:Path = (@($m,$u) | Where-Object { $_ }) -join ';'
 }
 
-# ── 1) Cai cong cu nen bang winget ───────────────────────────────────────────
+# -- 1) Cai cong cu nen bang winget -------------------------------------------
 Section "Cai thanh phan nen (winget)"
 if (-not (Have "winget")) {
   Write-Host "[LOI] Khong co winget (App Installer). Cap nhat 'App Installer' tu Microsoft Store roi chay lai." -ForegroundColor Red
@@ -54,18 +54,18 @@ if (-not (Have "winget")) {
   Ensure-Tool "ollama" "Ollama.Ollama"                   "Ollama"
   Ensure-Tool "docker" "Docker.DockerDesktop"             "Docker Desktop"
 
-  # ── Python: xu ly rieng vi Windows Store stub co the chan lenh 'python' ────
+  # -- Python: xu ly rieng vi Windows Store stub co the chan lenh 'python' ----
   Section "Cai dat Python 3.11"
 
   # Buoc 1: Tat Python Store stub (python.exe gia tu Microsoft Store)
-  # Stub nay tra ve exit code 9009 va khong lam gi ca — la nguyen nhan chinh cua loi "python not found".
+  # Stub nay tra ve exit code 9009 va khong lam gi ca - la nguyen nhan chinh cua loi "python not found".
   $stubPath = "$env:LOCALAPPDATA\Microsoft\WindowsApps"
   $stubPy   = Join-Path $stubPath "python.exe"
   $stubPy3  = Join-Path $stubPath "python3.exe"
   foreach ($stub in @($stubPy, $stubPy3)) {
     if (Test-Path $stub) {
       try {
-        # Doi ten stub de vo hieu hoa (khong xoa — tranh loi quyen)
+        # Doi ten stub de vo hieu hoa (khong xoa - tranh loi quyen)
         $bak = $stub + ".disabled_by_grader"
         if (-not (Test-Path $bak)) { Rename-Item $stub $bak -ErrorAction SilentlyContinue }
         Write-Host "  [OK] Da tat Python Store stub: $stub" -ForegroundColor Green
@@ -103,7 +103,7 @@ if (-not (Have "winget")) {
     try { $ver = & python --version 2>&1; if ($LASTEXITCODE -eq 0) { $pyOk = $true } } catch {}
     if (-not $pyOk) { try { $ver = & py -3 --version 2>&1; if ($LASTEXITCODE -eq 0) { $pyOk = $true } } catch {} }
     if ($pyOk) { Write-Host "  [OK] Python da cai thanh cong: $ver" -ForegroundColor Green }
-    else        { Write-Host "  [CANH BAO] Python chua san sang — co the can KHOI DONG LAI may." -ForegroundColor Yellow }
+    else        { Write-Host "  [CANH BAO] Python chua san sang - co the can KHOI DONG LAI may." -ForegroundColor Yellow }
   }
 
   # Buoc 3: Nang cap pip va dam bao virtualenv co san (bot can tao .venv)
@@ -117,7 +117,7 @@ if (-not (Have "winget")) {
   Refresh-Path
 }
 
-# ── 1b) Cau hinh Docker data-root sang o khac (neu duoc chi dinh) ────────────
+# -- 1b) Cau hinh Docker data-root sang o khac (neu duoc chi dinh) -------------
 if ($DockerDataRoot -and $DockerDataRoot -ne "") {
   Section "Cau hinh Docker data-root: $DockerDataRoot"
   $daemonDir  = "$env:ProgramData\Docker\config"
@@ -155,7 +155,7 @@ if ($DockerDataRoot -and $DockerDataRoot -ne "") {
   }
 }
 
-# ── 2) Tai model Ollama ──────────────────────────────────────────────────────
+# -- 2) Tai model Ollama -------------------------------------------------------
 if (-not $SkipModels -and (Have "ollama")) {
   Section "Tai model Ollama ($Model + $Embed)"
   try { Invoke-RestMethod "http://localhost:11434/api/tags" -TimeoutSec 3 | Out-Null }
@@ -169,7 +169,7 @@ if (-not $SkipModels -and (Have "ollama")) {
   Write-Host "  [BO QUA] Ollama chua san sang -> tai model sau (chay lai file nay)." -ForegroundColor Yellow
 }
 
-# ── 3) Anh nen cham bai 'grading-base' (can Docker engine chay) ───────────────
+# -- 3) Anh nen cham bai 'grading-base' (can Docker engine chay) ---------------
 Section "Anh nen cham bai (grading-base)"
 if (-not (Have "docker")) {
   Write-Host "  [BO QUA] Chua co docker." -ForegroundColor Yellow

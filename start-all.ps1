@@ -1,31 +1,31 @@
 ﻿<#
-  start-all.ps1 — Chạy CẢ hệ thống chỉ bằng 1 lệnh (đặt ở GỐC repo Grader_App).
-  Điều phối: Ollama (model) -> MySQL (docker) -> Feedback bot -> Backend -> Frontend.
-  Mỗi service mở trong 1 cửa sổ PowerShell riêng (đóng cửa sổ = tắt service đó).
+  start-all.ps1 - Chay CA he thong chi bang 1 lenh (dat o GOC repo Grader_App).
+  Dieu phoi: Ollama (model) -> MySQL (docker) -> Feedback bot -> Backend -> Frontend.
+  Moi service mo trong 1 cua so PowerShell rieng (dong cua so = tat service do).
 
-  Cách dùng (mở terminal tại thư mục Grader_App):
+  Cach dung (mo terminal tai thu muc Grader_App):
       powershell -ExecutionPolicy Bypass -File .\start-all.ps1
-  Đổi model feedback: sửa 1 dòng trong file  bot-model.txt  (hoặc dùng -Model):
+  Doi model feedback: sua 1 dong trong file bot-model.txt (hoac dung -Model):
       powershell -ExecutionPolicy Bypass -File .\start-all.ps1 -Model qwen3:8b
 #>
 
 param(
-  [string]$Model = "",            # model sinh feedback; rỗng = đọc từ bot-model.txt
+  [string]$Model = "",            # model sinh feedback; rong = doc tu bot-model.txt
   [string]$Embed = "bge-m3",      # model embedding cho RAG
-  [switch]$SkipOllama,            # bỏ qua kiểm tra/pull model (nếu đã có sẵn)
-  [switch]$SkipMysql              # bỏ qua docker compose (nếu MySQL đã chạy)
+  [switch]$SkipOllama,            # bo qua kiem tra/pull model (neu da co san)
+  [switch]$SkipMysql              # bo qua docker compose (neu MySQL da chay)
 )
 
-# KHÔNG dùng "Stop": 1 lỗi không nghiêm trọng (vd Start-Process không thấy ollama, docker chưa bật)
-# sẽ làm DỪNG cả script → app không lên. Dùng "Continue"; các lỗi NGHIÊM TRỌNG vẫn chặn bằng `throw`.
+# KHONG dung "Stop": 1 loi khong nghiem trong (vd Start-Process khong thay ollama, docker chua bat)
+# se lam DUNG ca script -> app khong len. Dung "Continue"; cac loi NGHIEM TRONG van chan bang `throw`.
 $ErrorActionPreference = "Continue"
-$root       = $PSScriptRoot          # = thư mục Grader_App (mọi thứ nằm trong đây)
+$root       = $PSScriptRoot          # = thu muc Grader_App (moi thu nam trong day)
 $botDir     = Join-Path $root "feedback-bot"
-$composeDir = $root                  # docker-compose.yml ở gốc Grader_App
+$composeDir = $root                  # docker-compose.yml o goc Grader_App
 $beDir      = Join-Path $root "grader"
 $feDir      = Join-Path $root "frontend"
 
-# Model bot: ưu tiên tham số -Model; nếu trống thì đọc 1 dòng trong bot-model.txt; cuối cùng mặc định.
+# Model bot: uu tien tham so -Model; neu trong thi doc 1 dong trong bot-model.txt; cuoi cung mac dinh.
 if (-not $Model) {
   $modelFile = Join-Path $root "bot-model.txt"
   if (Test-Path $modelFile) {
@@ -35,8 +35,8 @@ if (-not $Model) {
   if (-not $Model) { $Model = "qwen3:14b" }
 }
 
-# FAST-PATH: nếu bot-model.txt ghi "openai:gpt-4o-mini" → dùng API (NHANH + song song, hợp chấm hàng loạt).
-# Key lấy lại từ grader/secret.properties (grader.ai.openai.api-key) — không phải khai 2 lần.
+# FAST-PATH: neu bot-model.txt ghi "openai:gpt-4o-mini" -> dung API (NHANH + song song, hop cham hang loat).
+# Key lay lai tu grader/secret.properties (grader.ai.openai.api-key) - khong phai khai 2 lan.
 $useOpenAi = $false; $openAiModel = ""; $openAiKey = ""
 if ($Model -match '^(?i)\s*openai\s*:\s*(.+)$') {
   $useOpenAi = $true
@@ -50,29 +50,29 @@ if ($Model -match '^(?i)\s*openai\s*:\s*(.+)$') {
     Write-Host "  [CANH BAO] bot-model.txt chon 'openai' nhung KHONG thay key o grader/secret.properties -> bot se loi." -ForegroundColor Yellow
   }
 }
-if ($useOpenAi) { Write-Host "Feedback provider: OPENAI ($openAiModel) — nhanh, chay song song duoc" -ForegroundColor Cyan }
-else            { Write-Host "Feedback provider: OLLAMA ($Model) — local" -ForegroundColor Cyan }
+if ($useOpenAi) { Write-Host "Feedback provider: OPENAI ($openAiModel) - nhanh, chay song song duoc" -ForegroundColor Cyan }
+else            { Write-Host "Feedback provider: OLLAMA ($Model) - local" -ForegroundColor Cyan }
 
 function Have($cmd) { return [bool](Get-Command $cmd -ErrorAction SilentlyContinue) }
 function Section($t) { Write-Host "`n==== $t ====" -ForegroundColor Cyan }
 
-# ── 0) Kiểm tra công cụ cần thiết ────────────────────────────────────────────
+# -- 0) Kiem tra cong cu can thiet --------------------------------------------
 Section "Kiem tra cong cu"
 foreach ($t in @("python","node","npm","docker")) {
   if (Have $t) { Write-Host "  [OK] $t" -ForegroundColor Green }
-  else { Write-Host "  [THIEU] $t — cai dat truoc khi chay" -ForegroundColor Yellow }
+  else { Write-Host "  [THIEU] $t - cai dat truoc khi chay" -ForegroundColor Yellow }
 }
 if (-not (Test-Path $botDir)) { throw "Khong thay repo feedback bot tai: $botDir" }
 if (-not (Test-Path $beDir))  { throw "Khong thay backend tai: $beDir" }
 
-# ── 1) Ollama: bảo đảm đang chạy + đã có model ───────────────────────────────
+# -- 1) Ollama: bao dam dang chay + da co model -------------------------------
 if (-not $SkipOllama) {
   Section "Ollama (model AI feedback)"
   if (-not (Have "ollama")) {
-    Write-Host "  [THIEU] ollama — tai tai https://ollama.com/download roi chay lai." -ForegroundColor Yellow
+    Write-Host "  [THIEU] ollama - tai tai https://ollama.com/download roi chay lai." -ForegroundColor Yellow
   } else {
-    # Bảo đảm server Ollama đang chạy (cổng 11434). Dùng ĐƯỜNG DẪN ĐẦY ĐỦ + try/catch để
-    # "Start-Process không thấy file" không làm chết script.
+    # Bao dam server Ollama dang chay (cong 11434). Dung duong dan day du + try/catch de
+    # "Start-Process khong thay file" khong lam chet script.
     try { Invoke-RestMethod "http://localhost:11434/api/tags" -TimeoutSec 3 | Out-Null }
     catch {
       Write-Host "  Khoi dong Ollama server..."
@@ -80,7 +80,7 @@ if (-not $SkipOllama) {
       catch { Write-Host "  [BO QUA] Khong tu bat duoc Ollama; hay mo Ollama thu cong roi chay lai." -ForegroundColor Yellow }
     }
 
-    # openai: chỉ cần bge-m3 (RAG embeddings vẫn chạy LOCAL); KHÔNG pull model openai như ollama.
+    # openai: chi can bge-m3 (RAG embeddings van chay LOCAL); KHONG pull model openai nhu ollama.
     $models = if ($useOpenAi) { @($Embed) } else { @($Model, $Embed) }
     $have = (& ollama list) 2>$null | Out-String
     foreach ($m in $models) {
@@ -90,7 +90,7 @@ if (-not $SkipOllama) {
   }
 }
 
-# ── 2) Ghi .env cho bot (chốt model) ─────────────────────────────────────────
+# -- 2) Ghi .env cho bot (chot model) -----------------------------------------
 Section "Cau hinh feedback bot (.env)"
 if ($useOpenAi) {
   $envContent = @"
@@ -109,16 +109,16 @@ EMBED_MODEL_NAME=$Embed
 OLLAMA_TIMEOUT_SECONDS=600
 "@
 }
-# Ghi .env KHÔNG BOM: PowerShell 'Set-Content -Encoding utf8' chèn BOM → python-dotenv đọc sai
-# dòng đầu (FEEDBACK_PROVIDER) → fast-path openai bị bỏ qua. Dùng UTF8 không BOM.
+# Ghi .env KHONG BOM: PowerShell 'Set-Content -Encoding utf8' chen BOM -> python-dotenv doc sai
+# dong dau (FEEDBACK_PROVIDER) -> fast-path openai bi bo qua. Dung UTF8 khong BOM.
 [System.IO.File]::WriteAllText((Join-Path $botDir ".env"), $envContent, (New-Object System.Text.UTF8Encoding($false)))
 Write-Host "  Da ghi .env (provider=$(if($useOpenAi){'openai/'+$openAiModel}else{'ollama/'+$Model}))" -ForegroundColor Green
 
-# ── 3) Docker: bao dam engine chay -> MySQL -> kiem tra anh nen cham bai ──────
+# -- 3) Docker: bao dam engine chay -> MySQL -> kiem tra anh nen cham bai ------
 if (-not $SkipMysql) {
   Section "Docker (MySQL + anh nen cham bai)"
   if (-not (Have "docker")) {
-    Write-Host "  [THIEU] docker — cai Docker Desktop truoc (bo qua MySQL)." -ForegroundColor Yellow
+    Write-Host "  [THIEU] docker - cai Docker Desktop truoc (bo qua MySQL)." -ForegroundColor Yellow
   } else {
     # Bao dam Docker engine dang chay (may moi cai Docker can mo 1 lan, doi khi phai reboot)
     $dockerOk = $false
@@ -150,11 +150,11 @@ if (-not $SkipMysql) {
   }
 }
 
-# ── 4) Mở 3 cửa sổ: bot, backend, frontend ───────────────────────────────────
+# -- 4) Mo 3 cua so: bot, backend, frontend -----------------------------------
 Section "Khoi dong cac service (moi service 1 cua so)"
 
-# Tránh lỗi "Port already in use": CHỈ dọn instance CŨ CỦA CHÍNH APP (python/java/node) trên cổng,
-# KHÔNG đụng tiến trình lạ (vd Tomcat của bạn trên 8080).
+# Tranh loi "Port already in use": CHI don instance CU CUA CHINH APP (python/java/node) tren cong,
+# KHONG dung tien trinh la (vd Tomcat cua ban tren 8080).
 function Free-Port($port, $name, [string[]]$onlyProc) {
   Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue |
     Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object {
@@ -163,7 +163,7 @@ function Free-Port($port, $name, [string[]]$onlyProc) {
       $p = Get-Process -Id $procId -ErrorAction SilentlyContinue
       if (-not $p) { return }
       if ($onlyProc -and ($onlyProc -notcontains $p.ProcessName)) {
-        Write-Host "  Cong $port dang bi '$($p.ProcessName)' (PID $procId) chiem — GIU NGUYEN (khong phai service cua app)." -ForegroundColor DarkYellow
+        Write-Host "  Cong $port dang bi '$($p.ProcessName)' (PID $procId) chiem - GIU NGUYEN (khong phai service cua app)." -ForegroundColor DarkYellow
         return
       }
       try {
@@ -176,7 +176,7 @@ Free-Port 8000 "bot"      @('python','python3')
 Free-Port 8080 "backend"  @('java','javaw')
 Free-Port 3000 "frontend" @('node')
 
-# Backend: nếu 8080 vẫn bị chiếm (vd Tomcat) → tự chọn cổng trống kế tiếp; frontend trỏ theo.
+# Backend: neu 8080 van bi chiem (vd Tomcat) -> tu chon cong trong ke tiep; frontend tro theo.
 function Test-PortFree($port) { -not (Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue) }
 $bePort = 8080
 if (-not (Test-PortFree 8080)) {
@@ -184,7 +184,7 @@ if (-not (Test-PortFree 8080)) {
   $bePort = $cand
   Write-Host "  Cong 8080 dang ban -> backend dung cong $bePort (khong dung tien trinh khac)." -ForegroundColor Yellow
 }
-# Ghi NEXT_PUBLIC_API_BASE vào frontend/.env.local (giữ các dòng khác) để FE gọi đúng cổng backend.
+# Ghi NEXT_PUBLIC_API_BASE vao frontend/.env.local (giu cac dong khac) de FE goi dung cong backend.
 $apiBase  = "http://localhost:$bePort/api"
 $envLocal = Join-Path $feDir ".env.local"
 $keep = @(); if (Test-Path $envLocal) { $keep = Get-Content $envLocal | Where-Object { $_ -notmatch '^\s*NEXT_PUBLIC_API_BASE\s*=' } }
@@ -193,12 +193,12 @@ $keep = @(); if (Test-Path $envLocal) { $keep = Get-Content $envLocal | Where-Ob
 $lines = @($keep) + "NEXT_PUBLIC_API_BASE=$apiBase"
 [System.IO.File]::WriteAllText($envLocal, (($lines -join "`r`n") + "`r`n"), (New-Object System.Text.UTF8Encoding($false)))
 
-# powershell.exe ĐẦY ĐỦ ĐƯỜNG DẪN (tránh 'không thấy file'); python launcher (tránh store-stub 'python')
+# powershell.exe day du duong dan (tranh 'khong thay file'); python launcher (tranh store-stub 'python')
 $psExe = (Get-Command powershell -ErrorAction SilentlyContinue).Source
 if (-not $psExe) { $psExe = "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" }
 $venvPy = if (Get-Command py -ErrorAction SilentlyContinue) { "py -3" } else { "python" }
 
-# Mở 1 cửa sổ service; try/catch để 1 cái lỗi KHÔNG chặn các cái còn lại.
+# Mo 1 cua so service; try/catch de 1 cai loi KHONG chan cac cai con lai.
 function Launch($title, $cmd) {
   try {
     Start-Process $psExe -ArgumentList "-NoExit","-NoProfile","-ExecutionPolicy","Bypass","-Command",$cmd | Out-Null
@@ -226,7 +226,7 @@ Write-Host 'Feedback bot: http://localhost:8000' -ForegroundColor Green
 "@
 Launch "Feedback bot (:8000)" $botCmd
 
-# Backend Spring Boot (chay tren host). Windows DÙNG mvnw.cmd. Cổng = $bePort (8080 hoặc cổng trống).
+# Backend Spring Boot (chay tren host). Windows DUNG mvnw.cmd. Cong = $bePort (8080 hoac cong trong).
 $beCmd = @"
 Set-Location '$beDir'
 `$env:SERVER_PORT = '$bePort'

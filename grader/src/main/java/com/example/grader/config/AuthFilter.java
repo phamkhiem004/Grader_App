@@ -36,16 +36,15 @@ public class AuthFilter extends OncePerRequestFilter {
         boolean isApi       = path.startsWith("/api/");
         boolean isAuth      = path.startsWith("/api/auth/");
         boolean isPreflight = "OPTIONS".equalsIgnoreCase(method);
-        boolean isWrite     = !("GET".equalsIgnoreCase(method) || "HEAD".equalsIgnoreCase(method));
-        boolean readsSource = path.startsWith("/api/batch/submission/");   // mã nguồn bài nộp SV
-
-        boolean needsAuth = isApi && !isAuth && !isPreflight && (isWrite || readsSource);
+        boolean needsAuth = isApi && !isAuth && !isPreflight;
         if (!needsAuth) { chain.doFilter(req, res); return; }
 
         String h = req.getHeader("Authorization");
         String token = (h != null && h.startsWith("Bearer ")) ? h.substring(7).trim() : null;
         try {
-            authService.me(token);                 // ném nếu thiếu/sai/hết hạn
+            var teacher = authService.authenticate(token);    // ném nếu thiếu/sai/hết hạn
+            req.setAttribute("teacherEmail", teacher.getEmail());
+            req.setAttribute("teacherRole", teacher.getRole());
             chain.doFilter(req, res);
         } catch (Exception e) {
             res.setStatus(HttpServletResponse.SC_UNAUTHORIZED);

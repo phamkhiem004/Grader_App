@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
   Settings, FileText, CheckSquare, BarChart2, LogOut, Bell, Search,
-  GraduationCap, UserCircle, Loader2, History, PanelLeftClose, PanelLeftOpen,
+  GraduationCap, UserCircle, Loader2, History, PanelLeftClose,
   Clock, CheckCircle2, AlertCircle, BookOpen, Package, Archive, Sparkles,
   MessageSquareText,
 } from 'lucide-react';
@@ -109,12 +109,11 @@ export default function SidebarLayout({ children, activePath = '/', title, subti
 
   // Nạp thông báo (phiên chấm gần đây) + tự làm mới mỗi 30s
   const loadNotifs = useCallback(() => {
-    const url = `${API_BASE}/batch/recent` + (teacher?.email ? `?createdBy=${encodeURIComponent(teacher.email)}` : "");
-    fetch(url)
+    fetch(`${API_BASE}/batch/recent`)
       .then((r) => r.json())
       .then((d) => setNotifs(Array.isArray(d) ? d : []))
       .catch(() => {});
-  }, [teacher?.email]);
+  }, []);
 
   useEffect(() => {
     loadNotifs();

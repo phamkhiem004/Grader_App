@@ -91,7 +91,7 @@ public class GradingService {
             log.info("[{}] {} file dart, project root: {}", studentId, dartCount, projectRoot.getFileName());
 
             return runDockerGrader(
-                    studentLib.toAbsolutePath().toString(),
+                    studentId, studentLib.toAbsolutePath().toString(),
                     examId, testcasePath
             );
         } finally {
@@ -105,7 +105,7 @@ public class GradingService {
     }
 
     // ── Gọi Docker ───────────────────────────────────────────────
-    private String runDockerGrader(String libPath, String examId, String testcasePath) throws Exception {
+    private String runDockerGrader(String studentId, String libPath, String examId, String testcasePath) throws Exception {
         // Tách phần mount + ảnh ra để vừa chạy chấm, vừa tái dùng cho probe chẩn đoán khi 0/0.
         List<String> mounts = new ArrayList<>(List.of(
                 "-v", toDockerPath(libPath) + ":/app/lib"));
@@ -123,8 +123,9 @@ public class GradingService {
             image = imagePrefix + "-" + examId.toLowerCase();
         }
 
+        String containerName = dockerContainerName("grader-run", examId, studentId);
         List<String> command = new ArrayList<>(List.of(
-                "docker", "run", "--rm", "--memory", runMemory, "--cpus", runCpus));
+                "docker", "run", "--name", containerName, "--rm", "--memory", runMemory, "--cpus", runCpus));
         command.addAll(mounts);
         command.add(image);
         command.add("./run_grader.sh");   // chạy chấm tường minh — không phụ thuộc CMD baked trong ảnh
@@ -157,6 +158,7 @@ public class GradingService {
         boolean finished = process.waitFor(timeoutSeconds, TimeUnit.SECONDS);
         if (!finished) {
             process.destroyForcibly();
+            removeContainerQuietly(containerName);
             throw new RuntimeException("Timeout sau " + timeoutSeconds + "s");
         }
 
@@ -216,9 +218,10 @@ public class GradingService {
 
     /** Chạy lại flutter test (gộp stderr) chỉ để CHẨN ĐOÁN khi đã 0/0 — không tính điểm. */
     private String runCompileProbe(List<String> mounts, String image) {
+        String containerName = dockerContainerName("grader-probe", "compile", "zero-tests");
         try {
             List<String> cmd = new ArrayList<>(List.of(
-                    "docker", "run", "--rm", "--memory", runMemory, "--cpus", runCpus));
+                    "docker", "run", "--name", containerName, "--rm", "--memory", runMemory, "--cpus", runCpus));
             cmd.addAll(mounts);
             cmd.add("--entrypoint");
             cmd.add("bash");
@@ -234,7 +237,10 @@ public class GradingService {
                 String line;
                 while ((line = r.readLine()) != null) sb.append(line).append("\n");
             }
-            if (!p.waitFor(90, TimeUnit.SECONDS)) p.destroyForcibly();
+            if (!p.waitFor(90, TimeUnit.SECONDS)) {
+                p.destroyForcibly();
+                removeContainerQuietly(containerName);
+            }
             return sb.toString();
         } catch (Exception e) {
             log.warn("Probe chẩn đoán 0/0 lỗi: {}", e.getMessage());
@@ -380,5 +386,21 @@ public class GradingService {
         }
         // Linux/Mac giữ nguyên
         return path.replace("\\", "/");
+    }
+
+    private String dockerContainerName(String prefix, String examId, String studentId) {
+        String raw = prefix + "-" + examId + "-" + studentId + "-"
+                + System.currentTimeMillis() + "-" + UUID.randomUUID().toString().substring(0, 8);
+        return raw.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9_.-]", "-");
+    }
+
+    private void removeContainerQuietly(String containerName) {
+        if (containerName == null || containerName.isBlank()) return;
+        try {
+            Process p = new ProcessBuilder("docker", "rm", "-f", containerName).start();
+            if (!p.waitFor(10, TimeUnit.SECONDS)) p.destroyForcibly();
+        } catch (Exception e) {
+            log.warn("Không xóa được container Docker {} sau timeout: {}", containerName, e.getMessage());
+        }
     }
 }

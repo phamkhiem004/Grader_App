@@ -3,6 +3,7 @@
 import { API_BASE } from "./config";
 
 const TOKEN_KEY = "grader_token";
+let authFetchInstalled = false;
 
 // Lưu token ở sessionStorage: mở app/tab mới sẽ YÊU CẦU đăng nhập lại,
 // nhưng F5 / chuyển trang TRONG cùng phiên vẫn giữ đăng nhập.
@@ -17,6 +18,34 @@ export function setToken(token) {
     else sessionStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(TOKEN_KEY);   // dọn token cũ từng lưu ở localStorage (phiên trước)
   } catch { /* ignore */ }
+}
+
+export function installAuthFetch() {
+  if (typeof window === "undefined" || authFetchInstalled) return;
+  authFetchInstalled = true;
+  const nativeFetch = window.fetch.bind(window);
+
+  window.fetch = (input, init = {}) => {
+    const rawUrl =
+      typeof input === "string"
+        ? input
+        : input instanceof URL
+          ? input.toString()
+          : input?.url || "";
+    const shouldAttach = rawUrl.startsWith(API_BASE);
+    const token = shouldAttach ? getToken() : null;
+
+    if (!token) return nativeFetch(input, init);
+
+    const headers = new Headers(
+      init.headers ||
+        (typeof input === "object" && !(input instanceof URL) && input?.headers
+          ? input.headers
+          : undefined)
+    );
+    if (!headers.has("Authorization")) headers.set("Authorization", `Bearer ${token}`);
+    return nativeFetch(input, { ...init, headers });
+  };
 }
 
 async function postJson(path, body) {

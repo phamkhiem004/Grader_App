@@ -37,6 +37,8 @@ public class BatchGradingService {
 
     @Value("${grader.max.concurrent:3}")
     private int maxConcurrent;
+    @Value("${grader.workers.enabled:true}")
+    private boolean workersEnabled;
 
     /** Lưu lại file zip bài nộp để audit/chấm lại khi tranh chấp. */
     @Value("${grader.save-submissions:true}")
@@ -76,6 +78,10 @@ public class BatchGradingService {
 
     @PostConstruct
     public void startWorkers() {
+        if (!workersEnabled) {
+            log.info("Grading workers disabled by configuration");
+            return;
+        }
         executor = Executors.newFixedThreadPool(maxConcurrent);
         for (int i = 0; i < maxConcurrent; i++) {
             final int idx = i;
@@ -109,7 +115,9 @@ public class BatchGradingService {
     }
 
     @PreDestroy
-    public void shutdown() { executor.shutdownNow(); }
+    public void shutdown() {
+        if (executor != null) executor.shutdownNow();
+    }
 
     // ── GV upload hàng loạt ──────────────────────────────────────
     public BatchSubmitResponse enqueueBatch(List<MultipartFile> files,
@@ -124,7 +132,7 @@ public class BatchGradingService {
         batch.setBatchId(batchId);
         batch.setExamId(examId);
         batch.setTotalFiles(files.size());
-        batch.setCreatedBy(createdBy);
+        batch.setCreatedBy(actorEmail(createdBy));
         batchRepo.save(batch);
 
         List<String> queued      = new ArrayList<>();
@@ -650,7 +658,7 @@ public class BatchGradingService {
      * Testcase: ưu tiên testcase HIỆN TẠI của đề; nếu đề đã xóa / testcase mất thì DÙNG SNAPSHOT của
      * batch gốc (submissions/&lt;đề&gt;/&lt;batch&gt;/_testcase/) → vẫn chấm lại được bài của ĐỀ CŨ.
      */
-    public String regradeStudent(String examId, String studentId) throws Exception {
+    public String regradeStudent(String examId, String studentId, String createdBy) throws Exception {
         ExamService.safeId(examId, "đề"); ExamService.safeId(studentId, "SV");
         ExamResult r = resultRepo.findByStudentIdAndExamIdAndMode(studentId, examId, "submit")
                 .orElseThrow(() -> new IllegalArgumentException("Không tìm thấy bài nộp của " + studentId));
@@ -672,7 +680,7 @@ public class BatchGradingService {
         batch.setBatchId(newBatchId);
         batch.setExamId(examId);
         batch.setTotalFiles(1);
-        batch.setCreatedBy("regrade");
+        batch.setCreatedBy(actorEmail(createdBy));
         batchRepo.save(batch);
 
         // Copy zip sang folder batch mới + snapshot testcase đã resolve (audit lần chấm lại)
@@ -708,7 +716,7 @@ public class BatchGradingService {
      * CHẤM LẠI NHIỀU bài cùng lúc → gộp vào MỘT batch mới (theo dõi tiến độ chung). Bỏ qua bài mất
      * file/đề. Trả { batchId, queued, skipped:[...] }.
      */
-    public Map<String, Object> regradeStudents(String examId, List<String> studentIds) throws Exception {
+    public Map<String, Object> regradeStudents(String examId, List<String> studentIds, String createdBy) throws Exception {
         ExamService.safeId(examId, "đề");
         if (studentIds == null || studentIds.isEmpty())
             throw new IllegalArgumentException("Chưa chọn bài nào để chấm lại.");
@@ -717,7 +725,7 @@ public class BatchGradingService {
         GradingBatch batch = new GradingBatch();
         batch.setBatchId(newBatchId);
         batch.setExamId(examId);
-        batch.setCreatedBy("regrade");
+        batch.setCreatedBy(actorEmail(createdBy));
         batchRepo.save(batch);
 
         List<GradingJob> jobs = new ArrayList<>();
@@ -770,12 +778,12 @@ public class BatchGradingService {
     }
 
     /** Chấm lại TOÀN BỘ bài đã nộp của 1 đề (gom 1 batch). Dùng cho nút "Chấm lại đề" ở Kho đề. */
-    public Map<String, Object> regradeExam(String examId) throws Exception {
+    public Map<String, Object> regradeExam(String examId, String createdBy) throws Exception {
         ExamService.safeId(examId, "đề");
         List<String> ids = resultRepo.findSubmitStudentIds(examId);
         if (ids.isEmpty())
             throw new IllegalArgumentException("Đề " + examId + " chưa có bài nộp nào để chấm lại.");
-        return regradeStudents(examId, ids);
+        return regradeStudents(examId, ids, createdBy);
     }
 
     public BatchProgressResponse getBatchProgress(String batchId) {
@@ -797,6 +805,10 @@ public class BatchGradingService {
             if (n.has("score")) return (float) n.get("score").asDouble();
         } catch (Exception ignored) {}
         return 0f;
+    }
+
+    private String actorEmail(String createdBy) {
+        return (createdBy == null || createdBy.isBlank()) ? "unknown" : createdBy.trim();
     }
 
     private StudentInfo parseStudentInfo(String filename) {

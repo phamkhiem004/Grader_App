@@ -23,13 +23,13 @@ public class BatchController {
     public ResponseEntity<?> uploadBatch(
             @RequestParam("files") List<MultipartFile> files,
             @RequestParam(value = "examId",     defaultValue = "FLUTTER_PE_01") String examId,
-            @RequestParam(value = "createdBy",  defaultValue = "admin") String createdBy) {
+            @RequestAttribute(value = "teacherEmail", required = false) String teacherEmail) {
 
         if (files == null || files.isEmpty())
             return ResponseEntity.badRequest().body(Map.of("error", "Không có file"));
 
         try {
-            return ResponseEntity.ok(batchService.enqueueBatch(files, examId, createdBy));
+            return ResponseEntity.ok(batchService.enqueueBatch(files, examId, teacherEmail));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         } catch (Exception e) {
@@ -48,9 +48,9 @@ public class BatchController {
 
     /** Thông báo: các phiên chấm gần đây (cho icon chuông ở header). */
     @GetMapping("/recent")
-    public ResponseEntity<?> recent(@RequestParam(value = "createdBy", required = false) String createdBy) {
+    public ResponseEntity<?> recent(@RequestAttribute(value = "teacherEmail", required = false) String teacherEmail) {
         try {
-            return ResponseEntity.ok(batchService.recentBatches(createdBy));
+            return ResponseEntity.ok(batchService.recentBatches(teacherEmail));
         } catch (Exception e) {
             return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
         }
@@ -78,9 +78,10 @@ public class BatchController {
 
     /** Chấm lại 1 bài từ zip đã lưu (không cần upload lại). Trả batchId mới để theo dõi tiến độ. */
     @PostMapping("/regrade/{examId}/{studentId}")
-    public ResponseEntity<?> regrade(@PathVariable String examId, @PathVariable String studentId) {
+    public ResponseEntity<?> regrade(@PathVariable String examId, @PathVariable String studentId,
+                                     @RequestAttribute(value = "teacherEmail", required = false) String teacherEmail) {
         try {
-            String batchId = batchService.regradeStudent(examId, studentId);
+            String batchId = batchService.regradeStudent(examId, studentId, teacherEmail);
             return ResponseEntity.ok(Map.of("batchId", batchId));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
@@ -91,9 +92,10 @@ public class BatchController {
 
     /** Chấm lại TOÀN BỘ bài đã nộp của 1 đề (gộp 1 batch). Trả batchId mới để theo dõi. */
     @PostMapping("/regrade-exam/{examId}")
-    public ResponseEntity<?> regradeExam(@PathVariable String examId) {
+    public ResponseEntity<?> regradeExam(@PathVariable String examId,
+                                         @RequestAttribute(value = "teacherEmail", required = false) String teacherEmail) {
         try {
-            return ResponseEntity.ok(batchService.regradeExam(examId));
+            return ResponseEntity.ok(batchService.regradeExam(examId, teacherEmail));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         } catch (Exception e) {
@@ -104,12 +106,13 @@ public class BatchController {
     /** Chấm lại NHIỀU bài cùng lúc (gộp 1 batch). Body: { studentIds:[...] }. */
     @SuppressWarnings("unchecked")
     @PostMapping("/regrade-batch/{examId}")
-    public ResponseEntity<?> regradeBatch(@PathVariable String examId, @RequestBody Map<String, Object> body) {
+    public ResponseEntity<?> regradeBatch(@PathVariable String examId, @RequestBody Map<String, Object> body,
+                                          @RequestAttribute(value = "teacherEmail", required = false) String teacherEmail) {
         try {
             Object ids = body.get("studentIds");
             List<String> studentIds = (ids instanceof List)
                     ? ((List<Object>) ids).stream().map(String::valueOf).toList() : List.of();
-            return ResponseEntity.ok(batchService.regradeStudents(examId, studentIds));
+            return ResponseEntity.ok(batchService.regradeStudents(examId, studentIds, teacherEmail));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         } catch (Exception e) {

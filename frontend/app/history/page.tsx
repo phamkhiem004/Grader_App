@@ -5,11 +5,11 @@ import { createPortal } from "react-dom";
 import SidebarLayout from "@/components/layout/SidebarLayout";
 import { API_BASE, PASS_THRESHOLD } from "@/lib/config";
 import { getToken } from "@/lib/auth";
-import { Skeleton, SkeletonRow } from "@/components/ui/Skeleton";
+import { Skeleton } from "@/components/ui/Skeleton";
 import { Tooltip } from "@/components/ui/Tooltip";
 import CompetencyPanel, { CompetencyItem } from "@/components/grading/CompetencyPanel";
 import {
-  History, FileJson, DownloadCloud, Search, ChevronRight,
+  FileJson, DownloadCloud, Search, ChevronRight,
   CheckCircle, AlertCircle, Clock, Users, FileText, FileArchive,
   BarChart3, X, Loader2, FileCode2, RotateCcw,
 } from "lucide-react";

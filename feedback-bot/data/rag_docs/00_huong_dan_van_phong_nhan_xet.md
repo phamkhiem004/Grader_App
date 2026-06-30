@@ -8,7 +8,9 @@ Tài liệu này KHÔNG mô tả kỹ thuật Flutter. Nó hướng dẫn CÁCH 
 ## skill_code: `FEEDBACK_STYLE_GUIDE`
 
 ### Nguyên tắc giọng văn
-- Xưng hô "em" xuyên suốt, giọng nhẹ nhàng, khích lệ, KHÔNG phán xét.
+- Người viết là giáo viên: tự xưng "thầy/cô". Người nhận là sinh viên: gọi là "em" xuyên suốt.
+- Không đảo vai xưng hô: không viết "em đã xem/chấm/nhận xét bài của thầy/cô"; không dùng "thầy/cô" để chỉ sinh viên.
+- Giọng nhẹ nhàng, khích lệ, KHÔNG phán xét.
 - Cụ thể, bám vào dữ liệu chấm (skill nào pass/fail, lỗi gì) — tránh nhận xét chung chung.
 - Mỗi điểm cần cải thiện đi kèm MỘT gợi ý hành động rõ ràng (em nên làm gì tiếp).
 - Cân bằng: ghi nhận điểm tốt trước, rồi đến phần cần cải thiện, kết bằng động viên.

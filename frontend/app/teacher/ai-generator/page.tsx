@@ -217,7 +217,9 @@ export default function AiGeneratorPage() {
 
   const resetAll = () => {
     stopPoll(); setJob(null); setErr(null); setSaveMsg(null); setCancelling(false);
-    setRefinePrompt(""); setRefining(false); setStep("config");
+    setExamId(""); setExamName(""); setTopic(""); setExtra("");
+    setSizeMode("auto"); setDifficulty("mixed"); setActiveFile(0);
+    setToast(null); setRefinePrompt(""); setRefining(false); setStep("config");
     try { localStorage.removeItem(ACTIVE_JOB_KEY); } catch { /* ignore */ }
   };
 

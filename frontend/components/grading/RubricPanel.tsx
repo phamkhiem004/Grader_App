@@ -1,5 +1,5 @@
 import React from 'react';
-import { Save, Check, RefreshCw, MessageSquare } from 'lucide-react';
+import { Save, RefreshCw, MessageSquare } from 'lucide-react';
 import { clsx } from 'clsx';
 
 interface RubricItem {
@@ -15,10 +15,10 @@ interface RubricPanelProps {
   onScoreChange: (id: string, score: number) => void;
   feedback: string;
   onFeedbackChange: (val: string) => void;
-  totalScore: number;
+  totalScore?: number;
 }
 
-export default function RubricPanel({ rubrics, scores, onScoreChange, feedback, onFeedbackChange, totalScore }: RubricPanelProps) {
+export default function RubricPanel({ rubrics, scores, onScoreChange, feedback, onFeedbackChange }: RubricPanelProps) {
   return (
     <div className="flex flex-col h-full bg-white relative">
       {/* Header */}

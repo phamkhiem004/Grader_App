@@ -9,6 +9,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -21,6 +24,8 @@ import java.util.Map;
 @RequestMapping("/api/feedback")
 @CrossOrigin(origins = "*")
 public class FeedbackController {
+
+    private static final String FEEDBACK_CACHE_VERSION = "feedback-v3";
 
     @Autowired private ExamResultRepository resultRepo;
     @Autowired private FeedbackBotClient bot;
@@ -64,7 +69,7 @@ public class FeedbackController {
 
         // CACHE: nếu đã sinh nhận xét cho ĐÚNG result_json này (hash khớp) thì trả lại ngay,
         // không gọi lại model → chấm hàng loạt / mở lại trang không phải sinh lại. force=true để bắt sinh lại.
-        String hash = Integer.toHexString(rj.hashCode());
+        String hash = sha256(FEEDBACK_CACHE_VERSION + ":" + rj);
         if (!force && r.getFeedbackJson() != null && hash.equals(r.getFeedbackSrcHash())) {
             try {
                 FeedbackRow cached = mapper.readValue(r.getFeedbackJson(), FeedbackRow.class);
@@ -83,5 +88,15 @@ public class FeedbackController {
             } catch (Exception ignored) { /* không cache được cũng không sao */ }
         }
         return ResponseEntity.ok(row);
+    }
+
+    private String sha256(String text) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest((text == null ? "" : text).getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(digest);
+        } catch (Exception e) {
+            throw new IllegalStateException("Không tính được SHA-256 cho result_json", e);
+        }
     }
 }

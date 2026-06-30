@@ -5,4 +5,4 @@
 #   qwen2.5-coder:3b   ~270s/bài 40 testcase, RA NHẬN XÉT THẬT  ← đang dùng
 #   qwen3:14b          >300s/bài → thường rơi về nhận xét mẫu (chỉ nên dùng khi có GPU)
 # Đổi model xong: ollama pull <model> rồi chạy lại app (run.cmd).
-qwen2.5-coder:3b
+qwen3:14b

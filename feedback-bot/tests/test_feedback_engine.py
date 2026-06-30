@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from app.feedback_engine import generate_feedback_text
+from app.feedback_engine import generate_feedback_text, normalize_feedback_voice
 from app.schemas import Exam, FeedbackRequest, GradingResult, Student, TestCase as FeedbackTestCase
 
 
@@ -96,6 +96,30 @@ def make_final_shape_request() -> FeedbackRequest:
     )
 
 
+def make_perfect_request() -> FeedbackRequest:
+    return FeedbackRequest(
+        student=Student(id="HE180010", name="Tran Thi B"),
+        exam=Exam(code="PRM393_PE", title="Flutter Practical Exam", total_score=10),
+        grading_result=GradingResult(score=10, passed_tests=2, failed_tests=0, total_tests=2),
+        test_cases=[
+            FeedbackTestCase(
+                test_id="TC_DART_01",
+                name="Model constructor",
+                status="passed",
+                skill_code="DART_CLASSES",
+                skill_name="Class & constructor",
+            ),
+            FeedbackTestCase(
+                test_id="TC_UI_01",
+                name="Render UI",
+                status="passed",
+                skill_code="UI_WIDGETS",
+                skill_name="Widget cơ bản",
+            ),
+        ],
+    )
+
+
 def test_generate_feedback_uses_llm_when_available(monkeypatch):
     monkeypatch.setattr(
         "app.feedback_engine.retrieve_context",
@@ -117,6 +141,24 @@ def test_generate_feedback_uses_llm_when_available(monkeypatch):
     assert response.teacher_review_required is False
     assert response.sources == ["skills/test.md"]
     assert response.review_reasons == []
+
+
+def test_perfect_submission_does_not_require_teacher_review_when_rag_empty(monkeypatch):
+    monkeypatch.setattr("app.feedback_engine.retrieve_context", lambda request, rule_data: [])
+
+    class FakeClient:
+        def __init__(self, timeout):
+            self.timeout = timeout
+
+        def chat(self, **kwargs):
+            return SimpleNamespace(message=SimpleNamespace(content="Chào em, thầy/cô rất vui vì bài làm của em rất tốt."))
+
+    monkeypatch.setattr("app.feedback_engine.Client", FakeClient)
+
+    response = generate_feedback_text(make_perfect_request())
+
+    assert response.teacher_review_required is False
+    assert response.sources == []
 
 
 def test_generate_feedback_falls_back_when_rag_fails(monkeypatch):
@@ -162,3 +204,43 @@ def test_generate_feedback_accepts_final_web_app_shape(monkeypatch):
     assert response.feedback_text == "Feedback final shape"
     assert response.score_summary == "4.95/10.0"
     assert response.teacher_review_required is False
+
+
+def test_normalize_feedback_voice_fixes_reversed_teacher_student_roles():
+    text = (
+        "Chào thầy/cô, em đã xem bài của thầy/cô. "
+        "Em thấy thầy/cô đã nắm phần nền tảng nhưng thầy/cô nên kiểm tra lại validation."
+    )
+
+    result = normalize_feedback_voice(text)
+
+    assert "Chào em" in result
+    assert "thầy/cô đã xem bài làm của em" in result
+    assert "Thầy/cô thấy em đã nắm" in result
+    assert "em nên kiểm tra lại validation" in result
+    assert "em đã xem bài của thầy/cô" not in result.lower()
+    assert "Chào thầy/cô" not in result
+
+
+def test_generate_feedback_normalizes_llm_voice(monkeypatch):
+    monkeypatch.setattr(
+        "app.feedback_engine.retrieve_context",
+        lambda request, rule_data: [{"source": "skills/test.md", "content": "context"}],
+    )
+
+    class FakeClient:
+        def __init__(self, timeout):
+            self.timeout = timeout
+
+        def chat(self, **kwargs):
+            return SimpleNamespace(
+                message=SimpleNamespace(
+                    content="Chào thầy/cô, em đã xem bài của thầy/cô và em tin thầy/cô có thể làm tốt hơn."
+                )
+            )
+
+    monkeypatch.setattr("app.feedback_engine.Client", FakeClient)
+
+    response = generate_feedback_text(make_request())
+
+    assert response.feedback_text == "Chào em, thầy/cô đã xem bài làm của em và thầy/cô tin em có thể làm tốt hơn."

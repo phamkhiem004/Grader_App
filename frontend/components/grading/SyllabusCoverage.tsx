@@ -3,7 +3,7 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { API_BASE } from "@/lib/config";
 import {
-  Target, Loader2, AlertTriangle, CheckCircle2, RefreshCw, PieChart,
+  Target, Loader2, AlertTriangle, RefreshCw, PieChart,
 } from "lucide-react";
 
 interface ExamItem { examId: string; examName?: string | null; status?: string; hasTestcase: boolean; }

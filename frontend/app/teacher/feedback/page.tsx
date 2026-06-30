@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import SidebarLayout from "@/components/layout/SidebarLayout";
 import { API_BASE } from "@/lib/config";
 import { getToken } from "@/lib/auth";
@@ -35,6 +35,157 @@ interface FbRow {
 // Số luồng song song: Ollama (CPU) xử lý tuần tự → 2 (nhiều hơn sẽ chờ quá lâu → timeout).
 // API (openai) chạy song song thật → 8 luồng nhanh hơn nhiều cho hàng loạt bài.
 const concurrencyFor = (provider: string) => (provider === "openai" ? 8 : 2);
+const FEEDBACK_JOB_KEY = "ai_feedback_active_job_v1";
+
+interface FeedbackRunSnapshot {
+  examId: string;
+  rows: FbRow[];
+  running: boolean;
+  loadingList: boolean;
+  error: string | null;
+  botProvider: string;
+  updatedAt: number;
+}
+
+interface FeedbackJobState extends FeedbackRunSnapshot {
+  stopRequested: boolean;
+}
+
+let activeFeedbackJob: FeedbackJobState | null = null;
+const feedbackSubscribers = new Set<(snapshot: FeedbackRunSnapshot) => void>();
+
+function cloneFeedbackSnapshot(job: FeedbackJobState | FeedbackRunSnapshot): FeedbackRunSnapshot {
+  return {
+    examId: job.examId,
+    rows: job.rows.map((row) => ({ ...row, reviewReasons: row.reviewReasons ? [...row.reviewReasons] : undefined, sources: row.sources ? [...row.sources] : undefined })),
+    running: job.running,
+    loadingList: job.loadingList,
+    error: job.error,
+    botProvider: job.botProvider,
+    updatedAt: job.updatedAt,
+  };
+}
+
+function persistFeedbackSnapshot(snapshot: FeedbackRunSnapshot) {
+  if (typeof window === "undefined") return;
+  try { localStorage.setItem(FEEDBACK_JOB_KEY, JSON.stringify(snapshot)); } catch { /* ignore */ }
+}
+
+function readStoredFeedbackSnapshot(): FeedbackRunSnapshot | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(FEEDBACK_JOB_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as FeedbackRunSnapshot;
+    if (!parsed?.examId || !Array.isArray(parsed.rows)) return null;
+    // Nếu reload trình duyệt thì job client-side không thể tiếp tục; chỉ giữ lại kết quả đã có.
+    return activeFeedbackJob
+      ? cloneFeedbackSnapshot(activeFeedbackJob)
+      : { ...parsed, running: false, loadingList: false };
+  } catch {
+    return null;
+  }
+}
+
+function emitFeedbackSnapshot() {
+  if (!activeFeedbackJob) return;
+  activeFeedbackJob.updatedAt = Date.now();
+  const snapshot = cloneFeedbackSnapshot(activeFeedbackJob);
+  persistFeedbackSnapshot(snapshot);
+  feedbackSubscribers.forEach((fn) => fn(snapshot));
+}
+
+function subscribeFeedbackJob(fn: (snapshot: FeedbackRunSnapshot) => void) {
+  feedbackSubscribers.add(fn);
+  const current = activeFeedbackJob ? cloneFeedbackSnapshot(activeFeedbackJob) : readStoredFeedbackSnapshot();
+  if (current) fn(current);
+  return () => { feedbackSubscribers.delete(fn); };
+}
+
+function patchFeedbackRow(idx: number, patch: Partial<FbRow>) {
+  if (!activeFeedbackJob) return;
+  activeFeedbackJob.rows = activeFeedbackJob.rows.map((row, i) => (i === idx ? { ...row, ...patch } : row));
+  emitFeedbackSnapshot();
+}
+
+function stopFeedbackJob() {
+  if (!activeFeedbackJob) return;
+  activeFeedbackJob.stopRequested = true;
+  activeFeedbackJob.running = false;
+  emitFeedbackSnapshot();
+}
+
+async function startFeedbackJob(examId: string, botProvider: string) {
+  activeFeedbackJob = {
+    examId,
+    rows: [],
+    running: true,
+    loadingList: true,
+    error: null,
+    botProvider,
+    updatedAt: Date.now(),
+    stopRequested: false,
+  };
+  emitFeedbackSnapshot();
+
+  let students: StudentLite[] = [];
+  try {
+    const res = await fetch(`${API_BASE}/results/exam/${encodeURIComponent(examId)}`);
+    const data = res.ok ? await res.json() : [];
+    students = Array.isArray(data) ? data : [];
+  } catch {
+    students = [];
+  }
+
+  if (!activeFeedbackJob || activeFeedbackJob.examId !== examId) return;
+  activeFeedbackJob.loadingList = false;
+
+  if (students.length === 0) {
+    activeFeedbackJob.error = `Đề "${examId}" chưa có bài nộp nào đã chấm. Kiểm tra lại mã đề.`;
+    activeFeedbackJob.running = false;
+    emitFeedbackSnapshot();
+    return;
+  }
+
+  activeFeedbackJob.rows = students.map((s) => ({
+    studentId: s.studentId,
+    studentName: s.studentName,
+    score: s.score,
+    _state: "pending",
+  }));
+  emitFeedbackSnapshot();
+
+  const token = getToken();
+  await runPool(students, concurrencyFor(botProvider), () => !activeFeedbackJob || activeFeedbackJob.stopRequested, async (s, idx) => {
+    patchFeedbackRow(idx, { _state: "loading" });
+    try {
+      const res = await fetch(
+        `${API_BASE}/feedback/exam/${encodeURIComponent(examId)}/${encodeURIComponent(s.studentId)}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        },
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        patchFeedbackRow(idx, { _state: "error", error: data.error || `HTTP ${res.status}` });
+        return;
+      }
+      patchFeedbackRow(idx, {
+        ...data,
+        _state: data.error ? "error" : "done",
+      });
+    } catch (e: any) {
+      patchFeedbackRow(idx, { _state: "error", error: e?.message || "Lỗi mạng" });
+    }
+  });
+
+  if (activeFeedbackJob && activeFeedbackJob.examId === examId) {
+    activeFeedbackJob.running = false;
+    activeFeedbackJob.loadingList = false;
+    emitFeedbackSnapshot();
+  }
+}
 
 // ── Xuất .xlsx THẬT (OOXML) — không cần thư viện ngoài, không lỗi "định dạng không khớp" ──
 const CRC_TABLE = (() => {
@@ -148,8 +299,6 @@ export default function FeedbackPage() {
   const [botBase, setBotBase] = useState<string>("");
   const [botProvider, setBotProvider] = useState<string>("");   // ollama | openai
 
-  const stopRef = useRef(false);
-
   // Danh sách đề đã chấm (gợi ý cho ô nhập mã đề)
   useEffect(() => {
     fetch(`${API_BASE}/statistics/exams`)
@@ -168,6 +317,16 @@ export default function FeedbackPage() {
   };
   useEffect(checkBot, []);
 
+  // Khôi phục/subscribe tiến trình nhận xét đang chạy khi rời trang rồi quay lại.
+  useEffect(() => subscribeFeedbackJob((snapshot) => {
+    setExamId(snapshot.examId);
+    setRows(snapshot.rows);
+    setRunning(snapshot.running);
+    setLoadingList(snapshot.loadingList);
+    setError(snapshot.error);
+    if (snapshot.botProvider) setBotProvider(snapshot.botProvider);
+  }), []);
+
   const done = rows.filter((r) => r._state === "done").length;
   const errored = rows.filter((r) => r._state === "error").length;
   const finished = rows.length > 0 && done + errored === rows.length;
@@ -176,73 +335,18 @@ export default function FeedbackPage() {
     [rows],
   );
 
-  const patchRow = (idx: number, patch: Partial<FbRow>) =>
-    setRows((list) => list.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
-
   const run = async () => {
     const id = examId.trim();
     if (!id) { setError("Hãy nhập mã đề (ví dụ: PE_01)."); return; }
-    setError(null);
-    setRunning(true);
-    stopRef.current = false;
-    setLoadingList(true);
-    setRows([]);
-
-    let students: StudentLite[] = [];
-    try {
-      const res = await fetch(`${API_BASE}/results/exam/${encodeURIComponent(id)}`);
-      const data = res.ok ? await res.json() : [];
-      students = Array.isArray(data) ? data : [];
-    } catch {
-      students = [];
-    } finally {
-      setLoadingList(false);
-    }
-
-    if (students.length === 0) {
-      setError(`Đề "${id}" chưa có bài nộp nào đã chấm. Kiểm tra lại mã đề.`);
-      setRunning(false);
+    if (activeFeedbackJob?.running) {
+      setError(`Đang nhận xét đề "${activeFeedbackJob.examId}". Hãy dừng tiến trình hiện tại trước khi chạy đề khác.`);
       return;
     }
-
-    // Khởi tạo bảng ở trạng thái chờ
-    const initial: FbRow[] = students.map((s) => ({
-      studentId: s.studentId,
-      studentName: s.studentName,
-      score: s.score,
-      _state: "pending",
-    }));
-    setRows(initial);
-
-    const token = getToken();
-    await runPool(students, concurrencyFor(botProvider), () => stopRef.current, async (s, idx) => {
-      patchRow(idx, { _state: "loading" });
-      try {
-        const res = await fetch(
-          `${API_BASE}/feedback/exam/${encodeURIComponent(id)}/${encodeURIComponent(s.studentId)}`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-          },
-        );
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) {
-          patchRow(idx, { _state: "error", error: data.error || `HTTP ${res.status}` });
-          return;
-        }
-        patchRow(idx, {
-          ...data,
-          _state: data.error ? "error" : "done",
-        });
-      } catch (e: any) {
-        patchRow(idx, { _state: "error", error: e?.message || "Lỗi mạng" });
-      }
-    });
-
-    setRunning(false);
+    setError(null);
+    await startFeedbackJob(id, botProvider);
   };
 
-  const stop = () => { stopRef.current = true; setRunning(false); };
+  const stop = () => stopFeedbackJob();
 
   const exportXls = () => {
     const ready = rows.filter((r) => r._state === "done" || r._state === "error");

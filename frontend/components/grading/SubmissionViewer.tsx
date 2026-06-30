@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { FileCode2, FileText, Download, CodeXml } from 'lucide-react';
+import { FileCode2, Download, CodeXml } from 'lucide-react';
 import { clsx } from 'clsx';
 
 interface FileData {

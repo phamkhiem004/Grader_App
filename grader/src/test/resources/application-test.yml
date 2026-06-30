@@ -1,0 +1,20 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:grader_test;MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1
+    username: sa
+    password:
+    driver-class-name: org.h2.Driver
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    open-in-view: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.H2Dialect
+
+grader:
+  workers:
+    enabled: false
+
+feedback:
+  bot-data-dir: target/nonexistent-feedback-bot-data

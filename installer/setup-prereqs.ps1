@@ -20,6 +20,7 @@ param(
 )
 
 $ErrorActionPreference = "Continue"
+$script:CriticalSetupFailed = $false
 
 # Model: uu tien -Model; rong thi doc bot-model.txt; cuoi cung mac dinh qwen3:14b
 if (-not $Model) {
@@ -37,21 +38,113 @@ function Refresh-Path {
   $u = [Environment]::GetEnvironmentVariable("Path","User")
   $env:Path = (@($m,$u) | Where-Object { $_ }) -join ';'
 }
+function Get-Jdk17Home {
+  $candidates = @()
+  foreach ($scope in @("Process","User","Machine")) {
+    $jh = [Environment]::GetEnvironmentVariable("JAVA_HOME", $scope)
+    if ($jh) { $candidates += $jh }
+  }
+
+  $javac = Get-Command "javac" -ErrorAction SilentlyContinue
+  if ($javac -and $javac.Source) {
+    $candidates += (Split-Path (Split-Path $javac.Source -Parent) -Parent)
+  }
+
+  $roots = @(
+    (Join-Path $env:ProgramFiles "Eclipse Adoptium"),
+    (Join-Path $env:ProgramFiles "Java"),
+    (Join-Path $env:ProgramFiles "Microsoft")
+  )
+  $pf86 = [Environment]::GetEnvironmentVariable("ProgramFiles(x86)")
+  if ($pf86) { $roots += (Join-Path $pf86 "Eclipse Adoptium") }
+
+  foreach ($root in $roots) {
+    if (Test-Path $root) {
+      Get-ChildItem -Path $root -Directory -Filter "jdk-17*" -ErrorAction SilentlyContinue |
+        Sort-Object Name -Descending |
+        ForEach-Object { $candidates += $_.FullName }
+    }
+  }
+
+  foreach ($home in ($candidates | Where-Object { $_ } | Select-Object -Unique)) {
+    try {
+      $resolved = (Resolve-Path $home -ErrorAction Stop).Path
+      $javacExe = Join-Path $resolved "bin\javac.exe"
+      if (Test-Path $javacExe) {
+        $ver = (& $javacExe -version 2>&1 | Out-String).Trim()
+        if ($ver -match '^javac\s+17\.') { return $resolved }
+      }
+    } catch {}
+  }
+  return $null
+}
+function Set-JdkEnvironment([string]$jdkHome) {
+  if (-not $jdkHome) { return }
+  $jdkBin = Join-Path $jdkHome "bin"
+
+  try { [Environment]::SetEnvironmentVariable("JAVA_HOME", $jdkHome, "Machine") } catch {}
+
+  $machinePath = [Environment]::GetEnvironmentVariable("Path", "Machine")
+  $parts = @($machinePath -split ';') | Where-Object { $_ }
+  $hasJdkBin = $false
+  foreach ($p in $parts) {
+    $norm = $p.Trim().TrimEnd('\')
+    if ($norm -ieq "%JAVA_HOME%\bin" -or $norm -ieq $jdkBin.TrimEnd('\')) { $hasJdkBin = $true }
+  }
+  if (-not $hasJdkBin) {
+    $newPath = if ($machinePath) { "%JAVA_HOME%\bin;$machinePath" } else { "%JAVA_HOME%\bin" }
+    try { [Environment]::SetEnvironmentVariable("Path", $newPath, "Machine") } catch {}
+  }
+
+  $env:JAVA_HOME = $jdkHome
+  if (($env:Path -split ';' | ForEach-Object { $_.Trim().TrimEnd('\') }) -notcontains $jdkBin.TrimEnd('\')) {
+    $env:Path = "$jdkBin;$env:Path"
+  }
+}
+function Ensure-Jdk17 {
+  $jdkHome = Get-Jdk17Home
+  if ($jdkHome) {
+    Set-JdkEnvironment $jdkHome
+    Write-Host "  [OK] Java JDK 17 da co: $jdkHome" -ForegroundColor Green
+    return
+  }
+
+  Write-Host "  Cai Java JDK 17 (winget: EclipseAdoptium.Temurin.17.JDK) ..." -ForegroundColor Yellow
+  winget install -e --id EclipseAdoptium.Temurin.17.JDK --silent --accept-package-agreements --accept-source-agreements --disable-interactivity 2>&1 | Out-Host
+  Refresh-Path
+  $jdkHome = Get-Jdk17Home
+  if ($jdkHome) {
+    Set-JdkEnvironment $jdkHome
+    Write-Host "  [OK] Java JDK 17 da san sang: $jdkHome" -ForegroundColor Green
+  } else {
+    Write-Host "  [LOI] Khong tim thay javac sau khi cai JDK. Hay khoi dong lai may hoac cai Temurin JDK 17." -ForegroundColor Red
+    $script:CriticalSetupFailed = $true
+  }
+}
 
 # -- 1) Cai cong cu nen bang winget -------------------------------------------
 Section "Cai thanh phan nen (winget)"
 if (-not (Have "winget")) {
   Write-Host "[LOI] Khong co winget (App Installer). Cap nhat 'App Installer' tu Microsoft Store roi chay lai." -ForegroundColor Red
+  $script:CriticalSetupFailed = $true
 } else {
-  function Ensure-Tool($check, $id, $name) {
+  function Ensure-Tool($check, $id, $name, [bool]$critical = $true) {
     if (Have $check) { Write-Host "  [OK] $name da co" -ForegroundColor Green; return }
     Write-Host "  Cai $name  (winget: $id) ..." -ForegroundColor Yellow
     winget install -e --id $id --silent --accept-package-agreements --accept-source-agreements --disable-interactivity 2>&1 | Out-Host
     Refresh-Path
+    if (Have $check) {
+      Write-Host "  [OK] $name da san sang" -ForegroundColor Green
+    } elseif ($critical) {
+      Write-Host "  [LOI] $name chua san sang sau khi cai. Hay khoi dong lai may roi chay lai grader-setup.cmd." -ForegroundColor Red
+      $script:CriticalSetupFailed = $true
+    } else {
+      Write-Host "  [CANH BAO] $name chua san sang sau khi cai. Co the can khoi dong lai may." -ForegroundColor Yellow
+    }
   }
   Ensure-Tool "node"   "OpenJS.NodeJS.LTS"               "Node.js LTS"
-  Ensure-Tool "java"   "EclipseAdoptium.Temurin.17.JDK"  "Java (Temurin JDK 17)"
-  Ensure-Tool "ollama" "Ollama.Ollama"                   "Ollama"
+  Ensure-Jdk17
+  Ensure-Tool "ollama" "Ollama.Ollama"                   "Ollama" $false
   Ensure-Tool "docker" "Docker.DockerDesktop"             "Docker Desktop"
 
   # -- Python: xu ly rieng vi Windows Store stub co the chan lenh 'python' ----
@@ -229,9 +322,11 @@ if (-not (Have "docker")) {
         & powershell -NoProfile -ExecutionPolicy Bypass -File $base
         if ($LASTEXITCODE -ne 0) {
           Write-Host "  [CANH BAO] Chua build duoc grading-base. Xem huong dan loi phia tren, sau do chay lai grader-setup.cmd." -ForegroundColor Yellow
+          $script:CriticalSetupFailed = $true
         }
       } catch {
         Write-Host "  [LOI] build-base: $_" -ForegroundColor Yellow
+        $script:CriticalSetupFailed = $true
       }
       Pop-Location
     }
@@ -243,4 +338,8 @@ if (-not (Have "docker")) {
 
 Section "Hoan tat setup-prereqs"
 Write-Host "  Neu vua cai Docker lan dau: KHOI DONG LAI MAY, mo Docker Desktop, roi chay lai file nay." -ForegroundColor DarkGray
+if ($script:CriticalSetupFailed) {
+  Write-Host "  [CHUA SAN SANG] Co buoc bat buoc chua thanh cong. Sua loi phia tren roi chay lai grader-setup.cmd." -ForegroundColor Red
+  exit 1
+}
 Write-Host "  Xong roi -> dung shortcut 'Khoi dong Grader' (GraderLauncher.exe)." -ForegroundColor Green

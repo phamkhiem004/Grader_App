@@ -10,10 +10,11 @@
 
 import json
 from app.schemas import FeedbackRequest
+from app.config import FEEDBACK_MAX_EVIDENCE_ITEMS, FEEDBACK_MAX_RAG_CHARS_PER_ITEM
 
 
-MAX_RAG_CHARS_PER_ITEM = 1800
-MAX_EVIDENCE_ITEMS = 12
+MAX_RAG_CHARS_PER_ITEM = FEEDBACK_MAX_RAG_CHARS_PER_ITEM
+MAX_EVIDENCE_ITEMS = FEEDBACK_MAX_EVIDENCE_ITEMS
 
 
 def limit_text(text: str, max_chars: int = MAX_RAG_CHARS_PER_ITEM) -> str:

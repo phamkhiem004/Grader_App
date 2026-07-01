@@ -2,7 +2,7 @@
 # (Dòng bắt đầu bằng # là chú thích, bị bỏ qua. Chỉ cần sửa dòng model bên dưới.)
 #
 # LƯU Ý TỐC ĐỘ (đã test thực tế trên CPU‑only):
-#   qwen2.5-coder:3b   ~270s/bài 40 testcase, RA NHẬN XÉT THẬT  ← đang dùng
-#   qwen3:14b          >300s/bài → thường rơi về nhận xét mẫu (chỉ nên dùng khi có GPU)
+#   qwen2.5-coder:3b   ~270s/bài 40 testcase, RA NHẬN XÉT THẬT
+#   qwen3:14b          >300s/bài → thường rơi về nhận xét mẫu trên CPU (đang dùng theo cấu hình)
 # Đổi model xong: ollama pull <model> rồi chạy lại app (run.cmd).
 qwen3:14b

@@ -118,7 +118,9 @@ void main() async {
       : 0.0;
 
   // 5) Phân tích tĩnh code SV (best-effort)
-  final analyze = await _analyzeLib();
+  final analyze = _analyzeEnabled()
+      ? await _analyzeLib()
+      : {'has_error': false, 'warnings': <Map<String, dynamic>>[]};
 
   // 6) Xuất JSON (GIỮ field cũ để tương thích + thêm cấu trúc giàu cho AI)
   print('--- GRADE_RESULT_START ---');
@@ -137,6 +139,11 @@ void main() async {
     'analyze_result': analyze,
   }));
   print('--- GRADE_RESULT_END ---');
+}
+
+bool _analyzeEnabled() {
+  final v = (Platform.environment['GRADER_ANALYZE_LIB'] ?? 'true').toLowerCase();
+  return v == '1' || v == 'true' || v == 'yes' || v == 'on';
 }
 
 // Chọn thông báo lỗi chi tiết nhất: ưu tiên print 'EXCEPTION CAUGHT' (widget test),

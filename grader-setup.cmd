@@ -56,6 +56,14 @@ echo.
 REM 2) Cai prereqs NGAY TAI repo nay (-AppDir = thu muc chua file nay).
 echo === Cai thanh phan nen (lan dau co the RAT lau: tai Docker/JDK/Node + model AI) ===
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0installer\setup-prereqs.ps1" -AppDir "%~dp0." -DockerDataRoot "!DOCKER_DATA_ROOT!"
+if errorlevel 1 (
+  echo.
+  echo [LOI] Setup chua hoan tat. Hay xem loi/canh bao phia tren, sua theo huong dan roi chay lai grader-setup.
+  echo      Neu vua cai Docker lan dau: khoi dong lai may, mo Docker Desktop 1 lan, roi chay lai file nay.
+  echo.
+  pause
+  exit /b 1
+)
 
 echo.
 echo [OK] Xong buoc cai thanh phan nen.

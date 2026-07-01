@@ -339,6 +339,8 @@ Grader_App/
 |---|---|
 | Chấm bị kẹt `QUEUED` mãi | Đã fix (worker không chết). Nếu còn → restart backend, `recoverPendingJobs` tự nạp lại hàng đợi |
 | `image not found: grading-base` | Chưa build ảnh nền → chạy `grader-base/build-base.ps1` |
+| Maven báo `No compiler is provided` | Máy đang dùng JRE, thiếu JDK. Chạy lại `grader-setup.cmd`; script sẽ cài/tìm Temurin JDK 17 và set `JAVA_HOME` cho backend |
+| Docker build báo `failed to compute cache key` / `input/output error` | Lỗi storage/cache của Docker Desktop/WSL hoặc ổ Docker thiếu dung lượng. Chạy lại `grader-setup.cmd`; `build-base.ps1` sẽ prune cache, retry `--no-cache`, restart Docker/WSL rồi retry lần cuối |
 | Bài báo `0/0 — không chạy được testcase` | Bài nộp sai tên class/thiếu file so với đề, hoặc lỗi biên dịch |
 | `Sai format — cần MaSV_Ten.zip` | Đổi tên file ZIP đúng định dạng `MaSV_HoTen.zip` |
 | Hết RAM khi chấm nhiều | Giảm `GRADER_MAX_CONCURRENT` hoặc `GRADER_RUN_MEMORY` |

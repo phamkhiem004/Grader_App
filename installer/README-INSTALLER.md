@@ -20,6 +20,10 @@ Nó tự **xin quyền admin (UAC)** rồi gọi `installer\setup-prereqs.ps1`:
 > **Vừa cài Docker lần đầu?** Docker Desktop thường cần **khởi động lại máy** + mở Docker Desktop 1 lần.
 > Sau khi reboot, chạy lại `grader-setup.cmd` để build `grading-base` + tải nốt model còn thiếu.
 
+Nếu backend báo `No compiler is provided`, máy đang dùng JRE thay vì JDK. Chạy lại `grader-setup.cmd`; script sẽ cài/tìm Temurin JDK 17, set `JAVA_HOME`, rồi `GraderLauncher.exe` sẽ ép backend dùng JDK này.
+
+Nếu build Docker báo `failed to compute cache key` hoặc `input/output error`, thường là lỗi cache/storage của Docker Desktop/WSL hoặc ổ Docker thiếu dung lượng. `grader-base\build-base.ps1` đã tự prune cache, retry `--no-cache`, restart Docker/WSL và retry lần cuối. Nếu vẫn lỗi, mở Docker Desktop → Troubleshoot → Clean / Purge data, rồi chạy lại `grader-setup.cmd`.
+
 ## B. Chạy app
 
 Sau khi A xong, ngay trong repo:

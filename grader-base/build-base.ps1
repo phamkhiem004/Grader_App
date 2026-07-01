@@ -39,6 +39,31 @@ function Ensure-DockerReady {
   }
 }
 
+function Restart-DockerDesktop {
+  Write-Host ""
+  Write-Host "Restart Docker Desktop + WSL de lam sach loi I/O tam thoi..." -ForegroundColor Yellow
+  try { Stop-Process -Name "Docker Desktop" -Force -ErrorAction SilentlyContinue } catch {}
+  try { & wsl --shutdown 2>$null | Out-Null } catch {}
+
+  $dd = Join-Path $env:ProgramFiles "Docker\Docker\Docker Desktop.exe"
+  if (-not (Test-Path $dd)) { $dd = Join-Path $env:LOCALAPPDATA "Docker\Docker Desktop.exe" }
+  if (Test-Path $dd) {
+    Start-Process $dd | Out-Null
+  } else {
+    Write-Host "  [CANH BAO] Khong tim thay Docker Desktop.exe. Hay mo Docker Desktop thu cong." -ForegroundColor Yellow
+  }
+
+  $ready = $false
+  for ($i = 0; $i -lt 80 -and -not $ready; $i++) {
+    Start-Sleep -Seconds 3
+    try { & docker version *> $null; if ($LASTEXITCODE -eq 0) { $ready = $true } } catch {}
+  }
+  if (-not $ready) {
+    Write-Host "  [CANH BAO] Docker chua san sang sau khi restart." -ForegroundColor Yellow
+  }
+  return $ready
+}
+
 function Invoke-Build($title, [string]$buildKit, [bool]$useNoCache, [bool]$plainProgress) {
   Write-Host ""
   Write-Host "== $title ==" -ForegroundColor Cyan
@@ -78,6 +103,13 @@ if (-not $ok) {
   Write-Host ""
   Write-Host "BuildKit van loi. Thu legacy builder --no-cache (hay sua loi cache key/I/O tren Docker Desktop)..." -ForegroundColor Yellow
   $ok = Invoke-Build "Legacy docker build --no-cache" "0" $true $false
+}
+
+if (-not $ok) {
+  $restarted = Restart-DockerDesktop
+  if ($restarted) {
+    $ok = Invoke-Build "BuildKit build --no-cache sau restart Docker" "1" $true $true
+  }
 }
 
 if (-not $ok) {

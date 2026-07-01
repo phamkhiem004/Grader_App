@@ -1,6 +1,7 @@
 package com.example.grader.repository;
 
 import com.example.grader.entity.Exam;
+import com.example.grader.dto.ExamHistoryRow;
 import com.example.grader.entity.ExamResult;
 import com.example.grader.entity.ExamStatus;
 import com.example.grader.entity.GradingStatus;
@@ -78,6 +79,20 @@ public interface ExamResultRepository extends JpaRepository<ExamResult, Long> {
 
     // Lịch sử chấm theo đề (chỉ bài nộp chính thức), mới nhất lên đầu
     List<ExamResult> findByExamIdAndModeOrderByUpdatedAtDesc(String examId, String mode);
+
+    // Projection nhe cho trang lich su/feedback: khong keo result_json LONGTEXT.
+    @Query("""
+        select new com.example.grader.dto.ExamHistoryRow(
+            r.id, r.studentId, r.studentName, r.score, r.manualScore, r.status,
+            r.batchId, r.updatedAt, r.details, r.errorLog,
+            case when r.resultJson is null then false else true end
+        )
+        from ExamResult r
+        where r.examId = :examId and r.mode = :mode
+        order by r.updatedAt desc
+    """)
+    List<ExamHistoryRow> findHistoryRowsByExamIdAndMode(@Param("examId") String examId,
+                                                        @Param("mode") String mode);
 
     // Tìm kiếm (thanh search header): theo mã SV / tên SV / mã đề
     @Query("SELECT r FROM ExamResult r WHERE (r.mode IS NULL OR r.mode = 'submit') AND (" +

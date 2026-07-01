@@ -9,6 +9,8 @@ from ollama import Client
 from app.config import (
     FEEDBACK_MODEL_NAME, OLLAMA_TIMEOUT_SECONDS,
     FEEDBACK_PROVIDER, OPENAI_API_KEY, OPENAI_MODEL, OPENAI_BASE_URL,
+    FEEDBACK_FAST_INVALID, FEEDBACK_FAST_PERFECT,
+    OLLAMA_NUM_PREDICT, OPENAI_FEEDBACK_MAX_TOKENS,
 )
 from app.schemas import FeedbackRequest, FeedbackTextResponse
 from app.rule_engine import build_rule_based_evidence
@@ -120,7 +122,7 @@ def _chat_ollama(prompt: str) -> str:
         options={
             # Nhiệt độ THẤP để model BÁM dữ liệu, ít "sáng tác"/bịa (đổi từ 0.55 → 0.25).
             "temperature": 0.25, "top_p": 0.85, "repeat_penalty": 1.15,
-            "num_ctx": 4096, "num_predict": 900,
+            "num_ctx": 4096, "num_predict": OLLAMA_NUM_PREDICT,
             "num_thread": os.cpu_count() or 4,
         },
         keep_alive="30m",
@@ -139,11 +141,11 @@ def _chat_openai(prompt: str) -> str:
         ],
     }
     if is_reasoning:                      # gpt-5/o-series: không nhận temperature, dùng max_completion_tokens
-        body["max_completion_tokens"] = 1200
+        body["max_completion_tokens"] = OPENAI_FEEDBACK_MAX_TOKENS
     else:
         body["temperature"] = 0.55
         body["top_p"] = 0.9
-        body["max_tokens"] = 1100
+        body["max_tokens"] = OPENAI_FEEDBACK_MAX_TOKENS
     req = urllib.request.Request(
         OPENAI_BASE_URL.rstrip("/") + "/chat/completions",
         data=json.dumps(body).encode("utf-8"),
@@ -256,6 +258,28 @@ def normalize_feedback_voice(text: str) -> str:
 def generate_feedback_text(request: FeedbackRequest) -> FeedbackTextResponse:
     rule_data = build_rule_based_evidence(request) ##chay rule engine
     review_reasons = list(rule_data.get("data_quality_warnings", []))
+
+    if FEEDBACK_FAST_INVALID and (not request.test_cases or request.grading_result.total_tests <= 0):
+        feedback_text = normalize_feedback_voice(build_fallback_feedback(request, rule_data))
+        reasons = review_reasons or ["Khong co du lieu testcase du de sinh nhan xet chi tiet."]
+        return FeedbackTextResponse(
+            student_id=request.student.id,
+            score_summary=f"{request.grading_result.score}/{request.exam.total_score}",
+            feedback_text=feedback_text,
+            teacher_review_required=True,
+            sources=[],
+            review_reasons=reasons,
+        )
+
+    if FEEDBACK_FAST_PERFECT and is_perfect_submission(request) and not review_reasons:
+        return FeedbackTextResponse(
+            student_id=request.student.id,
+            score_summary=f"{request.grading_result.score}/{request.exam.total_score}",
+            feedback_text=build_perfect_feedback(request, rule_data),
+            teacher_review_required=False,
+            sources=[],
+            review_reasons=[],
+        )
 
     try:
         rag_context = retrieve_context(request, rule_data) ##doc rag

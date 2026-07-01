@@ -120,6 +120,15 @@ def make_perfect_request() -> FeedbackRequest:
     )
 
 
+def make_invalid_request() -> FeedbackRequest:
+    return FeedbackRequest(
+        student=Student(id="HE180011", name="Le Van C"),
+        exam=Exam(code="PRM393_PE", title="Flutter Practical Exam", total_score=10),
+        grading_result=GradingResult(score=0, passed_tests=0, failed_tests=0, total_tests=0),
+        test_cases=[],
+    )
+
+
 def test_generate_feedback_uses_llm_when_available(monkeypatch):
     monkeypatch.setattr(
         "app.feedback_engine.retrieve_context",
@@ -159,6 +168,40 @@ def test_perfect_submission_does_not_require_teacher_review_when_rag_empty(monke
 
     assert response.teacher_review_required is False
     assert response.sources == []
+
+
+def test_perfect_submission_skips_rag_and_llm(monkeypatch):
+    def fail_retrieval(request, rule_data):
+        raise AssertionError("RAG should not run for perfect submissions")
+
+    def fail_llm(prompt):
+        raise AssertionError("LLM should not run for perfect submissions")
+
+    monkeypatch.setattr("app.feedback_engine.retrieve_context", fail_retrieval)
+    monkeypatch.setattr("app.feedback_engine._call_llm", fail_llm)
+
+    response = generate_feedback_text(make_perfect_request())
+
+    assert response.teacher_review_required is False
+    assert response.sources == []
+    assert response.feedback_text
+
+
+def test_invalid_submission_skips_rag_and_llm(monkeypatch):
+    monkeypatch.setattr(
+        "app.feedback_engine.retrieve_context",
+        lambda request, rule_data: (_ for _ in ()).throw(AssertionError("RAG should not run")),
+    )
+    monkeypatch.setattr(
+        "app.feedback_engine._call_llm",
+        lambda prompt: (_ for _ in ()).throw(AssertionError("LLM should not run")),
+    )
+
+    response = generate_feedback_text(make_invalid_request())
+
+    assert response.teacher_review_required is True
+    assert response.sources == []
+    assert response.feedback_text
 
 
 def test_generate_feedback_falls_back_when_rag_fails(monkeypatch):

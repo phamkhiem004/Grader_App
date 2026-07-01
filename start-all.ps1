@@ -55,12 +55,67 @@ else            { Write-Host "Feedback provider: OLLAMA ($Model) - local" -Foreg
 
 function Have($cmd) { return [bool](Get-Command $cmd -ErrorAction SilentlyContinue) }
 function Section($t) { Write-Host "`n==== $t ====" -ForegroundColor Cyan }
+function Get-Jdk17Home {
+  $candidates = @()
+  foreach ($scope in @("Process","User","Machine")) {
+    $jh = [Environment]::GetEnvironmentVariable("JAVA_HOME", $scope)
+    if ($jh) { $candidates += $jh }
+  }
+
+  $javac = Get-Command "javac" -ErrorAction SilentlyContinue
+  if ($javac -and $javac.Source) {
+    $candidates += (Split-Path (Split-Path $javac.Source -Parent) -Parent)
+  }
+
+  $roots = @(
+    (Join-Path $env:ProgramFiles "Eclipse Adoptium"),
+    (Join-Path $env:ProgramFiles "Java"),
+    (Join-Path $env:ProgramFiles "Microsoft")
+  )
+  $pf86 = [Environment]::GetEnvironmentVariable("ProgramFiles(x86)")
+  if ($pf86) { $roots += (Join-Path $pf86 "Eclipse Adoptium") }
+
+  foreach ($root in $roots) {
+    if (Test-Path $root) {
+      Get-ChildItem -Path $root -Directory -Filter "jdk-17*" -ErrorAction SilentlyContinue |
+        Sort-Object Name -Descending |
+        ForEach-Object { $candidates += $_.FullName }
+    }
+  }
+
+  foreach ($home in ($candidates | Where-Object { $_ } | Select-Object -Unique)) {
+    try {
+      $resolved = (Resolve-Path $home -ErrorAction Stop).Path
+      $javacExe = Join-Path $resolved "bin\javac.exe"
+      if (Test-Path $javacExe) {
+        $ver = (& $javacExe -version 2>&1 | Out-String).Trim()
+        if ($ver -match '^javac\s+17\.') { return $resolved }
+      }
+    } catch {}
+  }
+  return $null
+}
+function Use-Jdk17([string]$jdkHome) {
+  if (-not $jdkHome) { return }
+  $env:JAVA_HOME = $jdkHome
+  $jdkBin = Join-Path $jdkHome "bin"
+  if (($env:Path -split ';' | ForEach-Object { $_.Trim().TrimEnd('\') }) -notcontains $jdkBin.TrimEnd('\')) {
+    $env:Path = "$jdkBin;$env:Path"
+  }
+}
 
 # -- 0) Kiem tra cong cu can thiet --------------------------------------------
 Section "Kiem tra cong cu"
 foreach ($t in @("python","node","npm","docker")) {
   if (Have $t) { Write-Host "  [OK] $t" -ForegroundColor Green }
   else { Write-Host "  [THIEU] $t - cai dat truoc khi chay" -ForegroundColor Yellow }
+}
+$backendJdkHome = Get-Jdk17Home
+if ($backendJdkHome) {
+  Use-Jdk17 $backendJdkHome
+  Write-Host "  [OK] JDK 17: $backendJdkHome" -ForegroundColor Green
+} else {
+  Write-Host "  [THIEU] JDK 17/javac - chay grader-setup.cmd de backend bien dich duoc." -ForegroundColor Yellow
 }
 if (-not (Test-Path $botDir)) { throw "Khong thay repo feedback bot tai: $botDir" }
 if (-not (Test-Path $beDir))  { throw "Khong thay backend tai: $beDir" }
@@ -100,6 +155,15 @@ OPENAI_API_KEY=$openAiKey
 OPENAI_BASE_URL=https://api.openai.com/v1
 EMBED_MODEL_NAME=$Embed
 OLLAMA_TIMEOUT_SECONDS=600
+OLLAMA_NUM_PREDICT=650
+OPENAI_FEEDBACK_MAX_TOKENS=800
+FEEDBACK_FAST_PERFECT=true
+FEEDBACK_FAST_INVALID=true
+FEEDBACK_MAX_RAG_CHARS_PER_ITEM=900
+FEEDBACK_MAX_EVIDENCE_ITEMS=8
+FEEDBACK_RAG_K_SMALL=3
+FEEDBACK_RAG_K_MEDIUM=4
+FEEDBACK_RAG_K_LARGE=5
 "@
 } else {
   $envContent = @"
@@ -107,6 +171,15 @@ FEEDBACK_PROVIDER=ollama
 FEEDBACK_MODEL_NAME=$Model
 EMBED_MODEL_NAME=$Embed
 OLLAMA_TIMEOUT_SECONDS=600
+OLLAMA_NUM_PREDICT=650
+OPENAI_FEEDBACK_MAX_TOKENS=800
+FEEDBACK_FAST_PERFECT=true
+FEEDBACK_FAST_INVALID=true
+FEEDBACK_MAX_RAG_CHARS_PER_ITEM=900
+FEEDBACK_MAX_EVIDENCE_ITEMS=8
+FEEDBACK_RAG_K_SMALL=3
+FEEDBACK_RAG_K_MEDIUM=4
+FEEDBACK_RAG_K_LARGE=5
 "@
 }
 # Ghi .env KHONG BOM: PowerShell 'Set-Content -Encoding utf8' chen BOM -> python-dotenv doc sai
@@ -229,6 +302,14 @@ Launch "Feedback bot (:8000)" $botCmd
 # Backend Spring Boot (chay tren host). Windows DUNG mvnw.cmd. Cong = $bePort (8080 hoac cong trong).
 $beCmd = @"
 Set-Location '$beDir'
+if ('$backendJdkHome') {
+  `$env:JAVA_HOME = '$backendJdkHome'
+  `$env:Path = (Join-Path `$env:JAVA_HOME 'bin') + ';' + `$env:Path
+  Write-Host "JDK: `$env:JAVA_HOME" -ForegroundColor DarkGray
+} else {
+  Write-Host '[LOI] Khong thay JDK 17 (javac). Hay chay grader-setup.cmd roi mo lai GraderLauncher.exe.' -ForegroundColor Red
+  return
+}
 `$env:SERVER_PORT = '$bePort'
 Write-Host 'Backend: http://localhost:$bePort' -ForegroundColor Green
 .\mvnw.cmd spring-boot:run

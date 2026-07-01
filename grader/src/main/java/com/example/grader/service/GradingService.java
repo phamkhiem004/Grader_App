@@ -39,6 +39,9 @@ public class GradingService {
     @Value("${grader.run.cpus:2.0}")
     private String runCpus;
 
+    @Value("${grader.analyze.enabled:true}")
+    private boolean analyzeEnabled;
+
     private final ObjectMapper mapper = new ObjectMapper();
 
     // ── Entry point ──────────────────────────────────────────────
@@ -126,6 +129,8 @@ public class GradingService {
         String containerName = dockerContainerName("grader-run", examId, studentId);
         List<String> command = new ArrayList<>(List.of(
                 "docker", "run", "--name", containerName, "--rm", "--memory", runMemory, "--cpus", runCpus));
+        command.add("-e");
+        command.add("GRADER_ANALYZE_LIB=" + analyzeEnabled);
         command.addAll(mounts);
         command.add(image);
         command.add("./run_grader.sh");   // chạy chấm tường minh — không phụ thuộc CMD baked trong ảnh
@@ -344,11 +349,12 @@ public class GradingService {
 
     // ── Helpers ──────────────────────────────────────────────────
     private void unzip(File zip, File dest) throws Exception {
-        byte[] buf = new byte[4096];
+        byte[] buf = new byte[64 * 1024];
+        String destCanonical = dest.getCanonicalPath() + File.separator;
         try (ZipInputStream zis = new ZipInputStream(new FileInputStream(zip))) {
             ZipEntry entry;
             while ((entry = zis.getNextEntry()) != null) {
-                File f = safeFile(dest, entry);
+                File f = safeFile(dest, destCanonical, entry);
                 if (entry.isDirectory()) {
                     f.mkdirs();
                 } else {
@@ -363,9 +369,9 @@ public class GradingService {
         }
     }
 
-    private File safeFile(File dest, ZipEntry entry) throws Exception {
+    private File safeFile(File dest, String destCanonical, ZipEntry entry) throws Exception {
         File f = new File(dest, entry.getName());
-        if (!f.getCanonicalPath().startsWith(dest.getCanonicalPath() + File.separator))
+        if (!f.getCanonicalPath().startsWith(destCanonical))
             throw new Exception("Zip Slip: " + entry.getName());
         return f;
     }

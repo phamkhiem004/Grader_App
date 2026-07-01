@@ -48,3 +48,6 @@ grader:
   run:
     cpus: ${GRADER_RUN_CPUS:2.0}
     memory: ${GRADER_RUN_MEMORY:2048m}
+  analyze:
+    # Mac dinh bat de giu canh bao dart analyze trong ket qua va feedback.
+    enabled: ${GRADER_ANALYZE_LIB:true}

@@ -22,11 +22,10 @@ import java.util.Set;
 public class PromptBuilder {
 
     /**
-     * Cho phép AI sinh WIDGET TEST (render UI) hay không. Mặc định FALSE: chỉ test LOGIC/UNIT thuần — nhanh,
-     * luôn PASS, đạt số lượng ổn định (model nhỏ như gpt-4o-mini hay viết widget test lệch solution → fail).
-     * Bật TRUE khi dùng model mạnh (gpt-4o/gpt-4.1...) để có thêm test kiểm tra giao diện.
+     * Mặc định bật widget test vì đề Flutter trong app tập trung chấm UI/hành vi màn hình.
+     * Có thể tắt khi cần sinh đề logic-only thật nhanh.
      */
-    @Value("${grader.ai.allow-widget-tests:false}")
+    @Value("${grader.ai.allow-widget-tests:true}")
     private boolean allowWidgetTests;
 
     // Đọc syllabus ĐỘNG (DB) để liệt kê skill_code hợp lệ → AI sinh đề theo Khung năng lực HIỆN TẠI,
@@ -100,7 +99,7 @@ public class PromptBuilder {
                    KHÔNG dựa vào điều hướng giữa các màn hình (đừng tap để chuyển trang rồi mới find) — dễ vỡ.
                  • Solution PHẢI render CHÍNH XÁC mọi chuỗi mà test tìm bằng find.text('...') (khớp từng ký tự, có dấu).
                  • Truyền sẵn dữ liệu/callback qua constructor của màn hình (vd XScreen(items: [...], onAdd: (_){})), đừng phụ thuộc state ngoài.
-               ƯU TIÊN test LOGIC thuần (unit) vì dễ deterministic; widget test chỉ cho hành vi/UI đã nêu rõ.
+               ƯU TIÊN widget test khi đề có trọng tâm UI/hành vi màn hình; dùng unit test để bổ trợ logic thuần/validate/store.
             5. Mỗi test ĐỘC LẬP — KHÔNG chia sẻ trạng thái giữa các test. TUYỆT ĐỐI KHÔNG dùng hàm/biến TOÀN CỤC
                có state thay đổi (vd top-level addIncome()/getTotalIncome() thao tác trên 1 list dùng chung —
                sẽ khiến test "khi rỗng = 0" FAIL vì test trước đã đổi state). Thiết kế HƯỚNG ĐỐI TƯỢNG: đặt state
@@ -140,11 +139,11 @@ public class PromptBuilder {
         if (target > firstN)
             sb.append(" (TỔNG MỤC TIÊU ~").append(target).append(" testcase — tôi sẽ xin THÊM (CHỈ phần mới) ở các lô sau)");
         sb.append(".\n");
-        sb.append("- ⚠ LÔ NỀN CHỈ dùng test LOGIC/UNIT THUẦN trên class/hàm Dart (KHÔNG widget test, KHÔNG pumpWidget) "
-                + "để CHẮC CHẮN PASS 100%. Vẫn phủ được FORM_VALIDATE/business qua HÀM thuần (vd validateTitle(String)->String?), "
-                + "UI_LISTS qua logic store (add/remove/lọc/tổng).");
-        sb.append(allowWidgetTests ? " Widget test (render UI) sẽ thêm ở các lô sau.\n"
-                                   : " Đề thi này KHÔNG dùng widget test — chỉ chấm logic.\n");
+        sb.append(allowWidgetTests
+                ? "- LÔ NỀN PHẢI có widget test cho các màn hình/hành vi UI chính ngay từ đầu; dùng unit test để bổ trợ logic thuần/validate/store. "
+                  + "Widget test cần pump TRỰC TIẾP màn hình, text/constructor khớp solution, không phụ thuộc điều hướng mong manh.\n"
+                : "- ⚠ LÔ NỀN CHỈ dùng test LOGIC/UNIT THUẦN trên class/hàm Dart (KHÔNG widget test, KHÔNG pumpWidget) "
+                  + "để CHẮC CHẮN PASS 100%. Vẫn phủ được FORM_VALIDATE/business qua HÀM thuần, UI_LISTS qua logic store.\n");
         sb.append("- Phân bố độ khó: ").append(describeDifficulty(r.difficultyOr()))
           .append(" — nhớ có cả advanced để điểm có chiều sâu.\n");
         sb.append("- Phủ càng nhiều skill_code / category càng tốt; mỗi yêu cầu/ràng buộc của đề ≥1 testcase.\n");
@@ -186,9 +185,9 @@ public class PromptBuilder {
             với solution sau khi áp solution_patch. Nếu không cần đổi lib thì BỎ "solution_patch"/"new_top_level"/"new_imports".
             """).formatted(currentCount, target, idList, skills, addN,
                 allowWidgetTests
-                    ? "Phần lớn vẫn nên là test LOGIC (chắc chắn PASS). CÓ THỂ xen 1-2 widget test ĐƠN GIẢN nếu CHẮC "
-                      + "render đúng: pump TRỰC TIẾP màn hình (MaterialApp(home: XScreen(...))), KHÔNG điều hướng; "
-                      + "solution_patch render CHÍNH XÁC text mà find.text('...') tìm. KHÔNG chắc thì để là test logic."
+                    ? "ƯU TIÊN thêm widget test cho màn hình/hành vi UI còn thiếu phủ; có thể thêm unit test cho logic phụ trợ. "
+                      + "Widget test phải render đúng: pump TRỰC TIẾP màn hình (MaterialApp(home: XScreen(...))), KHÔNG điều hướng mong manh; "
+                      + "solution_patch render CHÍNH XÁC text mà find.text('...') tìm và truyền dữ liệu/callback qua constructor."
                     : "⚠ CHỈ thêm test LOGIC/UNIT THUẦN (KHÔNG widget test, KHÔNG pumpWidget) để CHẮC CHẮN PASS — "
                       + "phủ thêm logic/validate/business/collections/null-safety/async chưa có.");
     }

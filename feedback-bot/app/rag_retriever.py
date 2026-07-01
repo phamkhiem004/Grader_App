@@ -4,7 +4,13 @@ from typing import List, Optional
 from langchain_chroma import Chroma
 from langchain_ollama import OllamaEmbeddings
 
-from app.config import CHROMA_DIR, EMBED_MODEL_NAME
+from app.config import (
+    CHROMA_DIR,
+    EMBED_MODEL_NAME,
+    FEEDBACK_RAG_K_LARGE,
+    FEEDBACK_RAG_K_MEDIUM,
+    FEEDBACK_RAG_K_SMALL,
+)
 from app.schemas import FeedbackRequest
 
 
@@ -114,10 +120,10 @@ def determine_retrieval_k(rule_data: dict) -> int:
     )
 
     if weak_count <= 1:
-        return 4
+        return FEEDBACK_RAG_K_SMALL
     if weak_count <= 3:
-        return 6
-    return 8
+        return FEEDBACK_RAG_K_MEDIUM
+    return FEEDBACK_RAG_K_LARGE
 
 
 def retrieve_context(

@@ -37,4 +37,41 @@ def _get_float_env(name: str, default: float) -> float:
         return default
 
 
+def _get_int_env(name: str, default: int) -> int:
+    raw_value = os.getenv(name)
+    if raw_value is None:
+        return default
+
+    try:
+        return int(raw_value)
+    except ValueError:
+        return default
+
+
+def _get_bool_env(name: str, default: bool) -> bool:
+    raw_value = os.getenv(name)
+    if raw_value is None:
+        return default
+
+    value = raw_value.strip().lower()
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    if value in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
 OLLAMA_TIMEOUT_SECONDS = _get_float_env("OLLAMA_TIMEOUT_SECONDS", 60.0)
+OLLAMA_NUM_PREDICT = _get_int_env("OLLAMA_NUM_PREDICT", 650)
+OPENAI_FEEDBACK_MAX_TOKENS = _get_int_env("OPENAI_FEEDBACK_MAX_TOKENS", 800)
+
+# Fast paths: skip RAG/LLM when the result is already deterministic enough.
+FEEDBACK_FAST_PERFECT = _get_bool_env("FEEDBACK_FAST_PERFECT", True)
+FEEDBACK_FAST_INVALID = _get_bool_env("FEEDBACK_FAST_INVALID", True)
+
+# Smaller prompts make local Ollama feedback much faster while keeping enough evidence.
+FEEDBACK_MAX_RAG_CHARS_PER_ITEM = _get_int_env("FEEDBACK_MAX_RAG_CHARS_PER_ITEM", 900)
+FEEDBACK_MAX_EVIDENCE_ITEMS = _get_int_env("FEEDBACK_MAX_EVIDENCE_ITEMS", 8)
+FEEDBACK_RAG_K_SMALL = _get_int_env("FEEDBACK_RAG_K_SMALL", 3)
+FEEDBACK_RAG_K_MEDIUM = _get_int_env("FEEDBACK_RAG_K_MEDIUM", 4)
+FEEDBACK_RAG_K_LARGE = _get_int_env("FEEDBACK_RAG_K_LARGE", 5)

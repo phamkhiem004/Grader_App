@@ -62,6 +62,14 @@ class TestCase(BaseModel):
     def validate_skill_code(self):
         if not self.skill_code:
             raise ValueError("skill_code is required")
+        # Chuẩn hoá case ở BIÊN: taxonomy chuẩn là CHỮ HOA (vd DART_VARIABLES_TYPES).
+        # So khớp skill_code (key comment_bank, query RAG) phân biệt hoa-thường → nếu
+        # Grader lỡ gửi thường/lẫn lộn sẽ rơi DEFAULT_COMMENTS. Uppercase để bất biến case.
+        self.skill_code = self.skill_code.strip().upper()
+        if self.skill:
+            self.skill = self.skill.strip().upper()
+        if self.category:
+            self.category = self.category.strip().upper()
         return self
 
     @property
@@ -111,6 +119,14 @@ class CompetencyAssessment(BaseModel):
     total_tests: int = Field(ge=0)
     by_difficulty: Dict[str, str] = Field(default_factory=dict)
     weak_skills: List[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def normalize_case(self):
+        # Đồng bộ với TestCase: category + weak_skills cũng uppercase để khớp taxonomy chuẩn.
+        if self.category:
+            self.category = self.category.strip().upper()
+        self.weak_skills = [s.strip().upper() for s in self.weak_skills if s and s.strip()]
+        return self
 
 
 class FeedbackRequest(BaseModel):

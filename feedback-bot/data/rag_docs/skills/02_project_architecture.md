@@ -1,14 +1,14 @@
 # Skill: Cấu trúc & Kiến trúc dự án (Project Structure & Architecture)
 
-- **skill (lớn):** `project_architecture`
+- **skill (lớn):** `PROJECT_ARCHITECTURE`
 - **Tên skill:** Cấu trúc và kiến trúc dự án Flutter
 - **Nguồn:** *Mastering Flutter* (Kevin Moore, 2025), Chương 3–4.
-- **skill_code trong skill này:** `proj_pubspec_dependencies`, `proj_folder_structure`, `proj_stateless_vs_stateful`
+- **skill_code trong skill này:** `PROJ_PUBSPEC_DEPENDENCIES`, `PROJ_FOLDER_STRUCTURE`, `PROJ_STATELESS_VS_STATEFUL`
 
 ---
 
-## skill_code: `proj_pubspec_dependencies`
-**skill_name:** pubspec.yaml và quản lý dependencies · **skill:** `project_architecture`
+## skill_code: `PROJ_PUBSPEC_DEPENDENCIES`
+**skill_name:** pubspec.yaml và quản lý dependencies · **skill:** `PROJECT_ARCHITECTURE`
 
 ### Khái niệm
 `pubspec.yaml` định nghĩa dự án cùng toàn bộ packages và plugins mà app cần. File YAML gồm field, dấu hai chấm và value; phần tử con thụt lề đúng hai khoảng trắng (spaces, không phải tabs). Các field chính gồm `name`, `description`, `publish_to`, `version`, `environment`, `dependencies`.
@@ -33,8 +33,8 @@ pubspec.yaml, dependencies, dev_dependencies, YAML indentation, environment SDK,
 
 ---
 
-## skill_code: `proj_folder_structure`
-**skill_name:** Cấu trúc thư mục lib/ và Clean Architecture · **skill:** `project_architecture`
+## skill_code: `PROJ_FOLDER_STRUCTURE`
+**skill_name:** Cấu trúc thư mục lib/ và Clean Architecture · **skill:** `PROJECT_ARCHITECTURE`
 
 ### Khái niệm
 Thư mục `lib/` là nơi chứa toàn bộ file Dart, có thể lồng folder tùy ý. Clean architecture tách biệt mối quan tâm và giữ business logic độc lập với UI, database, framework, làm code dễ test và bảo trì. Cấu trúc folder gợi ý gồm `data/` (database, models, repository, sources), `network/`, `router/`, `ui/` (screens, themes, widgets), `utils/`.
@@ -59,8 +59,8 @@ clean architecture, folder structure, lib folder, layering, dependency rule, SOL
 
 ---
 
-## skill_code: `proj_stateless_vs_stateful`
-**skill_name:** StatelessWidget và StatefulWidget · **skill:** `project_architecture`
+## skill_code: `PROJ_STATELESS_VS_STATEFUL`
+**skill_name:** StatelessWidget và StatefulWidget · **skill:** `PROJECT_ARCHITECTURE`
 
 ### Khái niệm
 Flutter dùng widget để dựng UI declarative. `StatelessWidget` là immutable, chỉ hiển thị thông tin được truyền vào và không đổi giá trị. `StatefulWidget` giữ state có thể thay đổi (ví dụ một field như `_counter` hoặc text controller), khi state đổi widget được rebuild.

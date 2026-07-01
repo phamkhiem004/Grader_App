@@ -1,14 +1,14 @@
 # Skill: Widget UI cơ bản & Bố cục (Basic UI & Layout Widgets)
 
-- **skill (lớn):** `ui_basic_widgets`
+- **skill (lớn):** `UI_BASIC_WIDGETS`
 - **Tên skill:** Widget giao diện cơ bản và bố cục
 - **Nguồn:** *Mastering Flutter* (Kevin Moore, 2025), Chương 4 — "Basic Widgets".
-- **skill_code trong skill này:** `ui_scaffold_appbar`, `ui_container_row_column`, `ui_text_image_icon`, `ui_buttons_selection`, `ui_text_input`, `ui_drawer_snackbar`
+- **skill_code trong skill này:** `UI_SCAFFOLD_APPBAR`, `UI_CONTAINER_ROW_COLUMN`, `UI_TEXT_IMAGE_ICON`, `UI_BUTTONS_SELECTION`, `UI_TEXT_INPUT`, `UI_DRAWER_SNACKBAR`
 
 ---
 
-## skill_code: `ui_scaffold_appbar`
-**skill_name:** Scaffold, AppBar và NavigationBar · **skill:** `ui_basic_widgets`
+## skill_code: `UI_SCAFFOLD_APPBAR`
+**skill_name:** Scaffold, AppBar và NavigationBar · **skill:** `UI_BASIC_WIDGETS`
 
 ### Khái niệm
 `Scaffold` là widget Material Design dựng layout cho cả một màn hình. Các tham số chính: `appBar` (thanh tiêu đề, actions, menu), `body` (nội dung giữa màn hình), `floatingActionButton`, `bottomNavigationBar` và `drawer`. Mọi tham số đều tùy chọn trừ `body`. `AppBar` dùng để hiển thị tiêu đề trang, menu tùy chọn và nút back; hữu ích trên thiết bị di động. `BottomNavigationBar` phù hợp khi app có ba hoặc bốn màn hình để chuyển qua lại.
@@ -31,8 +31,8 @@ Scaffold, AppBar, BottomNavigationBar, body, floatingActionButton
 
 ---
 
-## skill_code: `ui_container_row_column`
-**skill_name:** Container, Row và Column · **skill:** `ui_basic_widgets`
+## skill_code: `UI_CONTAINER_ROW_COLUMN`
+**skill_name:** Container, Row và Column · **skill:** `UI_BASIC_WIDGETS`
 
 ### Khái niệm
 `Container` chứa một widget con và cho phép trang trí: màu nền, `padding`, `alignment`, `decoration`, `width`/`height`, `transform`. `Column` xếp danh sách widget theo chiều dọc, `Row` xếp theo chiều ngang; cả hai dùng `mainAxisAlignment`, `crossAxisAlignment`, `mainAxisSize` và `children`. Lưu ý đặt `mainAxisSize` vì `Column` mặc định là `max`.
@@ -55,8 +55,8 @@ Container, Row, Column, mainAxisAlignment, crossAxisAlignment, Spacer
 
 ---
 
-## skill_code: `ui_text_image_icon`
-**skill_name:** Text, Image và Icon · **skill:** `ui_basic_widgets`
+## skill_code: `UI_TEXT_IMAGE_ICON`
+**skill_name:** Text, Image và Icon · **skill:** `UI_BASIC_WIDGETS`
 
 ### Khái niệm
 `Text` hiển thị văn bản tĩnh với các tham số như `data`, `style` (`TextStyle` về color, font, size), `textAlign`, `overflow` (clip, fade, ellipsis, visible), `maxLines`. `Image` hiển thị ảnh từ nhiều nguồn qua `Image.asset`, `Image.network`, `Image.file`; tham số quan trọng là `width`, `height`, `fit` (`BoxFit`). `Icon` hiển thị biểu tượng chuẩn (material/cupertino), thường đặt trong `IconButton`.
@@ -79,8 +79,8 @@ Text, TextStyle, Image.network, BoxFit, Icon, IconButton, overflow
 
 ---
 
-## skill_code: `ui_buttons_selection`
-**skill_name:** Buttons, Chips và widget lựa chọn · **skill:** `ui_basic_widgets`
+## skill_code: `UI_BUTTONS_SELECTION`
+**skill_name:** Buttons, Chips và widget lựa chọn · **skill:** `UI_BASIC_WIDGETS`
 
 ### Khái niệm
 Có nhiều loại button: `IconButton`, `TextButton`, `ElevatedButton`, `FilledButton`, `OutlinedButton`, `FloatingActionButton`, `SegmentedButton`. Widget lựa chọn gồm `Checkbox`, `Radio`, `Slider`, `Switch`. `Chip` có các loại `InputChip`, `ChoiceChip`, `FilterChip`, `ActionChip`. Ngoài ra có `DatePickerDialog`, `TimePicker` và `PopupMenuButton` (menu gắn với một button).
@@ -103,8 +103,8 @@ Button, Checkbox, Radio, Slider, Switch, FilterChip, DatePicker, PopupMenuButton
 
 ---
 
-## skill_code: `ui_text_input`
-**skill_name:** Nhập liệu với TextField · **skill:** `ui_basic_widgets`
+## skill_code: `UI_TEXT_INPUT`
+**skill_name:** Nhập liệu với TextField · **skill:** `UI_BASIC_WIDGETS`
 
 ### Khái niệm
 `TextField` cho phép người dùng nhập văn bản. Nó cần một `TextEditingController` để giữ giá trị, nghĩa là phải đặt trong `StatefulWidget`. Cách dễ nhất là tạo controller trong `initState` và giải phóng trong `dispose`. Các tham số chính: `controller`, `focusNode`, `decoration` (`InputDecoration`), `keyboardType`, `maxLength`, `onChanged`, `onSubmitted`.
@@ -127,8 +127,8 @@ TextField, TextEditingController, keyboardType, onSubmitted, initState, dispose
 
 ---
 
-## skill_code: `ui_drawer_snackbar`
-**skill_name:** Drawer và Snackbar · **skill:** `ui_basic_widgets`
+## skill_code: `UI_DRAWER_SNACKBAR`
+**skill_name:** Drawer và Snackbar · **skill:** `UI_BASIC_WIDGETS`
 
 ### Khái niệm
 `Drawer` là menu trượt vào từ trái hoặc phải, gắn với `AppBar`, dùng để hiển thị menu các tùy chọn khác. `Snackbar` là cửa sổ nhỏ nổi lên hiển thị thông điệp trong thời gian ngắn, thường dùng cho lỗi. Để hiển thị snackbar bắt buộc phải có `Scaffold` làm widget cha.

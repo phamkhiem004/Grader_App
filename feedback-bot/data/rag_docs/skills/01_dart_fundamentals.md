@@ -1,14 +1,14 @@
 # Skill: Nền tảng Dart (Dart Fundamentals)
 
-- **skill (lớn):** `dart_fundamentals`
+- **skill (lớn):** `DART_FUNDAMENTALS`
 - **Tên skill:** Nền tảng ngôn ngữ Dart
 - **Nguồn:** *Mastering Flutter* (Kevin Moore, 2025), Chương 2 — "Dart Essentials".
-- **skill_code trong skill này:** `dart_variables_types`, `dart_null_safety`, `dart_control_flow`, `dart_functions`, `dart_classes_oop`, `dart_enums_mixins_ext`, `dart_exceptions`
+- **skill_code trong skill này:** `DART_VARIABLES_TYPES`, `DART_NULL_SAFETY`, `DART_CONTROL_FLOW`, `DART_FUNCTIONS`, `DART_CLASSES_OOP`, `DART_ENUMS_MIXINS_EXT`, `DART_EXCEPTIONS`
 
 ---
 
-## skill_code: `dart_variables_types`
-**skill_name:** Biến và kiểu dữ liệu · **skill:** `dart_fundamentals`
+## skill_code: `DART_VARIABLES_TYPES`
+**skill_name:** Biến và kiểu dữ liệu · **skill:** `DART_FUNDAMENTALS`
 
 ### Khái niệm
 Dart là ngôn ngữ type-safe, đảm bảo biến khớp với kiểu đã khai báo. Khai báo bằng `var` thì kiểu suy ra từ giá trị gán; `final` và `const` cho giá trị không đổi; `late` báo biến sẽ khởi tạo sau. Dart có các kiểu dựng sẵn như `int`, `double`, `String`, `bool`, `List`, `Set`, `Map`, cùng generics dạng `List<T>` và alias qua `typedef`.
@@ -33,8 +33,8 @@ var, final, const, late, built-in types, generics, typedef
 
 ---
 
-## skill_code: `dart_null_safety`
-**skill_name:** An toàn null (Null Safety) · **skill:** `dart_fundamentals`
+## skill_code: `DART_NULL_SAFETY`
+**skill_name:** An toàn null (Null Safety) · **skill:** `DART_FUNDAMENTALS`
 
 ### Khái niệm
 Từ Dart 2.12 có null safety; Dart 3.0 toàn bộ kiểu non-nullable mặc định, cần thêm `?` sau kiểu để cho phép null. Tính năng này giúp tránh null pointer exception. Truy cập biến nullable dùng `?.`, lấy giá trị mặc định bằng `??`, và ép không null bằng `!`.
@@ -59,8 +59,8 @@ null safety, nullable, non-nullable, null-aware operator
 
 ---
 
-## skill_code: `dart_control_flow`
-**skill_name:** Luồng điều khiển · **skill:** `dart_fundamentals`
+## skill_code: `DART_CONTROL_FLOW`
+**skill_name:** Luồng điều khiển · **skill:** `DART_FUNDAMENTALS`
 
 ### Khái niệm
 Control flow quyết định hành động theo giá trị biến. Dart có rẽ nhánh `if`/`else if`/`else` và `switch` (gồm cả switch expression dạng `pattern => expression` với `_` mặc định). Vòng lặp gồm `for`, `for-in`, `while` và `do...while`. Hai từ khóa `break` và `continue` thay đổi luồng lặp.
@@ -85,8 +85,8 @@ control flow, if else, switch, for loop, while, break, continue
 
 ---
 
-## skill_code: `dart_functions`
-**skill_name:** Hàm trong Dart · **skill:** `dart_fundamentals`
+## skill_code: `DART_FUNCTIONS`
+**skill_name:** Hàm trong Dart · **skill:** `DART_FUNDAMENTALS`
 
 ### Khái niệm
 Hàm là đoạn code tái sử dụng, định nghĩa theo dạng `returnType tên(kiểu tên)`; dùng `void` khi không trả giá trị. Hàm một dòng dùng arrow syntax `=>`. Tham số có ba dạng: plain, named (bọc `{}`), và optional (bọc `[]`). Mọi app bắt đầu từ hàm `main`. Có thể gán hàm cho biến và dùng anonymous function.
@@ -111,8 +111,8 @@ functions, arrow syntax, named parameters, optional parameters, main
 
 ---
 
-## skill_code: `dart_classes_oop`
-**skill_name:** Lớp và lập trình hướng đối tượng · **skill:** `dart_fundamentals`
+## skill_code: `DART_CLASSES_OOP`
+**skill_name:** Lớp và lập trình hướng đối tượng · **skill:** `DART_FUNDAMENTALS`
 
 ### Khái niệm
 Class là khuôn mẫu tạo object, gồm field và method. Dart chỉ kế thừa đơn qua `extends` và gọi cha bằng `super`. Field `final` phải khởi tạo trong constructor; named constructor dùng `{}` với `required` cho field bắt buộc. Override method dùng `@override`. Field/method của lớp dùng `static`. String interpolation dùng `$` và `${}`.
@@ -137,8 +137,8 @@ class, constructor, extends, super, override, static, interpolation
 
 ---
 
-## skill_code: `dart_enums_mixins_ext`
-**skill_name:** Enum, Mixin và Extension · **skill:** `dart_fundamentals`
+## skill_code: `DART_ENUMS_MIXINS_EXT`
+**skill_name:** Enum, Mixin và Extension · **skill:** `DART_FUNDAMENTALS`
 
 ### Khái niệm
 `enum` là lớp đặc biệt có tập giá trị hằng cố định, có thể chứa field và constructor; lấy vị trí bằng `index`, lấy tất cả bằng `.values`. `mixin` cung cấp chức năng dùng chung qua `with`, nhưng không có constructor và không `extends` lớp khác. `extension ... on Type` thêm method cho một lớp có sẵn (ví dụ `String`, `int`).
@@ -163,8 +163,8 @@ enum, values, index, mixin, with, extension
 
 ---
 
-## skill_code: `dart_exceptions`
-**skill_name:** Xử lý ngoại lệ · **skill:** `dart_fundamentals`
+## skill_code: `DART_EXCEPTIONS`
+**skill_name:** Xử lý ngoại lệ · **skill:** `DART_FUNDAMENTALS`
 
 ### Khái niệm
 Dart dùng lớp `Exception` và `Error` để báo lỗi; ngoại lệ không bắt sẽ làm app crash. Dart có thể `throw` bất kỳ object nào và chỉ có unchecked exception. Bắt lỗi bằng `try/catch`, lọc theo loại bằng `on Exception catch`, và chạy code dọn dẹp bằng `finally`. `Error` (như `OutOfMemoryError`) là lỗi nghiêm trọng không khôi phục được.

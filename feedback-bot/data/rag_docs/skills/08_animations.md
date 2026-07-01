@@ -1,14 +1,14 @@
 # Skill: Hoạt ảnh & Chuyển cảnh (Animations & Transitions)
 
-- **skill (lớn):** `animations`
+- **skill (lớn):** `ANIMATIONS`
 - **Tên skill:** Hoạt ảnh và hiệu ứng chuyển cảnh
 - **Nguồn:** *Mastering Flutter* (Kevin Moore, 2025), Chương 9 — "Animations and Transitions".
-- **skill_code trong skill này:** `anim_implicit`, `anim_tween`, `anim_explicit_controller`, `anim_hero`, `anim_packages`
+- **skill_code trong skill này:** `ANIM_IMPLICIT`, `ANIM_TWEEN`, `ANIM_EXPLICIT_CONTROLLER`, `ANIM_HERO`, `ANIM_PACKAGES`
 
 ---
 
-## skill_code: `anim_implicit`
-**skill_name:** Hoạt ảnh ẩn (Implicit animations) · **skill:** `animations`
+## skill_code: `ANIM_IMPLICIT`
+**skill_name:** Hoạt ảnh ẩn (Implicit animations) · **skill:** `ANIMATIONS`
 
 ### Khái niệm
 Implicit animations là các widget dạng `AnimatedXXXX` tự động chạy hoạt ảnh khi giá trị thuộc tính thay đổi, dễ dùng nhưng ít kiểm soát hơn explicit. Tất cả kế thừa `ImplicitlyAnimatedWidget`. Ví dụ `AnimatedContainer` có hai tham số bắt buộc là `duration` và `child`; chỉ cần đổi giá trị (như `color`) là widget tự chuyển động theo `curve`.
@@ -33,8 +33,8 @@ implicit animation, AnimatedContainer, AnimatedXXXX, duration, curve, Implicitly
 
 ---
 
-## skill_code: `anim_tween`
-**skill_name:** Hoạt ảnh Tween (Tween animations) · **skill:** `animations`
+## skill_code: `ANIM_TWEEN`
+**skill_name:** Hoạt ảnh Tween (Tween animations) · **skill:** `ANIMATIONS`
 
 ### Khái niệm
 Khi không có widget `AnimatedXXXX` phù hợp, dùng `TweenAnimationBuilder` với một `Tween` (in-between) có `begin` và `end` để chuyển một thuộc tính từ giá trị này sang giá trị khác. `builder` nhận `(context, value, child)` và dựng widget theo `value`. Có thể dùng `ColorTween` (cần kiểu nullable) hoặc `Tween<double>` cho dịch chuyển.
@@ -59,8 +59,8 @@ TweenAnimationBuilder, Tween, ColorTween, begin end, builder value child
 
 ---
 
-## skill_code: `anim_explicit_controller`
-**skill_name:** Hoạt ảnh tường minh (Explicit: AnimationController, Animation, Curves, AnimatedBuilder) · **skill:** `animations`
+## skill_code: `ANIM_EXPLICIT_CONTROLLER`
+**skill_name:** Hoạt ảnh tường minh (Explicit: AnimationController, Animation, Curves, AnimatedBuilder) · **skill:** `ANIMATIONS`
 
 ### Khái niệm
 Explicit animations cho phép tự điều khiển thời điểm chạy bằng `AnimationController`, lớp sinh dải giá trị begin–end theo `duration`, có thể `forward`, `reverse`, `stop`. Controller cần một `Ticker` qua mixin `SingleTickerProviderStateMixin` (một controller) hoặc `TickerProviderStateMixin` (nhiều controller), với `vsync: this`. `Animation` (vd `CurvedAnimation`) áp `Curve` lên controller; `AnimatedBuilder` lắng nghe và rebuild widget.
@@ -85,8 +85,8 @@ AnimationController, vsync, TickerProviderStateMixin, dispose, CurvedAnimation, 
 
 ---
 
-## skill_code: `anim_hero`
-**skill_name:** Hoạt ảnh Hero (Hero animations) · **skill:** `animations`
+## skill_code: `ANIM_HERO`
+**skill_name:** Hoạt ảnh Hero (Hero animations) · **skill:** `ANIMATIONS`
 
 ### Khái niệm
 `Hero` tạo hiệu ứng chuyển tiếp một widget (thường là ảnh) giữa hai trang: widget bay từ vị trí trang nguồn sang vị trí trang đích. Cách dùng: bọc widget trong `Hero` và gán `tag` giống nhau, duy nhất ở cả hai trang. Trong movie app, tag duy nhất được tạo từ `movieUrl + movieType` để tránh trùng giữa các section.
@@ -111,8 +111,8 @@ Hero animation, tag, unique tag, page transition, hero flight, StateProvider
 
 ---
 
-## skill_code: `anim_packages`
-**skill_name:** Gói hoạt ảnh, flutter_animate & custom routes · **skill:** `animations`
+## skill_code: `ANIM_PACKAGES`
+**skill_name:** Gói hoạt ảnh, flutter_animate & custom routes · **skill:** `ANIMATIONS`
 
 ### Khái niệm
 Ngoài widget dựng sẵn còn có gói bên thứ ba: cấp cao như Lottie (JSON) và Rive (cần công cụ riêng); và gói hiệu ứng như `flutter_animate`, `flutter_spinkit`, `flutter_staggered_animations`, `simple_animations`, `Spring`. `flutter_animate` (tác giả Wonderous) thêm hiệu ứng qua chuỗi `.animate().scaleXY().then()`. Vẽ tùy biến dùng `CustomPaint`/`CustomPainter` với `Canvas`. AutoRoute có `CustomRoute` thêm hoạt ảnh chuyển trang.

@@ -1,14 +1,14 @@
 # Skill: Điều hướng & Định tuyến (Navigation & Routing)
 
-- **skill (lớn):** `navigation_routing`
+- **skill (lớn):** `NAVIGATION_ROUTING`
 - **Tên skill:** Điều hướng và định tuyến màn hình
 - **Nguồn:** *Mastering Flutter* (Kevin Moore, 2025), Chương 8 — "Navigation and Routing".
-- **skill_code trong skill này:** `nav_navigator_push_pop`, `nav_named_routes`, `nav_gorouter_autoroute`, `nav_bottom_navigation`, `nav_deep_linking`
+- **skill_code trong skill này:** `NAV_NAVIGATOR_PUSH_POP`, `NAV_NAMED_ROUTES`, `NAV_GOROUTER_AUTOROUTE`, `NAV_BOTTOM_NAVIGATION`, `NAV_DEEP_LINKING`
 
 ---
 
-## skill_code: `nav_navigator_push_pop`
-**skill_name:** Navigator và push/pop · **skill:** `navigation_routing`
+## skill_code: `NAV_NAVIGATOR_PUSH_POP`
+**skill_name:** Navigator và push/pop · **skill:** `NAVIGATION_ROUTING`
 
 ### Khái niệm
 Điều hướng là việc đi từ màn hình này sang màn hình khác. Flutter dùng widget `Navigator` quản lý một stack các trang (gọi là route); `push` đẩy trang mới lên đỉnh stack, `pop` lấy trang trên cùng ra để hiện trang phía dưới. `Navigator` có mảng `pages` chứa các `Page` (thường là `MaterialPage`).
@@ -31,8 +31,8 @@ Navigator, push, pop, stack, MaterialPage, onPopPage
 
 ---
 
-## skill_code: `nav_named_routes`
-**skill_name:** Named routes và MaterialApp routes · **skill:** `navigation_routing`
+## skill_code: `NAV_NAMED_ROUTES`
+**skill_name:** Named routes và MaterialApp routes · **skill:** `NAVIGATION_ROUTING`
 
 ### Khái niệm
 Named routes là route được đặt tên bằng chuỗi; `Navigator.pushNamed(context, routeName)` tìm route theo tên và đẩy lên stack. Có thể khai báo qua tham số `routes` của `MaterialApp` (map tên route sang `WidgetBuilder`). Truyền dữ liệu qua `arguments` và đọc lại bằng `ModalRoute.of(context)!.settings.arguments`; trả dữ liệu về bằng tham số thứ hai của `pop`.
@@ -55,8 +55,8 @@ named routes, pushNamed, routes map, arguments, ModalRoute
 
 ---
 
-## skill_code: `nav_gorouter_autoroute`
-**skill_name:** GoRouter và AutoRoute · **skill:** `navigation_routing`
+## skill_code: `NAV_GOROUTER_AUTOROUTE`
+**skill_name:** GoRouter và AutoRoute · **skill:** `NAVIGATION_ROUTING`
 
 ### Khái niệm
 Vì dùng Router API trực tiếp khá rối, có các package hỗ trợ: GoRouter (do Google bảo trì, được khuyến nghị) và AutoRoute (dùng code generation). Cả hai dùng `MaterialApp.router` với tham số `routerConfig`. GoRouter khai báo `GoRoute` với `path` kiểu URL, có route con và tham số (`state.pathParameters`). AutoRoute dùng annotation `@AutoRouterConfig`, `@RoutePage` và chạy `build_runner` để sinh code.
@@ -79,8 +79,8 @@ GoRouter, AutoRoute, routerConfig, GoRoute, RoutePage, build_runner
 
 ---
 
-## skill_code: `nav_bottom_navigation`
-**skill_name:** Bottom navigation · **skill:** `navigation_routing`
+## skill_code: `NAV_BOTTOM_NAVIGATION`
+**skill_name:** Bottom navigation · **skill:** `NAVIGATION_ROUTING`
 
 ### Khái niệm
 Cách điều hướng đơn giản là dùng thanh dưới màn hình chứa ba đến năm mục. `BottomNavigationBar` dùng các `BottomNavigationBarItem` (icon + label), với `currentIndex` và callback `onTap`. Material 3 có widget mới `NavigationBar` dùng `destinations` là các `NavigationDestination`, với `selectedIndex` và `onDestinationSelected`. Material còn cung cấp `NavigationRail` đặt ở cạnh trái/phải.
@@ -103,8 +103,8 @@ BottomNavigationBar, NavigationBar, NavigationDestination, selectedIndex, onDest
 
 ---
 
-## skill_code: `nav_deep_linking`
-**skill_name:** Deep linking và custom schemes · **skill:** `navigation_routing`
+## skill_code: `NAV_DEEP_LINKING`
+**skill_name:** Deep linking và custom schemes · **skill:** `NAVIGATION_ROUTING`
 
 ### Khái niệm
 Deep link là một URL trỏ tới trang cụ thể trong app; khi nhận link, router phải xác định trang cần đến. URL gồm scheme (thường `https`), host name, path và query parameters. Ngoài `https`, trên mobile có thể tạo custom scheme (vd `movieapp://moviedetails/?id=1234`). Android gọi là deep link, iOS gọi là custom URL; phải khai báo trong `AndroidManifest.xml` và `info.plist`.

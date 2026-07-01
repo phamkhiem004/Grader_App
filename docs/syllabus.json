@@ -1,75 +1,617 @@
 {
-  "version": "2026.2",
+  "version": "2026.3",
   "subject": {
     "code": "PRM_FLUTTER",
     "name": "Mobile Programming — Flutter/Dart",
-    "note": "Danh mục kiến thức (syllabus) dùng để RA ĐỀ và ĐÁNH GIÁ NĂNG LỰC. Testcase tham chiếu kỹ năng bằng `code` (ID ổn định). File này là SEED: khi `version` đổi, backend RE-SEED lại DB từ file (xem SyllabusService). Chỉnh runtime qua /api/syllabus (CRUD) thì đừng bump version kẻo bị ghi đè."
+    "note": "Khung năng lực: 9 nhóm / 47 skill_code (CHỮ HOA) — ĐỒNG BỘ với taxonomy của NLP Feedback Bot. Phạm vi PE giới hạn trong 47 skill này. Testcase tham chiếu kỹ năng bằng `code`. SEED: khi `version` đổi, backend RE-SEED DB từ file (xem SyllabusService). Chỉnh runtime qua /api/syllabus (CRUD) thì đừng bump version."
   },
-
   "difficulty_levels": [
-    { "code": "basic",        "label": "Cơ bản",     "points": 1, "criteria": "Kiến thức của một buổi học đơn lẻ, áp dụng trực tiếp, không cần kết hợp nhiều khái niệm." },
-    { "code": "intermediate", "label": "Trung bình",  "points": 2, "criteria": "Kết hợp 2–3 khái niệm, có điều kiện/rẽ nhánh, vài edge case." },
-    { "code": "advanced",     "label": "Nâng cao",    "points": 3, "criteria": "Tổng hợp nhiều phần, xử lý edge case khó, tối ưu/đệ quy/bất đồng bộ." }
+    {
+      "code": "basic",
+      "label": "Cơ bản",
+      "points": 1,
+      "criteria": "Kiến thức của một buổi học đơn lẻ, áp dụng trực tiếp, không cần kết hợp nhiều khái niệm."
+    },
+    {
+      "code": "intermediate",
+      "label": "Trung bình",
+      "points": 2,
+      "criteria": "Kết hợp 2–3 khái niệm, có điều kiện/rẽ nhánh, vài edge case."
+    },
+    {
+      "code": "advanced",
+      "label": "Nâng cao",
+      "points": 3,
+      "criteria": "Tổng hợp nhiều phần, xử lý edge case khó, tối ưu/đệ quy/bất đồng bộ."
+    }
   ],
   "_scoring_note": "ĐIỂM THEO ĐỘ KHÓ: weight mỗi testcase = points của difficulty (basic=1, intermediate=2, advanced=3). Điểm cuối = Σweight_pass / Σweight × 10 (grader tự chuẩn hóa).",
-
-  "level_thresholds_default": { "weak": 0.4, "good": 0.7 },
-
+  "level_thresholds_default": {
+    "weak": 0.4,
+    "good": 0.7
+  },
   "categories": [
-    { "code": "DART_ESSENTIALS",   "name": "Dart Essentials",              "competency_label": "Dart Essentials",     "order": 1, "description": "Ch.2–3: Cú pháp Dart, kiểu dữ liệu, hàm, class cơ bản, null safety." },
-    { "code": "OOP_ASYNC",         "name": "OOP & Asynchronous",           "competency_label": "OOP & Async",         "order": 2, "description": "Ch.3–4: OOP patterns, Futures, Streams, async/await." },
-    { "code": "UI_FUNDAMENTALS",   "name": "UI Fundamentals",              "competency_label": "UI Fundamentals",     "order": 3, "description": "Ch.4: Widgets, Layouts, MaterialApp, lists & pickers." },
-    { "code": "NAV_STATE",         "name": "Navigation & State Management", "competency_label": "Navigation & State",  "order": 4, "description": "Ch.8: Navigator 1.0/2.0, named routes, deep links, basic state." },
-    { "code": "LAYOUT_RESPONSIVE", "name": "Layout & Responsive Design",   "competency_label": "Layout & Responsive", "order": 5, "description": "Ch.5–6: Advanced layouts (Grid/Stack/Flex), responsive patterns." },
-    { "code": "FORMS_VALIDATION",  "name": "Forms & Validation",           "competency_label": "Forms & Validation",  "order": 6, "description": "Form, TextFormField, validator, ràng buộc nghiệp vụ." },
-    { "code": "NETWORKING",        "name": "Networking & JSON API",        "competency_label": "Networking & API",    "order": 7, "description": "Ch.9: HTTP/REST, JSON parsing, FutureBuilder." },
-    { "code": "STORAGE",           "name": "Local Storage & Persistence",  "competency_label": "Storage & Persistence","order": 8, "description": "Ch.10: SharedPreferences, SQLite/Hive, caching." },
-    { "code": "AUTH",              "name": "Authentication & User Management","competency_label": "Authentication",    "order": 9, "description": "Ch.11: Auth basics, session, guarded routes." }
+    {
+      "code": "DART_FUNDAMENTALS",
+      "name": "Nền tảng ngôn ngữ Dart",
+      "competency_label": "Nền tảng ngôn ngữ Dart",
+      "order": 1,
+      "description": "Mastering Flutter, Ch.2 — Nền tảng ngôn ngữ Dart."
+    },
+    {
+      "code": "PROJECT_ARCHITECTURE",
+      "name": "Cấu trúc và kiến trúc dự án Flutter",
+      "competency_label": "Cấu trúc và kiến trúc dự án Flutter",
+      "order": 2,
+      "description": "Mastering Flutter, Ch.3-4 — Cấu trúc và kiến trúc dự án Flutter."
+    },
+    {
+      "code": "UI_BASIC_WIDGETS",
+      "name": "Widget giao diện cơ bản và bố cục",
+      "competency_label": "Widget giao diện cơ bản và bố cục",
+      "order": 3,
+      "description": "Mastering Flutter, Ch.4 — Widget giao diện cơ bản và bố cục."
+    },
+    {
+      "code": "THEMING",
+      "name": "Chủ đề giao diện, màu sắc và font chữ",
+      "competency_label": "Chủ đề giao diện, màu sắc và font chữ",
+      "order": 4,
+      "description": "Mastering Flutter, Ch.5 — Chủ đề giao diện, màu sắc và font chữ."
+    },
+    {
+      "code": "STATE_MANAGEMENT",
+      "name": "Quản lý trạng thái trong Flutter",
+      "competency_label": "Quản lý trạng thái trong Flutter",
+      "order": 5,
+      "description": "Mastering Flutter, Ch.6 — Quản lý trạng thái trong Flutter."
+    },
+    {
+      "code": "ADVANCED_WIDGETS",
+      "name": "Widget bố cục và hiển thị nâng cao",
+      "competency_label": "Widget bố cục và hiển thị nâng cao",
+      "order": 6,
+      "description": "Mastering Flutter, Ch.7 — Widget bố cục và hiển thị nâng cao."
+    },
+    {
+      "code": "NAVIGATION_ROUTING",
+      "name": "Điều hướng và định tuyến màn hình",
+      "competency_label": "Điều hướng và định tuyến màn hình",
+      "order": 7,
+      "description": "Mastering Flutter, Ch.8 — Điều hướng và định tuyến màn hình."
+    },
+    {
+      "code": "ANIMATIONS",
+      "name": "Hoạt ảnh và hiệu ứng chuyển cảnh",
+      "competency_label": "Hoạt ảnh và hiệu ứng chuyển cảnh",
+      "order": 8,
+      "description": "Mastering Flutter, Ch.9 — Hoạt ảnh và hiệu ứng chuyển cảnh."
+    },
+    {
+      "code": "ASYNC_PROGRAMMING",
+      "name": "Lập trình bất đồng bộ trong Flutter/Dart",
+      "competency_label": "Lập trình bất đồng bộ trong Flutter/Dart",
+      "order": 9,
+      "description": "Mastering Flutter, Ch.10 — Lập trình bất đồng bộ trong Flutter/Dart."
+    }
   ],
-
   "skills": [
-    { "code": "DART_SYNTAX",       "category": "DART_ESSENTIALS",   "name": "Cú pháp & kiểu dữ liệu",   "default_difficulty": "basic",        "testable": "auto",   "description": "Biến, kiểu, toán tử, control flow (if/for/while).",                              "resources": ["dart.dev/language", "Ch.2"] },
-    { "code": "DART_FUNCTIONS",    "category": "DART_ESSENTIALS",   "name": "Hàm",                      "default_difficulty": "basic",        "testable": "auto",   "description": "Khai báo hàm, tham số (named/optional), arrow function, closure.",               "resources": ["dart.dev/language/functions", "Ch.2"] },
-    { "code": "DART_CLASSES",      "category": "DART_ESSENTIALS",   "name": "Class & constructor",      "default_difficulty": "basic",        "testable": "auto",   "description": "Class, constructor named + required, field, getter/setter; model cơ bản.",       "resources": ["dart.dev/language/classes", "Ch.3"] },
-    { "code": "DART_COLLECTIONS",  "category": "DART_ESSENTIALS",   "name": "Collection & logic thuần", "default_difficulty": "intermediate", "testable": "auto",   "description": "List/Map/Set, filter/map/reduce, sort, nextId(max+1), hàm thuần xử lý dữ liệu.", "resources": ["dart.dev/codelabs/iterables", "Ch.3"] },
-    { "code": "DART_NULL_SAFETY",  "category": "DART_ESSENTIALS",   "name": "Null safety",              "default_difficulty": "basic",        "testable": "auto",   "description": "Nullable (?), bang (!), null-aware (??, ?.), late, required.",                   "resources": ["dart.dev/null-safety", "Ch.2"] },
-
-    { "code": "OOP_INHERITANCE",   "category": "OOP_ASYNC",         "name": "Kế thừa & abstract",       "default_difficulty": "intermediate", "testable": "auto",   "description": "extends, abstract class, override, super.",                                      "resources": ["dart.dev/language/extend", "Ch.3"] },
-    { "code": "OOP_PATTERNS",      "category": "OOP_ASYNC",         "name": "OOP patterns",             "default_difficulty": "advanced",     "testable": "auto",   "description": "mixin, interface (implements), factory, ==/hashCode, toString.",                 "resources": ["dart.dev/language/mixins", "Ch.3"] },
-    { "code": "OOP_MODEL",         "category": "OOP_ASYNC",         "name": "Model nâng cao",           "default_difficulty": "intermediate", "testable": "auto",   "description": "copyWith, bất biến (immutable), toString, so sánh model.",                       "resources": ["Ch.3"] },
-    { "code": "ASYNC_FUTURE",      "category": "OOP_ASYNC",         "name": "Future & async/await",     "default_difficulty": "intermediate", "testable": "auto",   "description": "Future, async, await, then/catchError; xử lý bất đồng bộ thuần Dart.",           "resources": ["dart.dev/codelabs/async-await", "Ch.4"] },
-    { "code": "ASYNC_STREAM",      "category": "OOP_ASYNC",         "name": "Stream",                   "default_difficulty": "advanced",     "testable": "auto",   "description": "Stream, listen, async*, StreamController.",                                      "resources": ["dart.dev/tutorials/language/streams", "Ch.4"] },
-
-    { "code": "UI_WIDGETS",        "category": "UI_FUNDAMENTALS",   "name": "Widget cơ bản",            "default_difficulty": "basic",        "testable": "auto",   "description": "Scaffold, AppBar, Text, ElevatedButton/TextButton, Icon, Image.",                "resources": ["docs.flutter.dev/ui/widgets", "Ch.4"] },
-    { "code": "UI_MATERIAL",       "category": "UI_FUNDAMENTALS",   "name": "MaterialApp & Theme",      "default_difficulty": "basic",        "testable": "auto",   "description": "MaterialApp, ThemeData, màu, TextStyle (bold/size).",                            "resources": ["docs.flutter.dev/ui/design/material", "Ch.4"] },
-    { "code": "UI_LISTS",          "category": "UI_FUNDAMENTALS",   "name": "Danh sách động",           "default_difficulty": "intermediate", "testable": "auto",   "description": "ListView/ListView.builder; render danh sách item kèm dữ liệu.",                  "resources": ["docs.flutter.dev/cookbook/lists", "Ch.4"] },
-    { "code": "UI_PICKERS",        "category": "UI_FUNDAMENTALS",   "name": "Dialog & Pickers",         "default_difficulty": "intermediate", "testable": "auto",   "description": "AlertDialog/showDialog, SnackBar, date/time picker.",                            "resources": ["docs.flutter.dev/cookbook/design", "Ch.4"] },
-
-    { "code": "NAV_BASIC",         "category": "NAV_STATE",         "name": "Push/Pop",                 "default_difficulty": "basic",        "testable": "auto",   "description": "Navigator.push/pop với MaterialPageRoute; mở/đóng màn hình.",                    "resources": ["docs.flutter.dev/cookbook/navigation", "Ch.8"] },
-    { "code": "NAV_NAMED",         "category": "NAV_STATE",         "name": "Named routes & arguments", "default_difficulty": "intermediate", "testable": "auto",   "description": "routes/onGenerateRoute, truyền & nhận tham số giữa màn hình.",                   "resources": ["docs.flutter.dev/cookbook/navigation/named-routes", "Ch.8"] },
-    { "code": "NAV_ADVANCED",      "category": "NAV_STATE",         "name": "Navigator 2.0 / deep links","default_difficulty": "advanced",    "testable": "auto",   "description": "Router API, deep link, điều hướng theo URL.",                                    "resources": ["docs.flutter.dev/ui/navigation", "Ch.8"] },
-    { "code": "STATE_BASIC",       "category": "NAV_STATE",         "name": "setState",                 "default_difficulty": "basic",        "testable": "auto",   "description": "StatefulWidget + setState: cập nhật UI theo sự kiện.",                           "resources": ["docs.flutter.dev/ui/interactivity", "Ch.8"] },
-    { "code": "STATE_LIFTING",     "category": "NAV_STATE",         "name": "Nâng state & callback",    "default_difficulty": "intermediate", "testable": "auto",   "description": "Callback (ValueChanged/VoidCallback); widget con báo sự kiện lên cha.",          "resources": ["docs.flutter.dev/data-and-backend/state-mgmt/simple", "Ch.8"] },
-
-    { "code": "LAYOUT_FLEX",       "category": "LAYOUT_RESPONSIVE", "name": "Row/Column/Flex",          "default_difficulty": "basic",        "testable": "auto",   "description": "Row, Column, Expanded/Flexible, Padding, SizedBox; căn chỉnh.",                  "resources": ["docs.flutter.dev/ui/layout", "Ch.5"] },
-    { "code": "LAYOUT_STACK",      "category": "LAYOUT_RESPONSIVE", "name": "Stack & Positioned",       "default_difficulty": "intermediate", "testable": "auto",   "description": "Stack, Positioned, Align; xếp lớp.",                                             "resources": ["api.flutter.dev/flutter/widgets/Stack-class.html", "Ch.5"] },
-    { "code": "LAYOUT_GRID",       "category": "LAYOUT_RESPONSIVE", "name": "GridView",                 "default_difficulty": "intermediate", "testable": "auto",   "description": "GridView.count/builder, SliverGrid.",                                            "resources": ["docs.flutter.dev/cookbook/lists/grid-lists", "Ch.6"] },
-    { "code": "LAYOUT_RESPONSIVE", "category": "LAYOUT_RESPONSIVE", "name": "Responsive design",        "default_difficulty": "advanced",     "testable": "auto",   "description": "MediaQuery, LayoutBuilder, breakpoint cho nhiều kích thước màn hình.",           "resources": ["docs.flutter.dev/ui/layout/responsive", "Ch.6"] },
-
-    { "code": "FORM_INPUT",        "category": "FORMS_VALIDATION",  "name": "Ô nhập liệu",              "default_difficulty": "basic",        "testable": "auto",   "description": "TextField/TextFormField, TextEditingController, nhãn (label/hint).",             "resources": ["docs.flutter.dev/cookbook/forms", "Ch.7"] },
-    { "code": "FORM_VALIDATE",     "category": "FORMS_VALIDATION",  "name": "Validator",                "default_difficulty": "intermediate", "testable": "auto",   "description": "Form + GlobalKey<FormState> + validator; kiểm tra rỗng/định dạng, báo lỗi đúng.","resources": ["docs.flutter.dev/cookbook/forms/validation", "Ch.7"] },
-    { "code": "FORM_BUSINESS",     "category": "FORMS_VALIDATION",  "name": "Ràng buộc nghiệp vụ",      "default_difficulty": "intermediate", "testable": "auto",   "description": "Số tiền dương, ngày không tương lai, giá trị trong khoảng cho phép.",            "resources": ["Ch.7"] },
-
-    { "code": "NET_JSON",          "category": "NETWORKING",        "name": "Parse JSON & model",       "default_difficulty": "intermediate", "testable": "auto",   "description": "jsonDecode/jsonEncode (dart:convert), fromJson/toJson, map JSON ↔ model.",       "resources": ["docs.flutter.dev/data-and-backend/serialization/json", "Ch.9"] },
-    { "code": "NET_FUTUREBUILDER", "category": "NETWORKING",        "name": "FutureBuilder",            "default_difficulty": "advanced",     "testable": "auto",   "description": "Hiển thị loading/error/data theo Future.",                                       "resources": ["api.flutter.dev/flutter/widgets/FutureBuilder-class.html", "Ch.9"] },
-    { "code": "NET_HTTP",          "category": "NETWORKING",        "name": "HTTP / REST API",          "default_difficulty": "advanced",     "testable": "manual", "description": "Gọi API bằng package http/dio. CẦN MẠNG + PACKAGE NGOÀI → chấm tay.",            "resources": ["pub.dev/packages/http", "Ch.9"] },
-
-    { "code": "STORE_CACHE",       "category": "STORAGE",           "name": "Caching & build query",    "default_difficulty": "intermediate", "testable": "auto",   "description": "Logic cache trong bộ nhớ, dựng câu truy vấn/khoá lưu (thuần Dart, test được).",  "resources": ["Ch.10"] },
-    { "code": "STORE_PREFS",       "category": "STORAGE",           "name": "SharedPreferences",        "default_difficulty": "intermediate", "testable": "manual", "description": "Lưu cặp khoá-giá trị. CẦN PLUGIN NỀN TẢNG → chấm tay.",                          "resources": ["pub.dev/packages/shared_preferences", "Ch.10"] },
-    { "code": "STORE_DB",          "category": "STORAGE",           "name": "SQLite / Hive",            "default_difficulty": "advanced",     "testable": "manual", "description": "CSDL cục bộ (sqflite/Hive). CẦN PLUGIN → chấm tay.",                              "resources": ["pub.dev/packages/sqflite", "Ch.10"] },
-
-    { "code": "AUTH_GUARD",        "category": "AUTH",              "name": "Guarded routes",           "default_difficulty": "advanced",     "testable": "auto",   "description": "Chặn/điều hướng route khi chưa đăng nhập (logic thuần, test được).",             "resources": ["Ch.11"] },
-    { "code": "AUTH_BASIC",        "category": "AUTH",              "name": "Đăng nhập/đăng ký",        "default_difficulty": "intermediate", "testable": "manual", "description": "Luồng auth cơ bản. CẦN BACKEND → chấm tay.",                                     "resources": ["Ch.11"] },
-    { "code": "AUTH_SESSION",      "category": "AUTH",              "name": "Session & token",          "default_difficulty": "advanced",     "testable": "manual", "description": "Lưu/giữ phiên đăng nhập bằng token. CẦN BACKEND → chấm tay.",                     "resources": ["Ch.11"] }
+    {
+      "code": "DART_VARIABLES_TYPES",
+      "category": "DART_FUNDAMENTALS",
+      "name": "Biến và kiểu dữ liệu",
+      "default_difficulty": "basic",
+      "testable": "auto",
+      "description": "Chọn kiểu phù hợp (`int`/`double`, `String`, `bool`) và dùng `var` khi kiểu rõ ràng.; Dùng `final`/`const` cho giá trị không đổi, đặt tên biến private bằng dấu `_` ở đầu.; Dùng generics `List<T>`, `Map<K,V>` đúng kiểu phần tử.",
+      "resources": [
+        "Mastering Flutter Ch.2"
+      ]
+    },
+    {
+      "code": "DART_NULL_SAFETY",
+      "category": "DART_FUNDAMENTALS",
+      "name": "An toàn null (Null Safety)",
+      "default_difficulty": "basic",
+      "testable": "auto",
+      "description": "Khai báo biến có thể null bằng `Type?` (ví dụ `String? name`).; Truy cập an toàn qua `?.` và cung cấp giá trị thay thế bằng `??`.; Chỉ dùng `!` khi chắc chắn biến không null.",
+      "resources": [
+        "Mastering Flutter Ch.2"
+      ]
+    },
+    {
+      "code": "DART_CONTROL_FLOW",
+      "category": "DART_FUNDAMENTALS",
+      "name": "Luồng điều khiển",
+      "default_difficulty": "basic",
+      "testable": "auto",
+      "description": "Dùng `if/else if/else` cho rẽ nhánh đơn, `switch` với `default` cho nhiều trường hợp.; Dùng `for-in` khi duyệt list để tránh lỗi chỉ số.; Dùng `break`/`continue` đúng mục đích thoát hoặc bỏ qua vòng lặp.",
+      "resources": [
+        "Mastering Flutter Ch.2"
+      ]
+    },
+    {
+      "code": "DART_FUNCTIONS",
+      "category": "DART_FUNDAMENTALS",
+      "name": "Hàm trong Dart",
+      "default_difficulty": "basic",
+      "testable": "auto",
+      "description": "Khai báo đúng kiểu trả về và kiểu tham số; dùng `void` khi không trả giá trị.; Dùng named parameter `{}` hoặc optional `[]` đúng nhu cầu.; Dùng arrow `=>` cho hàm một dòng, anonymous function cho callback.",
+      "resources": [
+        "Mastering Flutter Ch.2"
+      ]
+    },
+    {
+      "code": "DART_CLASSES_OOP",
+      "category": "DART_FUNDAMENTALS",
+      "name": "Lớp và lập trình hướng đối tượng",
+      "default_difficulty": "intermediate",
+      "testable": "auto",
+      "description": "Constructor khởi tạo đúng các field `final`, dùng `required` cho tham số bắt buộc.; Kế thừa bằng `extends`, truyền giá trị lên cha bằng `super`.; Đánh dấu `@override` khi ghi đè method, dùng `static` cho thành viên của lớp.",
+      "resources": [
+        "Mastering Flutter Ch.2"
+      ]
+    },
+    {
+      "code": "DART_ENUMS_MIXINS_EXT",
+      "category": "DART_FUNDAMENTALS",
+      "name": "Enum, Mixin và Extension",
+      "default_difficulty": "advanced",
+      "testable": "auto",
+      "description": "Định nghĩa `enum` với danh sách giá trị; dùng field qua `const` constructor khi cần lưu dữ liệu.; Dùng `mixin` với `with` để chia sẻ chức năng cho nhiều lớp.; Dùng `extension on` để thêm method, gọi qua đối tượng đích.",
+      "resources": [
+        "Mastering Flutter Ch.2"
+      ]
+    },
+    {
+      "code": "DART_EXCEPTIONS",
+      "category": "DART_FUNDAMENTALS",
+      "name": "Xử lý ngoại lệ",
+      "default_difficulty": "intermediate",
+      "testable": "auto",
+      "description": "Bọc code có thể lỗi trong `try`, bắt bằng `catch` hoặc `on Type catch`.; Dùng `finally` để chạy code dọn dẹp sau khi xử lý lỗi.; `throw Exception(...)` với thông điệp rõ ràng khi cần báo lỗi.",
+      "resources": [
+        "Mastering Flutter Ch.2"
+      ]
+    },
+    {
+      "code": "PROJ_PUBSPEC_DEPENDENCIES",
+      "category": "PROJECT_ARCHITECTURE",
+      "name": "pubspec.yaml và quản lý dependencies",
+      "default_difficulty": "basic",
+      "testable": "auto",
+      "description": "Khai báo `flutter: sdk: flutter` trong `dependencies` và thụt lề đúng hai khoảng trắng.; Đặt package mới (ví dụ `material_symbols_icons`, `cupertino_icons`) đúng dưới `dependencies` và chạy Pub get.; Đặt `flutter_test`, `integration_test`, `flutter_lints` trong `dev_dependencies`.",
+      "resources": [
+        "Mastering Flutter Ch.3-4"
+      ]
+    },
+    {
+      "code": "PROJ_FOLDER_STRUCTURE",
+      "category": "PROJECT_ARCHITECTURE",
+      "name": "Cấu trúc thư mục lib/ và Clean Architecture",
+      "default_difficulty": "intermediate",
+      "testable": "manual",
+      "description": "Tổ chức code theo các layer riêng biệt (domain, use cases, interface adapters, frameworks/drivers).; Tuân thủ dependency rule: thành phần cấp cao không phụ thuộc UI/framework/database.; Đặt screens, widgets, themes trong `ui/`; tách model và repository trong `data/`.",
+      "resources": [
+        "Mastering Flutter Ch.3-4"
+      ]
+    },
+    {
+      "code": "PROJ_STATELESS_VS_STATEFUL",
+      "category": "PROJECT_ARCHITECTURE",
+      "name": "StatelessWidget và StatefulWidget",
+      "default_difficulty": "basic",
+      "testable": "auto",
+      "description": "Dùng `StatelessWidget` cho UI tĩnh không có state (ví dụ `MyApp`).; Dùng `StatefulWidget` kèm `State` và `createState()` khi UI thay đổi theo state (ví dụ `MyHomePage`, `MainApp`).; Override `build(BuildContext context)` trả về cây widget.",
+      "resources": [
+        "Mastering Flutter Ch.3-4"
+      ]
+    },
+    {
+      "code": "UI_SCAFFOLD_APPBAR",
+      "category": "UI_BASIC_WIDGETS",
+      "name": "Scaffold, AppBar và NavigationBar",
+      "default_difficulty": "basic",
+      "testable": "auto",
+      "description": "Màn hình bọc trong `Scaffold` với `body` là nội dung chính.; `appBar` đặt đúng tiêu đề; `bottomNavigationBar` cho phép chuyển màn hình.",
+      "resources": [
+        "Mastering Flutter Ch.4"
+      ]
+    },
+    {
+      "code": "UI_CONTAINER_ROW_COLUMN",
+      "category": "UI_BASIC_WIDGETS",
+      "name": "Container, Row và Column",
+      "default_difficulty": "basic",
+      "testable": "auto",
+      "description": "`Column`/`Row` truyền danh sách `children` đúng, đặt `mainAxisSize` hợp lý.; `Container` đặt `color`/`decoration`/`padding` đúng để trang trí widget con.",
+      "resources": [
+        "Mastering Flutter Ch.4"
+      ]
+    },
+    {
+      "code": "UI_TEXT_IMAGE_ICON",
+      "category": "UI_BASIC_WIDGETS",
+      "name": "Text, Image và Icon",
+      "default_difficulty": "basic",
+      "testable": "auto",
+      "description": "`Text` đặt đúng nội dung và `style`; dùng `overflow`/`maxLines` khi cần.; Ảnh dùng constructor đúng nguồn (`Image.asset`/`Image.network`) và `fit` (`BoxFit`).",
+      "resources": [
+        "Mastering Flutter Ch.4"
+      ]
+    },
+    {
+      "code": "UI_BUTTONS_SELECTION",
+      "category": "UI_BASIC_WIDGETS",
+      "name": "Buttons, Chips và widget lựa chọn",
+      "default_difficulty": "intermediate",
+      "testable": "auto",
+      "description": "Button truyền `onPressed` để xử lý hành động; chọn đúng loại theo thiết kế.; `PopupMenuButton` dùng `itemBuilder` trả về danh sách `PopupMenuItem`; `FilterChip` dùng để chọn lọc.",
+      "resources": [
+        "Mastering Flutter Ch.4"
+      ]
+    },
+    {
+      "code": "UI_TEXT_INPUT",
+      "category": "UI_BASIC_WIDGETS",
+      "name": "Nhập liệu với TextField",
+      "default_difficulty": "basic",
+      "testable": "auto",
+      "description": "Tạo `TextEditingController` trong `initState`, gọi `dispose()` trong `dispose`.; Gán `controller` cho `TextField`; đặt `keyboardType` phù hợp (email, number...).",
+      "resources": [
+        "Mastering Flutter Ch.4"
+      ]
+    },
+    {
+      "code": "UI_DRAWER_SNACKBAR",
+      "category": "UI_BASIC_WIDGETS",
+      "name": "Drawer và Snackbar",
+      "default_difficulty": "intermediate",
+      "testable": "auto",
+      "description": "`Drawer` được gán vào tham số `drawer` của `Scaffold`.; Snackbar hiển thị trong cây có `Scaffold` cha.",
+      "resources": [
+        "Mastering Flutter Ch.4"
+      ]
+    },
+    {
+      "code": "THEME_COLORS_COLORSCHEME",
+      "category": "THEMING",
+      "name": "Màu sắc, ColorScheme và Material Design",
+      "default_difficulty": "basic",
+      "testable": "auto",
+      "description": "Dùng `Color(0xFF...)` hoặc `Colors.*` thay vì màu hard-code rải rác, đặt tên biến màu rõ nghĩa.; Tạo `ColorScheme` qua `fromSeed` với `seedColor` và `brightness`, có thể set `primary`, `onPrimary`, `secondary`.; App được bọc bởi `MaterialApp` để dùng Material Design.",
+      "resources": [
+        "Mastering Flutter Ch.5"
+      ]
+    },
+    {
+      "code": "THEME_TYPOGRAPHY_FONTS",
+      "category": "THEMING",
+      "name": "Typography và Google Fonts",
+      "default_difficulty": "intermediate",
+      "testable": "auto",
+      "description": "Thêm package `google_fonts` (`flutter pub add google_fonts`) và import trong file theme.; Tạo TextStyle dùng chung bằng `GoogleFonts.roboto().copyWith(...)` với `fontSize`, `fontWeight`, `color`.; Thay style hard-code trong widget bằng các biến style đã định nghĩa.",
+      "resources": [
+        "Mastering Flutter Ch.5"
+      ]
+    },
+    {
+      "code": "THEME_LIGHT_DARK",
+      "category": "THEMING",
+      "name": "Tạo Theme và chế độ sáng/tối (Light/Dark)",
+      "default_difficulty": "intermediate",
+      "testable": "auto",
+      "description": "Tạo hàm trả về `ThemeData` và gắn vào `theme: createTheme()` trong `MaterialApp`.; Định nghĩa `textTheme` bằng `Typography.material2021().englishLike.copyWith(...)` ánh xạ các style.; Chọn theme theo `Brightness.light`/`Brightness.dark` dựa trên `platformBrightness`.",
+      "resources": [
+        "Mastering Flutter Ch.5"
+      ]
+    },
+    {
+      "code": "STATE_SETSTATE_STATEFUL",
+      "category": "STATE_MANAGEMENT",
+      "name": "setState và state có sẵn với StatefulWidget",
+      "default_difficulty": "basic",
+      "testable": "auto",
+      "description": "Dùng `StatefulWidget` + `State` để lưu dữ liệu thay đổi cục bộ.; Gọi `setState` khi state đổi để UI vẽ lại.; Khởi tạo dữ liệu trong `initState`.",
+      "resources": [
+        "Mastering Flutter Ch.6"
+      ]
+    },
+    {
+      "code": "STATE_INHERITED_WIDGET",
+      "category": "STATE_MANAGEMENT",
+      "name": "InheritedWidget",
+      "default_difficulty": "intermediate",
+      "testable": "auto",
+      "description": "Có static `of(BuildContext context)` trả về instance.; Dùng `dependOnInheritedWidgetOfExactType` để lấy state.; Truyền state xuống cây mà không qua tham số.",
+      "resources": [
+        "Mastering Flutter Ch.6"
+      ]
+    },
+    {
+      "code": "STATE_PROVIDER",
+      "category": "STATE_MANAGEMENT",
+      "name": "Provider",
+      "default_difficulty": "intermediate",
+      "testable": "manual",
+      "description": "Tạo dữ liệu một lần trong `create`, dùng lại qua `child`.; Lớp state extends `ChangeNotifier`, gọi `notifyListeners()` khi đổi.; Dùng `MultiProvider` khi có nhiều provider.",
+      "resources": [
+        "Mastering Flutter Ch.6"
+      ]
+    },
+    {
+      "code": "STATE_RIVERPOD",
+      "category": "STATE_MANAGEMENT",
+      "name": "Riverpod",
+      "default_difficulty": "advanced",
+      "testable": "manual",
+      "description": "Bọc app trong `ProviderScope`; định nghĩa provider qua `@riverpod`.; Dùng `ref.watch` trong `build` để theo dõi thay đổi; `ref.read` cho hành động ngoài build.; Widget kế thừa `ConsumerWidget`/`ConsumerStatefulWidget`.",
+      "resources": [
+        "Mastering Flutter Ch.6"
+      ]
+    },
+    {
+      "code": "STATE_BLOC_OTHER",
+      "category": "STATE_MANAGEMENT",
+      "name": "BLoC, GetIt, Redux, MobX",
+      "default_difficulty": "advanced",
+      "testable": "manual",
+      "description": "BLoC: action → cubit → state mới gửi cho UI, tách biệt logic và UI.; GetIt: đăng ký `registerSingleton`, lấy lại bằng `getIt<T>()`.; Redux/MobX: state thay đổi qua reducer/action, dùng `StoreConnector`/`Observer`.",
+      "resources": [
+        "Mastering Flutter Ch.6"
+      ]
+    },
+    {
+      "code": "STATE_IMMUTABLE",
+      "category": "STATE_MANAGEMENT",
+      "name": "Immutable state, local vs app state",
+      "default_difficulty": "intermediate",
+      "testable": "auto",
+      "description": "Phân biệt đúng local state (trong widget) và app state (chia sẻ toàn app).; Lưu selection cục bộ (vd `FilterChip`) trong `StatefulWidget`.; State chia sẻ được giữ một nơi, tạo copy mới khi cập nhật immutable.",
+      "resources": [
+        "Mastering Flutter Ch.6"
+      ]
+    },
+    {
+      "code": "ADVUI_LISTVIEW",
+      "category": "ADVANCED_WIDGETS",
+      "name": "ListView và danh sách cuộn",
+      "default_difficulty": "intermediate",
+      "testable": "auto",
+      "description": "Dùng `ListView.builder` với `itemCount` và `itemBuilder(context, index)` trả về widget theo index.; Danh sách dài cuộn được, không có sọc overflow.; Đặt `scrollDirection: Axis.horizontal` khi cần danh sách ngang.",
+      "resources": [
+        "Mastering Flutter Ch.7"
+      ]
+    },
+    {
+      "code": "ADVUI_GRIDVIEW",
+      "category": "ADVANCED_WIDGETS",
+      "name": "GridView và lưới item",
+      "default_difficulty": "intermediate",
+      "testable": "auto",
+      "description": "Dùng `GridView.builder` với `itemCount`, `gridDelegate` và `itemBuilder`.; Cấu hình `SliverGridDelegateWithMaxCrossAxisExtent` (`maxCrossAxisExtent`, `crossAxisSpacing`, `childAspectRatio`, `mainAxisSpacing`).; Lưới tự giãn để lấp đầy vùng khi kích thước màn hình thay đổi.",
+      "resources": [
+        "Mastering Flutter Ch.7"
+      ]
+    },
+    {
+      "code": "ADVUI_STACK_INDEXEDSTACK",
+      "category": "ADVANCED_WIDGETS",
+      "name": "Stack và IndexedStack",
+      "default_difficulty": "intermediate",
+      "testable": "auto",
+      "description": "Dùng `Stack` với `Align`/`Positioned` để chồng text lên ảnh.; `IndexedStack` có `index` điều khiển child đang hiển thị và danh sách `children`.",
+      "resources": [
+        "Mastering Flutter Ch.7"
+      ]
+    },
+    {
+      "code": "ADVUI_EXPANDED_LAYOUTBUILDER",
+      "category": "ADVANCED_WIDGETS",
+      "name": "Expanded và LayoutBuilder",
+      "default_difficulty": "intermediate",
+      "testable": "auto",
+      "description": "Bọc danh sách/widget vô hạn bằng `Expanded` trong `Row`/`Column`.; Dùng `LayoutBuilder` đọc `constraints.maxWidth` để chọn layout responsive.",
+      "resources": [
+        "Mastering Flutter Ch.7"
+      ]
+    },
+    {
+      "code": "ADVUI_TABLE_CARD",
+      "category": "ADVANCED_WIDGETS",
+      "name": "Table và Card",
+      "default_difficulty": "intermediate",
+      "testable": "auto",
+      "description": "`Table` với danh sách `TableRow`, số widget mỗi hàng khớp số cột.; Dùng `columnWidths` và `TableBorder.all()` khi cần.; `Card` bọc nội dung với elevation hoặc dùng `Card.filled`/`Card.outlined`.",
+      "resources": [
+        "Mastering Flutter Ch.7"
+      ]
+    },
+    {
+      "code": "ADVUI_BOTTOMSHEET",
+      "category": "ADVANCED_WIDGETS",
+      "name": "BottomSheets",
+      "default_difficulty": "intermediate",
+      "testable": "auto",
+      "description": "Gọi `showModalBottomSheet(context:..., builder:...)` trả về widget nội dung.; Phân biệt được persistent và modal bottom sheet.",
+      "resources": [
+        "Mastering Flutter Ch.7"
+      ]
+    },
+    {
+      "code": "ADVUI_SLIVERS",
+      "category": "ADVANCED_WIDGETS",
+      "name": "Slivers và CustomScrollView",
+      "default_difficulty": "advanced",
+      "testable": "auto",
+      "description": "Dùng `CustomScrollView` với danh sách `slivers`.; Chuyển widget thường thành sliver bằng `SliverToBoxAdapter`.; `SliverList` dùng đúng delegate (`SliverChildListDelegate`/`SliverChildBuilderDelegate`).",
+      "resources": [
+        "Mastering Flutter Ch.7"
+      ]
+    },
+    {
+      "code": "NAV_NAVIGATOR_PUSH_POP",
+      "category": "NAVIGATION_ROUTING",
+      "name": "Navigator và push/pop",
+      "default_difficulty": "basic",
+      "testable": "auto",
+      "description": "Dùng `Navigator.push`/`pop` (hoặc `Navigator.of(context)`) để chuyển và quay lại trang.; Mỗi `MaterialPage` có `key` và `child` rõ ràng; `onPopPage` gọi `route.didPop` rồi cập nhật danh sách pages.",
+      "resources": [
+        "Mastering Flutter Ch.8"
+      ]
+    },
+    {
+      "code": "NAV_NAMED_ROUTES",
+      "category": "NAVIGATION_ROUTING",
+      "name": "Named routes và MaterialApp routes",
+      "default_difficulty": "intermediate",
+      "testable": "auto",
+      "description": "Khai báo map `routes` trong `MaterialApp` và điều hướng bằng `pushNamed`.; Truyền `arguments` và nhận lại đúng qua `ModalRoute`; `await` kết quả khi cần dữ liệu trả về.",
+      "resources": [
+        "Mastering Flutter Ch.8"
+      ]
+    },
+    {
+      "code": "NAV_GOROUTER_AUTOROUTE",
+      "category": "NAVIGATION_ROUTING",
+      "name": "GoRouter và AutoRoute",
+      "default_difficulty": "advanced",
+      "testable": "manual",
+      "description": "Cấu hình `MaterialApp.router(routerConfig: ...)` với GoRouter hoặc AutoRoute.; AutoRoute: gắn `@RoutePage`, khai báo `AutoRoute(path/page)`, chạy `dart run build_runner build`, push qua `context.router.push`.",
+      "resources": [
+        "Mastering Flutter Ch.8"
+      ]
+    },
+    {
+      "code": "NAV_BOTTOM_NAVIGATION",
+      "category": "NAVIGATION_ROUTING",
+      "name": "Bottom navigation",
+      "default_difficulty": "intermediate",
+      "testable": "auto",
+      "description": "Khai báo 3–5 mục; cập nhật `index` trong `onTap`/`onDestinationSelected` qua `setState`.; `currentIndex`/`selectedIndex` phản ánh đúng tab đang chọn; đổi màu qua theme khi dùng `NavigationBar`.",
+      "resources": [
+        "Mastering Flutter Ch.8"
+      ]
+    },
+    {
+      "code": "NAV_DEEP_LINKING",
+      "category": "NAVIGATION_ROUTING",
+      "name": "Deep linking và custom schemes",
+      "default_difficulty": "advanced",
+      "testable": "manual",
+      "description": "Khai báo `intent-filter` (Android) và `URL types`/`FlutterDeepLinkingEnabled` (iOS) cho scheme/host đúng.; Với https App Links/Universal Links: có file xác minh domain (`assetlinks.json`, `apple-app-site-association`) đặt tại `.well-known`.",
+      "resources": [
+        "Mastering Flutter Ch.8"
+      ]
+    },
+    {
+      "code": "ANIM_IMPLICIT",
+      "category": "ANIMATIONS",
+      "name": "Hoạt ảnh ẩn (Implicit animations)",
+      "default_difficulty": "basic",
+      "testable": "auto",
+      "description": "Dùng đúng widget `AnimatedXXXX` cho thuộc tính cần đổi (color, opacity, size, position).; Có khai báo `duration` và thay đổi giá trị thuộc tính để kích hoạt hoạt ảnh.; Dùng `curve` (vd `Curves.easeInOut`) cho chuyển động tự nhiên.",
+      "resources": [
+        "Mastering Flutter Ch.9"
+      ]
+    },
+    {
+      "code": "ANIM_TWEEN",
+      "category": "ANIMATIONS",
+      "name": "Hoạt ảnh Tween (Tween animations)",
+      "default_difficulty": "intermediate",
+      "testable": "auto",
+      "description": "Khai báo `tween` với `begin`/`end` đúng kiểu dữ liệu thuộc tính.; Dùng `value` trong `builder` để áp vào widget.; Truyền và tái dùng `child` trong builder để tối ưu hiệu năng.",
+      "resources": [
+        "Mastering Flutter Ch.9"
+      ]
+    },
+    {
+      "code": "ANIM_EXPLICIT_CONTROLLER",
+      "category": "ANIMATIONS",
+      "name": "Hoạt ảnh tường minh (Explicit: AnimationController, Animation, Curves, AnimatedBuilder)",
+      "default_difficulty": "advanced",
+      "testable": "manual",
+      "description": "State class có mixin ticker và `vsync: this` khi tạo controller.; Gọi `_controller.dispose()` trong `dispose()`; khởi động bằng `forward()`.; Dùng `Animation`/`CurvedAnimation` hoặc `controller.drive(...)` và transition (vd `FadeTransition`) hoặc `AnimatedBuilder`.",
+      "resources": [
+        "Mastering Flutter Ch.9"
+      ]
+    },
+    {
+      "code": "ANIM_HERO",
+      "category": "ANIMATIONS",
+      "name": "Hoạt ảnh Hero (Hero animations)",
+      "default_difficulty": "intermediate",
+      "testable": "manual",
+      "description": "Bọc widget bằng `Hero` ở cả trang nguồn và trang đích.; `tag` ở hai trang trùng nhau và duy nhất (vd ghép URL + loại).; Đồng bộ tag qua state/provider (vd `heroTagProvider`) khi tag động.",
+      "resources": [
+        "Mastering Flutter Ch.9"
+      ]
+    },
+    {
+      "code": "ANIM_PACKAGES",
+      "category": "ANIMATIONS",
+      "name": "Gói hoạt ảnh, flutter_animate & custom routes",
+      "default_difficulty": "advanced",
+      "testable": "manual",
+      "description": "Thêm gói vào `pubspec.yaml` và chạy pub get trước khi dùng.; Dùng `.animate()` với `controller`/`autoPlay` đúng, hoặc `CustomPainter` override `paint`/`shouldRepaint`.; Dùng `CustomRoute` với `transitionsBuilder` cho chuyển trang.",
+      "resources": [
+        "Mastering Flutter Ch.9"
+      ]
+    },
+    {
+      "code": "ASYNC_FUTURE_ASYNC_AWAIT",
+      "category": "ASYNC_PROGRAMMING",
+      "name": "Future và async/await",
+      "default_difficulty": "intermediate",
+      "testable": "auto",
+      "description": "Hàm có tác vụ chờ được khai báo `async`, trả về `Future<T>` đúng kiểu.; Dùng `await` để lấy kết quả thay vì giả định dữ liệu đã sẵn sàng.; Có bắt lỗi cho tác vụ bất đồng bộ (try/catch hoặc `catchError`).",
+      "resources": [
+        "Mastering Flutter Ch.10"
+      ]
+    },
+    {
+      "code": "ASYNC_EVENT_LOOP",
+      "category": "ASYNC_PROGRAMMING",
+      "name": "Event loop và microtask",
+      "default_difficulty": "advanced",
+      "testable": "manual",
+      "description": "Không chạy tác vụ nặng/đồng bộ kéo dài trên luồng chính.; Đẩy việc nặng sang `Future`/microtask/isolate để UI vẫn phản hồi.",
+      "resources": [
+        "Mastering Flutter Ch.10"
+      ]
+    },
+    {
+      "code": "ASYNC_FUTUREBUILDER",
+      "category": "ASYNC_PROGRAMMING",
+      "name": "FutureBuilder và AsyncSnapshot",
+      "default_difficulty": "advanced",
+      "testable": "auto",
+      "description": "Truyền đúng hàm trả về `Future` vào tham số `future`.; Kiểm tra `connectionState` trước khi đọc `snapshot.data`.; Có nhánh loading (`waiting`) và nhánh lỗi (`snapshot.hasError`).",
+      "resources": [
+        "Mastering Flutter Ch.10"
+      ]
+    },
+    {
+      "code": "ASYNC_STREAMS_STREAMBUILDER",
+      "category": "ASYNC_PROGRAMMING",
+      "name": "Streams và StreamBuilder",
+      "default_difficulty": "advanced",
+      "testable": "auto",
+      "description": "Chọn đúng loại stream (single vs broadcast) theo số listener.; Dùng `StreamBuilder` và kiểm tra `connectionState` trước khi đọc dữ liệu.; Hủy `StreamSubscription` khi không dùng để tránh rò rỉ.",
+      "resources": [
+        "Mastering Flutter Ch.10"
+      ]
+    },
+    {
+      "code": "ASYNC_ISOLATES",
+      "category": "ASYNC_PROGRAMMING",
+      "name": "Isolates và giao tiếp qua Port",
+      "default_difficulty": "advanced",
+      "testable": "manual",
+      "description": "Đưa tác vụ nặng sang isolate bằng `Isolate.spawn` thay vì chạy trên luồng chính.; Giao tiếp đúng qua `SendPort`/`ReceivePort` và `listen`.; Đóng isolate đúng cách (`isolate.kill()`); chỉ truyền kiểu dữ liệu được phép.",
+      "resources": [
+        "Mastering Flutter Ch.10"
+      ]
+    }
   ]
 }

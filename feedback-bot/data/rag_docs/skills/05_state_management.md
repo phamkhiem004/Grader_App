@@ -1,14 +1,14 @@
 # Skill: Quản lý trạng thái (State Management)
 
-- **skill (lớn):** `state_management`
+- **skill (lớn):** `STATE_MANAGEMENT`
 - **Tên skill:** Quản lý trạng thái trong Flutter
 - **Nguồn:** *Mastering Flutter* (Kevin Moore, 2025), Chương 6 — "State Management Fundamentals".
-- **skill_code trong skill này:** `state_setstate_stateful`, `state_inherited_widget`, `state_provider`, `state_riverpod`, `state_bloc_other`, `state_immutable`
+- **skill_code trong skill này:** `STATE_SETSTATE_STATEFUL`, `STATE_INHERITED_WIDGET`, `STATE_PROVIDER`, `STATE_RIVERPOD`, `STATE_BLOC_OTHER`, `STATE_IMMUTABLE`
 
 ---
 
-## skill_code: `state_setstate_stateful`
-**skill_name:** setState và state có sẵn với StatefulWidget · **skill:** `state_management`
+## skill_code: `STATE_SETSTATE_STATEFUL`
+**skill_name:** setState và state có sẵn với StatefulWidget · **skill:** `STATE_MANAGEMENT`
 
 ### Khái niệm
 State là dữ liệu thay đổi theo thời gian và làm UI cập nhật. `StatelessWidget` chỉ hiển thị dữ liệu, còn `StatefulWidget` giữ state riêng và gọi `setState` để báo cho hệ thống Flutter biết cần vẽ lại. State class lưu dữ liệu, build UI và theo dõi vòng đời qua `initState`, `setState`, `build`. Nên gọi `setState` ở vị trí thấp nhất trong widget tree để chỉ vẽ lại phần thay đổi.
@@ -33,8 +33,8 @@ setState, StatefulWidget, State class, initState, build, rebuild, local state
 
 ---
 
-## skill_code: `state_inherited_widget`
-**skill_name:** InheritedWidget · **skill:** `state_management`
+## skill_code: `STATE_INHERITED_WIDGET`
+**skill_name:** InheritedWidget · **skill:** `STATE_MANAGEMENT`
 
 ### Khái niệm
 `InheritedWidget` là widget của Flutter truyền state xuống dưới widget tree mà không cần truyền qua tham số; state được lưu trong `BuildContext`. Các subclass thường có một static method `of` nhận `context` và trả về giá trị, dùng `dependOnInheritedWidgetOfExactType` để lấy giá trị đã lưu. Sách lưu ý widget này ít được dùng trực tiếp.
@@ -58,8 +58,8 @@ InheritedWidget, BuildContext, of method, dependOnInheritedWidgetOfExactType
 
 ---
 
-## skill_code: `state_provider`
-**skill_name:** Provider · **skill:** `state_management`
+## skill_code: `STATE_PROVIDER`
+**skill_name:** Provider · **skill:** `STATE_MANAGEMENT`
 
 ### Khái niệm
 `Provider` là package của Google (đang ở chế độ maintenance), được mô tả như một wrapper quanh `InheritedWidget` để widget con truy cập state định nghĩa ở trên mà không truyền qua tham số. Lớp cơ bản `Provider` có tham số `create` (tạo class một lần) và `child`. `ChangeNotifierProvider` dùng `ChangeNotifier` và gọi `notifyListeners()` để cập nhật widget khi giá trị đổi. Nhiều provider thì dùng `MultiProvider`.
@@ -83,8 +83,8 @@ Provider, ChangeNotifier, ChangeNotifierProvider, notifyListeners, MultiProvider
 
 ---
 
-## skill_code: `state_riverpod`
-**skill_name:** Riverpod · **skill:** `state_management`
+## skill_code: `STATE_RIVERPOD`
+**skill_name:** Riverpod · **skill:** `STATE_MANAGEMENT`
 
 ### Khái niệm
 Riverpod là package cùng tác giả với Provider (anagram của "provider"), là reactive caching framework cho Flutter/Dart, xử lý bất đồng bộ kèm error handling và cache. Có generator dùng annotation `@riverpod` để sinh code. Bọc `MainApp` trong `ProviderScope` để lưu state mọi provider. Reference class chính là `WidgetRef` với `watch`, `listen`, `read`. Widget UI subclass `ConsumerWidget` hoặc `ConsumerStatefulWidget`/`ConsumerState`.
@@ -109,8 +109,8 @@ Riverpod, ProviderScope, WidgetRef, watch, read, ConsumerWidget, riverpod_annota
 
 ---
 
-## skill_code: `state_bloc_other`
-**skill_name:** BLoC, GetIt, Redux, MobX · **skill:** `state_management`
+## skill_code: `STATE_BLOC_OTHER`
+**skill_name:** BLoC, GetIt, Redux, MobX · **skill:** `STATE_MANAGEMENT`
 
 ### Khái niệm
 Ngoài Provider/Riverpod còn nhiều package: BLoC tách UI khỏi business logic, action gửi tới một `cubit` lưu state rồi phát state mới cho UI (nhiều code). GetIt là service locator/dependency injection, đăng ký singleton qua `registerSingleton`. Redux theo ba nguyên tắc (single source of truth, state read-only, pure reducers) với `StoreProvider`, `StoreConnector`. MobX dùng observables, actions, reactions với annotation `@observable`, `@action` và widget `Observer`.
@@ -135,8 +135,8 @@ BLoC, cubit, GetIt, dependency injection, Redux, reducer, MobX, observable, acti
 
 ---
 
-## skill_code: `state_immutable`
-**skill_name:** Immutable state, local vs app state · **skill:** `state_management`
+## skill_code: `STATE_IMMUTABLE`
+**skill_name:** Immutable state, local vs app state · **skill:** `STATE_MANAGEMENT`
 
 ### Khái niệm
 Local state là dữ liệu riêng của một widget, quản lý trong class `StatefulWidget` (ví dụ lưu selection của `FilterChip`). App state là dữ liệu chia sẻ giữa nhiều phần của app (user preferences, authentication, giỏ hàng) và cần kỹ thuật state management như Riverpod. Immutability quan trọng vì state thay đổi được bởi nhiều class dễ sinh bug do các instance khác nhau; điểm yếu là phải tạo bản copy mới mỗi lần cập nhật.

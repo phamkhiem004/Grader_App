@@ -1,14 +1,14 @@
 # Skill: Lập trình bất đồng bộ (Asynchronous Programming)
 
-- **skill (lớn):** `async_programming`
+- **skill (lớn):** `ASYNC_PROGRAMMING`
 - **Tên skill:** Lập trình bất đồng bộ trong Flutter/Dart
 - **Nguồn:** *Mastering Flutter* (Kevin Moore, 2025), Chương 10 — "Futures and Async/Await".
-- **skill_code trong skill này:** `async_future_async_await`, `async_event_loop`, `async_futurebuilder`, `async_streams_streambuilder`, `async_isolates`.
+- **skill_code trong skill này:** `ASYNC_FUTURE_ASYNC_AWAIT`, `ASYNC_EVENT_LOOP`, `ASYNC_FUTUREBUILDER`, `ASYNC_STREAMS_STREAMBUILDER`, `ASYNC_ISOLATES`.
 
 ---
 
-## skill_code: `async_future_async_await`
-**skill_name:** Future và async/await · **skill:** `async_programming`
+## skill_code: `ASYNC_FUTURE_ASYNC_AWAIT`
+**skill_name:** Future và async/await · **skill:** `ASYNC_PROGRAMMING`
 
 ### Khái niệm
 `Future<T>` đại diện cho một giá trị sẽ có trong tương lai, dùng làm kiểu trả về cho hàm bất đồng bộ (gọi mạng, I/O, tính toán nặng). `async` đánh dấu hàm bất đồng bộ và bắt buộc hàm trả về `Future`. `await` (chỉ dùng trong hàm `async`) chờ kết quả trước khi chạy tiếp.
@@ -33,8 +33,8 @@ Future, async, await, asynchronous, network call, Future.wait
 
 ---
 
-## skill_code: `async_event_loop`
-**skill_name:** Event loop và microtask · **skill:** `async_programming`
+## skill_code: `ASYNC_EVENT_LOOP`
+**skill_name:** Event loop và microtask · **skill:** `ASYNC_PROGRAMMING`
 
 ### Khái niệm
 Flutter chạy trên một event loop ở luồng chính, khởi động từ `main` qua `runApp`. Event loop xử lý sự kiện (tap, nhập liệu, vòng đời, hệ thống), rồi chạy các microtask (hàm ngắn ưu tiên cao, sau sự kiện hiện tại nhưng trước tác vụ bất đồng bộ khác), rồi rebuild UI. Mọi thứ làm chậm event loop đều khiến UI "đơ".
@@ -57,8 +57,8 @@ event loop, microtask, main isolate, runApp, responsive UI
 
 ---
 
-## skill_code: `async_futurebuilder`
-**skill_name:** FutureBuilder và AsyncSnapshot · **skill:** `async_programming`
+## skill_code: `ASYNC_FUTUREBUILDER`
+**skill_name:** FutureBuilder và AsyncSnapshot · **skill:** `ASYNC_PROGRAMMING`
 
 ### Khái niệm
 `FutureBuilder` dựng UI theo trạng thái một `Future`; `builder` nhận `AsyncSnapshot` gồm `data`, `error`, `connectionState` (`none`, `waiting`, `active`, `done`). Builder trả widget khác nhau tùy trạng thái — loading khi chưa `done`, dữ liệu khi `done`.
@@ -83,8 +83,8 @@ FutureBuilder, AsyncSnapshot, connectionState, loading state, async UI
 
 ---
 
-## skill_code: `async_streams_streambuilder`
-**skill_name:** Streams và StreamBuilder · **skill:** `async_programming`
+## skill_code: `ASYNC_STREAMS_STREAMBUILDER`
+**skill_name:** Streams và StreamBuilder · **skill:** `ASYNC_PROGRAMMING`
 
 ### Khái niệm
 `Stream` là chuỗi sự kiện phát bất đồng bộ, có thể có listener. Hai loại: *single* (một listener) và *broadcast* (nhiều listener, qua `asBroadcastStream`). Tạo bằng `StreamController`, factory (`Stream.fromIterable`, `Stream.periodic`, `Stream.fromFuture`), hoặc hàm `async*` dùng `yield`. Tiêu thụ bằng `StreamBuilder` hoặc `listen()` (trả `StreamSubscription` có `cancel`/`pause`/`resume`).
@@ -109,8 +109,8 @@ Stream, StreamBuilder, StreamController, broadcast, subscription, yield, async*
 
 ---
 
-## skill_code: `async_isolates`
-**skill_name:** Isolates và giao tiếp qua Port · **skill:** `async_programming`
+## skill_code: `ASYNC_ISOLATES`
+**skill_name:** Isolates và giao tiếp qua Port · **skill:** `ASYNC_PROGRAMMING`
 
 ### Khái niệm
 Flutter chạy trong một isolate chính. Với tác vụ rất nặng (vd đồng bộ CSDL), dùng **isolate** để tạo luồng riêng. Mỗi isolate có heap và event loop riêng, không chia sẻ bộ nhớ; giao tiếp qua **Port**: gửi bằng `SendPort`, nhận bằng `ReceivePort`. Chỉ gửi được primitive, `List`, `Map`, `Set`, `SendPort`; dữ liệu phức tạp nên chuyển JSON.

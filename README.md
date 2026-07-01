@@ -201,17 +201,6 @@ openai:gpt-4o-mini
 
 ---
 
-## 🔑 Tài khoản mặc định
-
-| Email | Mật khẩu | Vai trò |
-|---|---|---|
-| `giaovien@fpt.edu.vn` | `123456` | TEACHER |
-| `admin@fpt.edu.vn` | `123456` | ADMIN |
-
-Hai tài khoản này chỉ để người clone về chạy thử ngay. Khi dùng thật hoặc deploy lên máy public, hãy đăng nhập rồi đổi mật khẩu, hoặc chỉnh seed trong backend theo chính sách của bạn.
-
----
-
 ## 📖 Hướng dẫn sử dụng
 
 ### 1. Cấu hình đề thi (trang **Cấu hình Đề thi**)

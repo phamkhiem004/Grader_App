@@ -1,1 +1,0 @@
-# File này dùng để mở rộng RAG hoặc Knowledge Graph trong giai đoạn sau.

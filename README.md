@@ -1,8 +1,8 @@
 # 🎓 Grader App — Hệ thống chấm thi Flutter tự động
 
-Hệ thống chấm bài thi thực hành **Flutter/Dart** tự động trong môi trường **Docker cô lập**. Giáo viên upload hàng loạt bài nộp (file ZIP), hệ thống tự biên dịch, chạy testcase và trả về điểm + log chi tiết cho từng sinh viên. **AI feedback bot** (Ollama, nằm trong `feedback-bot/`) đọc kết quả chấm và viết lời nhận xét cho từng sinh viên.
+Hệ thống chấm bài thi thực hành **Flutter/Dart** tự động trong môi trường **Docker cô lập**. Giáo viên upload hàng loạt bài nộp (file ZIP), hệ thống tự biên dịch, chạy testcase và trả về điểm + log chi tiết cho từng sinh viên. **AI feedback bot** (Ollama) là **microservice repo RIÊNG** [`prm393-feedback-bot`](https://github.com/meomeomeo2004/prm393-feedback-bot) — đọc kết quả chấm qua HTTP và viết lời nhận xét cho từng sinh viên.
 
-> **Repo này là MỘT gói hoàn chỉnh**: backend (`grader/`) · frontend (`frontend/`) · AI feedback bot (`feedback-bot/`) · script chạy (`run.cmd`, `start-all.ps1`) · bộ cài (`installer/`). Clone 1 repo là đủ.
+> **Repo này** gồm: backend (`grader/`) · frontend (`frontend/`) · script chạy (`run.cmd`, `start-all.ps1`) · bộ cài (`installer/`). **Bot AI là repo riêng — clone CẠNH Grader_App** (sibling `..\prm393-feedback-bot`); backend gọi bot qua `feedback.api.base` (mặc định `http://localhost:8000`).
 
 ---
 

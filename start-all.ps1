@@ -12,6 +12,7 @@
 param(
   [string]$Model = "",            # model sinh feedback; rỗng = đọc từ bot-model.txt
   [string]$Embed = "bge-m3",      # model embedding cho RAG
+  [string]$BotDir = "",           # repo feedback-bot; rỗng = tìm ..\prm393-feedback-bot (sibling)
   [switch]$SkipOllama,            # bỏ qua kiểm tra/pull model (nếu đã có sẵn)
   [switch]$SkipMysql              # bỏ qua docker compose (nếu MySQL đã chạy)
 )
@@ -19,8 +20,12 @@ param(
 # KHÔNG dùng "Stop": 1 lỗi không nghiêm trọng (vd Start-Process không thấy ollama, docker chưa bật)
 # sẽ làm DỪNG cả script → app không lên. Dùng "Continue"; các lỗi NGHIÊM TRỌNG vẫn chặn bằng `throw`.
 $ErrorActionPreference = "Continue"
-$root       = $PSScriptRoot          # = thư mục Grader_App (mọi thứ nằm trong đây)
-$botDir     = Join-Path $root "feedback-bot"
+$root       = $PSScriptRoot          # = thư mục Grader_App
+# Feedback-bot giờ là MICROSERVICE repo RIÊNG (không nhét trong Grader_App nữa) — gọi qua HTTP :8000.
+# Mặc định tìm ở sibling ..\prm393-feedback-bot; đổi bằng -BotDir hoặc biến môi trường BOT_DIR.
+$botDir = if ($BotDir) { $BotDir }
+          elseif ($env:BOT_DIR) { $env:BOT_DIR }
+          else { Join-Path (Split-Path $root -Parent) "prm393-feedback-bot" }
 $composeDir = $root                  # docker-compose.yml ở gốc Grader_App
 $beDir      = Join-Path $root "grader"
 $feDir      = Join-Path $root "frontend"
@@ -62,7 +67,14 @@ foreach ($t in @("python","node","npm","docker")) {
   if (Have $t) { Write-Host "  [OK] $t" -ForegroundColor Green }
   else { Write-Host "  [THIEU] $t — cai dat truoc khi chay" -ForegroundColor Yellow }
 }
-if (-not (Test-Path $botDir)) { throw "Khong thay repo feedback bot tai: $botDir" }
+if (-not (Test-Path $botDir)) {
+  throw @"
+Khong thay repo feedback-bot tai: $botDir
+Bot gio la repo RIENG (microservice). Clone canh Grader_App:
+    git clone https://github.com/meomeomeo2004/prm393-feedback-bot.git
+Hoac chi ro duong dan:  -BotDir <path>  (hoac dat bien moi truong BOT_DIR)
+"@
+}
 if (-not (Test-Path $beDir))  { throw "Khong thay backend tai: $beDir" }
 
 # ── 1) Ollama: bảo đảm đang chạy + đã có model ───────────────────────────────

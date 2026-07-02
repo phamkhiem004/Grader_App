@@ -27,8 +27,8 @@ import java.util.Map;
 @Component
 public class BotSyllabusSync {
 
-    /** Thư mục data của bot (sibling của grader). Mặc định hợp với start-all (working dir = grader/). */
-    @Value("${feedback.bot-data-dir:../feedback-bot/data}")
+    /** Thư mục data của bot — REPO RIÊNG sibling ..\prm393-feedback-bot (working dir backend = grader/). */
+    @Value("${feedback.bot-data-dir:../../prm393-feedback-bot/data}")
     private String botDataDir;
 
     private final ObjectMapper mapper = new ObjectMapper();

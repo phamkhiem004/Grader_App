@@ -3,15 +3,19 @@
 Hướng dẫn cho Claude Code khi làm việc trong repo này. Đọc kỹ phần **Gotchas** — nhiều thứ
 khác với mặc định và đã từng gây lỗi thật.
 
-## Repo này là MỘT gói hoàn chỉnh
+## Cấu trúc (bot là microservice repo RIÊNG)
+> Feedback-bot **KHÔNG còn nằm trong** Grader_App. Nó là repo riêng
+> `prm393-feedback-bot` (https://github.com/meomeomeo2004/prm393-feedback-bot),
+> chạy như 1 service HTTP ở cổng 8000; backend gọi qua `feedback.api.base`
+> (mặc định `http://localhost:8000`). **Clone nó CẠNH Grader_App** (sibling):
+> `D:\...\prm393-feedback-bot` bên cạnh `D:\...\Grader_App`.
 ```
-Grader_App/                  ← repo duy nhất (clone 1 cái là đủ)
+Grader_App/                  ← repo backend/web (clone kèm repo bot ở sibling)
 ├── grader/        Backend Spring Boot 4 · Java 17 · MySQL · gọi Docker để chấm
 ├── frontend/      Next.js 16 · React 19 · Tailwind v4  (ĐỌC frontend/AGENTS.md trước khi sửa FE)
-├── feedback-bot/  AI nhận xét: FastAPI + Ollama + ChromaDB (RAG) — Python
 ├── grader-base/   Dockerfile ảnh nền chấm (Flutter SDK) → image `grading-base:latest`
 ├── exams/  submissions/   dữ liệu runtime (gitignore, rỗng khi mới clone)
-├── bot-model.txt  ← 1 dòng: model Ollama cho bot nhận xét
+├── bot-model.txt  ← 1 dòng: model Ollama cho bot nhận xét (start-all ghi vào .env của repo bot sibling)
 ├── grader-setup.cmd  ← MÁY TRỐNG: cài Docker/Node/Java/Python/Ollama + model (gọi installer/setup-prereqs.ps1, tự UAC)
 ├── run.cmd · start-all.ps1 · GraderLauncher.exe  ← chạy tất cả (chạy NGAY trong repo, không nhân bản)
 └── installer/     setup-prereqs.ps1 (cài thành phần nền) · README-INSTALLER.md
@@ -21,7 +25,7 @@ Grader_App/                  ← repo duy nhất (clone 1 cái là đủ)
 - **Chạy tất cả:** `run` (cmd) hoặc `.\run` (PowerShell) tại thư mục Grader_App → MySQL + bot(:8000) + backend(:8080) + frontend(:3000).
 - **Backend only:** `cd grader && .\mvnw.cmd spring-boot:run` (cổng khác: `$env:SERVER_PORT=8090`). Phải chạy **trên host**, không trong container (cần mount docker.sock host để chấm).
 - **Compile backend:** `cd grader && .\mvnw.cmd -q -o compile` (offline, deps đã cache).
-- **Bot:** `cd feedback-bot && .\.venv\Scripts\python.exe -m uvicorn app.main:app --port 8000`.
+- **Bot:** ở repo sibling → `cd ..\prm393-feedback-bot && .\.venv\Scripts\python.exe -m uvicorn app.main:app --port 8000`. Backend tìm bot qua `feedback.api.base` (mặc định `http://localhost:8000`); `start-all.ps1 -BotDir <path>` nếu để chỗ khác.
 - **Frontend:** `cd frontend && npm run dev`.
 - **Tài khoản test:** `giaovien@fpt.edu.vn` / `123456` (TEACHER), `admin@fpt.edu.vn` / `123456`.
 
@@ -41,7 +45,7 @@ Trang "Nhận xét AI" → POST /api/feedback/exam/{examId}/{studentId}
 2. **Hai phiên bản Jackson cùng classpath.** Services dùng `com.fasterxml.jackson` (Jackson 2); vài controller dùng `tools.jackson` (Jackson 3, mặc định Spring Boot 4). Khi thêm code, theo file xung quanh. `SyllabusService`/`BatchGradingService` = Jackson 2.
 3. **skill_code phải có trong syllabus (bảng `skill`).** AI sinh đề đôi khi BỊA code (vd `DART_ESSENTIALS`). `SyllabusService.sanitizeSkillsMatrix` tự thay code lạ → code hợp lệ cùng tiền tố; được gọi trong `AiExamGenService.saveAsExam`. Upload TAY vẫn validate nghiêm (`ExamService.validateSkillCodes` ném lỗi).
 4. **Model bot chậm trên CPU.** Đổi model ở `bot-model.txt` (KHÔNG sửa chỗ khác — `start-all.ps1` ghi `.env` từ đó). CPU-only → dùng `qwen2.5-coder:3b` (~270s/bài). `qwen3:14b` cần GPU. Timeout mặc định đã nới 600s (backend `feedback.timeout-seconds`, bot `OLLAMA_TIMEOUT_SECONDS`).
-5. **Windows: `python` là Store-stub** (báo "Python was not found"). Dùng `C:\Python313\python.exe` hoặc `py -3`. Bot venv ở `feedback-bot/.venv`.
+5. **Windows: `python` là Store-stub** (báo "Python was not found"). Dùng `C:\Python313\python.exe` hoặc `py -3`. Bot venv ở `..\prm393-feedback-bot\.venv` (repo sibling).
 6. **Cần Docker bật + image `grading-base:latest`** để chấm và để AI gen compile-fix. Build ảnh: `grader-base/build-base.ps1` (lâu, Flutter SDK).
 7. **`grader/secret.properties`** (API key LLM cho "Tạo đề bằng AI") bị gitignore. Người mới: copy từ `.example` + dán key. Chấm + bot nhận xét KHÔNG cần key này.
 8. **POST `/api/**` cần token** (AuthFilter), trừ `/api/auth/*`. GET đa phần mở. FE gửi `Authorization: Bearer <token>` (xem `lib/auth.js`).

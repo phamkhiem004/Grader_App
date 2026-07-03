@@ -80,7 +80,7 @@ public interface ExamResultRepository extends JpaRepository<ExamResult, Long> {
     // Lịch sử chấm theo đề (chỉ bài nộp chính thức), mới nhất lên đầu
     List<ExamResult> findByExamIdAndModeOrderByUpdatedAtDesc(String examId, String mode);
 
-    // Projection nhe cho trang lich su/feedback: khong keo result_json LONGTEXT.
+    // Projection nhẹ cho trang lịch sử: không kéo result_json LONGTEXT.
     @Query("""
         select new com.example.grader.dto.ExamHistoryRow(
             r.id, r.studentId, r.studentName, r.score, r.manualScore, r.status,

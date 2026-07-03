@@ -3,7 +3,7 @@
   Inno Setup goi file nay khi cai (co quyen admin). Cung co the chay lai bang tay sau khi reboot.
 
   Lam gi:
-    1) Dung winget cai (neu thieu): Docker Desktop, Node.js LTS, Temurin JDK 17.
+    1) Dung winget cai (neu thieu): Docker Desktop, Node.js LTS, JDK 17+.
     2) Neu Docker da san sang -> build anh nen cham bai 'grading-base'.
 
   Cach chay tay:
@@ -12,8 +12,7 @@
 
 param(
   [string]$AppDir        = (Split-Path $PSScriptRoot -Parent),  # thu muc cai = goc Grader_App
-  [string]$DockerDataRoot = "",                                 # rong = dung mac dinh Docker (C:\ProgramData\docker)
-  [switch]$SkipModels
+  [string]$DockerDataRoot = ""                                  # rong = dung mac dinh Docker (C:\ProgramData\docker)
 )
 
 $ErrorActionPreference = "Continue"
@@ -26,7 +25,7 @@ function Refresh-Path {
   $u = [Environment]::GetEnvironmentVariable("Path","User")
   $env:Path = (@($m,$u) | Where-Object { $_ }) -join ';'
 }
-function Get-Jdk17Home {
+function Get-JdkHome {
   $candidates = @()
   foreach ($scope in @("Process","User","Machine")) {
     $jh = [Environment]::GetEnvironmentVariable("JAVA_HOME", $scope)
@@ -48,19 +47,19 @@ function Get-Jdk17Home {
 
   foreach ($root in $roots) {
     if (Test-Path $root) {
-      Get-ChildItem -Path $root -Directory -Filter "jdk-17*" -ErrorAction SilentlyContinue |
+      Get-ChildItem -Path $root -Directory -Filter "jdk-*" -ErrorAction SilentlyContinue |
         Sort-Object Name -Descending |
         ForEach-Object { $candidates += $_.FullName }
     }
   }
 
-  foreach ($home in ($candidates | Where-Object { $_ } | Select-Object -Unique)) {
+  foreach ($candidateHome in ($candidates | Where-Object { $_ } | Select-Object -Unique)) {
     try {
-      $resolved = (Resolve-Path $home -ErrorAction Stop).Path
+      $resolved = (Resolve-Path $candidateHome -ErrorAction Stop).Path
       $javacExe = Join-Path $resolved "bin\javac.exe"
       if (Test-Path $javacExe) {
         $ver = (& $javacExe -version 2>&1 | Out-String).Trim()
-        if ($ver -match '^javac\s+17\.') { return $resolved }
+        if ($ver -match '^javac\s+(\d+)(?:\.|$)' -and [int]$Matches[1] -ge 17) { return $resolved }
       }
     } catch {}
   }
@@ -89,23 +88,23 @@ function Set-JdkEnvironment([string]$jdkHome) {
     $env:Path = "$jdkBin;$env:Path"
   }
 }
-function Ensure-Jdk17 {
-  $jdkHome = Get-Jdk17Home
+function Ensure-Jdk {
+  $jdkHome = Get-JdkHome
   if ($jdkHome) {
     Set-JdkEnvironment $jdkHome
-    Write-Host "  [OK] Java JDK 17 da co: $jdkHome" -ForegroundColor Green
+    Write-Host "  [OK] Java JDK 17+ da co: $jdkHome" -ForegroundColor Green
     return
   }
 
-  Write-Host "  Cai Java JDK 17 (winget: EclipseAdoptium.Temurin.17.JDK) ..." -ForegroundColor Yellow
+  Write-Host "  Cai Java JDK 17+ (winget: EclipseAdoptium.Temurin.17.JDK neu may chua co) ..." -ForegroundColor Yellow
   winget install -e --id EclipseAdoptium.Temurin.17.JDK --silent --accept-package-agreements --accept-source-agreements --disable-interactivity 2>&1 | Out-Host
   Refresh-Path
-  $jdkHome = Get-Jdk17Home
+  $jdkHome = Get-JdkHome
   if ($jdkHome) {
     Set-JdkEnvironment $jdkHome
-    Write-Host "  [OK] Java JDK 17 da san sang: $jdkHome" -ForegroundColor Green
+    Write-Host "  [OK] Java JDK 17+ da san sang: $jdkHome" -ForegroundColor Green
   } else {
-    Write-Host "  [LOI] Khong tim thay javac sau khi cai JDK. Hay khoi dong lai may hoac cai Temurin JDK 17." -ForegroundColor Red
+    Write-Host "  [LOI] Khong tim thay javac JDK 17+. Hay khoi dong lai may hoac cai Temurin JDK." -ForegroundColor Red
     $script:CriticalSetupFailed = $true
   }
 }
@@ -131,68 +130,8 @@ if (-not (Have "winget")) {
     }
   }
   Ensure-Tool "node"   "OpenJS.NodeJS.LTS"               "Node.js LTS"
-  Ensure-Jdk17
+  Ensure-Jdk
   Ensure-Tool "docker" "Docker.DockerDesktop"             "Docker Desktop"
-
-  # -- Python: xu ly rieng vi Windows Store stub co the chan lenh 'python' ----
-  Section "Cai dat Python 3.11"
-
-  # Buoc 1: Tat Python Store stub (python.exe gia tu Microsoft Store)
-  # Stub nay tra ve exit code 9009 va khong lam gi ca - la nguyen nhan chinh cua loi "python not found".
-  $stubPath = "$env:LOCALAPPDATA\Microsoft\WindowsApps"
-  $stubPy   = Join-Path $stubPath "python.exe"
-  $stubPy3  = Join-Path $stubPath "python3.exe"
-  foreach ($stub in @($stubPy, $stubPy3)) {
-    if (Test-Path $stub) {
-      try {
-        # Doi ten stub de vo hieu hoa (khong xoa - tranh loi quyen)
-        $bak = $stub + ".disabled_by_grader"
-        if (-not (Test-Path $bak)) { Rename-Item $stub $bak -ErrorAction SilentlyContinue }
-        Write-Host "  [OK] Da tat Python Store stub: $stub" -ForegroundColor Green
-      } catch {
-        Write-Host "  [INFO] Khong tat duoc stub (co the da tat san): $stub" -ForegroundColor DarkGray
-      }
-    }
-  }
-
-  # Buoc 2: Cai Python 3.11 neu chua co (hoac stub vua bi tat)
-  Refresh-Path
-  $pyOk = $false
-  try {
-    $ver = & python --version 2>&1
-    if ($LASTEXITCODE -eq 0 -and $ver -match 'Python 3') { $pyOk = $true }
-  } catch {}
-  # Thu them launcher 'py'
-  if (-not $pyOk) {
-    try {
-      $ver = & py -3 --version 2>&1
-      if ($LASTEXITCODE -eq 0) { $pyOk = $true }
-    } catch {}
-  }
-
-  if ($pyOk) {
-    Write-Host "  [OK] Python da co va hoat dong ($ver)" -ForegroundColor Green
-  } else {
-    Write-Host "  Cai Python 3.11 (winget: Python.Python.3.11) ..." -ForegroundColor Yellow
-    winget install -e --id Python.Python.3.11 --silent `
-      --accept-package-agreements --accept-source-agreements `
-      --override "/quiet InstallAllUsers=1 PrependPath=1 Include_pip=1" `
-      2>&1 | Out-Host
-    Refresh-Path
-    # Kiem tra lai
-    try { $ver = & python --version 2>&1; if ($LASTEXITCODE -eq 0) { $pyOk = $true } } catch {}
-    if (-not $pyOk) { try { $ver = & py -3 --version 2>&1; if ($LASTEXITCODE -eq 0) { $pyOk = $true } } catch {} }
-    if ($pyOk) { Write-Host "  [OK] Python da cai thanh cong: $ver" -ForegroundColor Green }
-    else        { Write-Host "  [CANH BAO] Python chua san sang - co the can KHOI DONG LAI may." -ForegroundColor Yellow }
-  }
-
-  # Buoc 3: Nang cap pip va dam bao virtualenv co san (bot can tao .venv)
-  if ($pyOk) {
-    $pyExe = if (Get-Command py -ErrorAction SilentlyContinue) { "py" } else { "python" }
-    Write-Host "  Nang cap pip..." -ForegroundColor DarkGray
-    & $pyExe -m pip install --upgrade pip --quiet 2>&1 | Out-Null
-    Write-Host "  [OK] pip da san sang" -ForegroundColor Green
-  }
 
   Refresh-Path
 }
@@ -305,7 +244,7 @@ if (-not (Have "docker")) {
     }
   } else {
     Write-Host "  [CHUA SAN SANG] Docker moi cai thuong can REBOOT + mo Docker Desktop 1 lan." -ForegroundColor Yellow
-    Write-Host "  Sau khi reboot: chay lai file nay de build grading-base + tai model." -ForegroundColor Yellow
+    Write-Host "  Sau khi reboot: chay lai file nay de build grading-base." -ForegroundColor Yellow
   }
 }
 

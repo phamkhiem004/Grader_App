@@ -25,8 +25,8 @@ foreach ($p in $ports) {
     Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object {
       $pid2 = $_
       $pname = (Get-Process -Id $pid2 -ErrorAction SilentlyContinue).ProcessName
-      # Chi dung tien trinh CUA APP (java/python/node) - tranh giet Tomcat cua ban tren 8080.
-      if ($pname -and $pname -notmatch '^(java|javaw|python|python3|node)$') {
+      # Chi dung tien trinh CUA APP (java/node) - tranh giet Tomcat cua ban tren 8080.
+      if ($pname -and $pname -notmatch '^(java|javaw|node)$') {
         if ($p -eq 8080) { return }   # 8080 do Tomcat la giu -> bo qua
       }
       try { Stop-Process -Id $pid2 -Force; $stopped++; Write-Host "  Da dung service o cong $p ($pname, PID $pid2)" -ForegroundColor Yellow } catch {}
@@ -34,5 +34,5 @@ foreach ($p in $ports) {
 }
 
 Write-Host ""
-Write-Host "App da dung ($stopped tien trinh). MySQL/Ollama van chay." -ForegroundColor Green
+Write-Host "App da dung ($stopped tien trinh). MySQL van chay." -ForegroundColor Green
 Write-Host "Mo lai app: .\run" -ForegroundColor DarkGray

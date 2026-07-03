@@ -13,12 +13,12 @@ interface RubricPanelProps {
   rubrics: RubricItem[];
   scores: Record<string, number>;
   onScoreChange: (id: string, score: number) => void;
-  feedback: string;
-  onFeedbackChange: (val: string) => void;
+  note: string;
+  onNoteChange: (val: string) => void;
   totalScore?: number;
 }
 
-export default function RubricPanel({ rubrics, scores, onScoreChange, feedback, onFeedbackChange }: RubricPanelProps) {
+export default function RubricPanel({ rubrics, scores, onScoreChange, note, onNoteChange }: RubricPanelProps) {
   return (
     <div className="flex flex-col h-full bg-white relative">
       {/* Header */}
@@ -84,15 +84,15 @@ export default function RubricPanel({ rubrics, scores, onScoreChange, feedback, 
           })}
         </div>
 
-        {/* Feedback Section */}
+        {/* Note Section */}
         <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm mt-8">
           <div className="flex items-center gap-2 mb-3">
             <MessageSquare size={16} className="text-slate-400" />
             <h3 className="font-semibold text-slate-800 text-sm">Nhận xét chung</h3>
           </div>
           <textarea
-            value={feedback}
-            onChange={(e) => onFeedbackChange(e.target.value)}
+            value={note}
+            onChange={(e) => onNoteChange(e.target.value)}
             placeholder="Nhập nhận xét cho sinh viên..."
             className="w-full min-h-[120px] p-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-y text-slate-700 bg-slate-50"
           />

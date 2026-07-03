@@ -81,7 +81,6 @@ Backend chạy ở **http://localhost:8080**
 com.example.grader
 ├── controller/      # REST endpoints
 ├── service/         # Business logic
-│   └── ai/         # AI-related services
 ├── entity/         # JPA entities
 ├── repository/     # Data access (JPA)
 ├── dto/            # Data transfer objects
@@ -117,7 +116,7 @@ app/
 ├── page.jsx        # Dashboard chính
 ├── history/        # Trang lịch sử chấm
 ├── statistics/     # Trang thống kê
-├── teacher/        # Trang cấu hình (setup, kho đề, AI generator)
+├── teacher/        # Trang cấu hình (setup, kho đề, thư viện chấm)
 ├── api/            # Server components/actions
 └── components/     # Reusable UI components
 ```
@@ -153,7 +152,6 @@ npm run lint
    - Upload testcase
    - Chấm bài
    - Xem lịch sử & thống kê
-   - Tính năng AI (nếu có API key)
 
 ### Docker image
 Nếu sửa thứ gì trong `grader-base/`:
@@ -205,7 +203,6 @@ Closes #42
 - `batch-grading` — hàng đợi chấm
 - `exam-setup` — cấu hình đề
 - `statistics` — thống kê
-- `ai-generator` — tạo đề bằng AI
 - `frontend` — giao diện
 - `docker` — Docker setup
 - `docs` — tài liệu
@@ -222,23 +219,15 @@ git push origin feature/tên-tính-năng
 ## 🔐 Bước 6: Security & Secrets
 
 ### KHÔNG BẰNG HỌ:
-- ❌ Commit `grader/secret.properties` (chứa API keys)
 - ❌ Commit `.env` hoặc `.env.local` (chứa credentials)
 - ❌ Commit files trong `submissions/` hoặc `exams/` (dữ liệu cá nhân)
 - ❌ Commit IDE config (`.idea/`, `.vscode/`, `.codex/`)
 
 ### LÀM:
 - ✅ Cập nhật `.gitignore` khi thêm file config mới
-- ✅ Dùng file `.example` làm template
-- ✅ Hướng dẫn contributor copy `.example` → `.local` rồi dán key
+- ✅ Dùng file `.example` làm template nếu cần cấu hình local
+- ✅ Hướng dẫn contributor copy `.example` → `.local` nếu thêm config mới
 - ✅ Validate user input (xóa phần script, SQL injection)
-
-### API Keys & Credentials
-Nếu cần test với API key:
-1. Copy file mẫu (vd: `grader/secret.properties.example`)
-2. Tạo file local: `grader/secret.properties`
-3. Dán key của bạn vào file local
-4. File `.gitignore` đã exclude nó — không bị commit
 
 ---
 
@@ -295,16 +284,11 @@ src/main/java/com/example/grader/
 │   ├── BatchGradingController.java
 │   ├── ExamSetupController.java
 │   ├── ResultController.java
-│   ├── StatisticsController.java
-│   └── AiGeneratorController.java
+│   └── StatisticsController.java
 ├── service/
 │   ├── AuthService.java
 │   ├── BatchGradingService.java          # Hàng đợi + workers
-│   ├── GradingService.java               # Docker executor
-│   ├── AiGeneratorService.java
-│   └── ai/
-│       ├── LlmClient.java                # OpenAI/Gemini client
-│       └── CompileFixLoop.java
+│   └── GradingService.java               # Docker executor
 ├── entity/
 │   ├── Teacher.java
 │   ├── Exam.java

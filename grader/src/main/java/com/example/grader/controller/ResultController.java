@@ -17,9 +17,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-/**
- * Cung cấp JSON kết quả đầy đủ (student/exam/test_cases/analyze/teacher_note) cho AI đọc & nhận xét.
- */
+/** Cung cấp JSON kết quả đầy đủ cho lịch sử, năng lực và xuất dữ liệu. */
 @RestController
 @RequestMapping("/api/results")
 @CrossOrigin(origins = "*")

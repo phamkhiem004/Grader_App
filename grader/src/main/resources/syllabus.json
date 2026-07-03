@@ -30,7 +30,6 @@
     "weak": 0.4,
     "good": 0.7
   },
-  "_note_alignment": "Đồng bộ theo feedback-bot/data/skill_mapping.json (Mastering Flutter Ch.1-10), code IN HOA.",
   "categories": [
     {
       "code": "DART_FUNDAMENTALS",

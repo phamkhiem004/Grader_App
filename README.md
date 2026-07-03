@@ -1,36 +1,30 @@
 # 🎓 Grader App — Hệ thống chấm thi Flutter tự động
 
-Hệ thống chấm bài thi thực hành **Flutter/Dart** tự động trong môi trường **Docker cô lập**. Giáo viên upload hàng loạt bài nộp (file ZIP), hệ thống tự biên dịch, chạy testcase và trả về điểm + log chi tiết cho từng sinh viên. **AI feedback bot** (Ollama, nằm trong `feedback-bot/`) đọc kết quả chấm và viết lời nhận xét cho từng sinh viên.
+Hệ thống chấm bài thi thực hành **Flutter/Dart** tự động trong môi trường **Docker cô lập**. Giáo viên upload hàng loạt bài nộp (file ZIP), hệ thống tự biên dịch, chạy testcase và trả về điểm + log chi tiết cho từng sinh viên.
 
-> **Repo này là MỘT gói hoàn chỉnh**: backend (`grader/`) · frontend (`frontend/`) · AI feedback bot (`feedback-bot/`) · script chạy (`run.cmd`, `start-all.ps1`) · bộ cài (`installer/`). Clone 1 repo là đủ.
+> **Repo này là MỘT gói hoàn chỉnh**: backend (`grader/`) · frontend (`frontend/`) · script chạy (`run.cmd`, `start-all.ps1`) · bộ cài (`installer/`). Clone 1 repo là đủ.
 
 ---
 
 ## 🚀 Chạy nhanh — luồng cho người mới
 
 **Cấu hình cần biết khi clone về:**
-- Nhận xét AI local dùng model ghi trong **`bot-model.txt`** (mặc định `qwen3:14b`; máy không có GPU nên đổi sang `qwen2.5-coder:3b` cho nhanh).
-- Nếu muốn dùng **Tạo đề bằng AI** hoặc feedback qua OpenAI/Gemini, copy file mẫu `grader/secret.properties.example` thành `grader/secret.properties` rồi dán API key của bạn. File key thật này bị `.gitignore`, không lên GitHub.
+- Nếu muốn dùng **Tạo đề bằng AI**, copy file mẫu `grader/secret.properties.example` thành `grader/secret.properties` rồi dán API key của bạn. File key thật này bị `.gitignore`, không lên GitHub.
 
-### Cách A — máy đã có sẵn Docker + Node + Java + Python + Ollama
+### Cách A — máy đã có sẵn Docker + Node + Java
 ```powershell
-# 1) Cài model AI (1 lần)
-ollama pull qwen3:14b      # hoặc model nhỏ hơn ghi trong bot-model.txt
-ollama pull bge-m3         # model embedding cho RAG (bắt buộc)
-# 2) Chạy TẤT CẢ bằng 1 lệnh (mở terminal tại thư mục Grader_App)
-.\run                      # = run.cmd: bật MySQL + bot + backend + frontend
+# Chạy TẤT CẢ bằng 1 lệnh (mở terminal tại thư mục Grader_App)
+.\run                      # = run.cmd: bật MySQL + backend + frontend
 ```
 Mở **http://localhost:3000** → đăng nhập → dùng.
 
-### Cách B — máy TRỐNG (chưa có Docker/Node/Java/Python/Ollama)
-Sau khi **clone repo**, chạy **`grader-setup.cmd`** (tự xin quyền admin → winget cài Docker/Node/Java/Python/Ollama + tải model + build ảnh chấm `grading-base`). Xong → chạy **`GraderLauncher.exe`** hoặc **`.\run`** ngay trong repo. Chi tiết: [`installer/README-INSTALLER.md`](installer/README-INSTALLER.md).
+### Cách B — máy TRỐNG (chưa có Docker/Node/Java)
+Sau khi **clone repo**, chạy **`grader-setup.cmd`** (tự xin quyền admin → winget cài Docker/Node/Java + build ảnh chấm `grading-base`). Xong → chạy **`GraderLauncher.exe`** hoặc **`.\run`** ngay trong repo. Chi tiết: [`installer/README-INSTALLER.md`](installer/README-INSTALLER.md).
 
-### Luồng sử dụng đầy đủ (chấm → nhận xét)
+### Luồng sử dụng chính
 1. **Cấu hình Đề thi** → upload ZIP testcase (`exam_test.dart`, `grader.dart`, `skills_matrix.json`).
-2. **Chấm bài (Batch)** → nhập mã đề + kéo thả ZIP bài nộp (`MaSV_HoTen.zip`) → chấm.
-3. **Nhận xét AI** (sidebar) → nhập mã đề → bấm **“Đọc & nhận xét bài làm”** → AI viết nhận xét từng SV → **Tải Excel (.xls)**.
-
-> ⏱️ **Tốc độ AI**: trên máy CPU‑only, `qwen3:14b` rất chậm (>300s/bài, dễ rơi về nhận xét mẫu). Đã kiểm thử `qwen2.5-coder:3b` cho nhận xét AI thật (~270s/bài). Không có GPU → đổi `bot-model.txt` sang model nhỏ.
+2. **Chấm bài (Batch)** → nhập mã đề + kéo thả ZIP bài nộp (`MaSV_HoTen.zip`) → chấm và xem kết quả.
+3. **Tạo đề bằng AI** (tùy chọn) → nhập yêu cầu → AI sinh testcase tự động.
 
 ### Các file bị `.gitignore` có làm clone về không chạy được không?
 
@@ -39,7 +33,7 @@ Không. Những file bị ignore là dữ liệu phát sinh ở từng máy ho�
 | File/thư mục bị ignore | Lý do không commit | Cách tạo lại sau khi clone |
 |---|---|---|
 | `grader/secret.properties` | Chứa API key OpenAI/Gemini thật | Copy từ `grader/secret.properties.example`, rồi dán key |
-| `feedback-bot/.env` | Cấu hình provider/model feedback theo máy, có thể chứa `OPENAI_API_KEY` thật | `.\run` / `start-all.ps1` tự ghi; chạy bot thủ công thì copy từ `feedback-bot/.env.example` |
+
 | `frontend/.env.local` | URL backend theo cổng máy local | `.\run` / `start-all.ps1` tự ghi; chạy tay thì copy từ `frontend/.env.example` |
 | `exams/` | Testcase giáo viên upload khi dùng app | Tự sinh khi cấu hình đề trên UI |
 | `submissions/` | ZIP bài nộp sinh viên, dữ liệu nhạy cảm | Tự sinh khi chấm batch |
@@ -183,21 +177,6 @@ tính năng tắt (trang báo *"Chưa cắm API key"*), mọi phần khác vẫn
 
 **Mỗi người clone/pull code về** chỉ cần lặp lại Bước 5 (copy `.example` → dán key của mình → chạy) —
 không ai thấy key của ai vì `secret.properties` không nằm trong git.
-
-### Dùng OpenAI cho feedback bot thay vì Ollama local
-
-Mặc định feedback bot chạy Ollama local. Nếu muốn nhận xét nhanh hơn bằng OpenAI:
-
-1. Điền `grader.ai.openai.api-key` trong `grader/secret.properties`.
-2. Sửa dòng model trong `bot-model.txt` thành dạng:
-
-```text
-openai:gpt-4o-mini
-```
-
-3. Chạy lại `.\run`.
-
-`start-all.ps1` sẽ đọc key từ `grader/secret.properties` và tự ghi `feedback-bot/.env`. Không cần commit `.env`.
 
 ---
 

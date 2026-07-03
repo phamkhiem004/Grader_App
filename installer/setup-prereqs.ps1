@@ -3,9 +3,8 @@
   Inno Setup goi file nay khi cai (co quyen admin). Cung co the chay lai bang tay sau khi reboot.
 
   Lam gi:
-    1) Dung winget cai (neu thieu): Docker Desktop, Node.js LTS, Temurin JDK 17, Python 3, Ollama.
-    2) Tai model Ollama: qwen3:14b (feedback) + bge-m3 (embedding RAG).
-    3) Neu Docker da san sang -> build anh nen cham bai 'grading-base'.
+    1) Dung winget cai (neu thieu): Docker Desktop, Node.js LTS, Temurin JDK 17.
+    2) Neu Docker da san sang -> build anh nen cham bai 'grading-base'.
 
   Cach chay tay:
     powershell -ExecutionPolicy Bypass -File .\setup-prereqs.ps1
@@ -13,8 +12,6 @@
 
 param(
   [string]$AppDir        = (Split-Path $PSScriptRoot -Parent),  # thu muc cai = goc Grader_App
-  [string]$Model         = "",                                  # rong = doc tu bot-model.txt
-  [string]$Embed         = "bge-m3",
   [string]$DockerDataRoot = "",                                 # rong = dung mac dinh Docker (C:\ProgramData\docker)
   [switch]$SkipModels
 )
@@ -22,15 +19,6 @@ param(
 $ErrorActionPreference = "Continue"
 $script:CriticalSetupFailed = $false
 
-# Model: uu tien -Model; rong thi doc bot-model.txt; cuoi cung mac dinh qwen3:14b
-if (-not $Model) {
-  $mf = Join-Path $AppDir "bot-model.txt"
-  if (Test-Path $mf) {
-    $Model = (Get-Content $mf | Where-Object { $_ -and -not $_.TrimStart().StartsWith('#') } | Select-Object -First 1)
-    if ($Model) { $Model = $Model.Trim() }
-  }
-  if (-not $Model) { $Model = "qwen3:14b" }
-}
 function Have($c) { return [bool](Get-Command $c -ErrorAction SilentlyContinue) }
 function Section($t) { Write-Host "`n==== $t ====" -ForegroundColor Cyan }
 function Refresh-Path {
@@ -144,7 +132,6 @@ if (-not (Have "winget")) {
   }
   Ensure-Tool "node"   "OpenJS.NodeJS.LTS"               "Node.js LTS"
   Ensure-Jdk17
-  Ensure-Tool "ollama" "Ollama.Ollama"                   "Ollama" $false
   Ensure-Tool "docker" "Docker.DockerDesktop"             "Docker Desktop"
 
   # -- Python: xu ly rieng vi Windows Store stub co the chan lenh 'python' ----
@@ -277,21 +264,7 @@ if ($DockerDataRoot -and $DockerDataRoot -ne "") {
   }
 }
 
-# -- 2) Tai model Ollama -------------------------------------------------------
-if (-not $SkipModels -and (Have "ollama")) {
-  Section "Tai model Ollama ($Model + $Embed)"
-  try { Invoke-RestMethod "http://localhost:11434/api/tags" -TimeoutSec 3 | Out-Null }
-  catch { Start-Process "ollama" -ArgumentList "serve" -WindowStyle Minimized; Start-Sleep 3 }
-  $have = (& ollama list) 2>$null | Out-String
-  foreach ($m in @($Model, $Embed)) {
-    if ($have -match [regex]::Escape($m)) { Write-Host "  [OK] $m da co" -ForegroundColor Green }
-    else { Write-Host "  Pull $m (lan dau co the lau, ~vai GB)..." -ForegroundColor Yellow; & ollama pull $m }
-  }
-} elseif (-not (Have "ollama")) {
-  Write-Host "  [BO QUA] Ollama chua san sang -> tai model sau (chay lai file nay)." -ForegroundColor Yellow
-}
-
-# -- 3) Anh nen cham bai 'grading-base' (can Docker engine chay) ---------------
+# -- 2) Anh nen cham bai 'grading-base' (can Docker engine chay) ---------------
 Section "Anh nen cham bai (grading-base)"
 if (-not (Have "docker")) {
   Write-Host "  [BO QUA] Chua co docker." -ForegroundColor Yellow

@@ -1,13 +1,13 @@
 ﻿<#
-  stop-all.ps1 - DUNG app: bot(:8000) + backend(:8080) + frontend(:3000) va dong cac cua so service.
-  MySQL/Ollama (ha tang) van de chay cho lan mo sau nhanh. Mo lai app: .\run
+  stop-all.ps1 - DUNG app: backend(:8080) + frontend(:3000) va dong cac cua so service.
+  MySQL (ha tang) van de chay cho lan mo sau nhanh. Mo lai app: .\run
   Dung: .\stop   (hoac .\pause)
 #>
 $ErrorActionPreference = "Continue"
 $stopped = 0
 
 # 1) Dong cac cua so PowerShell dang chay service (nhan dien theo dong lenh)
-$markers = @('uvicorn app.main', 'spring-boot:run', 'npm run dev', 'ingest_rag', 'mvnw.cmd')
+$markers = @('spring-boot:run', 'npm run dev', 'mvnw.cmd')
 try {
   Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue | ForEach-Object {
     $cl = $_.CommandLine
@@ -19,7 +19,7 @@ try {
 
 # 2) Kill tien trinh dang giu cong service (chac chan dung han).
 #    Backend co the TU DOI cong (8080 ban do Tomcat -> 8081/8082...), nen quet ca dai 8080-8090.
-$ports = @(8000, 3000) + (8080..8090)
+$ports = @(3000) + (8080..8090)
 foreach ($p in $ports) {
   Get-NetTCPConnection -LocalPort $p -State Listen -ErrorAction SilentlyContinue |
     Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object {

@@ -13,8 +13,7 @@ grader-setup.cmd
 
 Nó tự **xin quyền admin (UAC)** rồi gọi `installer\setup-prereqs.ps1`:
 
-- Dùng **winget** cài (nếu thiếu): Docker Desktop, Node.js LTS, Temurin JDK 17, Python 3, Ollama.
-- Tải model Ollama: model ghi trong `bot-model.txt` (mặc định `qwen3:14b`) + `bge-m3` (embedding RAG).
+- Dùng **winget** cài (nếu thiếu): Docker Desktop, Node.js LTS, Temurin JDK 17.
 - Nếu Docker đã sẵn sàng → build ảnh nền chấm bài `grading-base` (Flutter SDK, lần đầu rất lâu).
 
 > **Vừa cài Docker lần đầu?** Docker Desktop thường cần **khởi động lại máy** + mở Docker Desktop 1 lần.

@@ -16,5 +16,3 @@ grader:
   workers:
     enabled: false
 
-feedback:
-  bot-data-dir: target/nonexistent-feedback-bot-data

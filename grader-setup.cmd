@@ -1,8 +1,9 @@
 @echo off
 REM ============================================================================
-REM  grader-setup.cmd - CHI cai cac THANH PHAN NEN (Docker / Node / Java /
-REM  Python / Ollama + model AI + anh nen cham bai grading-base) NGAY TAI repo
-REM  nay. KHONG tao ban sao repo. Cai xong thi chay GraderLauncher.exe de mo app.
+REM  grader-setup.cmd - CHI cai thanh phan nen hien tai:
+REM  Docker Desktop / Node.js LTS / Java JDK 17+ / anh nen cham bai grading-base.
+REM  KHONG cai thanh phan nao khac. KHONG tao ban sao repo.
+REM  Cai xong thi chay GraderLauncher.exe de mo backend + frontend.
 REM
 REM  Cach dung:
 REM    - Double-click file nay, HOAC go  grader-setup  trong terminal tai repo.
@@ -20,7 +21,7 @@ if errorlevel 1 (
   exit /b
 )
 
-REM ── CHON O CAI DAT DOCKER DATA (images/containers/volumes) ──────────────────
+REM -- CHON O CAI DAT DOCKER DATA (images/containers/volumes) -----------------
 echo.
 echo ============================================================
 echo   CHON O DIA LUU DATA DOCKER
@@ -54,16 +55,25 @@ echo   => Docker data se luu tai: !DOCKER_DATA_ROOT!
 echo.
 
 REM 2) Cai prereqs NGAY TAI repo nay (-AppDir = thu muc chua file nay).
-echo === Cai thanh phan nen (lan dau co the RAT lau: tai Docker/JDK/Node + model AI) ===
+echo === Cai thanh phan nen (lan dau co the RAT lau: tai Docker/JDK/Node + build grading-base) ===
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0installer\setup-prereqs.ps1" -AppDir "%~dp0." -DockerDataRoot "!DOCKER_DATA_ROOT!"
+if errorlevel 1 (
+  echo.
+  echo [LOI] Setup chua hoan tat. Hay xem loi/canh bao phia tren, sua theo huong dan roi chay lai grader-setup.
+  echo      Neu vua cai Docker lan dau: khoi dong lai may, mo Docker Desktop 1 lan, roi chay lai file nay.
+  echo.
+  pause
+  exit /b 1
+)
 
 echo.
 echo [OK] Xong buoc cai thanh phan nen.
 echo   - Docker data root: !DOCKER_DATA_ROOT!
 echo   - Neu VUA cai Docker lan dau: khoi dong lai may, mo Docker Desktop 1 lan,
-echo     roi chay lai  grader-setup  (de build anh grading-base + tai model con thieu).
-echo   - Chay app: double-click  GraderLauncher.exe  (cung thu muc nay) hoac go  run
-echo     trong terminal. Sau do mo  http://localhost:3000
+echo     roi chay lai  grader-setup  (de build anh grading-base).
+echo   - Chay app: double-click  GraderLauncher.exe  hoac go  run
+echo     trong terminal. Launcher chi mo backend va frontend.
+echo   - Sau do mo  http://localhost:3000
 echo.
 pause
 endlocal

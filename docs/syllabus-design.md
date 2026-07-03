@@ -38,7 +38,7 @@ Một testcase được mô tả bằng **2 trục độc lập**:
 > 3 category sau là phần mở rộng cho đề nâng cao — có sẵn để không phải sửa lược đồ sau này.
 
 ### Vì sao 2 tầng (Category → Skill)?
-- **Testcase** map tới **skill chi tiết** (mịn) → AI nhận xét chính xác "yếu đúng phần nào".
+- **Testcase** map tới **skill chi tiết** (mịn) → hệ thống chỉ ra chính xác "yếu đúng phần nào".
 - **Đánh giá năng lực** roll-up lên **category** (thô) → bảng tổng quan dễ đọc cho SV/GV.
 
 Toàn bộ ~22 skill chi tiết nằm trong [`syllabus.json`](./syllabus.json) (mảng `skills`).
@@ -85,8 +85,8 @@ ratio ≥ 0.70            → TỐT
 
 Ngưỡng lấy từ `level_thresholds_default` trong `syllabus.json` (có thể override theo category).
 
-### Tinh chỉnh theo độ khó (khuyến nghị — chỉ dùng cho NHẬN XÉT, không đổi điểm)
-Tách thêm thống kê `pass/total` theo từng difficulty trong category để AI nói có chiều sâu:
+### Tinh chỉnh theo độ khó (khuyến nghị — chỉ dùng cho diễn giải, không đổi điểm)
+Tách thêm thống kê `pass/total` theo từng difficulty trong category để phần năng lực có chiều sâu:
 - Fail ở `basic` → "hổng kiến thức nền tảng" (báo động).
 - Pass basic, fail `advanced` → "nắm cơ bản, cần luyện nâng cao" (bình thường).
 
@@ -107,7 +107,7 @@ Tách thêm thống kê `pass/total` theo từng difficulty trong category để
     "level": "TỐT",
     "by_difficulty": { "basic": "2/2", "intermediate": "1/1", "advanced": "0/1" },
     "weak_skills": ["DART_LOGIC"],
-    "comment": "<AI điền>"
+    "comment": "Sinh viên đang yếu ở testcase nâng cao."
   },
   {
     "category": "VALIDATION",
@@ -118,7 +118,7 @@ Tách thêm thống kê `pass/total` theo từng difficulty trong category để
     "level": "YẾU",
     "by_difficulty": { "basic": "1/2", "intermediate": "0/1" },
     "weak_skills": ["VAL_INPUT", "VAL_BUSINESS"],
-    "comment": "<AI điền>"
+    "comment": "Cần luyện thêm validate input và rule nghiệp vụ."
   }
 ]
 ```
@@ -209,7 +209,7 @@ CREATE TABLE syllabus_meta (
 
 | Method | Endpoint | Vai trò | Mô tả |
 |---|---|---|---|
-| `GET` | `/api/syllabus` | mọi GV | Trả cả cây: categories + skills (cho ra đề & nhận xét) |
+| `GET` | `/api/syllabus` | mọi GV | Trả cả cây: categories + skills (cho ra đề & đánh giá năng lực) |
 | `GET` | `/api/syllabus/categories` | mọi GV | Danh sách category |
 | `POST` | `/api/syllabus/categories` | ADMIN | Thêm category mới |
 | `PUT` | `/api/syllabus/categories/{code}` | ADMIN | Sửa tên/mô tả/ngưỡng (KHÔNG cho đổi `code`) |
@@ -246,10 +246,10 @@ việc thay đổi syllabus **không đụng** tới các category năng lực c
 
 ## 8. Lộ trình triển khai gợi ý
 
-1. **GĐ1a** — Bổ sung `skill_code` + `difficulty` vào `skills_matrix.json` các đề (sửa tay / qua prompt mới).
+1. **GĐ1a** — Bổ sung `skill_code` + `difficulty` vào `skills_matrix.json` các đề.
 2. **GĐ1b** — `grader.dart` pass-through 2 field mới vào `test_cases[]`.
 3. **GĐ1c** — Backend: tính `competency_assessment[]` lúc lưu kết quả + load `syllabus.json` từ resources + validate lúc upload đề.
 4. **GĐ1d** — Frontend: hiện bảng năng lực theo category (TỐT/TB/YẾU) + nút xuất JSON kèm `competency_assessment`.
 5. **GĐ2** — DB + CRUD + UI quản lý syllabus cho GV (chỉ làm khi cần self-service).
 
-Prompt cập nhật (ra đề & AI nhận xét) ở [`prompt-nang-luc.md`](./prompt-nang-luc.md).
+Khi tạo testcase thủ công, đối chiếu trực tiếp với `syllabus.json` để chọn đúng `skill_code`.

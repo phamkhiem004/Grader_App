@@ -5,11 +5,11 @@ import { createPortal } from "react-dom";
 import SidebarLayout from "@/components/layout/SidebarLayout";
 import { API_BASE, PASS_THRESHOLD } from "@/lib/config";
 import { getToken } from "@/lib/auth";
-import { Skeleton, SkeletonRow } from "@/components/ui/Skeleton";
+import { Skeleton } from "@/components/ui/Skeleton";
 import { Tooltip } from "@/components/ui/Tooltip";
 import CompetencyPanel, { CompetencyItem } from "@/components/grading/CompetencyPanel";
 import {
-  History, FileJson, DownloadCloud, Search, ChevronRight,
+  FileJson, DownloadCloud, Search, ChevronRight,
   CheckCircle, AlertCircle, Clock, Users, FileText, FileArchive,
   BarChart3, X, Loader2, FileCode2, RotateCcw,
 } from "lucide-react";
@@ -345,7 +345,7 @@ export default function HistoryPage() {
     }
   };
 
-  // Tải JSON GỘP toàn bộ bài đã chấm xong của đề (cho AI đọc / lưu trữ)
+  // Tải JSON GỘP toàn bộ bài đã chấm xong của đề để lưu trữ/đối chiếu.
   const downloadAllJson = async () => {
     if (!selected) return;
     try {
@@ -466,7 +466,7 @@ export default function HistoryPage() {
                 <button
                   onClick={downloadAllJson}
                   disabled={!rows.some((r) => r.hasJson)}
-                  title="Tải JSON gộp toàn bộ bài đã chấm của đề (cho AI nhận xét)"
+                  title="Tải JSON gộp toàn bộ bài đã chấm của đề"
                   className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 shadow-sm transition-all hover:text-slate-900 hover:shadow active:scale-95 disabled:opacity-50"
                 >
                   <FileArchive size={15} /> JSON

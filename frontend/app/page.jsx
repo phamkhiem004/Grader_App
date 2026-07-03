@@ -2,7 +2,6 @@
 
 import { useState, useRef, useCallback, useEffect } from "react";
 import SidebarLayout from "@/components/layout/SidebarLayout";
-import { useAuth } from "@/components/auth/AuthProvider";
 import { API_BASE, PASS_THRESHOLD } from "@/lib/config";
 import { getToken } from "@/lib/auth";
 
@@ -11,7 +10,6 @@ const ACTIVE_BATCH_KEY = "grader_active_batch";
 import { UploadCloud, Play, FileArchive, X, CheckCircle, Clock, AlertCircle, DownloadCloud, Loader2, CheckSquare, BarChart2, Users, TrendingUp, FileJson } from "lucide-react";
 
 export default function DashboardPage() {
-  const { teacher } = useAuth();
   const [examId, setExamId] = useState("");
   const [files, setFiles] = useState([]);
   const [dragging, setDragging] = useState(false);
@@ -28,7 +26,7 @@ export default function DashboardPage() {
   // muốn xem lại kết quả thì vào trang Lịch sử.
   useEffect(() => {
     let saved = null;
-    try { saved = JSON.parse(localStorage.getItem(ACTIVE_BATCH_KEY) || "null"); } catch (_) {}
+    try { saved = JSON.parse(localStorage.getItem(ACTIVE_BATCH_KEY) || "null"); } catch {}
     if (!saved?.batchId) return;
 
     fetch(`${API_BASE}/batch/progress/${saved.batchId}`)
@@ -37,7 +35,7 @@ export default function DashboardPage() {
         const pending = (data?.queued || 0) + (data?.grading || 0);
         // Lỗi đọc tiến độ / batch rỗng-đã xóa / đã chấm xong → bỏ phiên lưu, giữ nguyên trang nhập mới.
         if (!data || data.total == null || pending === 0) {
-          try { localStorage.removeItem(ACTIVE_BATCH_KEY); } catch (_) {}
+          try { localStorage.removeItem(ACTIVE_BATCH_KEY); } catch {}
           return;
         }
         // Còn bài đang/chờ chấm → khôi phục để theo dõi tiếp tiến độ.
@@ -49,7 +47,6 @@ export default function DashboardPage() {
         startPolling(saved.batchId);
       })
       .catch(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Dọn interval khi rời trang (tránh setState trên component đã unmount)
@@ -102,7 +99,6 @@ export default function DashboardPage() {
 
     const form = new FormData();
     form.append("examId", examId.trim());
-    if (teacher?.email) form.append("createdBy", teacher.email);   // gắn GV đang đăng nhập
     files.forEach(f => form.append("files", f));
 
     try {
@@ -199,7 +195,7 @@ export default function DashboardPage() {
     a.click();
   };
 
-  // Tải JSON đầy đủ của cả batch (cho AI đọc & nhận xét)
+  // Tải JSON đầy đủ của cả batch để lưu trữ/đối chiếu.
   const downloadResultsJson = async () => {
     if (!batchId) return;
     try {
@@ -440,8 +436,8 @@ export default function DashboardPage() {
                   <h3 className="text-sm font-bold uppercase tracking-wider text-slate-700">Chi tiết kết quả</h3>
                   {phase === "done" && (
                     <div className="flex items-center gap-2">
-                      <button onClick={downloadResultsJson} title="Tải JSON đầy đủ để đưa cho AI nhận xét" className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 shadow-sm transition-all hover:text-slate-900 hover:shadow active:scale-95">
-                        <FileJson size={16} /> JSON (AI)
+                      <button onClick={downloadResultsJson} title="Tải JSON kết quả đầy đủ" className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 shadow-sm transition-all hover:text-slate-900 hover:shadow active:scale-95">
+                        <FileJson size={16} /> JSON
                       </button>
                       <button onClick={downloadCSV} className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 shadow-sm transition-all hover:text-slate-900 hover:shadow active:scale-95">
                         <DownloadCloud size={16} /> Xuất CSV

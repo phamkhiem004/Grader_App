@@ -13,9 +13,8 @@ import org.springframework.web.filter.OncePerRequestFilter;
 import java.io.IOException;
 
 /**
- * Bảo vệ tối thiểu cho API: yêu cầu TOKEN hợp lệ với MỌI thao tác GHI (POST/PUT/DELETE/PATCH)
- * dưới {@code /api/**} (trừ {@code /api/auth/*}) và với việc đọc MÃ NGUỒN bài nộp của SV.
- * Các API CHỈ ĐỌC khác (danh sách đề, tiến độ, thống kê, lịch sử) vẫn mở để dashboard hoạt động.
+ * Bảo vệ tối thiểu cho API: yêu cầu TOKEN hợp lệ với mọi route dưới {@code /api/**}
+ * (trừ {@code /api/auth/*}). Frontend tự gắn Bearer token cho cả GET và POST.
  *
  * Token lấy từ header {@code Authorization: Bearer <token>}. Sai/thiếu → 401 JSON.
  * (Đây là lớp chặn tấn công ẩn danh; chưa phải phân quyền RBAC đầy đủ.)
@@ -36,16 +35,15 @@ public class AuthFilter extends OncePerRequestFilter {
         boolean isApi       = path.startsWith("/api/");
         boolean isAuth      = path.startsWith("/api/auth/");
         boolean isPreflight = "OPTIONS".equalsIgnoreCase(method);
-        boolean isWrite     = !("GET".equalsIgnoreCase(method) || "HEAD".equalsIgnoreCase(method));
-        boolean readsSource = path.startsWith("/api/batch/submission/");   // mã nguồn bài nộp SV
-
-        boolean needsAuth = isApi && !isAuth && !isPreflight && (isWrite || readsSource);
+        boolean needsAuth = isApi && !isAuth && !isPreflight;
         if (!needsAuth) { chain.doFilter(req, res); return; }
 
         String h = req.getHeader("Authorization");
         String token = (h != null && h.startsWith("Bearer ")) ? h.substring(7).trim() : null;
         try {
-            authService.me(token);                 // ném nếu thiếu/sai/hết hạn
+            var teacher = authService.authenticate(token);    // ném nếu thiếu/sai/hết hạn
+            req.setAttribute("teacherEmail", teacher.getEmail());
+            req.setAttribute("teacherRole", teacher.getRole());
             chain.doFilter(req, res);
         } catch (Exception e) {
             res.setStatus(HttpServletResponse.SC_UNAUTHORIZED);

@@ -68,7 +68,19 @@ public class AuthService {
 
     // ── Lấy hồ sơ GV đang đăng nhập từ token ─────────────────────
     public TeacherProfile me(String token) {
-        return toProfile(resolve(token));
+        return toProfile(authenticate(token));
+    }
+
+    /**
+     * Xác thực token và trả về entity giáo viên, không tính lại các số liệu hồ sơ.
+     * Dùng cho filter/endpoint cần kiểm tra phiên với chi phí thấp.
+     */
+    public Teacher authenticate(String token) {
+        return resolve(token);
+    }
+
+    public String emailFromBearer(String authz) {
+        return authenticate(extractBearer(authz)).getEmail();
     }
 
     // ── Đổi tên hiển thị ─────────────────────────────────────────
@@ -132,6 +144,11 @@ public class AuthService {
 
     private String normalizeEmail(String email) {
         return email == null ? "" : email.trim().toLowerCase();
+    }
+
+    public String extractBearer(String authz) {
+        if (authz != null && authz.startsWith("Bearer ")) return authz.substring(7).trim();
+        return null;
     }
 
     // ── Seed tài khoản mẫu khi khởi động (mật khẩu băm tại runtime) ──

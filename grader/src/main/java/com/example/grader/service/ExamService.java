@@ -267,7 +267,7 @@ public class ExamService {
      * (testcase đã lưu xong) — chỉ log cảnh báo.
      *   <exams>/<examId>/handout/de_bai.md
      *   <exams>/<examId>/handout/starter/<lib/...>
-     *   <exams>/<examId>/handout/solution/<lib/...>   (lời giải mẫu AI sinh — để GV tải về tham khảo)
+     *   <exams>/<examId>/handout/solution/<lib/...>   (lời giải mẫu để GV tải về tham khảo)
      */
     public void saveHandout(String examId, String deBai, List<Map<String, String>> starter,
                             List<Map<String, String>> solution) {
@@ -337,7 +337,7 @@ public class ExamService {
         return zipHandoutSubdir(examId, "starter");
     }
 
-    /** ZIP lời giải mẫu (handout/solution/<lib/…>) do AI sinh — để GV tải về tham khảo; null nếu đề chưa có. */
+    /** ZIP lời giải mẫu (handout/solution/<lib/…>) để GV tải về tham khảo; null nếu đề chưa có. */
     public byte[] zipSolution(String examId) throws Exception {
         return zipHandoutSubdir(examId, "solution");
     }
@@ -373,10 +373,7 @@ public class ExamService {
         return setupExamFromZipBytes(examId, examName, teacherNote, testcaseZip.getBytes());
     }
 
-    /**
-     * Như {@link #setupExam} nhưng nhận thẳng BYTES của file zip — để bộ sinh đề bằng AI lưu
-     * artifacts (đóng gói 3 file trong bộ nhớ) qua đúng pipeline validate hiện có.
-     */
+    /** Như {@link #setupExam} nhưng nhận thẳng bytes của file zip để tái dùng pipeline validate hiện có. */
     public ExamSetupResponse setupExamFromZipBytes(String examId, String examName,
                                                    String teacherNote, byte[] zipBytes) throws Exception {
         safeId(examId, "đề");                 // chặn path traversal khi tạo exams/<examId>/testcase

@@ -25,9 +25,18 @@ submissions/
 .DS_Store
 Thumbs.db
 
+# ── Local AI/coding-agent config ─────────────────────────────────
+# Thường chứa quyền chạy lệnh, đường dẫn máy cá nhân, hoặc ghi chú cục bộ.
+.claude/
+.codex/
+.agents/
+
 # ── Logs / tạm ──────────────────────────────────────────────────
 *.log
 *.tmp
+_tmp*/
+.pytest_cache/
+__pycache__/
 # Thư mục output thử nghiệm của bộ sinh đề AI (cục bộ)
 grader/ai-test-output/
 grader/ai-zip-test/
@@ -46,3 +55,22 @@ secret.properties
 **/config/application.properties
 .env
 .env.local
+.env.*
+**/.env
+**/.env.*
+!.env.example
+!**/.env.example
+
+# Chứng chỉ/private key cục bộ
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+
+# Database/cache cục bộ
+*.db
+*.sqlite
+*.sqlite3
+mysql/data/
+mysql_data/

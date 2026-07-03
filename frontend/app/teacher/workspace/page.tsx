@@ -2,14 +2,13 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import SidebarLayout from "@/components/layout/SidebarLayout";
-import { useAuth } from "@/components/auth/AuthProvider";
 import { API_BASE, PASS_THRESHOLD } from "@/lib/config";
 import { getToken } from "@/lib/auth";
 import { Skeleton, SkeletonRow } from "@/components/ui/Skeleton";
 import { Tooltip } from "@/components/ui/Tooltip";
 import {
   FileCode2, ClipboardCheck, Save, Loader2, CheckCircle2, AlertCircle, XCircle,
-  Users, FileText, Award, RotateCcw,
+  Users, Award, RotateCcw,
 } from "lucide-react";
 
 interface ExamOption { examId: string; examName: string; }
@@ -32,8 +31,6 @@ interface CodeFile { name: string; content: string; }
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
 export default function WorkspacePage() {
-  const { teacher } = useAuth();
-
   const [exams, setExams] = useState<ExamOption[]>([]);
   const [examId, setExamId] = useState<string>("");
   const [students, setStudents] = useState<StudentRow[]>([]);

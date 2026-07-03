@@ -1,5 +1,6 @@
 package com.example.grader.controller;
 
+import com.example.grader.dto.ExamHistoryRow;
 import com.example.grader.entity.ExamResult;
 import com.example.grader.repository.ExamResultRepository;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -16,9 +17,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-/**
- * Cung cấp JSON kết quả đầy đủ (student/exam/test_cases/analyze/teacher_note) cho AI đọc & nhận xét.
- */
+/** Cung cấp JSON kết quả đầy đủ cho lịch sử, năng lực và xuất dữ liệu. */
 @RestController
 @RequestMapping("/api/results")
 @CrossOrigin(origins = "*")
@@ -106,21 +105,21 @@ public class ResultController {
     /** Lịch sử chấm theo ĐỀ: danh sách bài đã chấm (gọn nhẹ, KHÔNG kèm result_json lớn). */
     @GetMapping("/exam/{examId}")
     public ResponseEntity<?> getExamHistory(@PathVariable String examId) {
-        List<ExamResult> rows = resultRepo.findByExamIdAndModeOrderByUpdatedAtDesc(examId, "submit");
+        List<ExamHistoryRow> rows = resultRepo.findHistoryRowsByExamIdAndMode(examId, "submit");
         List<Map<String, Object>> out = new ArrayList<>();
-        for (ExamResult r : rows) {
+        for (ExamHistoryRow r : rows) {
             Map<String, Object> m = new LinkedHashMap<>();
-            m.put("id", r.getId());
-            m.put("studentId", r.getStudentId());
-            m.put("studentName", r.getStudentName());
-            m.put("score", r.getScore());
-            m.put("manualScore", r.getManualScore());
-            m.put("status", r.getStatus());
-            m.put("batchId", r.getBatchId());
-            m.put("updatedAt", r.getUpdatedAt());
-            m.put("details", r.getDetails());     // JSON gọn của grader: soTestPass / tongSoTest
-            m.put("errorLog", r.getErrorLog());
-            m.put("hasJson", r.getResultJson() != null && !r.getResultJson().isBlank());
+            m.put("id", r.id());
+            m.put("studentId", r.studentId());
+            m.put("studentName", r.studentName());
+            m.put("score", r.score());
+            m.put("manualScore", r.manualScore());
+            m.put("status", r.status());
+            m.put("batchId", r.batchId());
+            m.put("updatedAt", r.updatedAt());
+            m.put("details", r.details());     // JSON gon cua grader: soTestPass / tongSoTest
+            m.put("errorLog", r.errorLog());
+            m.put("hasJson", Boolean.TRUE.equals(r.hasJson()));
             out.add(m);
         }
         return ResponseEntity.ok(out);

@@ -8,7 +8,7 @@ import {
   Line, Area, PieChart, Pie, Cell, ComposedChart
 } from 'recharts';
 import {
-  TrendingUp, Users, Target, Award, RefreshCw, Filter, AlertCircle, Loader2, BarChart2,
+  TrendingUp, Users, Target, Award, RefreshCw, Filter, AlertCircle, BarChart2,
   CheckCircle2, Clock, XCircle
 } from 'lucide-react';
 

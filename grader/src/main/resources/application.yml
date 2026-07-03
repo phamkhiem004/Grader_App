@@ -13,10 +13,8 @@ spring:
   jpa:
     hibernate:
       ddl-auto: update
+    open-in-view: false
     show-sql: false
-    properties:
-      hibernate:
-        dialect: org.hibernate.dialect.MySQLDialect
 
   servlet:
     multipart:
@@ -50,3 +48,6 @@ grader:
   run:
     cpus: ${GRADER_RUN_CPUS:2.0}
     memory: ${GRADER_RUN_MEMORY:2048m}
+  analyze:
+    # Mặc định bật để giữ cảnh báo dart analyze trong JSON kết quả.
+    enabled: ${GRADER_ANALYZE_LIB:true}

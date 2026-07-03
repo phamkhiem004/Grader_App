@@ -25,7 +25,7 @@ public class CompetencyService {
     @Autowired private SyllabusService syllabusService;
 
     private static final String[] DIFFS = {"basic", "intermediate", "advanced"};
-    /** Nhãn độ khó đọc-được (cho JSON + AI nhận xét). Khớp difficulty_levels.label trong syllabus.json. */
+    /** Nhãn độ khó đọc-được trong JSON kết quả. Khớp difficulty_levels.label trong syllabus.json. */
     private static final Map<String, String> DIFF_LABEL = Map.of(
             "basic", "Cơ bản", "intermediate", "Trung bình", "advanced", "Nâng cao");
 

@@ -49,32 +49,29 @@ public class StatisticsService {
     // ── Tổng hợp số liệu ────────────────────────────────────────
     public StatisticsResponse getStatistics(String examId) {
         boolean all = examId == null || examId.isBlank() || examId.equalsIgnoreCase("ALL");
-        List<ResultStat> results = all ? resultRepo.findAllStats() : resultRepo.findStatsByExamId(examId);
+        String filterExam = all ? null : examId;
+        Object[] totals = unwrapRow(resultRepo.aggregateStats(
+                filterExam,
+                GradingStatus.DONE,
+                GradingStatus.ERROR,
+                GradingStatus.QUEUED,
+                GradingStatus.GRADING,
+                passThreshold
+        ));
 
-        // Chỉ tính bài NỘP CHÍNH THỨC (mode submit), bỏ các lần chạy thử (mode test) → số liệu chính xác
-        results = results.stream()
-                .filter(r -> r.getMode() == null || "submit".equalsIgnoreCase(r.getMode()))
-                .toList();
+        long submissions = asLong(totals, 0);              // số lượt chấm (dòng)
+        long total       = asLong(totals, 1);              // SỐ THÍ SINH thật (distinct)
+        long graded      = asLong(totals, 2);
+        long errors      = asLong(totals, 3);
+        long pending     = asLong(totals, 4) + asLong(totals, 5);
+        long passCount   = asLong(totals, 6);
+        long failCount   = asLong(totals, 7);
+        double avgScore  = asDouble(totals, 8);
 
-        long submissions = results.size();                       // số lượt chấm (dòng)
-        long total = results.stream()                            // SỐ THÍ SINH thật (distinct)
-                .map(ResultStat::getStudentId).distinct().count();
-        long graded  = countStatus(results, GradingStatus.DONE);
-        long errors  = countStatus(results, GradingStatus.ERROR);
-        long pending = countStatus(results, GradingStatus.QUEUED)
-                     + countStatus(results, GradingStatus.GRADING);
-
-        // Chỉ tính điểm trên bài đã chấm xong & có điểm
-        List<ResultStat> done = results.stream()
-                .filter(r -> r.getStatus() == GradingStatus.DONE && r.getScore() != null)
-                .toList();
-
-        long passCount = done.stream().filter(r -> r.getScore() >= passThreshold).count();
-        long failCount = done.size() - passCount;
-
-        double avgScore = done.stream().mapToDouble(r -> r.getScore()).average().orElse(0);
-        double passRate = done.isEmpty() ? 0 : (passCount * 100.0 / done.size());
+        double passRate = graded == 0 ? 0 : (passCount * 100.0 / graded);
         double progressPct = submissions == 0 ? 0 : (graded * 100.0 / submissions);
+        Instant since = LocalDate.now(ZONE).minusDays(6).atStartOfDay(ZONE).toInstant();
+        List<ResultStat> trendRows = resultRepo.findTrendStatsSince(filterExam, since);
 
         return new StatisticsResponse(
                 all ? "ALL" : examId,
@@ -82,22 +79,16 @@ public class StatisticsService {
                 passCount, failCount,
                 round1(passRate), round1(avgScore), round1(progressPct),
                 passThreshold,
-                buildDistribution(done),
-                buildTrend(results)
+                buildDistribution(filterExam),
+                buildTrend(trendRows)
         );
     }
 
     // ── Phổ điểm 5 khoảng ───────────────────────────────────────
-    private List<Bucket> buildDistribution(List<ResultStat> done) {
-        long[] counts = new long[RANGES.length];
-        for (ResultStat r : done) {
-            int idx = (int) Math.floor(r.getScore() / 2.0);
-            if (idx < 0) idx = 0;
-            if (idx >= RANGES.length) idx = RANGES.length - 1;
-            counts[idx]++;
-        }
+    private List<Bucket> buildDistribution(String examId) {
+        Object[] raw = unwrapRow(resultRepo.scoreBuckets(examId, GradingStatus.DONE));
         List<Bucket> out = new ArrayList<>();
-        for (int i = 0; i < RANGES.length; i++) out.add(new Bucket(RANGES[i], counts[i]));
+        for (int i = 0; i < RANGES.length; i++) out.add(new Bucket(RANGES[i], asLong(raw, i)));
         return out;
     }
 
@@ -125,11 +116,25 @@ public class StatisticsService {
         return out;
     }
 
-    private long countStatus(List<ResultStat> rs, GradingStatus s) {
-        return rs.stream().filter(r -> r.getStatus() == s).count();
-    }
-
     private double round1(double v) {
         return Math.round(v * 10.0) / 10.0;
+    }
+
+    private Object[] unwrapRow(Object raw) {
+        if (raw instanceof Object[] arr && arr.length == 1 && arr[0] instanceof Object[] nested) return nested;
+        if (raw instanceof Object[] arr) return arr;
+        return new Object[0];
+    }
+
+    private long asLong(Object[] row, int idx) {
+        if (row == null || idx >= row.length || row[idx] == null) return 0;
+        if (row[idx] instanceof Number n) return n.longValue();
+        return Long.parseLong(row[idx].toString());
+    }
+
+    private double asDouble(Object[] row, int idx) {
+        if (row == null || idx >= row.length || row[idx] == null) return 0;
+        if (row[idx] instanceof Number n) return n.doubleValue();
+        return Double.parseDouble(row[idx].toString());
     }
 }

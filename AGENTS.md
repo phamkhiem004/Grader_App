@@ -1,6 +1,6 @@
-# CLAUDE.md — Grader App (chấm thi Flutter)
+# AGENTS.md — Grader App (chấm thi Flutter)
 
-Hướng dẫn cho Claude Code khi làm việc trong repo này. Đọc kỹ phần **Gotchas** — nhiều thứ
+Hướng dẫn cho Codex khi làm việc trong repo này. Đọc kỹ phần **Gotchas** — nhiều thứ
 khác với mặc định và đã từng gây lỗi thật.
 
 ## Repo này là MỘT gói hoàn chỉnh

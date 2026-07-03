@@ -5,9 +5,8 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
   Settings, FileText, CheckSquare, BarChart2, LogOut, Bell, Search,
-  GraduationCap, UserCircle, Loader2, History, PanelLeftClose, PanelLeftOpen,
-  Clock, CheckCircle2, AlertCircle, BookOpen, Package, Archive, Sparkles,
-  MessageSquareText,
+  GraduationCap, UserCircle, Loader2, History, PanelLeftClose,
+  Clock, CheckCircle2, AlertCircle, BookOpen, Package, Archive,
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { useAuth } from '@/components/auth/AuthProvider';
@@ -41,12 +40,10 @@ interface SearchRow {
 const PRIMARY_NAV = [
   { name: 'Chấm bài (Batch)', path: '/', icon: CheckSquare },
   { name: 'Cấu hình Đề thi', path: '/teacher', icon: Settings },
-  { name: 'Tạo đề bằng AI', path: '/teacher/ai-generator', icon: Sparkles },
   { name: 'Kho đề thi', path: '/teacher/archive', icon: Archive },
   { name: 'Khung năng lực', path: '/syllabus', icon: BookOpen },
   { name: 'Thư viện chấm', path: '/teacher/libraries', icon: Package },
   { name: 'Không gian chấm', path: '/teacher/workspace', icon: FileText },
-  { name: 'Nhận xét AI', path: '/teacher/feedback', icon: MessageSquareText },
 ];
 
 const SECONDARY_NAV = [
@@ -109,12 +106,11 @@ export default function SidebarLayout({ children, activePath = '/', title, subti
 
   // Nạp thông báo (phiên chấm gần đây) + tự làm mới mỗi 30s
   const loadNotifs = useCallback(() => {
-    const url = `${API_BASE}/batch/recent` + (teacher?.email ? `?createdBy=${encodeURIComponent(teacher.email)}` : "");
-    fetch(url)
+    fetch(`${API_BASE}/batch/recent`)
       .then((r) => r.json())
       .then((d) => setNotifs(Array.isArray(d) ? d : []))
       .catch(() => {});
-  }, [teacher?.email]);
+  }, []);
 
   useEffect(() => {
     loadNotifs();

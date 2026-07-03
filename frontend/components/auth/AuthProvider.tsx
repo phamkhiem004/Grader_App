@@ -1,7 +1,7 @@
 "use client";
 
 import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
-import { getToken, setToken, apiLogin, apiRegister, apiMe, apiLogout, apiUpdateProfile, apiChangePassword } from "@/lib/auth";
+import { getToken, setToken, installAuthFetch, apiLogin, apiRegister, apiMe, apiLogout, apiUpdateProfile, apiChangePassword } from "@/lib/auth";
 
 export interface Teacher {
   id: number;
@@ -28,6 +28,8 @@ interface AuthContextValue {
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
+  installAuthFetch();
+
   const [teacher, setTeacher] = useState<Teacher | null>(null);
   const [loading, setLoading] = useState(true);
 

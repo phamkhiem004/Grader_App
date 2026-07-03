@@ -220,7 +220,7 @@ public class BatchGradingService {
                     job.studentId(), job.examId(), testcasePath, tempDir, zipPath);
 
             float score = parseScore(resultJson);
-            String fullJson = assembleResultJson(job, resultJson);   // JSON đầy đủ cho AI
+            String fullJson = assembleResultJson(job, resultJson);   // JSON đầy đủ cho lịch sử/năng lực
             updateStatus(job, GradingStatus.DONE, score, resultJson, fullJson);
             examRepo.markHasResults(job.examId());   // Flag Pattern: đề này đã có bài chấm xong
             log.info("[{}] DONE {} → {} đ", job.batchId(), job.studentId(), score);
@@ -253,7 +253,7 @@ public class BatchGradingService {
         });
     }
 
-    // ── Ghép JSON đầy đủ cho AI đọc: student + exam + kết quả chấm ─
+    // ── Ghép JSON đầy đủ: student + exam + kết quả chấm ─
     private String assembleResultJson(GradingJob job, String graderJson) {
         try {
             JsonNode g = mapper.readTree(graderJson);
@@ -304,7 +304,7 @@ public class BatchGradingService {
             enrichTestCases(testCases, exam);
 
             // Chuẩn hoá lỗi từng testcase FAIL: log thô của flutter test (Expected/Actual + stack trace
-            // dài như "log backend") → { code, message } gọn, sạch để AI nhận xét tốt & FE hiển thị đẹp.
+            // dài như "log backend") → { code, message } gọn, sạch để FE hiển thị đẹp.
             sanitizeTestCaseErrors(testCases);
 
             // Gắn nhãn KIẾN THỨC (skill_name/category/category_label) + ĐỘ KHÓ cho từng testcase,
@@ -384,7 +384,7 @@ public class BatchGradingService {
      *   - `actual`      = KẾT QUẢ THỰC TẾ gọn (giá trị/để so với `expected` của rubric), vd "1".
      *   - `error.code`  = loại lỗi (VALUE_MISMATCH | WIDGET_NOT_FOUND | EXCEPTION_THROWN | ASSERTION_FAILED).
      *   - `error.message` = LÝ DO/giải thích vì sao sai (reason của assertion) — KHÔNG lặp lại giá trị.
-     * Nhờ vậy 4 trường bổ sung nhau, không trùng nhau, AI & GV đọc đều rõ.
+     * Nhờ vậy 4 trường bổ sung nhau, không trùng nhau, GV đọc rõ.
      */
     private void sanitizeTestCaseErrors(List<Map<String, Object>> tcs) {
         for (Map<String, Object> tc : tcs) {

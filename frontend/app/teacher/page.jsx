@@ -130,7 +130,7 @@ export default function TeacherSetupPage() {
                   </div>
 
                   <div className="mt-4">
-                    <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500">Ghi chú đề bài <span className="font-normal normal-case text-slate-400">(cho AI nhận xét)</span></label>
+                    <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500">Ghi chú đề bài</label>
                     <textarea
                       value={teacherNote}
                       onChange={e => setTeacherNote(e.target.value)}
@@ -139,7 +139,7 @@ export default function TeacherSetupPage() {
                       placeholder="VD: Bài yêu cầu xây màn hình login, validate form và gọi API giả lập..."
                       className="w-full resize-none rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-800 transition-all focus:border-transparent focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-60"
                     />
-                    <p className="mt-1.5 text-xs text-slate-400">Mô tả ngắn yêu cầu đề — lưu kèm kết quả để AI hiểu ngữ cảnh khi nhận xét.</p>
+                    <p className="mt-1.5 text-xs text-slate-400">Mô tả ngắn yêu cầu đề — lưu kèm hồ sơ đề để đối chiếu khi xem kết quả.</p>
                   </div>
                 </div>
               </div>

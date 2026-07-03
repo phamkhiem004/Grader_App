@@ -11,7 +11,7 @@ import java.util.regex.Pattern;
  * PHÂN LOẠI LỖI TESTCASE — biến log THÔ của {@code flutter test --machine} thành bộ ba sạch
  * {@code { code, actual, message }} dùng chung cho MỌI đề (chuẩn hoá ở backend, không sửa grader.dart).
  *
- *  - {@code code}    : mã loại lỗi (xem CATALOG bên dưới) — để FE tô màu & AI phân nhóm.
+ *  - {@code code}    : mã loại lỗi (xem CATALOG bên dưới) — để FE tô màu & lọc nhóm lỗi.
  *  - {@code actual}  : KẾT QUẢ THỰC TẾ gọn (giá trị/finder/exception) — để so với {@code expected} (rubric).
  *  - {@code message} : LÝ DO/giải thích. Ưu tiên {@code reason:} của testcase; nếu trống → câu mô tả
  *                      mặc định theo từng {@code code} (nên luôn có message dù testcase không khai reason).
@@ -214,7 +214,7 @@ public final class TestErrorClassifier {
         return shorten(s, 200);
     }
 
-    /** Gộp khoảng trắng + cắt ngắn (tránh phình JSON / token AI). */
+    /** Gộp khoảng trắng + cắt ngắn để tránh phình JSON lưu DB/trả API. */
     static String shorten(String s, int max) {
         if (s == null) return "";
         s = s.replaceAll("\\s+", " ").strip();

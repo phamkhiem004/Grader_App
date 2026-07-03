@@ -25,14 +25,17 @@ interface ExamRow {
 interface CodeFile { name: string; content: string; }
 interface RegradeState { examId: string; batchId: string; total: number; done: number; error: number; running: boolean; }
 
-async function api(path: string, method: string, body?: unknown) {
+function authHeaders(init?: HeadersInit) {
+  const headers = new Headers(init);
   const token = getToken();
+  if (token && !headers.has("Authorization")) headers.set("Authorization", `Bearer ${token}`);
+  return headers;
+}
+
+async function api(path: string, method: string, body?: unknown) {
   const res = await fetch(`${API_BASE}${path}`, {
     method,
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
+    headers: authHeaders({ "Content-Type": "application/json" }),
     body: body ? JSON.stringify(body) : undefined,
   });
   const data = await res.json().catch(() => ({}));
@@ -41,7 +44,7 @@ async function api(path: string, method: string, body?: unknown) {
 }
 
 export default function ArchivePage() {
-  const { teacher } = useAuth();
+  const { teacher, loading: authLoading } = useAuth();
   const [exams, setExams] = useState<ExamRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
@@ -70,15 +73,19 @@ export default function ArchivePage() {
   const stopPoll = () => { if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; } };
 
   const load = useCallback(async () => {
+    if (authLoading) return;
+    if (!teacher) { setLoading(false); return; }
     try {
-      const d = await fetch(`${API_BASE}/exam-setup/list`).then((r) => r.json());
+      const res = await fetch(`${API_BASE}/exam-setup/list`, { headers: authHeaders() });
+      const d = await res.json().catch(() => []);
+      if (!res.ok) throw new Error(d.error || "Không tải được danh sách đề.");
       setExams(Array.isArray(d) ? d : []);
-    } catch {
-      setErr("Không tải được danh sách đề.");
+    } catch (e) {
+      setErr((e as Error).message || "Không tải được danh sách đề.");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [authLoading, teacher]);
 
   useEffect(() => { load(); return stopPoll; }, [load]);
 
@@ -90,19 +97,22 @@ export default function ArchivePage() {
     return () => { document.body.style.overflow = prev; };
   }, [viewExam]);
 
-  // Mở modal xem đề: ưu tiên ĐỀ BÀI; đề upload tay (không có đề bài) thì mở thẳng tab testcase.
-  const openView = (examId: string, hasDeBai?: boolean) => {
+  // Mở modal xem đề: ưu tiên ĐỀ BÀI; đề upload ở Cấu hình Đề thi thì mở thẳng testcase.
+  const openView = (examId: string, hasDeBai?: boolean, hasTestcase?: boolean) => {
     setViewExam(examId); setDeBai(null); setDeBaiMissing(false);
     setFiles([]); setActiveFile(0);
     if (hasDeBai) { setViewMode("debai"); loadDeBai(examId); }
-    else { setViewMode("files"); loadFiles(examId); }
+    else if (hasTestcase) { setViewMode("files"); loadFiles(examId); }
+    else { setViewMode("files"); }
   };
 
   // Đọc ĐỀ BÀI (de_bai.md) để hiển thị — tái dùng endpoint tải, bỏ BOM nếu có.
   const loadDeBai = async (examId: string) => {
     setViewLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/exam-setup/${encodeURIComponent(examId)}/download/de-bai`);
+      const res = await fetch(`${API_BASE}/exam-setup/${encodeURIComponent(examId)}/download/de-bai`, {
+        headers: authHeaders(),
+      });
       if (res.ok) {
         const txt = await res.text();
         setDeBai(txt.charCodeAt(0) === 0xFEFF ? txt.slice(1) : txt);   // bỏ BOM (U+FEFF) nếu có
@@ -115,7 +125,11 @@ export default function ArchivePage() {
   const loadFiles = async (examId: string) => {
     setViewLoading(true);
     try {
-      const d = await fetch(`${API_BASE}/exam-setup/${encodeURIComponent(examId)}/testcase`).then((r) => r.json());
+      const res = await fetch(`${API_BASE}/exam-setup/${encodeURIComponent(examId)}/testcase`, {
+        headers: authHeaders(),
+      });
+      const d = await res.json().catch(() => []);
+      if (!res.ok) throw new Error();
       setFiles(Array.isArray(d) ? d : []);
     } catch { setFiles([]); }
     finally { setViewLoading(false); }
@@ -155,7 +169,7 @@ export default function ArchivePage() {
   const doDownload = async (path: string, filename: string) => {
     setErr(null); setMsg(null);
     try {
-      const res = await fetch(`${API_BASE}${path}`);
+      const res = await fetch(`${API_BASE}${path}`, { headers: authHeaders() });
       if (!res.ok) {
         const d = await res.json().catch(() => ({}));
         setErr(d.error || "Không tải được file.");
@@ -175,7 +189,9 @@ export default function ArchivePage() {
   const exportPdf = async (examId: string, examName?: string) => {
     setErr(null); setMsg(null);
     try {
-      const res = await fetch(`${API_BASE}/exam-setup/${encodeURIComponent(examId)}/download/de-bai`);
+      const res = await fetch(`${API_BASE}/exam-setup/${encodeURIComponent(examId)}/download/de-bai`, {
+        headers: authHeaders(),
+      });
       if (!res.ok) { setErr("Không tải được đề bài để xuất PDF."); return; }
       let txt = await res.text();
       if (txt.charCodeAt(0) === 0xFEFF) txt = txt.slice(1);   // bỏ BOM (U+FEFF) nếu có
@@ -206,8 +222,8 @@ export default function ArchivePage() {
       <div className="mb-5 flex items-start gap-2.5 rounded-xl border border-indigo-100 bg-indigo-50/60 p-4 text-xs text-indigo-700">
         <Info size={16} className="mt-0.5 shrink-0" />
         <div className="space-y-1">
-          <p>Mỗi đề lưu sẵn <span className="font-mono">exam_test.dart</span>, <span className="font-mono">skills_matrix.json</span>, <span className="font-mono">grader.dart</span> trên đĩa — bấm <b>Xem</b> để xem <b>đề bài</b> (và đối chiếu testcase), <b>Chấm lại</b> để chấm lại toàn bộ bài đã nộp (vd sau khi cập nhật cách báo lỗi).</p>
-          <p className="text-indigo-600/80">Nhóm nút <b>Tải</b> cho phép tải <b>Đề bài</b> (de_bai.md) hoặc xuất <b>PDF</b> (in → Lưu thành PDF), <b>starter</b> (khung lib/ phát cho SV) &amp; <b>lời giải</b> (lời giải mẫu AI sinh — chỉ GV tham khảo, KHÔNG phát SV) — chỉ đề tạo bằng <b>AI</b> mới có; và <b>exam_test</b> (ZIP 3 file testcase) để dùng/upload lại.</p>
+          <p>Mỗi đề lưu sẵn <span className="font-mono">exam_test.dart</span>, <span className="font-mono">skills_matrix.json</span>, <span className="font-mono">grader.dart</span> trên đĩa — bấm <b>Xem</b> để mở đề bài nếu có, hoặc xem trực tiếp testcase của đề upload từ <b>Cấu hình Đề thi</b>.</p>
+          <p className="text-indigo-600/80">Nhóm nút <b>Tải</b> cho phép tải <b>Testcase</b> (ZIP 3 file để dùng/upload lại), <b>Đề bài</b> (de_bai.md), <b>starter</b> và <b>lời giải</b> nếu đề có lưu kèm.</p>
           <p className="text-indigo-600/80"><b>Xóa đề</b> sẽ gỡ testcase + ảnh Docker để giải phóng dung lượng — sau khi xóa sẽ KHÔNG chấm lại được đề đó nữa.</p>
         </div>
       </div>
@@ -250,6 +266,8 @@ export default function ArchivePage() {
             <tbody className="divide-y divide-slate-50">
               {exams.map((e) => {
                 const busy = regrade?.examId === e.examId && regrade.running;
+                const canView = Boolean(e.hasDeBai || e.hasTestcase);
+                const viewLabel = e.hasDeBai ? "Xem đề" : "Xem testcase";
                 return (
                   <tr key={e.examId} className="hover:bg-slate-50/60">
                     <td className="px-5 py-3 font-mono font-medium text-slate-700">{e.examId}</td>
@@ -282,7 +300,7 @@ export default function ArchivePage() {
                           <button onClick={() => doDownload(`/exam-setup/${encodeURIComponent(e.examId)}/download/exam-test`, `${e.examId}_exam_test.zip`)}
                             disabled={!e.hasTestcase} title="Tải testcase: exam_test.dart + grader.dart + skills_matrix.json"
                             className="flex items-center gap-1 border-l border-slate-200 px-2 py-1.5 text-slate-600 transition-colors hover:bg-indigo-50 hover:text-indigo-600 disabled:opacity-30 disabled:hover:bg-white disabled:hover:text-slate-600">
-                            <FileArchive size={12} /> exam_test
+                            <FileArchive size={12} /> Testcase
                           </button>
                           <button onClick={() => doDownload(`/exam-setup/${encodeURIComponent(e.examId)}/download/starter`, `${e.examId}_starter.zip`)}
                             disabled={!e.hasStarter} title="Tải khung code (lib/) phát cho sinh viên làm"
@@ -290,15 +308,15 @@ export default function ArchivePage() {
                             <FileArchive size={12} /> starter
                           </button>
                           <button onClick={() => doDownload(`/exam-setup/${encodeURIComponent(e.examId)}/download/solution`, `${e.examId}_solution.zip`)}
-                            disabled={!e.hasSolution} title="Tải lời giải mẫu (lib/) AI sinh — chỉ GV tham khảo, KHÔNG phát cho SV"
+                            disabled={!e.hasSolution} title="Tải lời giải mẫu (lib/) — chỉ GV tham khảo, KHÔNG phát cho SV"
                             className="flex items-center gap-1 border-l border-slate-200 px-2 py-1.5 text-slate-600 transition-colors hover:bg-amber-50 hover:text-amber-600 disabled:opacity-30 disabled:hover:bg-white disabled:hover:text-slate-600">
                             <Lightbulb size={12} /> lời giải
                           </button>
                         </div>
-                        <button onClick={() => openView(e.examId, e.hasDeBai)} title="Xem đề bài"
-                          disabled={!e.hasDeBai && !e.hasTestcase}
+                        <button onClick={() => openView(e.examId, e.hasDeBai, e.hasTestcase)} title={e.hasDeBai ? "Xem đề bài và testcase" : "Xem testcase của đề"}
+                          disabled={!canView}
                           className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-600 transition-colors hover:text-indigo-600 disabled:opacity-40">
-                          <Eye size={13} /> Xem
+                          <Eye size={13} /> {viewLabel}
                         </button>
                         <button onClick={() => doRegrade(e.examId)} title="Chấm lại toàn bộ bài đã nộp"
                           disabled={!teacher || busy || (e.resultCount ?? 0) === 0}
@@ -358,7 +376,7 @@ export default function ArchivePage() {
               ) : (
                 <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-16 text-center">
                   <FileText size={30} className="text-slate-300" />
-                  <p className="max-w-sm text-sm text-slate-500">Đề này chưa có <b>đề bài</b> (de_bai.md) — chỉ đề tạo bằng <b>AI</b> và lưu lại mới có.</p>
+                  <p className="max-w-sm text-sm text-slate-500">Đề này chưa có <b>đề bài</b> (de_bai.md). Bạn vẫn có thể xem 3 file testcase của đề.</p>
                   <button onClick={showFiles} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 hover:text-indigo-600">
                     <FileCode size={13} /> Xem 3 file testcase
                   </button>

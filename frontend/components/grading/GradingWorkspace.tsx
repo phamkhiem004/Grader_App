@@ -27,7 +27,7 @@ const MOCK_RUBRIC = [
 
 export default function GradingWorkspace() {
   const [scores, setScores] = useState<Record<string, number>>({});
-  const [feedback, setFeedback] = useState('');
+  const [note, setNote] = useState('');
 
   const handleScoreChange = (rubricId: string, score: number) => {
     setScores(prev => ({ ...prev, [rubricId]: score }));
@@ -45,14 +45,14 @@ export default function GradingWorkspace() {
           <SubmissionViewer files={MOCK_STUDENT.files} />
         </div>
 
-        {/* Right Pane: Rubric & Feedback */}
+        {/* Right Pane: Rubric & note */}
         <div className="w-5/12 bg-slate-50 flex flex-col">
           <RubricPanel 
             rubrics={MOCK_RUBRIC} 
             scores={scores} 
             onScoreChange={handleScoreChange}
-            feedback={feedback}
-            onFeedbackChange={setFeedback}
+            note={note}
+            onNoteChange={setNote}
             totalScore={totalScore}
           />
         </div>

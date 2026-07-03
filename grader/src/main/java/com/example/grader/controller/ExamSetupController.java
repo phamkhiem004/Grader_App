@@ -100,14 +100,14 @@ public class ExamSetupController {
         }
     }
 
-    /** Tải ĐỀ BÀI (de_bai.md) phát cho SV — chỉ đề tạo bằng AI mới có. 404 nếu đề chưa lưu kèm. */
+    /** Tải ĐỀ BÀI (de_bai.md) phát cho SV. 404 nếu đề chưa lưu kèm. */
     @GetMapping("/{examId}/download/de-bai")
     public ResponseEntity<?> downloadDeBai(@PathVariable String examId) {
         try {
             String md = examService.readDeBai(examId);
             if (md == null)
                 return ResponseEntity.status(404).body(Map.of("error",
-                        "Đề này chưa có đề bài (de_bai.md) — chỉ đề tạo bằng AI và lưu lại mới có."));
+                        "Đề này chưa có đề bài (de_bai.md)."));
             return ResponseEntity.ok()
                     .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + examId + "_de_bai.md\"")
                     .contentType(MediaType.parseMediaType("text/markdown; charset=UTF-8"))
@@ -134,14 +134,14 @@ public class ExamSetupController {
         }
     }
 
-    /** Tải STARTER: ZIP khung code (lib/…) phát cho SV — chỉ đề tạo bằng AI mới có. 404 nếu đề chưa lưu kèm. */
+    /** Tải STARTER: ZIP khung code (lib/…) phát cho SV. 404 nếu đề chưa lưu kèm. */
     @GetMapping("/{examId}/download/starter")
     public ResponseEntity<?> downloadStarter(@PathVariable String examId) {
         try {
             byte[] zip = examService.zipStarter(examId);
             if (zip == null)
                 return ResponseEntity.status(404).body(Map.of("error",
-                        "Đề này chưa có khung starter — chỉ đề tạo bằng AI và lưu lại mới có."));
+                        "Đề này chưa có khung starter."));
             return zipResponse(examId + "_starter.zip", zip);
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
@@ -150,14 +150,14 @@ public class ExamSetupController {
         }
     }
 
-    /** Tải LỜI GIẢI MẪU: ZIP lib/ do AI sinh — KHÔNG phát SV, chỉ GV tham khảo. 404 nếu đề chưa lưu kèm. */
+    /** Tải LỜI GIẢI MẪU: ZIP lib/ — KHÔNG phát SV, chỉ GV tham khảo. 404 nếu đề chưa lưu kèm. */
     @GetMapping("/{examId}/download/solution")
     public ResponseEntity<?> downloadSolution(@PathVariable String examId) {
         try {
             byte[] zip = examService.zipSolution(examId);
             if (zip == null)
                 return ResponseEntity.status(404).body(Map.of("error",
-                        "Đề này chưa có lời giải mẫu — chỉ đề tạo bằng AI và lưu lại mới có."));
+                        "Đề này chưa có lời giải mẫu."));
             return zipResponse(examId + "_solution.zip", zip);
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));

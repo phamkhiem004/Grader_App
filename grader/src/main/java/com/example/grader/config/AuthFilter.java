@@ -13,9 +13,8 @@ import org.springframework.web.filter.OncePerRequestFilter;
 import java.io.IOException;
 
 /**
- * Bảo vệ tối thiểu cho API: yêu cầu TOKEN hợp lệ với MỌI thao tác GHI (POST/PUT/DELETE/PATCH)
- * dưới {@code /api/**} (trừ {@code /api/auth/*}) và với việc đọc MÃ NGUỒN bài nộp của SV.
- * Các API CHỈ ĐỌC khác (danh sách đề, tiến độ, thống kê, lịch sử) vẫn mở để dashboard hoạt động.
+ * Bảo vệ tối thiểu cho API: yêu cầu TOKEN hợp lệ với mọi route dưới {@code /api/**}
+ * (trừ {@code /api/auth/*}). Frontend tự gắn Bearer token cho cả GET và POST.
  *
  * Token lấy từ header {@code Authorization: Bearer <token>}. Sai/thiếu → 401 JSON.
  * (Đây là lớp chặn tấn công ẩn danh; chưa phải phân quyền RBAC đầy đủ.)

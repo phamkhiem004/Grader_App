@@ -8,7 +8,6 @@ import com.example.grader.repository.SkillRepository;
 import com.example.grader.repository.SyllabusMetaRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -17,12 +16,10 @@ import org.springframework.stereotype.Service;
 
 import java.io.InputStream;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 
 /**
  * Quản lý SYLLABUS (danh mục năng lực): category + skill. Nguồn runtime là DB; lần đầu
@@ -348,55 +345,6 @@ public class SyllabusService {
                 .orElseThrow(() -> new IllegalArgumentException("Không tìm thấy skill: " + code));
         s.setDeprecated(true);
         skillRepo.save(s);
-    }
-
-    /**
-     * TỰ SỬA skills_matrix.json: thay mọi {@code skill_code} KHÔNG có trong syllabus bằng một code
-     * HỢP LỆ (ưu tiên alias → code cùng tiền tố trước '_' → code mặc định). Dùng cho ĐỀ DO AI SINH
-     * để KHÔNG bao giờ bị chặn ở bước lưu vì AI "bịa" skill_code (vd DART_ESSENTIALS). skill_code chỉ
-     * dùng để gom NĂNG LỰC, không ảnh hưởng việc chấm → thay an toàn. Trả JSON đã sửa (hoặc nguyên văn).
-     */
-    public String sanitizeSkillsMatrix(String skillsMatrixJson) {
-        if (skillsMatrixJson == null || skillRepo.count() == 0) return skillsMatrixJson;
-        try {
-            JsonNode root = mapper.readTree(skillsMatrixJson);
-            if (!root.isObject()) return skillsMatrixJson;
-            ObjectNode matrix = (ObjectNode) root;
-
-            List<Skill> skills = skillRepo.findAllByOrderByDisplayOrderAsc().stream()
-                    .filter(s -> !Boolean.TRUE.equals(s.getDeprecated())).toList();
-            if (skills.isEmpty()) return skillsMatrixJson;
-            Set<String> valid = new HashSet<>();
-            for (Skill s : skills) valid.add(s.getCode());
-            String globalDefault = skills.get(0).getCode();
-
-            boolean changed = false;
-            List<String> keys = new ArrayList<>();
-            matrix.fieldNames().forEachRemaining(keys::add);
-            for (String k : keys) {
-                JsonNode v = matrix.get(k);
-                if (!v.isObject()) continue;
-                JsonNode codeNode = v.get("skill_code");
-                if (codeNode == null || codeNode.asText().isBlank()) continue;
-                String code = codeNode.asText().trim().toUpperCase();
-                if (valid.contains(code)) continue;                 // đã hợp lệ
-
-                String fixed = LEGACY_CODE_ALIAS.get(code);          // 1) alias code cũ → mới
-                if (fixed == null || !valid.contains(fixed)) {
-                    String prefix = code.contains("_") ? code.substring(0, code.indexOf('_')) : code;
-                    fixed = skills.stream().map(Skill::getCode)      // 2) cùng tiền tố (DART_* , UI_* ...)
-                            .filter(c -> c.equals(prefix) || c.startsWith(prefix + "_"))
-                            .findFirst().orElse(globalDefault);      // 3) mặc định an toàn
-                }
-                ((ObjectNode) v).put("skill_code", fixed);
-                log.warn("AI gen: skill_code không hợp lệ '{}' (test {}) → tự thay '{}'", code, k, fixed);
-                changed = true;
-            }
-            return changed ? mapper.writeValueAsString(matrix) : skillsMatrixJson;
-        } catch (Exception e) {
-            log.warn("sanitizeSkillsMatrix bỏ qua (parse lỗi): {}", e.getMessage());
-            return skillsMatrixJson;
-        }
     }
 
     // ── Validate skills_matrix.json khi upload đề ────────────────

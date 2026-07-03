@@ -195,7 +195,7 @@ export default function DashboardPage() {
     a.click();
   };
 
-  // Tải JSON đầy đủ của cả batch (cho AI đọc & nhận xét)
+  // Tải JSON đầy đủ của cả batch để lưu trữ/đối chiếu.
   const downloadResultsJson = async () => {
     if (!batchId) return;
     try {
@@ -436,8 +436,8 @@ export default function DashboardPage() {
                   <h3 className="text-sm font-bold uppercase tracking-wider text-slate-700">Chi tiết kết quả</h3>
                   {phase === "done" && (
                     <div className="flex items-center gap-2">
-                      <button onClick={downloadResultsJson} title="Tải JSON đầy đủ để đưa cho AI nhận xét" className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 shadow-sm transition-all hover:text-slate-900 hover:shadow active:scale-95">
-                        <FileJson size={16} /> JSON (AI)
+                      <button onClick={downloadResultsJson} title="Tải JSON kết quả đầy đủ" className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 shadow-sm transition-all hover:text-slate-900 hover:shadow active:scale-95">
+                        <FileJson size={16} /> JSON
                       </button>
                       <button onClick={downloadCSV} className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 shadow-sm transition-all hover:text-slate-900 hover:shadow active:scale-95">
                         <DownloadCloud size={16} /> Xuất CSV

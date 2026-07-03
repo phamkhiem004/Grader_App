@@ -11,7 +11,7 @@ param(
   [switch]$SkipMysql              # bo qua docker compose (neu MySQL da chay)
 )
 
-# KHONG dung "Stop": 1 loi khong nghiem trong (vd Start-Process khong thay ollama, docker chua bat)
+# KHONG dung "Stop": 1 loi khong nghiem trong (vd Docker chua bat)
 # se lam DUNG ca script -> app khong len. Dung "Continue"; cac loi NGHIEM TRONG van chan bang `throw`.
 $ErrorActionPreference = "Continue"
 $root       = $PSScriptRoot          # = thu muc Grader_App (moi thu nam trong day)
@@ -21,7 +21,7 @@ $feDir      = Join-Path $root "frontend"
 
 function Have($cmd) { return [bool](Get-Command $cmd -ErrorAction SilentlyContinue) }
 function Section($t) { Write-Host "`n==== $t ====" -ForegroundColor Cyan }
-function Get-Jdk17Home {
+function Get-JdkHome {
   $candidates = @()
   foreach ($scope in @("Process","User","Machine")) {
     $jh = [Environment]::GetEnvironmentVariable("JAVA_HOME", $scope)
@@ -43,25 +43,25 @@ function Get-Jdk17Home {
 
   foreach ($root in $roots) {
     if (Test-Path $root) {
-      Get-ChildItem -Path $root -Directory -Filter "jdk-17*" -ErrorAction SilentlyContinue |
+      Get-ChildItem -Path $root -Directory -Filter "jdk-*" -ErrorAction SilentlyContinue |
         Sort-Object Name -Descending |
         ForEach-Object { $candidates += $_.FullName }
     }
   }
 
-  foreach ($home in ($candidates | Where-Object { $_ } | Select-Object -Unique)) {
+  foreach ($candidateHome in ($candidates | Where-Object { $_ } | Select-Object -Unique)) {
     try {
-      $resolved = (Resolve-Path $home -ErrorAction Stop).Path
+      $resolved = (Resolve-Path $candidateHome -ErrorAction Stop).Path
       $javacExe = Join-Path $resolved "bin\javac.exe"
       if (Test-Path $javacExe) {
         $ver = (& $javacExe -version 2>&1 | Out-String).Trim()
-        if ($ver -match '^javac\s+17\.') { return $resolved }
+        if ($ver -match '^javac\s+(\d+)(?:\.|$)' -and [int]$Matches[1] -ge 17) { return $resolved }
       }
     } catch {}
   }
   return $null
 }
-function Use-Jdk17([string]$jdkHome) {
+function Use-Jdk([string]$jdkHome) {
   if (-not $jdkHome) { return }
   $env:JAVA_HOME = $jdkHome
   $jdkBin = Join-Path $jdkHome "bin"
@@ -76,12 +76,12 @@ foreach ($t in @("node","npm","docker")) {
   if (Have $t) { Write-Host "  [OK] $t" -ForegroundColor Green }
   else { Write-Host "  [THIEU] $t - cai dat truoc khi chay" -ForegroundColor Yellow }
 }
-$backendJdkHome = Get-Jdk17Home
+$backendJdkHome = Get-JdkHome
 if ($backendJdkHome) {
-  Use-Jdk17 $backendJdkHome
-  Write-Host "  [OK] JDK 17: $backendJdkHome" -ForegroundColor Green
+  Use-Jdk $backendJdkHome
+  Write-Host "  [OK] JDK 17+: $backendJdkHome" -ForegroundColor Green
 } else {
-  Write-Host "  [THIEU] JDK 17/javac - chay grader-setup.cmd de backend bien dich duoc." -ForegroundColor Yellow
+  Write-Host "  [THIEU] JDK 17+/javac - chay grader-setup.cmd de backend bien dich duoc." -ForegroundColor Yellow
 }
 if (-not (Test-Path $beDir))  { throw "Khong thay backend tai: $beDir" }
 
@@ -107,8 +107,18 @@ if (-not $SkipMysql) {
     }
     if ($dockerOk) {
       Push-Location $composeDir
-      try { & docker compose up -d; Write-Host "  MySQL dang chay (cong 3306)" -ForegroundColor Green }
-      catch { Write-Host "  [LOI] docker compose that bai" -ForegroundColor Yellow }
+      try {
+        & docker compose up -d
+        if ($LASTEXITCODE -eq 0) {
+          Write-Host "  MySQL dang chay (cong 3306)" -ForegroundColor Green
+        } elseif (Get-NetTCPConnection -LocalPort 3306 -State Listen -ErrorAction SilentlyContinue) {
+          # Cổng 3306 đã có DB local khác chiếm; backend vẫn dùng được nếu đúng database chamthi_db.
+          Write-Host "  [CANH BAO] docker compose khong bind duoc 3306, dang dung MySQL san co tren cong 3306." -ForegroundColor Yellow
+        } else {
+          Write-Host "  [LOI] docker compose that bai - MySQL chua san sang." -ForegroundColor Yellow
+        }
+      }
+      catch { Write-Host "  [LOI] docker compose that bai: $($_.Exception.Message)" -ForegroundColor Yellow }
       Pop-Location
       # Anh nen 'grading-base' (Flutter SDK) la BAT BUOC de CHAM BAI. Build 1 lan bang setup-prereqs.ps1.
       $hasBase = $false
@@ -163,7 +173,7 @@ $keep = @(); if (Test-Path $envLocal) { $keep = Get-Content $envLocal | Where-Ob
 $lines = @($keep) + "NEXT_PUBLIC_API_BASE=$apiBase"
 [System.IO.File]::WriteAllText($envLocal, (($lines -join "`r`n") + "`r`n"), (New-Object System.Text.UTF8Encoding($false)))
 
-# powershell.exe day du duong dan (tranh 'khong thay file'); python launcher (tranh store-stub 'python')
+# powershell.exe day du duong dan (tranh 'khong thay file')
 $psExe = (Get-Command powershell -ErrorAction SilentlyContinue).Source
 if (-not $psExe) { $psExe = "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" }
 
@@ -185,7 +195,7 @@ if ('$backendJdkHome') {
   `$env:Path = (Join-Path `$env:JAVA_HOME 'bin') + ';' + `$env:Path
   Write-Host "JDK: `$env:JAVA_HOME" -ForegroundColor DarkGray
 } else {
-  Write-Host '[LOI] Khong thay JDK 17 (javac). Hay chay grader-setup.cmd roi mo lai GraderLauncher.exe.' -ForegroundColor Red
+  Write-Host '[LOI] Khong thay JDK 17+ (javac). Hay chay grader-setup.cmd roi mo lai GraderLauncher.exe.' -ForegroundColor Red
   return
 }
 `$env:SERVER_PORT = '$bePort'

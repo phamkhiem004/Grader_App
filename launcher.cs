@@ -4,7 +4,7 @@
 // (bat MySQL + backend + frontend).
 //
 // LUU Y: file exe nay la "launcher" - no goi start-all.ps1 ben canh, nen phai
-// dat GraderLauncher.exe CUNG THU MUC voi start-all.ps1 (D:\FPT\Capstone).
+// dat GraderLauncher.exe CUNG THU MUC voi start-all.ps1.
 
 using System;
 using System.Diagnostics;
@@ -29,7 +29,7 @@ class Launcher
             return 1;
         }
 
-        // Chuyen tiep tham so (vd: GraderLauncher.exe -Model qwen3:8b)
+        // Chuyen tiep tham so (vd: GraderLauncher.exe -SkipMysql)
         string extra = args.Length > 0 ? " " + string.Join(" ", args) : "";
 
         var psi = new ProcessStartInfo
@@ -56,7 +56,7 @@ class Launcher
         }
 
         Console.WriteLine();
-        Console.WriteLine("Cac cua so dich vu da mo (bot/backend/frontend).");
+        Console.WriteLine("Cac cua so dich vu da mo (backend/frontend).");
         Console.WriteLine("Mo trinh duyet: http://localhost:3000");
         Console.WriteLine("Co the dong cua so nay. Nhan phim bat ky de thoat...");
         Console.ReadKey();

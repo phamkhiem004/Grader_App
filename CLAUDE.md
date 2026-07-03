@@ -33,10 +33,9 @@ Trang "Lịch sử" → GET /api/exam/{examId}/results
 
 ## Gotchas (đã gây lỗi thật — đừng lặp lại)
 1. **Hai phiên bản Jackson cùng classpath.** Services dùng `com.fasterxml.jackson` (Jackson 2); vài controller dùng `tools.jackson` (Jackson 3, mặc định Spring Boot 4). Khi thêm code, theo file xung quanh. `SyllabusService`/`BatchGradingService` = Jackson 2.
-2. **skill_code phải có trong syllabus (bảng `skill`).** AI sinh đề đôi khi BỊA code (vd `DART_ESSENTIALS`). `SyllabusService.sanitizeSkillsMatrix` tự thay code lạ → code hợp lệ cùng tiền tố; được gọi trong `AiExamGenService.saveAsExam`. Upload TAY vẫn validate nghiêm (`ExamService.validateSkillCodes` ném lỗi).
-3. **Cần Docker bật + image `grading-base:latest`** để chấm và để AI gen compile-fix. Build ảnh: `grader-base/build-base.ps1` (lâu, Flutter SDK).
-4. **`grader/secret.properties`** (API key LLM cho "Tạo đề bằng AI") bị gitignore. Người mới: copy từ `.example` + dán key. Chấm KHÔNG cần key này.
-5. **POST `/api/**` cần token** (AuthFilter), trừ `/api/auth/*`. GET đa phần mở. FE gửi `Authorization: Bearer <token>` (xem `lib/auth.js`).
+2. **skill_code phải có trong syllabus (bảng `skill`).** Upload testcase validate nghiêm (`ExamService.validateSkillCodes` ném lỗi) để giữ taxonomy sạch.
+3. **Cần Docker bật + image `grading-base:latest`** để chấm. Build ảnh: `grader-base/build-base.ps1` (lâu, Flutter SDK).
+4. **POST `/api/**` cần token** (AuthFilter), trừ `/api/auth/*`. GET đa phần mở. FE gửi `Authorization: Bearer <token>` (xem `lib/auth.js`).
 
 ## Quy ước khi sửa code
 - Comment trong repo bằng tiếng Việt, súc tích, giải thích "tại sao" (theo style sẵn có).

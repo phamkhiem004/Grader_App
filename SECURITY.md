@@ -16,8 +16,8 @@ We will acknowledge your report within 48 hours and work on a fix.
 
 ## Security Best Practices for Contributors
 
-- **Never commit** `secret.properties`, `.env`, API keys, or credentials
-- **Check** `.gitignore` before pushing (should exclude `secret.properties` and other config with real keys)
+- **Never commit** `.env`, `.env.local`, API keys, or credentials
+- **Check** `.gitignore` before pushing (should exclude local config with real keys)
 - Backend uses HTTP/1.1 — don't downgrade protocol negotiation
 - Validate all user input (exam uploads, skill codes)
 - Keep dependencies updated: `mvnw.cmd dependency:check`

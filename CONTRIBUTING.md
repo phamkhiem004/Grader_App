@@ -32,17 +32,6 @@ cd ../frontend
 npm install
 ```
 
-### Cài đặt feedback bot
-```bash
-cd ../feedback-bot
-python -m venv .venv
-# Windows
-.\.venv\Scripts\Activate.ps1
-# Linux/Mac
-source .venv/bin/activate
-pip install -r requirements.txt
-```
-
 ### Khởi động MySQL
 ```bash
 docker compose up -d
@@ -140,27 +129,6 @@ app/
 npm run lint
 ```
 
-### Feedback Bot (FastAPI + Python)
-
-```bash
-cd feedback-bot
-source .venv/bin/activate  # hoặc .\.venv\Scripts\Activate.ps1 trên Windows
-uvicorn app.main:app --reload
-```
-
-API chạy ở **http://localhost:8000**
-
-**Quy tắc code:**
-- Sử dụng **Python 3.9+** type hints
-- Validate input với **Pydantic**
-- Viết **docstrings** cho tất cả functions
-- Tuân theo **PEP 8**
-
-**Chạy tests:**
-```bash
-pytest
-```
-
 ---
 
 ## 🔍 Bước 4: Kiểm tra toàn diện
@@ -174,9 +142,7 @@ pytest
    
    # Frontend
    cd frontend && npm run lint
-   
-   # Bot
-   cd feedback-bot && pytest
+
    ```
 
 2. **Kiểm tra linting & formatting**:
@@ -242,7 +208,6 @@ Closes #42
 - `exam-setup` — cấu hình đề
 - `statistics` — thống kê
 - `ai-generator` — tạo đề bằng AI
-- `feedback-bot` — bot nhận xét
 - `frontend` — giao diện
 - `docker` — Docker setup
 - `docs` — tài liệu
@@ -360,12 +325,6 @@ src/main/java/com/example/grader/
 - Tailwind CSS v4
 - Recharts (biểu đồ)
 - TypeScript
-
-### Python Bot (`feedback-bot/`)
-- FastAPI (async API)
-- Ollama (local LLM)
-- ChromaDB (RAG - retrieval-augmented generation)
-- Pydantic (validation)
 
 ---
 

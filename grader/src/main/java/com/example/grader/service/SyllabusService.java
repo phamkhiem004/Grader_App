@@ -41,10 +41,6 @@ public class SyllabusService {
     @Autowired private SkillCategoryRepository categoryRepo;
     @Autowired private SkillRepository skillRepo;
     @Autowired private SyllabusMetaRepository metaRepo;
-    @Autowired private BotSyllabusSync botSync;   // ghi đồng thời sang kho skill của bot khi syllabus đổi
-
-    /** Đồng bộ syllabus hiện tại sang kho skill của bot (gọi sau MỌI thay đổi + sau seed). */
-    private void syncBot() { try { botSync.sync(categories(), skills()); } catch (Exception ignored) {} }
 
     private final ObjectMapper mapper = new ObjectMapper();
 
@@ -134,7 +130,6 @@ public class SyllabusService {
 
             if (!empty && !versionChanged) {
                 log.info("Syllabus v{} đã khớp DB — bỏ qua seed", fileVer);
-                syncBot();
                 return;
             }
             if (!empty) {
@@ -176,7 +171,6 @@ public class SyllabusService {
             metaRepo.save(m);
 
             log.info("✅ Seed syllabus v{}: {} category, {} skill", fileVer, nc, ns);
-            syncBot();
         } catch (Exception e) {
             log.warn("Seed syllabus lỗi: {}", e.getMessage());
         }
@@ -294,7 +288,6 @@ public class SyllabusService {
         if (c.getName() == null || c.getName().isBlank())
             throw new IllegalArgumentException("Thiếu tên category (name)");
         SkillCategory saved = categoryRepo.save(c);
-        syncBot();
         return saved;
     }
 
@@ -309,7 +302,6 @@ public class SyllabusService {
                     "Còn skill đang dùng trong category này — hãy deprecate/đổi category các skill trước.");
         c.setActive(false);
         categoryRepo.save(c);
-        syncBot();
     }
 
     // ── CRUD skill ───────────────────────────────────────────────
@@ -347,7 +339,6 @@ public class SyllabusService {
         if (s.getDefaultDifficulty() == null) s.setDefaultDifficulty("basic");
         if (s.getTestable() == null) s.setTestable("auto");
         Skill saved = skillRepo.save(s);
-        syncBot();
         return saved;
     }
 
@@ -357,7 +348,6 @@ public class SyllabusService {
                 .orElseThrow(() -> new IllegalArgumentException("Không tìm thấy skill: " + code));
         s.setDeprecated(true);
         skillRepo.save(s);
-        syncBot();
     }
 
     /**

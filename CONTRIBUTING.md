@@ -16,8 +16,6 @@ cd Grader_App
 - **Docker Desktop** (bật, chia sẻ ổ đĩa trên Windows)
 - **Java 17+** & **Maven** (dùng `mvnw` có sẵn hoặc cài riêng)
 - **Node.js 20+** & **npm**
-- **Python 3.9+** & **pip** (cho feedback bot)
-- **Ollama** (cho feedback bot - tuỳ chọn)
 - RAM ≥ 8GB
 
 ### Cài đặt backend

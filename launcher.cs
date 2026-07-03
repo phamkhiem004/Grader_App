@@ -1,7 +1,7 @@
 // launcher.cs — Trinh khoi dong he thong cham thi (Grader).
 // Bien dich thanh GraderLauncher.exe: chay build-exe.cmd.
 // Giao vien chi viec double-click GraderLauncher.exe -> tu chay start-all.ps1
-// (bat MySQL + feedback bot + backend + frontend).
+// (bat MySQL + backend + frontend).
 //
 // LUU Y: file exe nay la "launcher" - no goi start-all.ps1 ben canh, nen phai
 // dat GraderLauncher.exe CUNG THU MUC voi start-all.ps1 (D:\FPT\Capstone).

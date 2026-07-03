@@ -11,25 +11,20 @@ Hệ thống chấm bài thi thực hành **Flutter/Dart** tự động trong m�
 **Cấu hình cần biết khi clone về:**
 - Nếu muốn dùng **Tạo đề bằng AI**, copy file mẫu `grader/secret.properties.example` thành `grader/secret.properties` rồi dán API key của bạn. File key thật này bị `.gitignore`, không lên GitHub.
 
-### Cách A — máy đã có sẵn Docker + Node + Java + Python + Ollama
+### Cách A — máy đã có sẵn Docker + Node + Java
 ```powershell
-# 1) Cài model AI (1 lần)
-ollama pull qwen3:14b      # hoặc model nhỏ hơn ghi trong bot-model.txt
-ollama pull bge-m3         # model embedding cho RAG (bắt buộc)
-# 2) Chạy TẤT CẢ bằng 1 lệnh (mở terminal tại thư mục Grader_App)
-.\run                      # = run.cmd: bật MySQL + bot + backend + frontend
+# Chạy TẤT CẢ bằng 1 lệnh (mở terminal tại thư mục Grader_App)
+.\run                      # = run.cmd: bật MySQL + backend + frontend
 ```
 Mở **http://localhost:3000** → đăng nhập → dùng.
 
-### Cách B — máy TRỐNG (chưa có Docker/Node/Java/Python/Ollama)
-Sau khi **clone repo**, chạy **`grader-setup.cmd`** (tự xin quyền admin → winget cài Docker/Node/Java/Python/Ollama + tải model + build ảnh chấm `grading-base`). Xong → chạy **`GraderLauncher.exe`** hoặc **`.\run`** ngay trong repo. Chi tiết: [`installer/README-INSTALLER.md`](installer/README-INSTALLER.md).
+### Cách B — máy TRỐNG (chưa có Docker/Node/Java)
+Sau khi **clone repo**, chạy **`grader-setup.cmd`** (tự xin quyền admin → winget cài Docker/Node/Java + build ảnh chấm `grading-base`). Xong → chạy **`GraderLauncher.exe`** hoặc **`.\run`** ngay trong repo. Chi tiết: [`installer/README-INSTALLER.md`](installer/README-INSTALLER.md).
 
-### Luồng sử dụng đầy đủ (chấm → nhận xét)
+### Luồng sử dụng chính
 1. **Cấu hình Đề thi** → upload ZIP testcase (`exam_test.dart`, `grader.dart`, `skills_matrix.json`).
-2. **Chấm bài (Batch)** → nhập mã đề + kéo thả ZIP bài nộp (`MaSV_HoTen.zip`) → chấm.
-3. **Nhận xét AI** (sidebar) → nhập mã đề → bấm **“Đọc & nhận xét bài làm”** → AI viết nhận xét từng SV → **Tải Excel (.xls)**.
-
-> ⏱️ **Tốc độ AI**: trên máy CPU‑only, `qwen3:14b` rất chậm (>300s/bài, dễ rơi về nhận xét mẫu). Đã kiểm thử `qwen2.5-coder:3b` cho nhận xét AI thật (~270s/bài). Không có GPU → đổi `bot-model.txt` sang model nhỏ.
+2. **Chấm bài (Batch)** → nhập mã đề + kéo thả ZIP bài nộp (`MaSV_HoTen.zip`) → chấm và xem kết quả.
+3. **Tạo đề bằng AI** (tùy chọn) → nhập yêu cầu → AI sinh testcase tự động.
 
 ### Các file bị `.gitignore` có làm clone về không chạy được không?
 

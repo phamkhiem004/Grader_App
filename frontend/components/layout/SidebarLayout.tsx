@@ -7,7 +7,6 @@ import {
   Settings, FileText, CheckSquare, BarChart2, LogOut, Bell, Search,
   GraduationCap, UserCircle, Loader2, History, PanelLeftClose,
   Clock, CheckCircle2, AlertCircle, BookOpen, Package, Archive, Sparkles,
-  MessageSquareText,
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { useAuth } from '@/components/auth/AuthProvider';
@@ -46,7 +45,6 @@ const PRIMARY_NAV = [
   { name: 'Khung năng lực', path: '/syllabus', icon: BookOpen },
   { name: 'Thư viện chấm', path: '/teacher/libraries', icon: Package },
   { name: 'Không gian chấm', path: '/teacher/workspace', icon: FileText },
-  { name: 'Nhận xét AI', path: '/teacher/feedback', icon: MessageSquareText },
 ];
 
 const SECONDARY_NAV = [

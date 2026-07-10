@@ -386,7 +386,8 @@ public class ExamService {
 
         unzip(zipBytes, testcaseDir);
         validateRequiredFiles(testcaseDir);
-        validateTestcaseImports(testcaseDir);   // CHẶN package ngoài (vd intl) → tránh 0/0 oan cả lớp
+        ensureTestcaseImportsAvailable(testcaseDir); // Tự bổ sung package thiếu vào môi trường chấm nếu có thể
+        validateTestcaseImports(testcaseDir);   // CHẶN package ngoài còn thiếu → tránh 0/0 oan cả lớp
         validateSkillCodes(testcaseDir);   // skill_code (nếu khai) phải nằm trong syllabus
 
         Exam exam = examRepository.findByExamId(examId).orElse(new Exam());
@@ -603,6 +604,15 @@ public class ExamService {
     }
 
     private void doApplyPackages(List<Map<String, Object>> desired) {
+        try {
+            doApplyPackagesBlocking(desired);
+        } catch (Exception e) {
+            setEnv("FAILED", "Lỗi: " + e.getMessage() + " — đã hoàn tác thay đổi.", envLog);
+            ExamService.log.warn("❌ Cập nhật thư viện vào ảnh nền thất bại: {}", e.getMessage());
+        }
+    }
+
+    private void doApplyPackagesBlocking(List<Map<String, Object>> desired) throws Exception {
         Path pubspec = basePubspec();
         String snapshot = null;
         StringBuilder logBuf = new StringBuilder();
@@ -632,8 +642,7 @@ public class ExamService {
                 try { Files.writeString(pubspec, snapshot); }     // HOÀN TÁC để không kẹt pubspec hỏng
                 catch (Exception ex) { log.warn("Revert pubspec lỗi: {}", ex.getMessage()); }
             }
-            setEnv("FAILED", "Lỗi: " + e.getMessage() + " — đã hoàn tác thay đổi.", envLog);
-            ExamService.log.warn("❌ Cập nhật thư viện vào ảnh nền thất bại: {}", e.getMessage());
+            throw e;
         }
     }
 
@@ -844,6 +853,42 @@ public class ExamService {
      */
     private void validateTestcaseImports(Path testcaseDir) throws Exception {
         Set<String> allowed = allowedPackages();
+        Set<String> bad = missingTestcasePackages(testcaseDir, allowed);
+        if (!bad.isEmpty())
+            throw new IllegalArgumentException(missingPackageMessage(bad, allowed, null));
+    }
+
+    /**
+     * Khi upload testcase, nếu đề import package chưa có trong môi trường chấm thì tự thêm vào
+     * pubspec.base.yaml và cập nhật ảnh grading-base ngay. Nếu Docker/pub get lỗi, báo rõ tên package
+     * để GV thêm thủ công ở trang "Thư viện chấm".
+     */
+    private void ensureTestcaseImportsAvailable(Path testcaseDir) throws Exception {
+        Set<String> allowed = allowedPackages();
+        Set<String> missing = missingTestcasePackages(testcaseDir, allowed);
+        if (missing.isEmpty()) return;
+
+        synchronized (envLock) {
+            if (envBuilding)
+                throw new IllegalStateException("Môi trường chấm đang cập nhật thư viện, vui lòng đợi build xong rồi upload lại testcase.");
+            envBuilding = true;
+            setEnv("RESOLVING", "Testcase cần thêm thư viện: " + String.join(", ", missing), "");
+        }
+        try {
+            List<Map<String, Object>> desired = editablePackagesWithMissing(missing);
+            doApplyPackagesBlocking(desired);
+        } catch (Exception e) {
+            throw new IllegalArgumentException(missingPackageMessage(missing, allowed, e.getMessage()));
+        } finally {
+            envBuilding = false;
+        }
+
+        Set<String> stillMissing = missingTestcasePackages(testcaseDir, allowedPackages());
+        if (!stillMissing.isEmpty())
+            throw new IllegalArgumentException(missingPackageMessage(stillMissing, allowedPackages(), null));
+    }
+
+    private Set<String> missingTestcasePackages(Path testcaseDir, Set<String> allowed) throws Exception {
         java.util.regex.Pattern p =
                 java.util.regex.Pattern.compile("import\\s+['\"]package:([A-Za-z0-9_]+)/");
         Set<String> bad = new LinkedHashSet<>();
@@ -857,12 +902,41 @@ public class ExamService {
                 if (m.find() && !allowed.contains(m.group(1))) bad.add(m.group(1));
             }
         }
-        if (!bad.isEmpty())
-            throw new IllegalArgumentException(
-                    "Testcase dùng package KHÔNG có trong môi trường chấm: " + String.join(", ", bad)
-                  + ". Môi trường chỉ có: " + String.join(", ", allowed)
-                  + ". Hãy bỏ các package này khỏi testcase (chỉ dùng flutter/flutter_test, định dạng/parse "
-                  + "bằng Dart thuần), hoặc thêm chúng vào grader-base/pubspec.base.yaml rồi build lại ảnh nền.");
+        return bad;
+    }
+
+    private List<Map<String, Object>> editablePackagesWithMissing(Set<String> missing) {
+        Map<String, Map<String, Object>> byName = new LinkedHashMap<>();
+        for (Map<String, Object> p : listManagedPackages()) {
+            if (Boolean.TRUE.equals(p.get("protected"))) continue;
+            String name = String.valueOf(p.getOrDefault("name", "")).trim();
+            if (name.isBlank()) continue;
+            Map<String, Object> copy = new LinkedHashMap<>();
+            copy.put("name", name);
+            Object version = p.get("version");
+            if (version != null && !String.valueOf(version).isBlank()) copy.put("version", version);
+            byName.put(name, copy);
+        }
+        for (String name : missing) {
+            Map<String, Object> p = new LinkedHashMap<>();
+            p.put("name", name);
+            p.put("version", ""); // để flutter pub add resolve version tương thích SDK trong ảnh nền
+            byName.putIfAbsent(name, p);
+        }
+        return new ArrayList<>(byName.values());
+    }
+
+    private String missingPackageMessage(Set<String> missing, Set<String> allowed, String cause) {
+        StringBuilder msg = new StringBuilder();
+        msg.append("Testcase dùng package chưa có trong môi trường chấm: ")
+           .append(String.join(", ", missing))
+           .append(". Backend đã thử tự thêm vào grading-base nhưng chưa thành công.");
+        if (cause != null && !cause.isBlank()) msg.append(" Chi tiết: ").append(cause);
+        msg.append(" Hãy vào trang \"Thư viện chấm\" thêm package: ")
+           .append(String.join(", ", missing))
+           .append(" rồi đợi trạng thái READY, hoặc thêm vào grader-base/pubspec.base.yaml và build/cập nhật lại ảnh nền. ")
+           .append("Môi trường hiện có: ").append(String.join(", ", allowed)).append(".");
+        return msg.toString();
     }
 
     /** Tập package được phép = các dependency khai trong pubspec.base.yaml (nguồn sự thật của ảnh nền). */

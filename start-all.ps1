@@ -21,6 +21,33 @@ $feDir      = Join-Path $root "frontend"
 
 function Have($cmd) { return [bool](Get-Command $cmd -ErrorAction SilentlyContinue) }
 function Section($t) { Write-Host "`n==== $t ====" -ForegroundColor Cyan }
+function Wait-MySqlReady([int]$timeoutSec = 120) {
+  Write-Host "  Doi MySQL san sang..." -ForegroundColor DarkGray
+  $deadline = (Get-Date).AddSeconds($timeoutSec)
+  while ((Get-Date) -lt $deadline) {
+    $healthy = $false
+    try {
+      $cid = (& docker compose ps -q mysql 2>$null | Select-Object -First 1)
+      if ($cid) {
+        $status = (& docker inspect --format "{{.State.Health.Status}}" $cid 2>$null | Select-Object -First 1)
+        if ($status -eq "healthy") { $healthy = $true }
+      }
+    } catch {}
+    if (-not $healthy) {
+      try {
+        $tcp = Test-NetConnection -ComputerName "127.0.0.1" -Port 3306 -InformationLevel Quiet -WarningAction SilentlyContinue
+        if ($tcp) { $healthy = $true }
+      } catch {}
+    }
+    if ($healthy) {
+      Write-Host "  [OK] MySQL da san sang" -ForegroundColor Green
+      return $true
+    }
+    Start-Sleep -Seconds 2
+  }
+  Write-Host "  [CANH BAO] MySQL chua bao san sang sau $timeoutSec giay; backend se tu doi them khi khoi dong." -ForegroundColor Yellow
+  return $false
+}
 function Get-JdkHome {
   $candidates = @()
   foreach ($scope in @("Process","User","Machine")) {
@@ -111,9 +138,11 @@ if (-not $SkipMysql) {
         & docker compose up -d
         if ($LASTEXITCODE -eq 0) {
           Write-Host "  MySQL dang chay (cong 3306)" -ForegroundColor Green
+          Wait-MySqlReady 150 | Out-Null
         } elseif (Get-NetTCPConnection -LocalPort 3306 -State Listen -ErrorAction SilentlyContinue) {
           # Cổng 3306 đã có DB local khác chiếm; backend vẫn dùng được nếu đúng database chamthi_db.
           Write-Host "  [CANH BAO] docker compose khong bind duoc 3306, dang dung MySQL san co tren cong 3306." -ForegroundColor Yellow
+          Wait-MySqlReady 60 | Out-Null
         } else {
           Write-Host "  [LOI] docker compose that bai - MySQL chua san sang." -ForegroundColor Yellow
         }
@@ -199,6 +228,13 @@ if ('$backendJdkHome') {
   return
 }
 `$env:SERVER_PORT = '$bePort'
+Write-Host 'Doi MySQL/JDBC san sang...' -ForegroundColor DarkGray
+for (`$i = 0; `$i -lt 60; `$i++) {
+  try {
+    if (Test-NetConnection -ComputerName '127.0.0.1' -Port 3306 -InformationLevel Quiet -WarningAction SilentlyContinue) { break }
+  } catch {}
+  Start-Sleep -Seconds 2
+}
 Write-Host 'Backend: http://localhost:$bePort' -ForegroundColor Green
 .\mvnw.cmd spring-boot:run
 "@

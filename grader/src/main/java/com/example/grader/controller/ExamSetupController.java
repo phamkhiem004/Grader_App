@@ -39,6 +39,10 @@ public class ExamSetupController {
             return ResponseEntity.badRequest()
                     .body(Map.of("error", e.getMessage()));
 
+        } catch (IllegalStateException e) {
+            return ResponseEntity.status(409)
+                    .body(Map.of("error", e.getMessage()));
+
         } catch (Exception e) {
             // docker build thất bại...
             return ResponseEntity.internalServerError()

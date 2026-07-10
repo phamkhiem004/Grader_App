@@ -7,11 +7,11 @@ environment:
   sdk: '>=3.0.0 <4.0.0'
 
 dependencies:
+  # Quản lý qua trang "Thư viện chấm". 'flutter' là lõi (không xóa).
   flutter:
     sdk: flutter
-  # Package được CHO PHÉP dùng trong testcase (vd DateFormat). Thêm package ở đây + build lại
-  # ảnh nền là testcase được phép import; backend tự đọc danh sách này để validate lúc upload đề.
   intl: ^0.20.2
+  flutter_riverpod: ^2.5.1
 
 dev_dependencies:
   flutter_test:

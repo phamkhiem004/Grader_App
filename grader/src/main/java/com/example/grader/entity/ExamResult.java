@@ -53,6 +53,13 @@ public class ExamResult {
     @Column(name = "error_log", columnDefinition = "LONGTEXT")
     private String errorLog;
 
+    // ── "Đọc & nhận xét bài làm bằng AI" (feedback-bot) — cache nhận xét đã sinh ──
+    @Column(name = "feedback_json", columnDefinition = "LONGTEXT")
+    private String feedbackJson;      // FeedbackRow đã sinh (JSON)
+
+    @Column(name = "feedback_src_hash", length = 40)
+    private String feedbackSrcHash;   // hash của result_json lúc sinh → result đổi (chấm lại) thì sinh lại
+
     // ── Chấm thủ công theo tiêu chí (ghi đè/ bổ sung cho điểm tự động) ──
     @Column(name = "manual_score")
     private Float manualScore;

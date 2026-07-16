@@ -9,6 +9,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.io.*;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
@@ -27,6 +28,10 @@ public class GradingService {
     /** Ảnh nền dùng chung — chạy container chấm và mount testcase + lib vào. */
     @Value("${grader.base-image:grading-base:latest}")
     private String baseImage;
+
+    /** Thư mục grader-base trên host, dùng lấy pubspec base khi cần mount assets của bài nộp. */
+    @Value("${grader.template-dir:grader-base}")
+    private String templateDir;
 
     @Value("${grader.timeout.seconds:120}")
     private int timeoutSeconds;
@@ -95,6 +100,8 @@ public class GradingService {
 
             return runDockerGrader(
                     studentId, studentLib.toAbsolutePath().toString(),
+                    projectRoot.resolve("assets").toAbsolutePath().toString(),
+                    prepareRuntimePubspec(tempDir, Files.isDirectory(projectRoot.resolve("assets"))),
                     examId, testcasePath
             );
         } finally {
@@ -108,10 +115,19 @@ public class GradingService {
     }
 
     // ── Gọi Docker ───────────────────────────────────────────────
-    private String runDockerGrader(String studentId, String libPath, String examId, String testcasePath) throws Exception {
+    private String runDockerGrader(String studentId, String libPath, String assetsPath, String pubspecPath,
+                                   String examId, String testcasePath) throws Exception {
         // Tách phần mount + ảnh ra để vừa chạy chấm, vừa tái dùng cho probe chẩn đoán khi 0/0.
         List<String> mounts = new ArrayList<>(List.of(
                 "-v", toDockerPath(libPath) + ":/app/lib"));
+        if (assetsPath != null && Files.isDirectory(Path.of(assetsPath))) {
+            mounts.add("-v");
+            mounts.add(toDockerPath(assetsPath) + ":/app/assets");
+        }
+        if (pubspecPath != null && Files.exists(Path.of(pubspecPath))) {
+            mounts.add("-v");
+            mounts.add(toDockerPath(pubspecPath) + ":/app/pubspec.yaml");
+        }
 
         // MOUNT mode: mount testcase vào ảnh nền (không cần image riêng cho đề).
         // Fallback (đề cũ): dùng image grading-env-<đề> đã build sẵn.
@@ -181,6 +197,63 @@ public class GradingService {
     }
 
     /**
+     * Bài Flutter có thể dùng Image.asset('assets/...'). Trước đây chỉ mount lib/ nên asset có
+     * trong ZIP vẫn bị mất trong container. Pubspec runtime cần khai assets/ để flutter_test load được.
+     */
+    private String prepareRuntimePubspec(Path tempDir, boolean includeAssets) throws Exception {
+        Path base = locateTemplateDir().resolve("pubspec.base.yaml");
+        if (!Files.exists(base)) return null;
+        String content = Files.readString(base, StandardCharsets.UTF_8);
+        if (includeAssets) content = ensureAssetsDeclared(content);
+        else content = removeAssetsDeclared(content);
+        Path out = tempDir.resolve("pubspec.yaml");
+        Files.writeString(out, content, StandardCharsets.UTF_8);
+        return out.toAbsolutePath().toString();
+    }
+
+    private String ensureAssetsDeclared(String pubspec) {
+        if (pubspec.contains("\n  assets:") || pubspec.contains("\r\n  assets:")) return pubspec;
+        String nl = pubspec.contains("\r\n") ? "\r\n" : "\n";
+        String assetBlock = "  assets:" + nl + "    - assets/" + nl;
+        String material = "  uses-material-design: true";
+        int materialAt = pubspec.indexOf(material);
+        if (materialAt >= 0) {
+            int lineEnd = pubspec.indexOf(nl, materialAt);
+            if (lineEnd < 0) lineEnd = pubspec.length();
+            return pubspec.substring(0, lineEnd + nl.length()) + assetBlock + pubspec.substring(lineEnd + nl.length());
+        }
+        int flutterAt = pubspec.indexOf("flutter:");
+        if (flutterAt >= 0) {
+            int lineEnd = pubspec.indexOf(nl, flutterAt);
+            if (lineEnd < 0) lineEnd = pubspec.length();
+            return pubspec.substring(0, lineEnd + nl.length())
+                    + "  uses-material-design: true" + nl + assetBlock
+                    + pubspec.substring(lineEnd + nl.length());
+        }
+        return pubspec.stripTrailing() + nl + nl + "flutter:" + nl
+                + "  uses-material-design: true" + nl + assetBlock;
+    }
+
+    private String removeAssetsDeclared(String pubspec) {
+        String nl = pubspec.contains("\r\n") ? "\r\n" : "\n";
+        String[] lines = pubspec.split("\\R", -1);
+        StringBuilder out = new StringBuilder();
+        boolean skippingAssets = false;
+        for (String line : lines) {
+            if (!skippingAssets && line.matches("^\\s{2}assets:\\s*$")) {
+                skippingAssets = true;
+                continue;
+            }
+            if (skippingAssets) {
+                if (line.matches("^\\s{4}-\\s+.*$") || line.isBlank()) continue;
+                skippingAssets = false;
+            }
+            out.append(line).append(nl);
+        }
+        return out.toString().stripTrailing() + nl;
+    }
+
+    /**
      * Nếu không có testcase nào chạy (tongSoTest == 0) thì gần như chắc chắn bài nộp KHÔNG
      * biên dịch được với testcase (thiếu file/sai tên class) → ném lỗi RÕ RÀNG thay vì để
      * hệ thống hiểu nhầm là "DONE 0 điểm".
@@ -215,8 +288,9 @@ public class GradingService {
         }
         // Probe compile sạch & chạy được test nhưng grader tính 0 → tên test ≠ key skills_matrix.json.
         if (probeRanTests(probe)) {
-            return "Test biên dịch & chạy được nhưng KHÔNG khớp rubric: tên test trong exam_test.dart "
-                 + "không trùng key nào trong skills_matrix.json (phân biệt hoa/thường).";
+            return "Test biên dịch & chạy được nhưng grader không map được testcase nào với rubric. "
+                 + "Thường do Flutter trả tên dạng 'Tên group TC_...' còn skills_matrix.json dùng 'TC_...'; "
+                 + "hãy upload lại testcase để backend tự vá grader.dart, hoặc dùng grader.dart có rubricKeyFor(...).";
         }
         return generic;
     }
@@ -382,6 +456,22 @@ public class GradingService {
             walk.sorted(Comparator.reverseOrder())
                     .map(Path::toFile).forEach(File::delete);
         }
+    }
+
+    private Path locateTemplateDir() {
+        Path configured = Path.of(templateDir);
+        String name = configured.getFileName() != null
+                ? configured.getFileName().toString() : "grader-base";
+
+        Path p = Path.of("").toAbsolutePath();
+        for (int i = 0; i < 5 && p != null; i++) {
+            for (Path c : new Path[]{ p.resolve(configured), p.resolve(name) }) {
+                if (Files.exists(c.resolve("Dockerfile.base")))
+                    return c.toAbsolutePath().normalize();
+            }
+            p = p.getParent();
+        }
+        return configured.toAbsolutePath().normalize();
     }
 
     private String toDockerPath(String path) {

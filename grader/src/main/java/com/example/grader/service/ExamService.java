@@ -386,6 +386,8 @@ public class ExamService {
 
         unzip(zipBytes, testcaseDir);
         validateRequiredFiles(testcaseDir);
+        normalizeExamTestNames(testcaseDir);   // Bỏ group wrapper để Flutter trả test name đúng TC_...
+        normalizeGraderRubricKeys(testcaseDir); // Tránh Flutter thêm group prefix làm lệch key rubric.
         ensureTestcaseImportsAvailable(testcaseDir); // Tự bổ sung package thiếu vào môi trường chấm nếu có thể
         validateTestcaseImports(testcaseDir);   // CHẶN package ngoài còn thiếu → tránh 0/0 oan cả lớp
         validateSkillCodes(testcaseDir);   // skill_code (nếu khai) phải nằm trong syllabus
@@ -844,6 +846,131 @@ public class ExamService {
         if (!Files.readString(dir.resolve("grader.dart")).contains("main"))
             throw new IllegalArgumentException(
                     "grader.dart không có hàm main() — file có thể sai nội dung/encoding.");
+    }
+
+    /**
+     * Bỏ wrapper group(...) trong exam_test.dart để flutter test --machine trả đúng tên test
+     * dạng "TC_MODEL_01" thay vì "A. User model TC_MODEL_01".
+     */
+    private void normalizeExamTestNames(Path testcaseDir) {
+        Path f = testcaseDir.resolve("exam_test.dart");
+        try {
+            List<String> lines = Files.readAllLines(f, StandardCharsets.UTF_8);
+            if (lines.stream().noneMatch(s -> s.trim().startsWith("group("))) return;
+
+            List<String> out = new ArrayList<>();
+            List<Integer> groupDepths = new ArrayList<>();
+            int depth = 0;
+            int removed = 0;
+            for (String line : lines) {
+                int delta = braceDelta(line);
+                String trim = line.trim();
+                if (trim.startsWith("group(")) {
+                    depth += delta;
+                    groupDepths.add(depth);
+                    removed++;
+                    continue;
+                }
+
+                if (!groupDepths.isEmpty()
+                        && trim.equals("});")
+                        && depth == groupDepths.get(groupDepths.size() - 1)
+                        && depth + delta == groupDepths.get(groupDepths.size() - 1) - 1) {
+                    depth += delta;
+                    groupDepths.remove(groupDepths.size() - 1);
+                    continue;
+                }
+
+                out.add(line);
+                depth += delta;
+            }
+
+            if (!groupDepths.isEmpty() || depth != 0) {
+                log.warn("Không bỏ group exam_test.dart vì brace không cân bằng: {}", f);
+                return;
+            }
+            Files.write(f, out, StandardCharsets.UTF_8);
+            log.info("Đã bỏ {} group wrapper trong exam_test.dart để tên test khớp rubric: {}", removed, f);
+        } catch (Exception e) {
+            log.warn("Tự bỏ group trong exam_test.dart lỗi: {}", e.getMessage());
+        }
+    }
+
+    private int braceDelta(String line) {
+        int delta = 0;
+        for (int i = 0; i < line.length(); i++) {
+            char c = line.charAt(i);
+            if (c == '{') delta++;
+            else if (c == '}') delta--;
+        }
+        return delta;
+    }
+
+    /**
+     * Dart test machine output trả tên đầy đủ gồm cả group, vd "A. User model TC_MODEL_01".
+     * Rubric thường chỉ khai key "TC_MODEL_01"; tự vá grader cũ để lookup theo key rubric thật.
+     */
+    private void normalizeGraderRubricKeys(Path testcaseDir) {
+        Path f = testcaseDir.resolve("grader.dart");
+        try {
+            String src = Files.readString(f, StandardCharsets.UTF_8);
+            if (src.contains("rubricKeyFor(") || !src.contains("testDone") || !src.contains("matrix")) return;
+
+            String patched = src;
+            boolean changed = false;
+            if (patched.contains("final name = idToName[id] ?? '';")) {
+                patched = patched.replace(
+                        "final name = idToName[id] ?? '';",
+                        "final rawName = idToName[id] ?? '';\n          final name = rubricKeyFor(rawName);");
+                changed = true;
+            }
+            if (patched.contains("final name = testIdToName[id] ?? '';")) {
+                patched = patched.replace(
+                        "final name = testIdToName[id] ?? '';",
+                        "final rawName = testIdToName[id] ?? '';\n        final name = rubricKeyFor(rawName);");
+                changed = true;
+            }
+            if (!changed) return;
+
+            patched = patched
+                    .replace("if (name.isEmpty || name.startsWith('loading ') || hidden)",
+                             "if (rawName.isEmpty || rawName.startsWith('loading ') || hidden)")
+                    .replace("if (name.isEmpty || name.startsWith('loading ') || hidden) continue;",
+                             "if (rawName.isEmpty || rawName.startsWith('loading ') || hidden) continue;");
+
+            String withHelper = insertRubricKeyHelper(patched);
+            if (withHelper.equals(patched)) {
+                log.warn("Không tự vá được grader.dart để normalize rubric key: {}", f);
+                return;
+            }
+            Files.writeString(f, withHelper, StandardCharsets.UTF_8);
+            log.info("Đã tự vá grader.dart để normalize tên testcase theo skills_matrix.json: {}", f);
+        } catch (Exception e) {
+            log.warn("Tự vá grader.dart để normalize rubric key lỗi: {}", e.getMessage());
+        }
+    }
+
+    private String insertRubricKeyHelper(String src) {
+        String helper = """
+
+  String rubricKeyFor(String rawName) {
+    if (matrix.containsKey(rawName)) return rawName;
+
+    // Flutter machine output ghép tên group vào tên test, vd:
+    // "A. User model TC_MODEL_01". Rubric chỉ dùng key "TC_MODEL_01".
+    final matches = RegExp(r'TC_[A-Za-z0-9_]+').allMatches(rawName).toList();
+    for (final m in matches.reversed) {
+      final key = m.group(0)!;
+      if (matrix.containsKey(key)) return key;
+    }
+    return rawName;
+  }
+""";
+        for (String marker : List.of("  // 3)", "  final lines = result.stdout")) {
+            int i = src.indexOf(marker);
+            if (i >= 0) return src.substring(0, i) + helper + "\n" + src.substring(i);
+        }
+        return src;
     }
 
     /**

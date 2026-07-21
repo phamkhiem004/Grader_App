@@ -116,6 +116,7 @@ public class ResultController {
             m.put("manualScore", r.manualScore());
             m.put("status", r.status());
             m.put("batchId", r.batchId());
+            m.put("submittedAt", r.submittedAt());
             m.put("updatedAt", r.updatedAt());
             m.put("details", r.details());     // JSON gon cua grader: soTestPass / tongSoTest
             m.put("errorLog", r.errorLog());

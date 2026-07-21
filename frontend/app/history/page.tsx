@@ -43,6 +43,7 @@ interface ResultRow {
   score: number | null;
   status: "DONE" | "ERROR" | "GRADING" | "QUEUED";
   batchId: string | null;
+  submittedAt: string | null;
   updatedAt: string | null;
   details: string | null;
   errorLog: string | null;
@@ -130,6 +131,27 @@ function passInfo(details: string | null): { pass: number; total: number } {
   } catch {
     return { pass: 0, total: 0 };
   }
+}
+
+function csvCell(value: string | number): string {
+  const s = String(value);
+  return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+function statusVi(status: ResultRow["status"]): string {
+  if (status === "DONE") return "Đã xong";
+  if (status === "ERROR") return "Lỗi";
+  if (status === "GRADING") return "Đang chấm";
+  if (status === "QUEUED") return "Đang chờ";
+  return status;
+}
+
+function formatHistoryTime(value: string | null): string {
+  if (!value) return "";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())} ${d.getDate()}/${d.getMonth() + 1}/${d.getFullYear()}`;
 }
 
 export default function HistoryPage() {
@@ -366,15 +388,30 @@ export default function HistoryPage() {
   // Xuất CSV toàn bộ đề
   const exportCSV = () => {
     if (!rows.length) return;
-    const header = "Mã SV,Họ tên,Điểm,Trạng thái,Pass,Thời gian\n";
+    const header = [
+      "STT",
+      "Mã SV",
+      "Họ tên",
+      "Điểm",
+      "Trạng thái",
+      "Số câu đúng",
+      "Tổng số câu",
+      "Thời gian nộp",
+    ].join(",") + "\n";
     const body = rows
-      .map((r) => {
+      .map((r, idx) => {
         const { pass, total } = passInfo(r.details);
-        const statusVi =
-          r.status === "DONE" ? "Đã xong" : r.status === "ERROR" ? "Lỗi" : r.status;
-        const time = r.updatedAt ? new Date(r.updatedAt).toLocaleString("vi-VN") : "";
-        const name = (r.studentName || "").replace(/"/g, '""');
-        return `${r.studentId},"${name}",${r.score != null ? r.score.toFixed(1) : ""},${statusVi},"${pass}/${total}","${time}"`;
+        const time = formatHistoryTime(r.submittedAt || r.updatedAt);
+        return [
+          idx + 1,
+          r.studentId,
+          r.studentName || "",
+          r.score != null ? r.score.toFixed(1) : "",
+          statusVi(r.status),
+          pass,
+          total,
+          time,
+        ].map(csvCell).join(",");
       })
       .join("\n");
     const blob = new Blob(["﻿" + header + body], { type: "text/csv;charset=utf-8" });
@@ -620,7 +657,7 @@ export default function HistoryPage() {
                             )}
                           </td>
                           <td className="px-6 py-3.5 text-xs text-slate-500">
-                            {r.updatedAt ? new Date(r.updatedAt).toLocaleString("vi-VN") : "—"}
+                            {formatHistoryTime(r.submittedAt || r.updatedAt) || "—"}
                           </td>
                           <td className="sticky right-0 z-10 border-l border-slate-100 bg-white px-4 py-3.5 transition-colors group-hover:bg-slate-50/70">
                             <div className="flex items-center justify-center gap-1">

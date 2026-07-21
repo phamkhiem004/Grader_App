@@ -84,7 +84,7 @@ public interface ExamResultRepository extends JpaRepository<ExamResult, Long> {
     @Query("""
         select new com.example.grader.dto.ExamHistoryRow(
             r.id, r.studentId, r.studentName, r.score, r.manualScore, r.status,
-            r.batchId, r.updatedAt, r.details, r.errorLog,
+            r.batchId, r.submittedAt, r.updatedAt, r.details, r.errorLog,
             case when r.resultJson is null then false else true end
         )
         from ExamResult r

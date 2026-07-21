@@ -12,6 +12,7 @@ public record ExamHistoryRow(
         Float manualScore,
         GradingStatus status,
         String batchId,
+        Instant submittedAt,
         Instant updatedAt,
         String details,
         String errorLog,

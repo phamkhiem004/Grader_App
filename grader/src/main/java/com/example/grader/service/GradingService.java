@@ -179,6 +179,7 @@ public class GradingService {
             createViewModelShimIfMissing(lib);
             patchUserRepositoryProviderVisibility(lib);
             patchNullableIdInViewModel(lib);
+            patchLegacyProviderContract(lib);
             replaceBrokenUserListScreenWithMinimalShim(lib);
             createUserListScreenShimIfMissing(lib);
         } catch (Exception e) {
@@ -691,6 +692,44 @@ final userRepositoryProvider = Provider<UserRepository>((ref) {
         if (!fixed.equals(s)) Files.writeString(vm, fixed, StandardCharsets.UTF_8);
     }
 
+    /** Cầu nối cho bài legacy dùng repositoryProvider/userProvider thay vì tên contract PE_30. */
+    private void patchLegacyProviderContract(Path lib) throws IOException {
+        Path vm = lib.resolve("viewmodels").resolve("user_view_model.dart");
+        Path screen = lib.resolve("screens").resolve("user_list_screen.dart");
+        if (!Files.exists(vm) || !Files.exists(screen)) return;
+
+        String source = Files.readString(vm, StandardCharsets.UTF_8);
+        if (!source.contains("final repositoryProvider")
+                || !source.contains("final userProvider")
+                || !source.contains("class UserNotifier extends StateNotifier<List<UserModel>>")) return;
+
+        String fixed = source.replaceFirst(
+                "(?s)final\\s+repositoryProvider\\s*=\\s*Provider\\s*\\(\\s*\\(ref\\)\\s*=>\\s*InMemoryUserRepository\\(\\)\\s*,?\\s*\\);",
+                "final userRepositoryProvider = Provider<UserRepository>(\n"
+                        + "  (ref) => InMemoryUserRepository(),\n"
+                        + ");\n"
+                        + "final repositoryProvider = userRepositoryProvider;");
+        if (!fixed.contains("../repositories/user_repository.dart")) {
+            fixed = fixed.replace(
+                    "import '../repositories/in_memory_user_repository.dart';",
+                    "import '../repositories/in_memory_user_repository.dart';\nimport '../repositories/user_repository.dart';");
+        }
+        fixed = fixed.replace("ref.read(repositoryProvider)", "ref.read(userRepositoryProvider)")
+                .replace("final InMemoryUserRepository repository;", "final UserRepository repository;");
+        if (!fixed.contains("final userViewModelProvider")) {
+            fixed = fixed.replaceFirst(
+                    "(?s)(final\\s+userProvider\\s*=.*?;\\s*)class\\s+UserNotifier",
+                    "$1\nfinal userViewModelProvider = userProvider;\n\nclass UserNotifier");
+        }
+        if (!fixed.equals(source)) Files.writeString(vm, fixed, StandardCharsets.UTF_8);
+
+        String screenSource = Files.readString(screen, StandardCharsets.UTF_8);
+        String screenFixed = screenSource
+                .replace("ref.watch(userProvider)", "ref.watch(userViewModelProvider)")
+                .replace("ref.read(userProvider.notifier)", "ref.read(userViewModelProvider.notifier)");
+        if (!screenFixed.equals(screenSource)) Files.writeString(screen, screenFixed, StandardCharsets.UTF_8);
+    }
+
     private void replaceBrokenUserListScreenWithMinimalShim(Path lib) throws IOException {
         Path screen = lib.resolve("screens").resolve("user_list_screen.dart");
         if (!Files.exists(screen)) return;
@@ -699,7 +738,7 @@ final userRepositoryProvider = Provider<UserRepository>((ref) {
         boolean compileBreakingStudentDraft = s.contains("usersState")
                 || s.contains("_selectedAvatarUrl")
                 || s.contains("avatarUrl:")
-                || s.contains("User(fullName:");
+                || s.matches("(?s).*\\bUser\\s*\\(\\s*fullName\\s*:.*");
         if (!compileBreakingStudentDraft) return;
 
         Files.writeString(screen, """

@@ -21,6 +21,7 @@ interface TestCaseItem {
   skill_code?: string; skill_name?: string; category_label?: string;
   difficulty?: string; skill?: string;
   expected?: string; actual?: string; error_log?: string;
+  student_safe_summary?: string;
   error?: TestError;
 }
 
@@ -75,8 +76,8 @@ const ERR_BADGE: Record<string, string> = {
  * Ưu tiên `error` có cấu trúc { code, message } (backend mới đã làm sạch); nếu không có thì fallback
  * parse log THÔ của flutter test (bài cũ): tách Expected/Actual/lý do, diễn giải exception widget.
  */
-function FailureDetail({ requirement, actual, error }:
-  { requirement?: string; actual?: string; error?: TestError }) {
+function FailureDetail({ requirement, actual, error, studentSafeSummary }:
+  { requirement?: string; actual?: string; error?: TestError; studentSafeSummary?: string }) {
   // Đường mới: Mong đợi (rubric) · Thực tế (giá trị) · Lỗi [code] + lý do — không còn stack trace.
   if (error && (error.code || error.message)) {
     return (
@@ -90,7 +91,9 @@ function FailureDetail({ requirement, actual, error }:
               {error.code}
             </span>
           )}
-          {error.message && <span>{error.message}</span>}
+          {(studentSafeSummary || error.message) && (
+            <span>{studentSafeSummary || error.message}</span>
+          )}
         </p>
       </div>
     );
@@ -807,8 +810,13 @@ export default function HistoryPage() {
                                   {tc.skill_code}
                                 </p>
                               )}
-                              {!passed && (tc.error || tc.expected || tc.actual || tc.error_log) && (
-                                <FailureDetail requirement={tc.expected} actual={tc.actual || tc.error_log} error={tc.error} />
+                              {!passed && (tc.error || tc.expected || tc.actual || tc.error_log || tc.student_safe_summary) && (
+                                <FailureDetail
+                                  requirement={tc.expected}
+                                  actual={tc.actual || tc.error_log}
+                                  error={tc.error}
+                                  studentSafeSummary={tc.student_safe_summary}
+                                />
                               )}
                             </div>
                           );

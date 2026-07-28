@@ -305,6 +305,7 @@ public class BatchGradingService {
 
             // Chuẩn hoá lỗi từng testcase FAIL: log thô của flutter test (Expected/Actual + stack trace
             // dài như "log backend") → { code, message } gọn, sạch để FE hiển thị đẹp.
+            // Đồng thời thêm student_safe_summary để client có một field ổn định mô tả lý do fail.
             sanitizeTestCaseErrors(testCases);
 
             // Gắn nhãn KIẾN THỨC (skill_name/category/category_label) + ĐỘ KHÓ cho từng testcase,
@@ -375,7 +376,8 @@ public class BatchGradingService {
     }
 
     // ════════════════════════════════════════════════════════════════════════════
-    //  CHUẨN HOÁ LỖI TESTCASE: log thô flutter test → actual (giá trị thực) + error{code,message}
+    //  CHUẨN HOÁ LỖI TESTCASE: log thô flutter test → actual + error{code,message}
+    //  + student_safe_summary (lời giải thích an toàn cho sinh viên)
     // ════════════════════════════════════════════════════════════════════════════
 
     /**
@@ -384,7 +386,8 @@ public class BatchGradingService {
      *   - `actual`      = KẾT QUẢ THỰC TẾ gọn (giá trị/để so với `expected` của rubric), vd "1".
      *   - `error.code`  = loại lỗi (VALUE_MISMATCH | WIDGET_NOT_FOUND | EXCEPTION_THROWN | ASSERTION_FAILED).
      *   - `error.message` = LÝ DO/giải thích vì sao sai (reason của assertion) — KHÔNG lặp lại giá trị.
-     * Nhờ vậy 4 trường bổ sung nhau, không trùng nhau, GV đọc rõ.
+     *   - `student_safe_summary` = bản tóm tắt an toàn, không chứa stack trace/thông tin nội bộ.
+     * Nhờ vậy các trường bổ sung nhau, không trùng nhau, GV đọc rõ.
      */
     private void sanitizeTestCaseErrors(List<Map<String, Object>> tcs) {
         for (Map<String, Object> tc : tcs) {
@@ -393,7 +396,11 @@ public class BatchGradingService {
             Object rawObj = tc.get("actual");
             if (rawObj == null || String.valueOf(rawObj).isBlank()) rawObj = tc.get("error_log");
             String raw = rawObj == null ? "" : String.valueOf(rawObj);
-            if (raw.isBlank()) continue;
+            if (raw.isBlank()) {
+                // Bài cũ có thể không lưu log; vẫn trả field để client không phải đoán schema.
+                ensureStudentSafeSummary(tc);
+                continue;
+            }
             applyStructuredError(tc, raw);
         }
     }
@@ -409,8 +416,41 @@ public class BatchGradingService {
         else tc.remove("actual");                       // không có giá trị thực → bỏ field cho gọn
         Map<String, Object> err = new LinkedHashMap<>();
         err.put("code", res.code());
-        err.put("message", TestErrorClassifier.shorten(res.message(), 240));
+        String summary = studentSafeSummary(res);
+        err.put("message", summary);
         tc.put("error", err);
+        tc.put("student_safe_summary", summary);
+    }
+
+    /**
+     * Lấy thông báo ngắn từ classifier làm contract ổn định cho client/student.
+     * Không trả raw log ở đây vì raw log có thể chứa stack trace hoặc đường dẫn container.
+     */
+    private String studentSafeSummary(TestErrorClassifier.Result res) {
+        String summary = TestErrorClassifier.shorten(res.message(), 240);
+        if (!summary.isBlank()) return summary;
+        return "Testcase chưa đạt yêu cầu.";
+    }
+
+    /** Đảm bảo dữ liệu chấm cũ vẫn có field student_safe_summary. */
+    private void ensureStudentSafeSummary(Map<String, Object> tc) {
+        Object current = tc.get("student_safe_summary");
+        if (current != null && !String.valueOf(current).isBlank()) {
+            tc.put("student_safe_summary",
+                    TestErrorClassifier.shorten(String.valueOf(current), 240));
+            return;
+        }
+
+        Object errorObj = tc.get("error");
+        if (errorObj instanceof Map<?, ?> errorMap) {
+            Object message = errorMap.get("message");
+            if (message != null && !String.valueOf(message).isBlank()) {
+                tc.put("student_safe_summary",
+                        TestErrorClassifier.shorten(String.valueOf(message), 240));
+                return;
+            }
+        }
+        tc.put("student_safe_summary", "Testcase chưa đạt yêu cầu.");
     }
 
     /** Giới hạn độ dài log lỗi để không phình DB / không tràn cột. */

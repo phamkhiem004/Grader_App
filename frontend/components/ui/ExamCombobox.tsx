@@ -15,6 +15,7 @@ interface Props {
   onEnter?: () => void;          // bấm Enter khi không chọn option nào (vd: chạy luôn)
   disabled?: boolean;
   placeholder?: string;
+  ariaLabel?: string;
 }
 
 const LIST_ID = "exam-combobox-listbox";
@@ -24,7 +25,7 @@ const LIST_ID = "exam-combobox-listbox";
  * <input list>/<datalist> native vốn xấu và lỗi màu ở chế độ tối.
  * Gõ để lọc theo mã/tên đề; click hoặc ↑/↓ + Enter để chọn; vẫn nhập tay được mã bất kỳ.
  */
-export default function ExamCombobox({ options, value, onChange, onEnter, disabled, placeholder }: Props) {
+export default function ExamCombobox({ options, value, onChange, onEnter, disabled, placeholder, ariaLabel = "Mã đề thi" }: Props) {
   const [open, setOpen] = useState(false);
   const [highlight, setHighlight] = useState(0);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -81,6 +82,7 @@ export default function ExamCombobox({ options, value, onChange, onEnter, disabl
         placeholder={placeholder}
         disabled={disabled}
         role="combobox"
+        aria-label={ariaLabel}
         aria-expanded={open}
         aria-controls={LIST_ID}
         autoComplete="off"

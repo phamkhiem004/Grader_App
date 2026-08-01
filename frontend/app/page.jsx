@@ -4,6 +4,7 @@ import { useState, useRef, useCallback, useEffect } from "react";
 import SidebarLayout from "@/components/layout/SidebarLayout";
 import { API_BASE, PASS_THRESHOLD } from "@/lib/config";
 import { getToken } from "@/lib/auth";
+import ExamCombobox from "@/components/ui/ExamCombobox";
 
 // Khóa lưu phiên chấm đang/ vừa chạy → rời trang rồi quay lại KHÔNG mất kết quả
 const ACTIVE_BATCH_KEY = "grader_active_batch";
@@ -11,6 +12,8 @@ import { UploadCloud, Play, FileArchive, X, CheckCircle, Clock, AlertCircle, Dow
 
 export default function DashboardPage() {
   const [examId, setExamId] = useState("");
+  const [examOptions, setExamOptions] = useState([]);
+  const [examOptionsLoading, setExamOptionsLoading] = useState(true);
   const [files, setFiles] = useState([]);
   const [dragging, setDragging] = useState(false);
   const [batchId, setBatchId] = useState(null);
@@ -20,6 +23,25 @@ export default function DashboardPage() {
   const [parseErrors, setParseErrors] = useState([]);
   const fileRef = useRef();
   const pollRef = useRef(null);
+
+  // Nạp toàn bộ đề đã tạo để giáo viên chọn nhanh; không giới hạn ở đề đã chấm.
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`${API_BASE}/exam-setup/list`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((data) => {
+        if (cancelled) return;
+        const options = Array.isArray(data)
+          ? data
+              .filter((e) => e?.examId)
+              .map((e) => ({ examId: String(e.examId), examName: e.examName || String(e.examId) }))
+          : [];
+        setExamOptions(options);
+      })
+      .catch(() => { if (!cancelled) setExamOptions([]); })
+      .finally(() => { if (!cancelled) setExamOptionsLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
 
   // ── Khôi phục phiên chấm khi quay lại trang — CHỈ khi batch còn ĐANG chấm dở ──
   // Batch đã chấm XONG (hoặc rỗng/đã xóa) sẽ KHÔNG khôi phục → F5 cho ra trang nhập mới;
@@ -259,13 +281,19 @@ export default function DashboardPage() {
             <div className="space-y-4 p-6">
               <div>
                 <label className="mb-2 block text-xs font-bold uppercase tracking-wider text-slate-500">Mã Đề Thi</label>
-                <input
+                <ExamCombobox
+                  options={examOptions}
                   value={examId}
-                  onChange={e => setExamId(e.target.value)}
+                  onChange={setExamId}
                   disabled={isRunning}
-                  placeholder="Nhập mã đề thi..."
-                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-800 transition-all focus:border-transparent focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-60"
+                  ariaLabel="Mã đề thi"
+                  placeholder={examOptionsLoading ? "Đang tải danh sách đề..." : "Nhập hoặc chọn mã đề thi..."}
                 />
+                <p className="mt-2 text-xs text-slate-400">
+                  {examOptions.length > 0
+                    ? `Bấm vào ô để chọn nhanh ${examOptions.length} đề đã tạo, hoặc vẫn có thể nhập mã mới.`
+                    : "Chưa có đề đã tạo; bạn vẫn có thể nhập mã đề thủ công."}
+                </p>
               </div>
 
               {phase === "idle" && (

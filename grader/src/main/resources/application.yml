@@ -53,6 +53,3 @@ grader:
   analyze:
     # Mặc định bật để giữ cảnh báo dart analyze trong JSON kết quả.
     enabled: ${GRADER_ANALYZE_LIB:true}
-  # ZIP engine layered dùng để sinh exam_test.dart + grader.dart cho đề mới.
-  # Nếu không đặt, backend tự tìm trong Downloads của user đang chạy backend.
-  layered-template-zip: ${GRADER_LAYERED_TEMPLATE_ZIP:}

@@ -144,6 +144,8 @@ public class ExamService {
             m.put("examId", e.getExamId());
             m.put("examName", e.getExamName() != null ? e.getExamName() : e.getExamId());
             m.put("status", e.getStatus() != null ? e.getStatus().name() : null);
+            m.put("testcaseStatus", e.getTestcaseStatus() != null ? e.getTestcaseStatus() : "DRAFT");
+            m.put("testcaseVersion", e.getTestcaseVersion());
             m.put("hasTestcase", hasTc);
             byId.put(e.getExamId(), m);
         }
@@ -162,6 +164,7 @@ public class ExamService {
                         m.put("examId", id);
                         m.put("examName", id);
                         m.put("status", "ON_DISK");
+                        m.put("testcaseStatus", "PUBLISHED");
                         m.put("hasTestcase", true);
                         byId.put(id, m);
                     }
@@ -249,6 +252,37 @@ public class ExamService {
                 && Files.exists(Path.of(exam.getTestcasePath()))) return Path.of(exam.getTestcasePath());
         Path disk = examsRoot().resolve(examId).resolve("testcase");
         return Files.exists(disk) ? disk : null;
+    }
+
+    /** Thư mục testcase để bộ dựng template ghi skills_matrix.json, không phụ thuộc đã upload ZIP hay chưa. */
+    public Path testcaseDirectoryForConfiguration(String examId) {
+        safeId(examId, "đề");
+        Path existing = testcaseDirOf(examId);
+        return existing != null ? existing : examsRoot().resolve(examId).resolve("testcase");
+    }
+
+    /** Sao chép snapshot testcase hiện tại trước khi Publish để đề cũ vẫn đối chiếu được. */
+    public boolean snapshotCurrentTestcase(String examId) {
+        safeId(examId, "đề");
+        Path source = testcaseDirOf(examId);
+        if (source == null || !Files.isDirectory(source)) return false;
+        Path target = source.resolveSibling("testcase-archive")
+                .resolve(String.valueOf(Instant.now().toEpochMilli()));
+        try {
+            Files.createDirectories(target);
+            try (Stream<Path> walk = Files.walk(source)) {
+                for (Path p : walk.filter(Files::isRegularFile).toList()) {
+                    Path out = target.resolve(source.relativize(p));
+                    Files.createDirectories(out.getParent());
+                    Files.copy(p, out);
+                }
+            }
+            log.info("🧊 Đã snapshot testcase trước Publish của {} → {}", examId, target);
+            return true;
+        } catch (Exception e) {
+            log.warn("Không snapshot được testcase của {}: {}", examId, e.getMessage());
+            return false;
+        }
     }
 
     /** Thư mục handout (đề bài + starter) của 1 đề — luôn nằm CẠNH testcase/ (<exams>/<id>/handout). */
@@ -397,6 +431,9 @@ public class ExamService {
         exam.setImageName(baseImage);
         exam.setTestcasePath(testcaseDir.toAbsolutePath().normalize().toString());
         exam.setStatus(ExamStatus.READY);
+        exam.setTestcaseStatus("PUBLISHED");
+        if (exam.getTestcaseVersion() == null) exam.setTestcaseVersion(1);
+        if (exam.getTestcasePublishedAt() == null) exam.setTestcasePublishedAt(Instant.now());
         if (examName    != null && !examName.isBlank())    exam.setExamName(examName.trim());
         if (teacherNote != null && !teacherNote.isBlank()) exam.setTeacherNote(teacherNote.trim());
         examRepository.save(exam);

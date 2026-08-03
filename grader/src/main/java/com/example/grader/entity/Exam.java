@@ -10,8 +10,13 @@ import java.time.Instant;
 @Getter
 @Setter
 @Entity
-@Table(name = "exams", indexes = {
-        @Index(name = "idx_exam_has_results", columnList = "has_results")
+@Table(name = "exams",
+        uniqueConstraints = {
+                @UniqueConstraint(name = "uq_exams_exam_id", columnNames = "exam_id")
+        },
+        indexes = {
+                @Index(name = "idx_exam_status", columnList = "status"),
+                @Index(name = "idx_exam_has_results", columnList = "has_results")
 })
 public class Exam {
     @Id
@@ -62,6 +67,22 @@ public class Exam {
     @ColumnDefault("CURRENT_TIMESTAMP")
     @Column(name = "updated_at")
     private Instant updatedAt;
+
+    /** Cấu hình testcase dạng template-instance; giữ riêng với skills_matrix đang được chấm. */
+    @Lob
+    @Column(name = "testcase_config_json", columnDefinition = "LONGTEXT")
+    private String testcaseConfigJson;
+
+    /** Phiên bản cấu hình testcase cuối cùng của đề. */
+    @Column(name = "testcase_version")
+    private Integer testcaseVersion;
+
+    /** DRAFT/PUBLISHED; không dùng ExamStatus để không phá trạng thái READY cũ. */
+    @Column(name = "testcase_status", length = 20)
+    private String testcaseStatus;
+
+    @Column(name = "testcase_published_at")
+    private Instant testcasePublishedAt;
 
     @PrePersist
     protected void onCreate() {

@@ -303,9 +303,12 @@ public class BatchGradingService {
             // Bổ sung skill_code/difficulty từ skills_matrix.json của đề (nguồn sự thật) cho mỗi testcase
             enrichTestCases(testCases, exam);
 
+            // Chuẩn hóa schema kết quả: chỉ dùng expected; expect chỉ được đọc để tương thích dữ liệu cũ.
+            normalizeExpectedFields(testCases);
+
             // Chuẩn hoá lỗi từng testcase FAIL: log thô của flutter test (Expected/Actual + stack trace
-            // dài như "log backend") → { code, message } gọn, sạch để FE hiển thị đẹp.
-            // Đồng thời thêm student_safe_summary để client có một field ổn định mô tả lý do fail.
+            // dài như "log backend") → actual/error gọn, sạch để FE hiển thị đẹp.
+            // error.message là chẩn đoán kỹ thuật; student_safe_summary là hướng dẫn riêng cho SV.
             sanitizeTestCaseErrors(testCases);
 
             // Gắn nhãn KIẾN THỨC (skill_name/category/category_label) + ĐỘ KHÓ cho từng testcase,
@@ -365,7 +368,24 @@ public class BatchGradingService {
                 putIfAbsent(tc, "skill_code", m.get("skill_code"));
                 putIfAbsent(tc, "difficulty", m.get("difficulty"));
                 putIfAbsent(tc, "skill",      m.get("skill"));
+                Object configuredExpected = m.get("expected");
+                if (configuredExpected != null && !String.valueOf(configuredExpected).isBlank()) {
+                    // Expected trong rubric là nội dung giáo viên đã cấu hình, nên là nguồn
+                    // sự thật cuối cùng khi dựng result_json kể cả grader trả metadata cũ.
+                    tc.put("expected", configuredExpected);
+                }
             }
+        }
+    }
+
+    /** Kết quả mới chỉ phát hành expected, không phát hành alias expect. */
+    private void normalizeExpectedFields(List<Map<String, Object>> tcs) {
+        for (Map<String, Object> tc : tcs) {
+            Object expected = tc.get("expected");
+            if (expected == null || String.valueOf(expected).isBlank()) expected = tc.get("expect");
+            if (expected == null || String.valueOf(expected).isBlank()) expected = "PASS";
+            tc.put("expected", expected);
+            tc.remove("expect");
         }
     }
 
@@ -377,7 +397,7 @@ public class BatchGradingService {
 
     // ════════════════════════════════════════════════════════════════════════════
     //  CHUẨN HOÁ LỖI TESTCASE: log thô flutter test → actual + error{code,message}
-    //  + student_safe_summary (lời giải thích an toàn cho sinh viên)
+    //  + student_safe_summary (lời giải thích/hướng xử lý an toàn cho sinh viên)
     // ════════════════════════════════════════════════════════════════════════════
 
     /**
@@ -385,8 +405,8 @@ public class BatchGradingService {
      * trace dài, "EXCEPTION CAUGHT BY...", cây widget → trông như "log backend") thành:
      *   - `actual`      = KẾT QUẢ THỰC TẾ gọn (giá trị/để so với `expected` của rubric), vd "1".
      *   - `error.code`  = loại lỗi (VALUE_MISMATCH | WIDGET_NOT_FOUND | EXCEPTION_THROWN | ASSERTION_FAILED).
-     *   - `error.message` = LÝ DO/giải thích vì sao sai (reason của assertion) — KHÔNG lặp lại giá trị.
-     *   - `student_safe_summary` = bản tóm tắt an toàn, không chứa stack trace/thông tin nội bộ.
+     *   - `error.message` = chẩn đoán kỹ thuật ngắn (reason/matcher/exception type).
+     *   - `student_safe_summary` = hướng xử lý an toàn cho sinh viên; không sao chép error.message.
      * Nhờ vậy các trường bổ sung nhau, không trùng nhau, GV đọc rõ.
      */
     private void sanitizeTestCaseErrors(List<Map<String, Object>> tcs) {
@@ -413,44 +433,64 @@ public class BatchGradingService {
         TestErrorClassifier.Result res = errorClassifier.classify(raw);
         String actual = res.actual();
         if (actual != null && !actual.isBlank()) tc.put("actual", actual);
-        else tc.remove("actual");                       // không có giá trị thực → bỏ field cho gọn
+        else tc.put("actual", "Không có giá trị actual — testcase dừng do exception");
         Map<String, Object> err = new LinkedHashMap<>();
         err.put("code", res.code());
-        String summary = studentSafeSummary(res);
-        err.put("message", summary);
+        String technicalMessage = TestErrorClassifier.shorten(res.message(), 240);
+        if (technicalMessage.isBlank()) technicalMessage = "Testcase không đạt và không có chẩn đoán kỹ thuật.";
+        err.put("message", technicalMessage);
         tc.put("error", err);
-        tc.put("student_safe_summary", summary);
+        tc.put("student_safe_summary", studentSafeSummary(res));
     }
 
     /**
-     * Lấy thông báo ngắn từ classifier làm contract ổn định cho client/student.
-     * Không trả raw log ở đây vì raw log có thể chứa stack trace hoặc đường dẫn container.
+     * Tạo hướng dẫn riêng cho sinh viên. Không lấy nguyên error.message để tránh JSON hiển thị
+     * hai field giống hệt nhau.
      */
     private String studentSafeSummary(TestErrorClassifier.Result res) {
-        String summary = TestErrorClassifier.shorten(res.message(), 240);
-        if (!summary.isBlank()) return summary;
-        return "Testcase chưa đạt yêu cầu.";
+        return studentSafeSummaryForCode(res.code());
+    }
+
+    private String studentSafeSummaryForCode(String code) {
+        return switch (code == null ? "" : code) {
+            case "VALUE_MISMATCH" -> "Đối chiếu actual với expected của testcase và sửa giá trị/logic tương ứng.";
+            case "WIDGET_NOT_FOUND" -> "Kiểm tra widget, text, key hoặc semantics mà đề yêu cầu; bảo đảm widget được render trong viewport.";
+            case "WIDGET_UNEXPECTED" -> "Loại bỏ widget/nhãn xuất hiện ngoài yêu cầu hoặc sửa điều kiện render.";
+            case "WIDGET_COUNT" -> "Kiểm tra số lượng widget thực tế và dữ liệu đầu vào của danh sách.";
+            case "LAYOUT_OVERFLOW" -> "Sửa bố cục bằng cách giới hạn kích thước hoặc cho phép cuộn ở viewport đang được kiểm tra.";
+            case "TIMEOUT" -> "Kiểm tra loading/animation và các thao tác async để chúng luôn kết thúc.";
+            case "NULL_ERROR" -> "Khởi tạo dữ liệu bắt buộc và xử lý null trước khi truy cập thuộc tính/field.";
+            case "TYPE_ERROR" -> "Kiểm tra kiểu dữ liệu và các phép ép kiểu trong luồng testcase.";
+            case "RANGE_ERROR" -> "Kiểm tra index và điều kiện danh sách rỗng trước khi truy cập phần tử.";
+            case "NO_SUCH_METHOD" -> "Kiểm tra tên hàm/thuộc tính và bảo đảm API được định nghĩa đúng trong lib/.";
+            case "FORMAT_ERROR" -> "Kiểm tra dữ liệu đầu vào trước khi parse hoặc chuyển đổi định dạng.";
+            case "STATE_ERROR" -> "Kiểm tra luồng cập nhật state/list và tránh thay đổi dữ liệu khi đang duyệt.";
+            case "BUILD_ERROR" -> "Kiểm tra tham số bắt buộc và lỗi trong build method của widget.";
+            case "COMPILE_ERROR" -> "Kiểm tra import, tên package và dependency trước khi chạy testcase.";
+            case "EXCEPTION_THROWN" -> "Testcase dừng do exception; kiểm tra log runtime và sửa lỗi trong luồng được yêu cầu.";
+            default -> "Đối chiếu yêu cầu testcase với cách triển khai và sửa phần chưa đáp ứng.";
+        };
     }
 
     /** Đảm bảo dữ liệu chấm cũ vẫn có field student_safe_summary. */
     private void ensureStudentSafeSummary(Map<String, Object> tc) {
         Object current = tc.get("student_safe_summary");
-        if (current != null && !String.valueOf(current).isBlank()) {
+        Object errorObj = tc.get("error");
+        String errorMessage = "";
+        String errorCode = "";
+        if (errorObj instanceof Map<?, ?> errorMap) {
+            Object message = errorMap.get("message");
+            if (message != null) errorMessage = String.valueOf(message).strip();
+            Object code = errorMap.get("code");
+            if (code != null) errorCode = String.valueOf(code).strip();
+        }
+        if (current != null && !String.valueOf(current).isBlank()
+                && !String.valueOf(current).strip().equals(errorMessage)) {
             tc.put("student_safe_summary",
                     TestErrorClassifier.shorten(String.valueOf(current), 240));
             return;
         }
-
-        Object errorObj = tc.get("error");
-        if (errorObj instanceof Map<?, ?> errorMap) {
-            Object message = errorMap.get("message");
-            if (message != null && !String.valueOf(message).isBlank()) {
-                tc.put("student_safe_summary",
-                        TestErrorClassifier.shorten(String.valueOf(message), 240));
-                return;
-            }
-        }
-        tc.put("student_safe_summary", "Testcase chưa đạt yêu cầu.");
+        tc.put("student_safe_summary", studentSafeSummaryForCode(errorCode));
     }
 
     /** Giới hạn độ dài log lỗi để không phình DB / không tràn cột. */

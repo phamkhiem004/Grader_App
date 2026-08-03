@@ -40,8 +40,10 @@ grader:
   pass-threshold: ${GRADER_PASS_THRESHOLD:5}
   image:
     prefix: ${GRADER_IMAGE_PREFIX:grading-env}
+  # Mặc định 3 container để không tranh CPU quá mức khi mỗi container có quota 2 CPU.
+  # Máy mạnh có thể tăng bằng GRADER_MAX_CONCURRENT.
   max:
-    concurrent: ${GRADER_MAX_CONCURRENT:8}
+    concurrent: ${GRADER_MAX_CONCURRENT:3}
   timeout:
     seconds: ${GRADER_TIMEOUT_SECONDS:240}
   # Tài nguyên mỗi container chấm. Máy yếu/ít RAM: giảm các giá trị này hoặc GRADER_MAX_CONCURRENT.
@@ -51,3 +53,6 @@ grader:
   analyze:
     # Mặc định bật để giữ cảnh báo dart analyze trong JSON kết quả.
     enabled: ${GRADER_ANALYZE_LIB:true}
+  # ZIP engine layered dùng để sinh exam_test.dart + grader.dart cho đề mới.
+  # Nếu không đặt, backend tự tìm trong Downloads của user đang chạy backend.
+  layered-template-zip: ${GRADER_LAYERED_TEMPLATE_ZIP:}

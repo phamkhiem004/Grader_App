@@ -68,6 +68,7 @@ const ERR_BADGE: Record<string, string> = {
   FORMAT_ERROR: "bg-red-100 text-red-700",
   STATE_ERROR: "bg-red-100 text-red-700",
   BUILD_ERROR: "bg-red-100 text-red-700",
+  COMPILE_ERROR: "bg-red-100 text-red-700",
   EXCEPTION_THROWN: "bg-red-100 text-red-700",
 };
 
@@ -91,10 +92,11 @@ function FailureDetail({ requirement, actual, error, studentSafeSummary }:
               {error.code}
             </span>
           )}
-          {(studentSafeSummary || error.message) && (
-            <span>{studentSafeSummary || error.message}</span>
-          )}
+          {error.message && <span>{error.message}</span>}
         </p>
+        {studentSafeSummary && (
+          <p><span className="font-semibold">Gợi ý:</span> {studentSafeSummary}</p>
+        )}
       </div>
     );
   }

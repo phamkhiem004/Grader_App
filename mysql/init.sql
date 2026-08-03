@@ -24,6 +24,12 @@ CREATE TABLE IF NOT EXISTS exam_results (
     details       LONGTEXT                       COMMENT 'JSON chi tiết từng testcase',
     result_json   LONGTEXT                       COMMENT 'JSON đầy đủ (student/exam/test_cases/analyze)',
     error_log     LONGTEXT                       COMMENT 'Lỗi thô khi chấm',
+    feedback_json LONGTEXT                       COMMENT 'Cache nhận xét từ feedback-bot',
+    feedback_src_hash VARCHAR(40)                COMMENT 'Hash result_json lúc sinh feedback',
+    manual_score  FLOAT                          COMMENT 'Điểm chấm tay',
+    manual_json   LONGTEXT                       COMMENT 'JSON tiêu chí và nhận xét chấm tay',
+    manual_by     VARCHAR(100)                   COMMENT 'Email GV chấm tay',
+    manual_at     TIMESTAMP                      COMMENT 'Thời điểm chấm tay',
     submitted_at  TIMESTAMP     DEFAULT CURRENT_TIMESTAMP,
     updated_at    TIMESTAMP     DEFAULT CURRENT_TIMESTAMP
                                 ON UPDATE CURRENT_TIMESTAMP,
@@ -39,7 +45,7 @@ CREATE TABLE IF NOT EXISTS exam_results (
 -- ── Bảng 2: Thông tin đề thi ─────────────────────────────────────
 CREATE TABLE IF NOT EXISTS exams (
     id            BIGINT AUTO_INCREMENT PRIMARY KEY,
-    exam_id       VARCHAR(50)   NOT NULL UNIQUE  COMMENT 'VD: FLUTTER_PE_01',
+    exam_id       VARCHAR(50)   NOT NULL          COMMENT 'VD: FLUTTER_PE_01',
     exam_name     VARCHAR(200)                   COMMENT 'Tên đề thi hiển thị',
     teacher_note  TEXT                           COMMENT 'Ghi chú/đề bài để đối chiếu khi xem kết quả',
     image_name    VARCHAR(100)                   COMMENT 'Ảnh chấm (grading-base khi dùng mount)',
@@ -55,7 +61,12 @@ CREATE TABLE IF NOT EXISTS exams (
     created_at    TIMESTAMP     DEFAULT CURRENT_TIMESTAMP,
     updated_at    TIMESTAMP     DEFAULT CURRENT_TIMESTAMP
                                 ON UPDATE CURRENT_TIMESTAMP,
+    testcase_config_json LONGTEXT                COMMENT 'Cấu hình testcase template-instance',
+    testcase_version INT                         COMMENT 'Phiên bản cấu hình testcase',
+    testcase_status VARCHAR(20)                  COMMENT 'DRAFT hoặc PUBLISHED',
+    testcase_published_at TIMESTAMP              COMMENT 'Thời điểm publish testcase',
 
+    UNIQUE KEY uq_exams_exam_id (exam_id),
     INDEX idx_exam_status (status),
     INDEX idx_exam_has_results (has_results)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Thông tin và trạng thái từng đề thi';
@@ -64,7 +75,7 @@ CREATE TABLE IF NOT EXISTS exams (
 -- ── Bảng 3: Lịch sử batch upload ────────────────────────────────
 CREATE TABLE IF NOT EXISTS grading_batches (
     id            BIGINT AUTO_INCREMENT PRIMARY KEY,
-    batch_id      VARCHAR(60)   NOT NULL UNIQUE,
+    batch_id      VARCHAR(80)   NOT NULL,
     exam_id       VARCHAR(50)   NOT NULL,
     total_files   INT           DEFAULT 0        COMMENT 'Tổng số bài upload',
     done_count    INT           DEFAULT 0        COMMENT 'Số bài đã chấm xong',
@@ -78,6 +89,7 @@ CREATE TABLE IF NOT EXISTS grading_batches (
     created_at    TIMESTAMP     DEFAULT CURRENT_TIMESTAMP,
     completed_at  TIMESTAMP                      COMMENT 'Thời điểm chấm xong toàn bộ',
 
+    UNIQUE KEY uq_grading_batches_batch_id (batch_id),
     INDEX idx_batch_exam (exam_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Lịch sử các lần upload hàng loạt';
 

@@ -10,14 +10,20 @@ import java.time.Instant;
 @Getter
 @Setter
 @Entity
-@Table(name = "grading_batches")
+@Table(name = "grading_batches",
+        uniqueConstraints = {
+                @UniqueConstraint(name = "uq_grading_batches_batch_id", columnNames = "batch_id")
+        },
+        indexes = {
+                @Index(name = "idx_batch_exam", columnList = "exam_id")
+        })
 public class GradingBatch {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     @Column(name = "id", nullable = false)
     private Long id;
 
-    @Column(name = "batch_id", nullable = false, length = 80, unique = true)
+    @Column(name = "batch_id", nullable = false, length = 80)
     private String batchId;
 
     @Column(name = "exam_id", nullable = false, length = 50)

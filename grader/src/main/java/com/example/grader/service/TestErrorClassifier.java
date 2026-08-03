@@ -70,6 +70,12 @@ public final class TestErrorClassifier {
                 p -> new Result("NULL_ERROR", excActual(p),
                         "Truy cập giá trị null — biến chưa khởi tạo hoặc thiếu xử lý null-safety.")));
 
+        c.add(rule(p -> p.has("couldn't resolve the package")
+                     || p.has("target of uri doesn't exist") || p.has("uri doesn't exist")
+                     || p.has("error when reading"),
+                p -> new Result("COMPILE_ERROR", excActual(p),
+                        "Không biên dịch được mã nguồn hoặc dependency nên testcase chưa thể chạy.")));
+
         c.add(rule(p -> p.has("rangeerror") || p.has("index out of range") || p.has("out of range")
                      || p.has("invalid value: not in inclusive range"),
                 p -> new Result("RANGE_ERROR", excActual(p),
@@ -134,14 +140,27 @@ public final class TestErrorClassifier {
     private Parsed parse(String raw) {
         Parsed p = new Parsed();
         p.raw = raw; p.low = raw.toLowerCase();
+        boolean skipTestDescriptionValue = false;
         for (String line : raw.split("\\R")) {
             String t = line.strip();
             if (t.isEmpty()) continue;
+
+            // Flutter/dart:test thường chèn tên testcase vào error event như:
+            // "The test description was:\n  TC_...". Đây là metadata của test,
+            // không phải actual/exception. Bỏ cả dòng nhãn và dòng giá trị kế tiếp.
+            String tl = t.toLowerCase();
+            if (tl.startsWith("the test description was")) {
+                skipTestDescriptionValue = !tl.contains(":") || tl.endsWith(":");
+                continue;
+            }
+            if (skipTestDescriptionValue) {
+                skipTestDescriptionValue = false;
+                continue;
+            }
             if (t.startsWith("When the exception was thrown") || t.equals("this was the stack:")
                     || t.startsWith("The relevant error-causing widget")) break;     // bỏ phần stack/cây widget
             if (t.startsWith("#") || t.startsWith("package:") || t.contains("(package:flutter")
                     || t.matches("[=═╔╚║╟╢─━].*")) continue;                          // bỏ stack-frame/khung kẻ
-            String tl = t.toLowerCase();
             if (tl.startsWith("test failed. see exception logs above")
                     || tl.matches("the following .*was thrown running a test:?")) continue;   // boilerplate
             if (tl.startsWith("expected:"))   p.expectedVal = after(t);
@@ -182,20 +201,25 @@ public final class TestErrorClassifier {
         return -1;
     }
 
-    /** "Kết quả thực tế" cho exception: nêu kiểu lỗi cụ thể, hoặc widget bị crash khi dựng. */
+    /** "Kết quả thực tế" cho exception; tuyệt đối không trả lại tên testcase. */
     private static String excActual(Parsed p) {
         String line = bestExceptionLine(p.reasonLines);
-        if (line.isBlank()) return "Ném lỗi khi chạy testcase";
+        if (line.isBlank()) return "Không có giá trị actual — testcase dừng do exception";
         Matcher m = Pattern.compile("(?i)was thrown building\\s+([A-Za-z0-9_]+)").matcher(line);
-        if (m.find()) return "Ném lỗi khi dựng widget " + m.group(1);
-        return "Ném lỗi: " + shorten(line, 160);
+        if (m.find()) return "Exception khi dựng widget " + m.group(1);
+
+        // Với wrapper của dart:test, chỉ lấy loại exception (ví dụ TestFailure),
+        // không lấy phần "The test description was: <test_id>".
+        m = Pattern.compile("(?i)the following\\s+(.+?)\\s+was thrown").matcher(line);
+        if (m.find()) return "Exception: " + shorten(m.group(1), 120);
+        return "Exception: " + shorten(line, 160);
     }
 
     /** Dòng exception giàu thông tin nhất: ưu tiên dòng CHI TIẾT nêu rõ loại lỗi (bỏ dòng bọc). */
     private static String bestExceptionLine(List<String> lines) {
         for (String t : lines) {                          // 1) dòng chi tiết, BỎ dòng bọc "The following…"
             String tl = t.toLowerCase();
-            if (tl.startsWith("the following")) continue;
+            if (tl.startsWith("the following") || tl.startsWith("the test description was")) continue;
             if (tl.contains("is not a subtype") || tl.contains("rangeerror") || tl.contains("nosuchmethod")
                     || tl.contains("null check") || tl.contains("formatexception") || tl.contains("bad state")
                     || tl.contains("out of range") || tl.contains("unsupported")
@@ -203,7 +227,11 @@ public final class TestErrorClassifier {
         }
         for (String t : lines)                            // 2) dòng bọc "The following X was thrown building Y"
             if (t.toLowerCase().matches("the following .*was thrown.*")) return t;
-        return lines.isEmpty() ? "" : lines.get(0);       // 3) đành lấy dòng đầu
+        for (String t : lines) {                           // 3) bỏ metadata còn sót từ log cũ
+            String tl = t.toLowerCase();
+            if (!tl.startsWith("the test description was") && !tl.startsWith("test description:")) return t;
+        }
+        return "";                                         // không có actual/exception detail đáng tin cậy
     }
 
     /** Bỏ ngoặc nhọn của giá trị matcher: "&lt;1&gt;" → "1". */

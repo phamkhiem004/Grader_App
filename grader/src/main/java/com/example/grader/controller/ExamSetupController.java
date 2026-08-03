@@ -24,6 +24,8 @@ public class ExamSetupController {
     private ExamRepository examRepo;
     @Autowired
     private SyllabusService syllabusService;
+    @Autowired
+    private com.example.grader.service.TestcaseTemplateService testcaseTemplateService;
 
     @PostMapping("/upload-testcase")
     public ResponseEntity<?> uploadTestcase(
@@ -87,6 +89,52 @@ public class ExamSetupController {
             return ResponseEntity.ok(examService.getCriteria(examId));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.status(404).body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    /** Đọc cấu hình template-instance của đề; không làm thay đổi skills_matrix đang publish. */
+    @GetMapping("/{examId}/testcases")
+    public ResponseEntity<?> getTestcaseConfig(@PathVariable String examId) {
+        try {
+            return ResponseEntity.ok(testcaseTemplateService.getExamConfig(examId));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().body(Map.of("error", "Không đọc được cấu hình testcase"));
+        }
+    }
+
+    /** Lưu Draft: chỉ lưu instance/config, không đụng vào bộ testcase đang được chấm. */
+    @RequestMapping(path = "/{examId}/testcases/draft", method = {RequestMethod.POST, RequestMethod.PUT})
+    public ResponseEntity<?> saveTestcaseDraft(@PathVariable String examId,
+                                                @RequestBody Map<String, Object> body,
+                                                @RequestAttribute(value = "teacherEmail", required = false) String teacherEmail) {
+        try {
+            return ResponseEntity.ok(testcaseTemplateService.saveDraft(examId, body,
+                    teacherEmail != null ? teacherEmail : "unknown"));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        } catch (IllegalStateException e) {
+            return ResponseEntity.status(409).body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    /** Publish: sinh skills_matrix.json và ghi snapshot cấu hình versioned cho đề. */
+    @PostMapping("/{examId}/testcases/publish")
+    public ResponseEntity<?> publishTestcases(@PathVariable String examId,
+                                              @RequestBody Map<String, Object> body,
+                                              @RequestAttribute(value = "teacherEmail", required = false) String teacherEmail) {
+        try {
+            return ResponseEntity.ok(testcaseTemplateService.publish(examId, body,
+                    teacherEmail != null ? teacherEmail : "unknown"));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        } catch (IllegalStateException e) {
+            return ResponseEntity.status(409).body(Map.of("error", e.getMessage()));
         } catch (Exception e) {
             return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
         }

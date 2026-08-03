@@ -35,6 +35,8 @@ Thumbs.db
 *.log
 *.tmp
 _tmp*/
+_codex_work/
+.codex_scratch/
 .pytest_cache/
 __pycache__/
 # Thư mục output thử nghiệm của bộ sinh đề AI (cục bộ)

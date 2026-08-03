@@ -4,7 +4,7 @@ import React, { useEffect, useState, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
-  Settings, FileText, CheckSquare, BarChart2, LogOut, Bell, Search,
+  Settings, FileText, FileCode2, CheckSquare, BarChart2, LogOut, Bell, Search,
   GraduationCap, UserCircle, Loader2, History, PanelLeftClose,
   Clock, CheckCircle2, AlertCircle, BookOpen, Package, Archive,
   MessageSquareText,
@@ -43,6 +43,7 @@ const PRIMARY_NAV = [
   { name: 'Cấu hình Đề thi', path: '/teacher', icon: Settings },
   { name: 'Kho đề thi', path: '/teacher/archive', icon: Archive },
   { name: 'Khung năng lực', path: '/syllabus', icon: BookOpen },
+  { name: 'Tạo testcase', path: '/teacher/testcases', icon: FileCode2 },
   { name: 'Thư viện chấm', path: '/teacher/libraries', icon: Package },
   { name: 'Không gian chấm', path: '/teacher/workspace', icon: FileText },
   { name: 'Nhận xét AI', path: '/teacher/feedback', icon: MessageSquareText },

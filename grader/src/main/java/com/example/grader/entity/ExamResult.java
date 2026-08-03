@@ -10,10 +10,17 @@ import java.time.Instant;
 @Getter
 @Setter
 @Entity
-@Table(name = "exam_results", indexes = {
-        @Index(name = "idx_batch",   columnList = "batch_id"),
-        @Index(name = "idx_student", columnList = "student_id"),
-        @Index(name = "idx_exam",    columnList = "exam_id")
+@Table(name = "exam_results",
+        uniqueConstraints = {
+                @UniqueConstraint(name = "uq_student_exam_mode", columnNames = {
+                        "student_id", "exam_id", "mode"
+                })
+        },
+        indexes = {
+                @Index(name = "idx_batch",   columnList = "batch_id"),
+                @Index(name = "idx_student", columnList = "student_id"),
+                @Index(name = "idx_exam",    columnList = "exam_id"),
+                @Index(name = "idx_status",  columnList = "status")
 })
 public class ExamResult {
     @Id

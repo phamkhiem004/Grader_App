@@ -9,7 +9,6 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Service;
 
@@ -25,8 +24,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
-import java.util.zip.ZipEntry;
-import java.util.zip.ZipFile;
 
 /**
  * Thư viện testcase dạng template-instance.
@@ -42,8 +39,6 @@ public class TestcaseTemplateService {
     private static final String TEMPLATE_CREATED_BY = "system";
     private static final String TEMPLATE_CREATED_AT = "2026-08-02T00:00:00Z";
     private static final String COMMON_ENGINE = "COMMON_V1";
-    private static final String LAYERED_ENGINE = "LAYERED_USER_CRUD_V1";
-    private static final String LEGACY_ENGINE = "LEGACY_GENERIC";
     private static final Pattern SAFE_INSTANCE_ID = Pattern.compile("[A-Za-z0-9_-]{1,60}");
     private static final Set<String> DIFFICULTIES = Set.of("basic", "intermediate", "advanced");
     /** Tên thân thiện hiển thị cho giáo viên; template_id vẫn giữ nguyên để grader nhận diện. */
@@ -192,26 +187,12 @@ public class TestcaseTemplateService {
     @Autowired private SyllabusService syllabusService;
     @Autowired private ExamService examService;
 
-    /** Gói engine layered testcase; có thể đổi bằng GRADER_LAYERED_TEMPLATE_ZIP. */
-    @Value("${grader.layered-template-zip:}")
-    private String configuredReferenceZip;
-
-    private Path referenceTemplateZip;
-    private long referenceTemplateZipLastModified;
-    private long referenceTemplateZipSize;
-
     @PostConstruct
     public void loadTemplates() {
         templates.clear();
-        boolean commonLoaded = loadClasspathTemplates("common-testcase-templates.json", COMMON_ENGINE);
-        if (!commonLoaded) loadClasspathTemplates("testcase-templates.json", LEGACY_ENGINE);
-
-        Path reference = locateReferenceZip();
-        if (reference != null && loadReferenceTemplates(reference)) {
-            referenceTemplateZip = reference;
-            rememberReferenceZipQuietly(reference);
-        }
-        log.info("✅ Nạp {} testcase template dùng chung", templates.size());
+        if (loadClasspathTemplates("common-testcase-templates.json", COMMON_ENGINE))
+            log.info("✅ Nạp {} testcase dùng chung từ common-testcase-templates.json", templates.size());
+        else log.error("Không nạp được thư viện testcase dùng chung.");
     }
 
     private boolean loadClasspathTemplates(String resourceName, String engineType) {
@@ -231,70 +212,6 @@ public class TestcaseTemplateService {
             log.warn("Không nạp được {}: {}", resourceName, e.getMessage());
             return false;
         }
-    }
-
-    /** Nạp rubric thật từ ZIP layered để template trên UI tương ứng với test Dart chạy được. */
-    private boolean loadReferenceTemplates(Path zipPath) {
-        try (ZipFile zip = new ZipFile(zipPath.toFile())) {
-            ZipEntry entry = zip.getEntry("skills_matrix.json");
-            if (entry == null) return false;
-            try (InputStream in = zip.getInputStream(entry)) {
-                Map<String, Object> matrix = mapper.readValue(in,
-                        new TypeReference<LinkedHashMap<String, Object>>() {});
-                for (Map.Entry<String, Object> rowEntry : matrix.entrySet()) {
-                    if (!(rowEntry.getValue() instanceof Map<?, ?>)) continue;
-                    Map<String, Object> source = castMap(rowEntry.getValue());
-                    String id = rowEntry.getKey();
-                    String rubric = text(source.get("rubric"));
-                    Map<String, Object> template = new LinkedHashMap<>(source);
-                    template.put("template_id", id);
-                    template.put("template_version", "layered-v9");
-                    template.put("layer", layerFor(id, rubric));
-                    template.put("name", friendlyTemplateName(id, text(source.get("name"), id)));
-                    template.put("description", friendlyTemplateDescription(id, text(source.get("description"), "")));
-                    template.put("weight_default", number(source.get("weight"), 1));
-                    template.put("parameters_schema", new LinkedHashMap<>());
-                    template.put("expected_template", text(source.get("expected"), id));
-                    template.put("execution_key", id);
-                    template.put("engine_type", LAYERED_ENGINE);
-                    template.put("profile_id", "USER_CRUD_V1");
-                    templates.put(id, template);
-                }
-                if (!templates.isEmpty()) {
-                    log.info("✅ Nạp {} template chạy được từ layered testcase: {}", templates.size(), zipPath);
-                    return true;
-                }
-            }
-        } catch (Exception e) {
-            log.warn("Không nạp được layered testcase ZIP {}: {}", zipPath, e.getMessage());
-        }
-        return false;
-    }
-
-    private Path locateReferenceZip() {
-        List<Path> candidates = new ArrayList<>();
-        if (configuredReferenceZip != null && !configuredReferenceZip.isBlank())
-            candidates.add(Path.of(configuredReferenceZip));
-        String userHome = System.getProperty("user.home", "");
-        if (!userHome.isBlank()) candidates.add(Path.of(userHome, "Downloads",
-                "PRM393_layered_testcase_v9_20260801.zip"));
-        for (Path candidate : candidates) {
-            if (Files.isRegularFile(candidate)) return candidate.toAbsolutePath().normalize();
-        }
-        return null;
-    }
-
-    private String layerFor(String templateId, String rubric) {
-        String id = templateId == null ? "" : templateId.toUpperCase();
-        String r = rubric == null ? "" : rubric.toUpperCase();
-        if (id.startsWith("CONTRACT_")) return "CONTRACT";
-        if (id.startsWith("MODEL_") || r.equals("VERIFY_DATA")) return "MODEL";
-        if (id.startsWith("REPOSITORY_") || id.startsWith("SQLITE_")) return "REPOSITORY";
-        if (id.startsWith("VIEWMODEL_") || r.equals("MVVM") || r.contains("RIVERPOD")) return "VIEWMODEL";
-        if (id.startsWith("UI_RESPONSIVE") || r.equals("RESPONSIVE")) return "RESPONSIVE";
-        if (id.startsWith("SCREEN_") || id.startsWith("VISUAL_")) return "SCREEN";
-        if (id.startsWith("UI_") || id.startsWith("PERSIST_")) return "BLACKBOX";
-        return "BLACKBOX";
     }
 
     /** Danh sách template kèm skill/category để frontend dựng 3 khu vực kéo-thả. */
@@ -403,12 +320,10 @@ public class TestcaseTemplateService {
             String skillsMatrixJson = mapper.writerWithDefaultPrettyPrinter()
                     .writeValueAsString(toSkillsMatrix(items, engineType));
             validateGeneratedMatrix(skillsMatrixJson);
-            Map<String, Object> legacyMatrix = map(oldConfig.get("legacy_matrix"));
-            if (legacyMatrix.isEmpty() && oldConfig.isEmpty()) legacyMatrix = readLegacyMatrix(examId);
             Map<String, Object> generatedMatrix = mapper.readValue(skillsMatrixJson,
                     new TypeReference<LinkedHashMap<String, Object>>() {});
-            Map<String, Object> publishedMatrix = mergeLegacyMatrix(legacyMatrix, generatedMatrix);
-            if (!legacyMatrix.isEmpty()) config.put("legacy_matrix", legacyMatrix);
+            // Bộ mới chỉ chứa rubric trong skills_matrix hiện tại, không ghép lại dữ liệu cũ.
+            Map<String, Object> publishedMatrix = generatedMatrix;
 
             // Draft cũng materialize thành bộ code để giáo viên tải xuống kiểm tra ngay;
             // chỉ Publish mới chuyển ExamStatus sang READY để cho phép chấm.
@@ -448,9 +363,7 @@ public class TestcaseTemplateService {
         if (COMMON_ENGINE.equals(engineType)) {
             copyClasspathEngine(dir, "common-testcase-engine/grader.dart", "grader.dart");
             copyClasspathEngine(dir, "common-testcase-engine/exam_test.dart", "exam_test.dart");
-            return;
         }
-        if (LAYERED_ENGINE.equals(engineType)) copyReferenceEngine(dir);
     }
 
     private void copyClasspathEngine(Path dir, String resourceName, String targetName) throws Exception {
@@ -461,62 +374,10 @@ public class TestcaseTemplateService {
         }
     }
 
-    /** Luôn đồng bộ engine layered với ZIP mẫu để không giữ code cũ của lần tạo trước. */
-    private void copyReferenceEngine(Path dir) throws Exception {
-        if (referenceTemplateZip == null) return;
-        try (ZipFile zip = new ZipFile(referenceTemplateZip.toFile())) {
-            for (String name : List.of("exam_test.dart", "grader.dart")) {
-                ZipEntry entry = zip.getEntry(name);
-                if (entry == null) continue;
-                try (InputStream in = zip.getInputStream(entry)) {
-                    byte[] bytes = in.readAllBytes();
-                    if ("grader.dart".equals(name)) bytes = removeLegacyExpectAlias(bytes);
-                    Files.write(dir.resolve(name), bytes);
-                }
-            }
-        }
-    }
-
-    /**
-     * Backend có thể chạy trước khi giáo viên đặt ZIP vào Downloads. Nạp lại khi có request
-     * để UI không rơi về bộ template generic và sinh nhầm engine.
-     */
+    /** Đảm bảo thư viện testcase dùng chung luôn có sẵn trước mỗi request. */
     private synchronized void ensureReferenceTemplatesLoaded() {
-        Path reference = locateReferenceZip();
-        if (reference == null) return;
-        try {
-            long modified = Files.getLastModifiedTime(reference).toMillis();
-            long size = Files.size(reference);
-            if (reference.equals(referenceTemplateZip)
-                    && modified == referenceTemplateZipLastModified
-                    && size == referenceTemplateZipSize) return;
-            if (loadReferenceTemplates(reference)) {
-                referenceTemplateZip = reference;
-                referenceTemplateZipLastModified = modified;
-                referenceTemplateZipSize = size;
-            }
-        } catch (Exception e) {
-            log.warn("Không thể nạp lại layered testcase ZIP {}: {}", reference, e.getMessage());
-        }
-    }
-
-    private void rememberReferenceZipQuietly(Path reference) {
-        try {
-            referenceTemplateZipLastModified = Files.getLastModifiedTime(reference).toMillis();
-            referenceTemplateZipSize = Files.size(reference);
-        } catch (Exception ignored) {
-            // Lần request sau sẽ kiểm tra lại metadata của ZIP.
-        }
-    }
-
-    /** ZIP mẫu cũ phát cả expect; engine mới chỉ phát expected theo schema hiện tại. */
-    private byte[] removeLegacyExpectAlias(byte[] bytes) {
-        String source = new String(bytes, java.nio.charset.StandardCharsets.UTF_8);
-        String oldBlock = "        // Giữ cả expected và expect để tương thích các format JSON cũ.\n"
-                + "        'expected': expected,\n"
-                + "        'expect': expected,\n";
-        String normalized = source.replace(oldBlock, "        'expected': expected,\n");
-        return normalized.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        if (templates.isEmpty() && !loadClasspathTemplates("common-testcase-templates.json", COMMON_ENGINE))
+            log.error("Không nạp được thư viện testcase dùng chung.");
     }
 
     /** Chỉ cho phép tiếp tục đúng đề Draft/Publish được tạo bởi chức năng template này. */
@@ -552,7 +413,6 @@ public class TestcaseTemplateService {
         if (!(rawItems instanceof List<?> list)) throw new IllegalArgumentException("items phải là một mảng testcase");
         List<Map<String, Object>> out = new ArrayList<>();
         Set<String> ids = new LinkedHashSet<>();
-        Set<String> templateIds = new LinkedHashSet<>();
         int index = 1;
         for (Object raw : list) {
             if (!(raw instanceof Map<?, ?>)) throw new IllegalArgumentException("Mỗi testcase phải là object");
@@ -560,11 +420,7 @@ public class TestcaseTemplateService {
             String templateId = text(input.get("template_id"));
             Map<String, Object> template = templates.get(templateId);
             if (template == null) throw new IllegalArgumentException("Template không tồn tại: " + templateId);
-            String templateEngine = text(template.get("engine_type"),
-                    referenceTemplateZip != null ? LAYERED_ENGINE : LEGACY_ENGINE);
-            if (LAYERED_ENGINE.equals(templateEngine) && !templateIds.add(templateId)) {
-                throw new IllegalArgumentException("Layered testcase không cho chọn trùng rubric: " + templateId);
-            }
+            String templateEngine = text(template.get("engine_type"), COMMON_ENGINE);
             Skill skill = findSkill(text(template.get("skill_code")));
             if (skill == null || Boolean.TRUE.equals(skill.getDeprecated()))
                 throw new IllegalArgumentException("skill_code không còn hợp lệ trong syllabus: " + template.get("skill_code"));
@@ -617,7 +473,7 @@ public class TestcaseTemplateService {
             String groupId = text(input.get("group_id"));
             if (groupId != null && !groupId.isBlank()) {
                 if (!COMMON_ENGINE.equals(templateEngine))
-                    throw new IllegalArgumentException("Chỉ testcase dùng chung mới được gộp nhóm: " + instanceId);
+                    throw new IllegalArgumentException("Testcase này không thuộc thư viện dùng chung: " + instanceId);
                 if (!SAFE_INSTANCE_ID.matcher(groupId).matches())
                     throw new IllegalArgumentException("group_id không hợp lệ ở " + instanceId);
                 item.put("group_id", groupId);
@@ -671,21 +527,12 @@ public class TestcaseTemplateService {
     }
 
     private String engineType(List<Map<String, Object>> items) {
-        Set<String> engines = new LinkedHashSet<>();
-        for (Map<String, Object> item : items) {
-            engines.add(text(item.get("engine_type"), LEGACY_ENGINE));
-        }
-        if (engines.isEmpty()) return COMMON_ENGINE;
-        if (engines.size() > 1) {
-            throw new IllegalArgumentException("Không thể trộn testcase chung với profile layered trong cùng một đề.");
-        }
-        return engines.iterator().next();
+        // Toàn bộ template được cung cấp cho giao diện đều chạy trên cùng engine semantic.
+        return COMMON_ENGINE;
     }
 
     private String profileId(String engineType) {
-        if (COMMON_ENGINE.equals(engineType)) return "COMMON_SEMANTIC_V1";
-        if (LAYERED_ENGINE.equals(engineType)) return "USER_CRUD_V1";
-        return "LEGACY_GENERIC";
+        return "COMMON_SEMANTIC_V1";
     }
 
     private void validateCommonParameters(String runner, Map<String, Object> params, String instanceId) {
@@ -938,12 +785,6 @@ public class TestcaseTemplateService {
 
     private Map<String, Object> toSkillsMatrix(List<Map<String, Object>> items, String engineType) {
         Map<String, Object> matrix = new LinkedHashMap<>();
-        Map<String, Integer> templateCounts = new LinkedHashMap<>();
-        for (Map<String, Object> item : items) {
-            if (!bool(item.get("enabled"), true)) continue;
-            String templateId = String.valueOf(item.get("template_id"));
-            templateCounts.put(templateId, templateCounts.getOrDefault(templateId, 0) + 1);
-        }
         Set<String> emittedGroups = new LinkedHashSet<>();
         for (Map<String, Object> item : items) {
             // Disabled instance vẫn nằm trong config Draft để bật lại sau, nhưng không được
@@ -959,44 +800,20 @@ public class TestcaseTemplateService {
                 matrix.put(groupId, commonGroupRow(groupId, children));
                 continue;
             }
-            String templateId = String.valueOf(item.get("template_id"));
-            Map<String, Object> row = LAYERED_ENGINE.equals(engineType)
-                    ? layeredRubricRow(item, templates.get(templateId))
-                    : COMMON_ENGINE.equals(engineType)
-                        ? commonRubricRow(item, templates.get(templateId))
-                        : genericRubricRow(item);
-            // Giữ key template_id khi chỉ dùng một lần để tương thích grader/testcase cũ;
-            // nếu dùng lại template thì chuyển sang instance_id để không mất bản ghi.
-            String matrixKey = COMMON_ENGINE.equals(engineType)
-                    ? String.valueOf(item.get("instance_id"))
-                    : templateCounts.getOrDefault(templateId, 0) == 1
-                        ? templateId : String.valueOf(item.get("instance_id"));
-            matrix.put(matrixKey, row);
+            matrix.put(String.valueOf(item.get("instance_id")),
+                    commonRubricRow(item));
         }
         return matrix;
     }
 
-    /** Format chính xác mà grader.dart layered mẫu đọc: rubric + 5 metadata chấm điểm. */
-    private Map<String, Object> layeredRubricRow(Map<String, Object> item,
-                                                  Map<String, Object> template) {
-        Map<String, Object> row = new LinkedHashMap<>();
-        if (template != null && template.get("rubric") != null) row.put("rubric", template.get("rubric"));
-        row.put("skill_code", item.get("skill_code"));
-        row.put("name", item.get("name"));
-        row.put("expected", item.get("expected"));
-        row.put("difficulty", item.get("difficulty"));
-        row.put("weight", item.get("weight"));
-        return row;
-    }
-
     /** Matrix của engine chung: runner đọc semantic key và parameters, không biết domain đề. */
-    private Map<String, Object> commonRubricRow(Map<String, Object> item,
-                                                 Map<String, Object> template) {
+    private Map<String, Object> commonRubricRow(Map<String, Object> item) {
         Map<String, Object> row = new LinkedHashMap<>();
         row.put("instance_id", item.get("instance_id"));
         row.put("runner", item.get("runner"));
         row.put("skill_code", item.get("skill_code"));
         row.put("name", item.get("name"));
+        row.put("description", item.get("description"));
         row.put("expected", item.get("expected"));
         row.put("difficulty", item.get("difficulty"));
         row.put("weight", item.get("weight"));
@@ -1013,8 +830,7 @@ public class TestcaseTemplateService {
         String groupName = groupId;
         String difficulty = "basic";
         for (Map<String, Object> child : children) {
-            Map<String, Object> template = templates.get(String.valueOf(child.get("template_id")));
-            childRows.add(commonRubricRow(child, template));
+            childRows.add(commonRubricRow(child));
             String skillCode = text(child.get("skill_code"));
             if (skillCode != null && !skillCode.isBlank()) skillCodes.add(skillCode);
             totalWeight += number(child.get("weight"), 0);
@@ -1047,48 +863,6 @@ public class TestcaseTemplateService {
             case "intermediate" -> 2;
             default -> 1;
         };
-    }
-
-    /** Format fallback cho các template generic không có engine layered tham chiếu. */
-    private Map<String, Object> genericRubricRow(Map<String, Object> item) {
-        Map<String, Object> row = new LinkedHashMap<>();
-        row.put("skill_code", item.get("skill_code"));
-        row.put("layer", item.get("layer"));
-        row.put("name", item.get("name"));
-        row.put("description", item.get("description"));
-        row.put("difficulty", item.get("difficulty"));
-        row.put("weight", item.get("weight"));
-        row.put("expected", item.get("expected"));
-        row.put("execution_key", item.get("execution_key"));
-        return row;
-    }
-
-    /** Đọc matrix cũ của đề chưa từng được quản lý bởi template-instance. */
-    private Map<String, Object> readLegacyMatrix(String examId) {
-        try {
-            Path file = examService.testcaseDirectoryForConfiguration(examId).resolve("skills_matrix.json");
-            if (!Files.exists(file)) return new LinkedHashMap<>();
-            return mapper.readValue(Files.readString(file),
-                    new TypeReference<LinkedHashMap<String, Object>>() {});
-        } catch (Exception e) {
-            log.warn("Không đọc được matrix legacy của {}: {}", examId, e.getMessage());
-            return new LinkedHashMap<>();
-        }
-    }
-
-    /** Ghép testcase mới mà không ghi đè key/test logic của đề cũ. */
-    private Map<String, Object> mergeLegacyMatrix(Map<String, Object> legacy,
-                                                   Map<String, Object> generated) {
-        Map<String, Object> merged = new LinkedHashMap<>(legacy);
-        for (Map.Entry<String, Object> entry : generated.entrySet()) {
-            String key = entry.getKey();
-            if (merged.containsKey(key) && entry.getValue() instanceof Map<?, ?> row) {
-                Object instanceId = row.get("instance_id");
-                key = instanceId == null ? key + "_template" : String.valueOf(instanceId);
-            }
-            merged.put(key, entry.getValue());
-        }
-        return merged;
     }
 
     /** Recheck skill_code sau khi dựng matrix, tránh template lệch taxonomy hiện tại. */

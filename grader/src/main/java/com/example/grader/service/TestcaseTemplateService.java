@@ -42,6 +42,17 @@ public class TestcaseTemplateService {
     private static final String COMMON_ENGINE = "COMMON_V1";
     private static final Pattern SAFE_INSTANCE_ID = Pattern.compile("[A-Za-z0-9_-]{1,60}");
     private static final Set<String> DIFFICULTIES = Set.of("basic", "intermediate", "advanced");
+    /** Nhóm lọc hiển thị ở Khu vực 1; không thay thế category/skill của syllabus. */
+    private static final Map<String, String> TESTCASE_GROUP_LABELS = Map.of(
+            "LOGIC", "Testcase Logic",
+            "WIDGET", "Testcase Widget",
+            "BEHAVIOR", "Testcase Behavior");
+    private static final Set<String> BEHAVIOR_RUNNERS = Set.of(
+            "APP_BOOT", "NAVIGATION", "BUTTON_ACTION", "WIDGET_ENABLED",
+            "DIALOG_FLOW", "FORM_PREFILL", "FORM_SUBMIT");
+    private static final Set<String> LOGIC_RUNNERS = Set.of(
+            "FORM_REQUIRED_FIELDS", "FORM_VALIDATE_FIELDS", "LIST_ITEM_COUNT",
+            "STATE_REACTIVE_FLOW");
     /** Tên thân thiện hiển thị cho giáo viên; template_id vẫn giữ nguyên để grader nhận diện. */
     private static final Map<String, String> FRIENDLY_TEMPLATE_NAMES = Map.ofEntries(
             Map.entry("COMMON_APP_BOOT", "Mở ứng dụng không bị lỗi"),
@@ -454,6 +465,8 @@ public class TestcaseTemplateService {
             item.put("runner", text(template.get("runner"), ""));
             item.put("skill_code", text(template.get("skill_code")));
             item.put("layer", text(template.get("layer")));
+            item.put("testcase_group", text(template.get("testcase_group"),
+                    testcaseGroup(template.get("runner"), template.get("layer"))));
             item.put("name", text(template.get("name")));
             item.put("description", text(template.get("description")));
             item.put("difficulty", difficulty);
@@ -813,6 +826,7 @@ public class TestcaseTemplateService {
         row.put("instance_id", item.get("instance_id"));
         row.put("runner", item.get("runner"));
         row.put("skill_code", item.get("skill_code"));
+        row.put("testcase_group", item.get("testcase_group"));
         row.put("name", item.get("name"));
         row.put("description", item.get("description"));
         row.put("expected", item.get("expected"));
@@ -903,7 +917,23 @@ public class TestcaseTemplateService {
             if (category != null) row.put("category_label", category.getCompetencyLabel() != null
                     && !category.getCompetencyLabel().isBlank() ? category.getCompetencyLabel() : category.getName());
         }
+        String group = text(source.get("testcase_group"),
+                testcaseGroup(source.get("runner"), source.get("layer")));
+        row.put("testcase_group", group);
+        row.put("testcase_group_label", TESTCASE_GROUP_LABELS.getOrDefault(group, "Testcase Logic"));
         return row;
+    }
+
+    /** Phân nhóm theo bản chất kiểm tra, độc lập với category năng lực của syllabus. */
+    private String testcaseGroup(Object rawRunner, Object rawLayer) {
+        String runner = text(rawRunner, "").toUpperCase();
+        String layer = text(rawLayer, "").toUpperCase();
+        if (BEHAVIOR_RUNNERS.contains(runner)) return "BEHAVIOR";
+        if (LOGIC_RUNNERS.contains(runner)) return "LOGIC";
+        if (layer.equals("RESPONSIVE") || runner.startsWith("WIDGET_") || runner.equals("LIST_VISIBLE")) {
+            return "WIDGET";
+        }
+        return "LOGIC";
     }
 
     private Skill findSkill(String code) {

@@ -16,6 +16,7 @@ import jakarta.annotation.PostConstruct;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -332,9 +333,9 @@ public class TestcaseTemplateService {
             Files.createDirectories(dir);
             materializeEngine(dir, engineType);
             Files.writeString(dir.resolve("skills_matrix.json"), mapper.writerWithDefaultPrettyPrinter()
-                    .writeValueAsString(publishedMatrix));
+                    .writeValueAsString(publishedMatrix), StandardCharsets.UTF_8);
             Files.writeString(dir.resolve("testcase-config.json"), mapper.writerWithDefaultPrettyPrinter()
-                    .writeValueAsString(config));
+                    .writeValueAsString(config), StandardCharsets.UTF_8);
             exam.setTestcasePath(dir.toAbsolutePath().normalize().toString());
             boolean engineReady = Files.exists(dir.resolve("exam_test.dart"))
                     && Files.exists(dir.resolve("grader.dart"));

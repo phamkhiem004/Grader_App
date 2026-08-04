@@ -21,6 +21,8 @@ interface Template {
   skill_name?: string;
   category?: string;
   category_label?: string;
+  testcase_group?: string;
+  testcase_group_label?: string;
   layer: string;
   name: string;
   description: string;
@@ -36,6 +38,7 @@ interface TestcaseItem {
   template_version: string;
   skill_code: string;
   layer: string;
+  testcase_group?: string;
   name: string;
   description: string;
   difficulty: string;
@@ -58,6 +61,14 @@ const DIFF_LABEL: Record<string, string> = {
 const LAYER_LABEL: Record<string, string> = {
   CONTRACT: "Hợp đồng API", MODEL: "Mô hình dữ liệu", REPOSITORY: "Truy cập dữ liệu", VIEWMODEL: "Trạng thái & xử lý",
   SCREEN: "Giao diện màn hình", BLACKBOX: "Chức năng người dùng", RESPONSIVE: "Tương thích kích thước",
+};
+
+const TESTCASE_GROUP_ORDER = ["ALL", "LOGIC", "WIDGET", "BEHAVIOR"] as const;
+const TESTCASE_GROUP_LABEL: Record<string, string> = {
+  ALL: "Toàn bộ testcase",
+  LOGIC: "Testcase Logic",
+  WIDGET: "Testcase Widget",
+  BEHAVIOR: "Testcase Behavior",
 };
 
 const RUNNER_LABEL: Record<string, string> = {
@@ -122,6 +133,18 @@ function cloneParams(template: Template): JsonMap {
 function formatParam(value: unknown) {
   if (typeof value === "object" && value !== null) return JSON.stringify(value);
   return String(value ?? "");
+}
+
+function testcaseGroup(template: Template) {
+  if (template.testcase_group && TESTCASE_GROUP_LABEL[template.testcase_group]) {
+    return template.testcase_group;
+  }
+  const runner = String(template.runner || "").toUpperCase();
+  const layer = String(template.layer || "").toUpperCase();
+  if (["APP_BOOT", "NAVIGATION", "BUTTON_ACTION", "WIDGET_ENABLED", "DIALOG_FLOW", "FORM_PREFILL", "FORM_SUBMIT"].includes(runner)) return "BEHAVIOR";
+  if (["FORM_REQUIRED_FIELDS", "FORM_VALIDATE_FIELDS", "LIST_ITEM_COUNT", "STATE_REACTIVE_FLOW"].includes(runner)) return "LOGIC";
+  if (layer === "RESPONSIVE" || runner.startsWith("WIDGET_") || runner === "LIST_VISIBLE") return "WIDGET";
+  return "LOGIC";
 }
 
 const PARAMETER_OPTIONS: Record<string, string[]> = {
@@ -190,7 +213,7 @@ export default function TestcasesPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<"draft" | "publish" | null>(null);
   const [message, setMessage] = useState<{ type: "ok" | "error"; text: string } | null>(null);
-  const [selectedCategory, setSelectedCategory] = useState("");
+  const [selectedCategory, setSelectedCategory] = useState("ALL");
   const [search, setSearch] = useState("");
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -240,25 +263,28 @@ export default function TestcasesPage() {
       .then((templateRows) => {
         const loadedTemplates = Array.isArray(templateRows) ? templateRows as Template[] : [];
         setTemplates(loadedTemplates);
-        if (loadedTemplates.length) setSelectedCategory(String(loadedTemplates[0].category || ""));
+        setSelectedCategory("ALL");
       })
       .catch(() => setMessage({ type: "error", text: "Không tải được thư viện testcase." }))
       .finally(() => setLoading(false));
   }, []);
 
   const categories = useMemo(() => {
-    const map = new Map<string, { code: string; label: string; count: number }>();
-    templates.forEach((t) => {
-      const code = t.category || "OTHER";
-      const current = map.get(code) || { code, label: t.category_label || code, count: 0 };
-      current.count += 1;
-      map.set(code, current);
+    const counts = new Map<string, number>(TESTCASE_GROUP_ORDER.map((code) => [code, 0]));
+    counts.set("ALL", templates.length);
+    templates.forEach((template) => {
+      const code = testcaseGroup(template);
+      counts.set(code, (counts.get(code) || 0) + 1);
     });
-    return [...map.values()];
+    return TESTCASE_GROUP_ORDER.map((code) => ({
+      code,
+      label: TESTCASE_GROUP_LABEL[code],
+      count: counts.get(code) || 0,
+    }));
   }, [templates]);
 
   const visibleTemplates = useMemo(() => templates.filter((t) => {
-    const categoryMatch = !selectedCategory || (t.category || "OTHER") === selectedCategory;
+    const categoryMatch = selectedCategory === "ALL" || testcaseGroup(t) === selectedCategory;
     const query = search.trim().toLowerCase();
     const skillLabel = SKILL_LABEL[t.skill_code] || t.skill_name || t.skill_code;
     const searchMatch = !query || [t.name, t.description, t.skill_code, skillLabel, t.layer,
@@ -301,6 +327,7 @@ export default function TestcasesPage() {
       template_version: template.template_version,
       skill_code: template.skill_code,
       layer: template.layer,
+      testcase_group: testcaseGroup(template),
       name: template.name,
       description: template.description,
       difficulty: template.difficulty,
@@ -571,7 +598,7 @@ export default function TestcasesPage() {
           <section className="card overflow-hidden">
             <div className="border-b border-slate-100 bg-slate-50/70 px-4 py-3">
               <p className="eyebrow">Khu vực 1</p>
-              <h2 className="mt-1 text-sm font-bold text-slate-800">Khung kiến thức</h2>
+              <h2 className="mt-1 text-sm font-bold text-slate-800">Nhóm testcase</h2>
             </div>
             <div className="p-2">
               {loading ? <div className="p-5 text-center text-sm text-slate-400"><Loader2 className="mx-auto animate-spin" size={20} /></div> : categories.map((category) => (
@@ -619,6 +646,7 @@ export default function TestcasesPage() {
                       <div className="flex flex-wrap items-center gap-1.5">
                         <h3 className="text-sm font-semibold text-slate-800">{template.name}</h3>
                         <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700" title={ENGINE_LABEL[template.engine_type || ""] || template.engine_type}>Dùng chung</span>
+                        <span className="rounded bg-cyan-100 px-1.5 py-0.5 text-[10px] font-bold text-cyan-700">{TESTCASE_GROUP_LABEL[testcaseGroup(template)]}</span>
                         <span className="rounded bg-violet-100 px-1.5 py-0.5 text-[10px] font-bold text-violet-700">{LAYER_LABEL[template.layer] || template.layer}</span>
                         <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-500">{DIFF_LABEL[template.difficulty] || template.difficulty}</span>
                       </div>

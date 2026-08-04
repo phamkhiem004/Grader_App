@@ -358,7 +358,8 @@ public class BatchGradingService {
         try {
             Path f = Path.of(exam.getTestcasePath()).resolve("skills_matrix.json");
             if (!Files.exists(f)) return;
-            matrix = mapper.convertValue(mapper.readTree(Files.readString(f)), Map.class);
+            matrix = mapper.convertValue(
+                    mapper.readTree(Files.readString(f, java.nio.charset.StandardCharsets.UTF_8)), Map.class);
         } catch (Exception e) {
             return;
         }

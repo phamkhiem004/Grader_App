@@ -12,6 +12,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -51,7 +52,7 @@ public class FeedbackBotClient {
         try {
             HttpRequest req = HttpRequest.newBuilder(URI.create(trimBase() + "/"))
                     .timeout(Duration.ofSeconds(5)).GET().build();
-            HttpResponse<String> res = http.send(req, HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> res = http.send(req, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
             if (res.statusCode() / 100 == 2) return mapper.readTree(res.body());
         } catch (Exception ignored) {}
         return null;
@@ -71,11 +72,12 @@ public class FeedbackBotClient {
 
             HttpRequest req = HttpRequest.newBuilder(URI.create(trimBase() + "/feedback/generate"))
                     .timeout(Duration.ofSeconds(timeoutSeconds))
-                    .header("Content-Type", "application/json")
-                    .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(body)))
+                    .header("Content-Type", "application/json; charset=UTF-8")
+                    .POST(HttpRequest.BodyPublishers.ofString(
+                            mapper.writeValueAsString(body), StandardCharsets.UTF_8))
                     .build();
 
-            HttpResponse<String> res = http.send(req, HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> res = http.send(req, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
             if (res.statusCode() / 100 != 2)
                 return err(studentId, studentName, score,
                         "Bot trả HTTP " + res.statusCode() + ": " + excerpt(res.body()));

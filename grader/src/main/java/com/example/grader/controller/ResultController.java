@@ -23,6 +23,9 @@ import java.util.Map;
 @CrossOrigin(origins = "*")
 public class ResultController {
 
+    /** JSON luôn khai báo UTF-8 để client không tự đoán theo mã ký tự của máy. */
+    private static final MediaType JSON_UTF8 = MediaType.parseMediaType("application/json; charset=UTF-8");
+
     @Autowired
     private ExamResultRepository resultRepo;
     @Autowired
@@ -151,7 +154,7 @@ public class ResultController {
         } catch (Exception e) {
             out = "{\"examId\":\"" + examId + "\",\"count\":0,\"results\":[]}";
         }
-        return ResponseEntity.ok().contentType(MediaType.APPLICATION_JSON).body(out);
+        return ResponseEntity.ok().contentType(JSON_UTF8).body(out);
     }
 
     /** JSON đầy đủ của 1 bài (1 SV + 1 đề) — in đẹp. */
@@ -162,7 +165,7 @@ public class ResultController {
                 .map(ExamResult::getResultJson)
                 .filter(json -> json != null && !json.isBlank())
                 .map(json -> ResponseEntity.ok()
-                        .contentType(MediaType.APPLICATION_JSON)
+                        .contentType(JSON_UTF8)
                         .body(pretty(json)))
                 .orElseGet(() -> ResponseEntity.notFound().build());
     }
@@ -192,7 +195,7 @@ public class ResultController {
         } catch (Exception e) {
             out = "{\"batchId\":\"" + batchId + "\",\"count\":0,\"results\":[]}";
         }
-        return ResponseEntity.ok().contentType(MediaType.APPLICATION_JSON).body(out);
+        return ResponseEntity.ok().contentType(JSON_UTF8).body(out);
     }
 
     private String pretty(String json) {

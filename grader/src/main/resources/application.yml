@@ -17,6 +17,10 @@ spring:
     show-sql: false
 
   servlet:
+    encoding:
+      charset: UTF-8
+      enabled: true
+      force: true
     multipart:
       max-file-size: 50MB
       max-request-size: ${GRADER_MAX_UPLOAD:2GB}   # cho batch lớn
@@ -46,6 +50,9 @@ grader:
     concurrent: ${GRADER_MAX_CONCURRENT:3}
   timeout:
     seconds: ${GRADER_TIMEOUT_SECONDS:240}
+  runner:
+    # Mỗi nhóm flutter test bị treo chỉ được chiếm tối đa 60 giây.
+    process-timeout-seconds: ${GRADER_RUNNER_PROCESS_TIMEOUT_SECONDS:60}
   # Tài nguyên mỗi container chấm. Máy yếu/ít RAM: giảm các giá trị này hoặc GRADER_MAX_CONCURRENT.
   run:
     cpus: ${GRADER_RUN_CPUS:2.0}

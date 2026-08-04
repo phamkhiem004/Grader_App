@@ -815,7 +815,7 @@ class UserListScreen extends HomeScreen {
 
         Thread t1 = new Thread(() -> {
             try (BufferedReader r = new BufferedReader(
-                    new InputStreamReader(process.getInputStream()))) {
+                    new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
                 String line;
                 while ((line = r.readLine()) != null) stdout.append(line).append("\n");
             } catch (IOException ignored) {
@@ -823,7 +823,7 @@ class UserListScreen extends HomeScreen {
         });
         Thread t2 = new Thread(() -> {
             try (BufferedReader r = new BufferedReader(
-                    new InputStreamReader(process.getErrorStream()))) {
+                    new InputStreamReader(process.getErrorStream(), StandardCharsets.UTF_8))) {
                 String line;
                 while ((line = r.readLine()) != null) stderr.append(line).append("\n");
             } catch (IOException ignored) {
@@ -970,7 +970,8 @@ class UserListScreen extends HomeScreen {
             pb.redirectErrorStream(true);
             Process p = pb.start();
             StringBuilder sb = new StringBuilder();
-            try (BufferedReader r = new BufferedReader(new InputStreamReader(p.getInputStream()))) {
+            try (BufferedReader r = new BufferedReader(
+                    new InputStreamReader(p.getInputStream(), StandardCharsets.UTF_8))) {
                 String line;
                 while ((line = r.readLine()) != null) sb.append(line).append("\n");
             }

@@ -88,7 +88,7 @@ Future<void> _runCase(
       final submitKey = _text(parameters, 'submitKey');
       expect(_byKey(submitKey), findsOneWidget, reason: 'Thiếu submit key: $submitKey');
       await tester.tap(_byKey(submitKey));
-      await tester.pumpAndSettle();
+      await _settle(tester);
       for (final key in _csv(parameters, 'errorKeys')) {
         expect(_byKey(key), findsOneWidget, reason: 'Thiếu error key: $key');
       }
@@ -116,13 +116,13 @@ Future<void> _runCase(
       final openKey = _text(parameters, 'openKey');
       final destinationKey = _text(parameters, 'destinationKey');
       await tester.tap(_byKey(openKey));
-      await tester.pumpAndSettle();
+      await _settle(tester);
       expect(_byKey(destinationKey), findsOneWidget);
       final backKey = _text(parameters, 'backKey');
       final homeKey = _text(parameters, 'homeKey');
       if (backKey.isNotEmpty && homeKey.isNotEmpty) {
         await tester.tap(_byKey(backKey));
-        await tester.pumpAndSettle();
+        await _settle(tester);
         expect(_byKey(homeKey), findsOneWidget);
       }
       return;
@@ -139,7 +139,7 @@ Future<void> _runCase(
       final buttonKey = _text(parameters, 'buttonKey');
       final resultKey = _text(parameters, 'resultKey');
       await tester.tap(_byKey(buttonKey));
-      await tester.pumpAndSettle();
+      await _settle(tester);
       expect(_byKey(resultKey), findsOneWidget);
       return;
     default:
@@ -186,7 +186,7 @@ Future<void> _checkStateReactiveFlow(
   expect(_byKey(initialKey), findsOneWidget,
       reason: 'Thiếu state ban đầu: $initialKey');
   await tester.tap(_byKey(actionKey));
-  await tester.pumpAndSettle();
+  await _settle(tester);
   expect(_byKey(updatedKey), findsOneWidget,
       reason: 'State không cập nhật sau action $actionKey: $updatedKey');
   if (absentKey.isNotEmpty) {
@@ -196,8 +196,23 @@ Future<void> _checkStateReactiveFlow(
 }
 
 Future<void> _boot(WidgetTester tester) async {
-  student_app.main();
-  await tester.pumpAndSettle(const Duration(seconds: 2));
+  // SQLite FFI là I/O thật; gọi main trong FakeAsync khiến Future loadUsers không
+  // được hoàn tất, còn pumpAndSettle thì chờ vô hạn vì CircularProgressIndicator.
+  await tester.runAsync(() async {
+    student_app.main();
+    await tester.pump();
+    await Future<void>.delayed(const Duration(milliseconds: 500));
+  });
+  await tester.pump();
+  expect(tester.takeException(), isNull);
+}
+
+Future<void> _settle(WidgetTester tester) async {
+  // Chờ có giới hạn để animation/loading nền không khóa cả batch chấm.
+  await tester.runAsync(() async {
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+  });
+  await tester.pump();
 }
 
 Future<void> _responsive(
@@ -222,7 +237,7 @@ Future<void> _responsive(
   expect(tester.takeException(), isNull);
 
   tester.view.physicalSize = landscape;
-  await tester.pumpAndSettle();
+  await _settle(tester);
   expect(tester.takeException(), isNull);
 }
 
@@ -254,7 +269,7 @@ Future<void> _responsiveTarget(
   _assertTargetType(tester, portraitFinder, targetKey, targetType);
 
   tester.view.physicalSize = landscape;
-  await tester.pumpAndSettle();
+  await _settle(tester);
   expect(tester.takeException(), isNull);
   final landscapeFinder = _byKey(targetKey);
   expect(landscapeFinder, findsOneWidget,
@@ -353,7 +368,7 @@ Future<void> _checkFormValidateFields(
   }
   final submitKey = _requiredText(parameters, 'submitKey');
   await tester.tap(_byKey(submitKey));
-  await tester.pumpAndSettle();
+  await _settle(tester);
   for (final errorKey in errors) {
     expect(_byKey(errorKey), findsOneWidget,
         reason: 'Thiếu lỗi validation key: $errorKey');
@@ -385,7 +400,7 @@ Future<void> _checkFormPrefill(
   await _boot(tester);
   final editKey = _requiredText(parameters, 'editKey');
   await tester.tap(_byKey(editKey));
-  await tester.pumpAndSettle();
+  await _settle(tester);
   final fields = _csv(parameters, 'fieldKeys');
   final expectedValues = _csv(parameters, 'expectedValues');
   if (fields.isEmpty || fields.length != expectedValues.length) {
@@ -421,7 +436,7 @@ Future<void> _checkFormSubmit(
     await tester.enterText(fieldFinder, _decodeInput(values[i]));
   }
   await tester.tap(_byKey(_requiredText(parameters, 'submitKey')));
-  await tester.pumpAndSettle();
+  await _settle(tester);
   final resultKey = _text(parameters, 'resultKey');
   if (resultKey.isNotEmpty) expect(_byKey(resultKey), findsOneWidget);
   for (final errorKey in _csv(parameters, 'errorKeys')) {
@@ -437,7 +452,7 @@ Future<void> _checkDialogFlow(
   await _boot(tester);
   final actionKey = _requiredText(parameters, 'actionKey');
   await tester.tap(_byKey(actionKey));
-  await tester.pumpAndSettle();
+  await _settle(tester);
 
   final dialogKey = _requiredText(parameters, 'dialogKey');
   final dialogFinder = _byKey(dialogKey);
@@ -446,7 +461,7 @@ Future<void> _checkDialogFlow(
 
   final decisionKey = _requiredText(parameters, 'decisionKey');
   await tester.tap(_byKey(decisionKey));
-  await tester.pumpAndSettle();
+  await _settle(tester);
   final resultKey = _text(parameters, 'resultKey');
   if (resultKey.isNotEmpty) expect(_byKey(resultKey), findsOneWidget);
   final absentKey = _text(parameters, 'absentKey');
@@ -582,7 +597,9 @@ void _assertTargetType(
     'switch' => widget is Switch,
     'dropdown' => widget is DropdownButton,
     'padding' => widget is Padding,
-    'container' => widget is Container,
+    // Template dùng key vai trò screen.home có thể fallback vào Scaffold khi
+    // bài không gắn ValueKey; README không bắt buộc sinh viên phải dùng key.
+    'container' => widget is Container || widget is Scaffold,
     _ => false,
   };
   if (!matches) {
@@ -647,7 +664,138 @@ FontWeight _fontWeight(String value) {
   return weights[value.toLowerCase()] ?? FontWeight.w400;
 }
 
-Finder _byKey(String key) => find.byKey(ValueKey<String>(key));
+Finder _byKey(String key) {
+  final exact = find.byKey(ValueKey<String>(key), skipOffstage: false);
+  if (exact.evaluate().isNotEmpty) return exact;
+
+  // Public contract của starter không ép ValueKey. Khi không có key, dùng
+  // fallback theo vai trò hiển thị để template vẫn đánh giá được hành vi.
+  switch (key) {
+    case 'screen.home':
+    case 'screen.list':
+      return find.byType(Scaffold, skipOffstage: false);
+    case 'screen.detail':
+      return find.text('User Detail', skipOffstage: false);
+    case 'field.title':
+    case 'field.name':
+    case 'field.fullName':
+      return _textFormFieldAt(0);
+    case 'field.email':
+      return _textFormFieldAt(1);
+    case 'field.avatar':
+      return find.byWidgetPredicate(
+        (widget) => widget is DropdownButtonFormField,
+        skipOffstage: false,
+      );
+    case 'action.save':
+      return _buttonWithText(RegExp(
+        r'^(add|create|save|submit|update|thêm|tạo|lưu|cập nhật)(\s+user)?$',
+        caseSensitive: false,
+      ));
+    case 'action.item.edit':
+      return _buttonWithText(RegExp(r'^(edit|sửa|chỉnh sửa)$', caseSensitive: false));
+    case 'action.delete':
+      return _buttonWithText(RegExp(r'^(delete|remove|xóa)$', caseSensitive: false));
+    case 'action.delete.cancel':
+      return _buttonWithText(RegExp(r'^(cancel|no|hủy|đóng)$', caseSensitive: false));
+    case 'action.back':
+      return _buttonWithText(RegExp(r'^(back|quay lại|trở về)$', caseSensitive: false));
+    case 'action.open-detail':
+      return find.byType(ListTile, skipOffstage: false);
+    case 'list.items':
+      return find.byType(ListView, skipOffstage: false);
+    case 'item.1':
+      return _listTileAt(0);
+    case 'item.2':
+      return _listTileAt(1);
+    case 'item.3':
+      return _listTileAt(2);
+    case 'dialog.delete':
+      return find.byType(AlertDialog, skipOffstage: false);
+    case 'message.success':
+      return find.byWidgetPredicate(
+        (widget) => widget is Text && RegExp(
+          r'success|successful|saved|added|updated|thành công|đã thêm|đã cập nhật|đã lưu',
+          caseSensitive: false,
+        ).hasMatch(widget.data ?? ''),
+        skipOffstage: false,
+      );
+    case 'state.empty':
+      return find.byWidgetPredicate(
+        (widget) => widget is Text && RegExp(
+          r'no users|empty|chưa có|không có',
+          caseSensitive: false,
+        ).hasMatch(widget.data ?? ''),
+        skipOffstage: false,
+      );
+    case 'state.loaded':
+      return _listTileAt(0);
+    case 'text.screen.title':
+      final appBar = find.byType(AppBar, skipOffstage: false);
+      return find.descendant(
+        of: appBar,
+        matching: find.byType(Text, skipOffstage: false),
+        matchRoot: true,
+      );
+    default:
+      if (key.startsWith('error.')) return _validationErrorFor(key);
+      return _notFound();
+  }
+}
+
+Finder _textFormFieldAt(int index) {
+  final fields = find.byWidgetPredicate(
+    (widget) => widget is TextFormField || widget is TextField,
+    skipOffstage: false,
+  );
+  return fields.evaluate().length > index ? fields.at(index) : _notFound();
+}
+
+Finder _listTileAt(int index) {
+  final items = find.byType(ListTile, skipOffstage: false);
+  return items.evaluate().length > index ? items.at(index) : _notFound();
+}
+
+Finder _buttonWithText(RegExp pattern) {
+  final labels = find.byWidgetPredicate(
+    (widget) => widget is Text && pattern.hasMatch((widget.data ?? '').trim()),
+    skipOffstage: false,
+  );
+  final buttons = find.ancestor(
+    of: labels,
+    matching: find.byWidgetPredicate(
+      (widget) => widget is ButtonStyleButton ||
+          widget is IconButton ||
+          widget is FloatingActionButton ||
+          widget is RawMaterialButton,
+      skipOffstage: false,
+    ),
+    matchRoot: true,
+  );
+  return buttons.evaluate().isNotEmpty ? buttons.first : _notFound();
+}
+
+Finder _validationErrorFor(String key) {
+  final all = find.byWidgetPredicate(
+    (widget) => widget is Text && RegExp(
+      r'required|minimum|min|invalid|bắt buộc|tối thiểu|không hợp lệ|lỗi',
+      caseSensitive: false,
+    ).hasMatch(widget.data ?? ''),
+    skipOffstage: false,
+  );
+  final email = key.toLowerCase().contains('email');
+  final specific = find.byWidgetPredicate(
+    (widget) => widget is Text && (email
+        ? RegExp(r'email|e-mail|định dạng', caseSensitive: false)
+            .hasMatch(widget.data ?? '')
+        : RegExp(r'name|họ|tên|full', caseSensitive: false)
+            .hasMatch(widget.data ?? '')),
+    skipOffstage: false,
+  );
+  return specific.evaluate().isNotEmpty ? specific.first : all;
+}
+
+Finder _notFound() => find.byWidgetPredicate((_) => false);
 
 Map<String, dynamic> _loadMatrix() {
   for (final path in <String>['test/skills_matrix.json', 'skills_matrix.json']) {

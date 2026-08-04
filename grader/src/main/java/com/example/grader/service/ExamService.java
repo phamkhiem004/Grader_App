@@ -29,6 +29,8 @@ import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Stream;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Setup đề theo cơ chế MOUNT: KHÔNG build image riêng cho từng đề.
@@ -53,6 +55,10 @@ public class ExamService {
 
     @Value("${grader.submissions-dir:submissions}")
     private String submissionsDir;
+
+    /** Giới hạn mỗi process Flutter để một testcase treo không chiếm cả lượt chấm. */
+    @Value("${grader.runner.process-timeout-seconds:60}")
+    private int runnerProcessTimeoutSeconds;
 
     private final AtomicBoolean baseImageReady = new AtomicBoolean(false);
     private final ObjectMapper mapper = new ObjectMapper();
@@ -93,7 +99,7 @@ public class ExamService {
         Path f = Path.of(tc).resolve("skills_matrix.json");
         if (!Files.exists(f)) return out;
 
-        JsonNode root = mapper.readTree(Files.readString(f));
+        JsonNode root = mapper.readTree(Files.readString(f, StandardCharsets.UTF_8));
         root.fields().forEachRemaining(e -> {
             JsonNode v = e.getValue();
             Map<String, Object> m = new LinkedHashMap<>();
@@ -122,10 +128,10 @@ public class ExamService {
         Exam exam = examRepository.findByExamId(examId).orElse(null);
         if (exam != null && exam.getTestcasePath() != null && !exam.getTestcasePath().isBlank()) {
             Path f = Path.of(exam.getTestcasePath()).resolve("skills_matrix.json");
-            if (Files.exists(f)) return Files.readString(f);
+            if (Files.exists(f)) return Files.readString(f, StandardCharsets.UTF_8);
         }
         Path disk = examsRoot().resolve(examId).resolve("testcase").resolve("skills_matrix.json");
-        if (Files.exists(disk)) return Files.readString(disk);
+        if (Files.exists(disk)) return Files.readString(disk, StandardCharsets.UTF_8);
         throw new IllegalArgumentException("Không tìm thấy skills_matrix.json của đề " + examId);
     }
 
@@ -216,7 +222,7 @@ public class ExamService {
                 String lower = name.toLowerCase();
                 if (!(lower.endsWith(".dart") || lower.endsWith(".json") || lower.endsWith(".yaml")
                         || lower.endsWith(".yml") || lower.endsWith(".md") || lower.endsWith(".txt"))) continue;
-                String content = Files.readString(p);
+                String content = Files.readString(p, StandardCharsets.UTF_8);
                 if (content.length() > MAX_BYTES) content = content.substring(0, MAX_BYTES) + "\n… (đã cắt bớt)";
                 Map<String, String> m = new LinkedHashMap<>();
                 m.put("name", name);
@@ -313,7 +319,7 @@ public class ExamService {
             boolean any = false;
             if (deBai != null && !deBai.isBlank()) {
                 Files.createDirectories(handout);
-                Files.writeString(handout.resolve("de_bai.md"), deBai);
+                Files.writeString(handout.resolve("de_bai.md"), deBai, StandardCharsets.UTF_8);
                 any = true;
             }
             any |= writeHandoutFiles(handout.resolve("starter"), starter);     // khung code phát SV
@@ -340,7 +346,7 @@ public class ExamService {
             if (!out.startsWith(subRoot))   // chặn path traversal ('../') trong tên file
                 throw new IllegalArgumentException("Tên file không hợp lệ: " + name);
             Files.createDirectories(out.getParent());
-            Files.writeString(out, f.getOrDefault("content", ""));
+            Files.writeString(out, f.getOrDefault("content", ""), StandardCharsets.UTF_8);
             any = true;
         }
         return any;
@@ -354,7 +360,7 @@ public class ExamService {
         Map<String, String> files = new LinkedHashMap<>();
         for (String f : List.of("exam_test.dart", "grader.dart", "skills_matrix.json")) {
             Path p = dir.resolve(f);
-            if (Files.exists(p)) files.put(f, Files.readString(p));
+            if (Files.exists(p)) files.put(f, Files.readString(p, StandardCharsets.UTF_8));
         }
         return files.isEmpty() ? null : zipBytes(files);
     }
@@ -363,7 +369,7 @@ public class ExamService {
     public String readDeBai(String examId) throws Exception {
         safeId(examId, "đề");
         Path f = handoutDirOf(examId).resolve("de_bai.md");
-        return Files.exists(f) ? Files.readString(f) : null;
+        return Files.exists(f) ? Files.readString(f, StandardCharsets.UTF_8) : null;
     }
 
     /** ZIP khung starter (handout/starter/<lib/…>) để phát SV; null nếu đề chưa có starter. */
@@ -384,7 +390,7 @@ public class ExamService {
         Map<String, String> files = new LinkedHashMap<>();
         try (Stream<Path> s = Files.walk(root)) {
             for (Path p : s.filter(Files::isRegularFile).toList())
-                files.put(root.relativize(p).toString().replace('\\', '/'), Files.readString(p));
+                files.put(root.relativize(p).toString().replace('\\', '/'), Files.readString(p, StandardCharsets.UTF_8));
         }
         return files.isEmpty() ? null : zipBytes(files);
     }
@@ -422,6 +428,7 @@ public class ExamService {
         validateRequiredFiles(testcaseDir);
         normalizeExamTestNames(testcaseDir);   // Bỏ group wrapper để Flutter trả test name đúng TC_...
         normalizeGraderRubricKeys(testcaseDir); // Tránh Flutter thêm group prefix làm lệch key rubric.
+        normalizeGraderExecution(testcaseDir); // Tránh retry hàng loạt làm một bài chạm timeout Docker.
         ensureTestcaseImportsAvailable(testcaseDir); // Tự bổ sung package thiếu vào môi trường chấm nếu có thể
         validateTestcaseImports(testcaseDir);   // CHẶN package ngoài còn thiếu → tránh 0/0 oan cả lớp
         validateSkillCodes(testcaseDir);   // skill_code (nếu khai) phải nằm trong syllabus
@@ -550,7 +557,8 @@ public class ExamService {
         try {
             Process pr = new ProcessBuilder("docker", "image", "inspect", image)
                     .redirectErrorStream(true).start();
-            try (BufferedReader r = new BufferedReader(new InputStreamReader(pr.getInputStream()))) {
+            try (BufferedReader r = new BufferedReader(
+                    new InputStreamReader(pr.getInputStream(), StandardCharsets.UTF_8))) {
                 while (r.readLine() != null) { /* drain */ }
             }
             return pr.waitFor(30, TimeUnit.SECONDS) && pr.exitValue() == 0;
@@ -586,7 +594,7 @@ public class ExamService {
             if (!Files.exists(pubspec)) return out;
             boolean inDeps = false;
             java.util.regex.Pattern entry = java.util.regex.Pattern.compile("^ {2}([A-Za-z0-9_]+):\\s*(.*)$");
-            for (String raw : Files.readAllLines(pubspec)) {
+            for (String raw : Files.readAllLines(pubspec, StandardCharsets.UTF_8)) {
                 String line = raw.replace("\t", "  ");
                 if (line.isBlank() || line.trim().startsWith("#")) continue;
                 if (!line.startsWith(" ")) { inDeps = line.split(":")[0].trim().equals("dependencies"); continue; }
@@ -659,7 +667,7 @@ public class ExamService {
             // Đảm bảo ĐÃ CÓ ảnh nền (build 1 lần duy nhất nếu máy chưa có); sau đó chỉ CẬP NHẬT tại chỗ.
             ensureBaseImage(locateTemplateDir());
 
-            snapshot = Files.readString(pubspec);
+            snapshot = Files.readString(pubspec, StandardCharsets.UTF_8);
 
             // 1) Resolve version cho package chưa khai version (flutter pub add trong container ephemeral)
             List<String[]> resolved = resolveVersions(desired);
@@ -678,7 +686,7 @@ public class ExamService {
 
         } catch (Exception e) {
             if (snapshot != null) {
-                try { Files.writeString(pubspec, snapshot); }     // HOÀN TÁC để không kẹt pubspec hỏng
+                try { Files.writeString(pubspec, snapshot, StandardCharsets.UTF_8); } // HOÀN TÁC để không kẹt pubspec hỏng
                 catch (Exception ex) { log.warn("Revert pubspec lỗi: {}", ex.getMessage()); }
             }
             throw e;
@@ -696,7 +704,7 @@ public class ExamService {
      * của ảnh mới (không tốn dung lượng riêng) → "tạo image 1 lần, dùng mãi mãi".
      */
     private void updateBaseImageInPlace(Path pubspec, StringBuilder out) throws Exception {
-        String content = Files.readString(pubspec);
+        String content = Files.readString(pubspec, StandardCharsets.UTF_8);
         String cid = "grader-env-update-" + System.currentTimeMillis();
         try {
             // 1) Container giữ-sống từ CHÍNH ảnh nền hiện có (ghi đè CMD = sleep, ENTRYPOINT vẫn null).
@@ -787,7 +795,7 @@ public class ExamService {
 
     /** Ghi lại khối `dependencies:` của pubspec.base.yaml (giữ nguyên các phần khác của file). */
     private void writeDependenciesBlock(Path pubspec, List<String[]> deps) throws Exception {
-        List<String> lines = Files.readAllLines(pubspec);
+        List<String> lines = Files.readAllLines(pubspec, StandardCharsets.UTF_8);
         List<String> out = new ArrayList<>();
         boolean done = false;
         int i = 0;
@@ -813,7 +821,7 @@ public class ExamService {
             out.add(line);
             i++;
         }
-        Files.writeString(pubspec, String.join("\n", out) + "\n");
+        Files.writeString(pubspec, String.join("\n", out) + "\n", StandardCharsets.UTF_8);
     }
 
     /** Như runDocker nhưng GOM output (giữ ~120 dòng cuối) để hiển thị tiến độ build cho GV. */
@@ -880,7 +888,7 @@ public class ExamService {
                         "File bắt buộc bị RỖNG (0 byte): " + f
                       + " — kiểm tra lại nội dung file trước khi nén zip.");
         }
-        if (!Files.readString(dir.resolve("grader.dart")).contains("main"))
+        if (!Files.readString(dir.resolve("grader.dart"), StandardCharsets.UTF_8).contains("main"))
             throw new IllegalArgumentException(
                     "grader.dart không có hàm main() — file có thể sai nội dung/encoding.");
     }
@@ -1011,6 +1019,103 @@ public class ExamService {
     }
 
     /**
+     * Tối ưu runner layered-v9 ngay lúc upload để mọi batch dùng cùng chính sách an toàn.
+     *
+     * Runner cũ đã gom test theo nhóm nhưng lại chạy lại TỪNG testcase fail. Với bài thiếu
+     * nhiều file, hàng chục lần khởi động Flutter nối tiếp nhau làm vượt timeout của Docker.
+     * Kết quả nhóm đã đủ để chấm; retry từng ID chỉ dành cho chẩn đoán nên bỏ khỏi đường nóng.
+     * Đồng thời thay Process.run bằng wrapper có timeout để một process Flutter bị treo tự kết thúc.
+     */
+    private void normalizeGraderExecution(Path testcaseDir) {
+        Path f = testcaseDir.resolve("grader.dart");
+        try {
+            String src = Files.readString(f, StandardCharsets.UTF_8);
+            String patched = src;
+            if (patched.contains("failedNames")
+                    && patched.contains("Future<Map<String, _TestRun>> _runFlutterGroup")) {
+                Pattern retryBlock = Pattern.compile(
+                        "(?s)\\n    var runs = await _runWidgetGroup\\(names\\);.*?\\n    for \\(final id in names\\) \\{");
+                Matcher matcher = retryBlock.matcher(patched);
+                if (matcher.find()) {
+                    patched = matcher.replaceFirst(Matcher.quoteReplacement(
+                            "\n    final runs = await _runWidgetGroup(names);\n"
+                                    + "    for (final id in names) {"));
+                }
+            }
+
+            if (patched.contains("Process.run(")
+                    && patched.contains("Future<Map<String, _TestRun>> _runFlutterGroup")
+                    && !patched.contains("Future<ProcessResult> _runProcess(")) {
+                if (patched.contains("import 'dart:io';")) {
+                    patched = patched.replace("import 'dart:io';",
+                            "import 'dart:async';\nimport 'dart:io';");
+                }
+                patched = patched.replace("Process.run(", "_runProcess(");
+
+                String helper = """
+
+Future<ProcessResult> _runProcess(
+  String executable,
+  List<String> arguments, {
+  Map<String, String>? environment,
+  String? workingDirectory,
+  bool runInShell = false,
+}) async {
+  const limit = Duration(seconds: %d);
+  final process = await Process.start(
+    executable,
+    arguments,
+    environment: environment,
+    workingDirectory: workingDirectory,
+    runInShell: runInShell,
+  );
+  final stdoutFuture = process.stdout.transform(utf8.decoder).join();
+  final stderrFuture = process.stderr.transform(utf8.decoder).join();
+  try {
+    final code = await process.exitCode.timeout(limit);
+    return ProcessResult(
+      process.pid,
+      code,
+      await stdoutFuture,
+      await stderrFuture,
+    );
+  } on TimeoutException {
+    process.kill();
+    final out = await stdoutFuture.timeout(
+      const Duration(seconds: 2),
+      onTimeout: () => '',
+    );
+    final err = await stderrFuture.timeout(
+      const Duration(seconds: 2),
+      onTimeout: () => '',
+    );
+    return ProcessResult(
+      process.pid,
+      -1,
+      out,
+      '${err}\\nGRADER_PROCESS_TIMEOUT after %ds',
+    );
+  }
+}
+""".formatted(runnerProcessTimeoutSeconds, runnerProcessTimeoutSeconds);
+
+                int marker = patched.indexOf("Future<void> main()");
+                if (marker >= 0) {
+                    patched = patched.substring(0, marker) + helper + "\n" + patched.substring(marker);
+                }
+            }
+
+            if (!patched.equals(src)) {
+                Files.writeString(f, patched, StandardCharsets.UTF_8);
+                log.info("Đã tối ưu grader.dart: bỏ retry hàng loạt, timeout process {}s: {}",
+                        runnerProcessTimeoutSeconds, f);
+            }
+        } catch (Exception e) {
+            log.warn("Tự tối ưu execution của grader.dart lỗi: {}", e.getMessage());
+        }
+    }
+
+    /**
      * CHẶN testcase import package KHÔNG có trong môi trường chấm (chỉ có những gì khai trong
      * pubspec.base.yaml: flutter, flutter_test...). Đây là nguyên nhân khiến CẢ LỚP bị 0/0 oan
      * (vd đề import 'package:intl/intl.dart' → exam_test.dart không biên dịch được). Bắt ngay lúc upload.
@@ -1061,7 +1166,7 @@ public class ExamService {
             dartFiles = s.filter(f -> f.toString().endsWith(".dart")).toList();
         }
         for (Path f : dartFiles) {
-            for (String line : Files.readAllLines(f)) {
+            for (String line : Files.readAllLines(f, StandardCharsets.UTF_8)) {
                 java.util.regex.Matcher m = p.matcher(line);
                 if (m.find() && !allowed.contains(m.group(1))) bad.add(m.group(1));
             }
@@ -1111,7 +1216,7 @@ public class ExamService {
             if (Files.exists(pubspec)) {
                 boolean inDeps = false;
                 java.util.regex.Pattern dep = java.util.regex.Pattern.compile("^ {2}([A-Za-z0-9_]+)\\s*:");
-                for (String raw : Files.readAllLines(pubspec)) {
+                for (String raw : Files.readAllLines(pubspec, StandardCharsets.UTF_8)) {
                     String line = raw.replace("\t", "  ");
                     if (line.isBlank() || line.trim().startsWith("#")) continue;
                     if (!line.startsWith(" ")) {                       // header ở cột 0
@@ -1136,7 +1241,8 @@ public class ExamService {
     private void validateSkillCodes(Path testcaseDir) throws Exception {
         Path f = testcaseDir.resolve("skills_matrix.json");
         if (!Files.exists(f)) return;
-        List<Map<String, Object>> problems = syllabusService.validateSkillsMatrix(Files.readString(f));
+        List<Map<String, Object>> problems = syllabusService.validateSkillsMatrix(
+                Files.readString(f, StandardCharsets.UTF_8));
         if (problems.isEmpty()) return;
 
         // "error" (skill_code sai/deprecated, difficulty không hợp lệ) → CHẶN upload.

@@ -99,6 +99,48 @@ class ResultTaxonomyAnnotationTest {
         assertEquals("GIU_NGUYEN", tcs.get(0).get("rubric"));
     }
 
+    // ── expected của testcase GROUP tại điểm ghép result.json ─────
+    private static void enrich(List<Map<String, Object>> tcs, Map<String, Object> matrix) throws Exception {
+        Method m = BatchGradingService.class
+                .getDeclaredMethod("enrichTestCases", List.class, Map.class);
+        m.setAccessible(true);
+        m.invoke(new BatchGradingService(), tcs, matrix);
+    }
+
+    private static Map<String, Object> groupRow(String storedExpected) {
+        return map("runner", "GROUP", "group_id", "THEM_USER", "name", "Thêm người dùng",
+                "expected", storedExpected,
+                "children", List.of(
+                        map("runner", "WIDGET_VISIBLE", "expected", "Form phải có nút lưu."),
+                        map("runner", "FORM_SUBMIT",
+                                "expected", "Sau khi lưu, người dùng mới phải nằm trong danh sách.")));
+    }
+
+    @Test
+    void rebuildsLegacyGroupExpectedWhenAssemblingResult() throws Exception {
+        // Đề publish TRƯỚC bản sửa: skills_matrix.json trên đĩa còn câu đếm số assert. Phải
+        // dựng lại lúc ghép, nếu không câu đó đi thẳng tới sinh viên qua bản nhận xét.
+        Map<String, Object> matrix = map("TC_ADD", groupRow("Tất cả 2 assert trong nhóm phải đạt."));
+        List<Map<String, Object>> tcs = cases(
+                map("test_id", "TC_ADD", "expected", "Tất cả 2 assert trong nhóm phải đạt."));
+
+        enrich(tcs, matrix);
+
+        assertEquals("Thêm người dùng: Form phải có nút lưu. "
+                + "Sau khi lưu, người dùng mới phải nằm trong danh sách.", tcs.get(0).get("expected"));
+    }
+
+    @Test
+    void keepsTeacherWrittenGroupExpectedWhenAssemblingResult() throws Exception {
+        String written = "Nhập hợp lệ rồi lưu thì người dùng mới xuất hiện trong danh sách.";
+        Map<String, Object> matrix = map("TC_ADD", groupRow(written));
+        List<Map<String, Object>> tcs = cases(map("test_id", "TC_ADD"));
+
+        enrich(tcs, matrix);
+
+        assertEquals(written, tcs.get(0).get("expected"));
+    }
+
     // ── chapter ───────────────────────────────────────────────────
     @Test
     void chapterPrefersExplicitColumnThenDerivesFromOrder() {

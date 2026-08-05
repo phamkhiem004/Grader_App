@@ -397,10 +397,13 @@ public class BatchGradingService {
                 putIfAbsent(tc, "skill_code", m.get("skill_code"));
                 putIfAbsent(tc, "difficulty", m.get("difficulty"));
                 putIfAbsent(tc, "skill",      m.get("skill"));
-                Object configuredExpected = m.get("expected");
+                // Expected trong rubric là nội dung giáo viên đã cấu hình, nên là nguồn
+                // sự thật cuối cùng khi dựng result_json kể cả grader trả metadata cũ.
+                // Riêng testcase GROUP: đề publish TRƯỚC bản sửa còn giữ câu tự sinh đếm số
+                // assert, phải dựng lại tại đây — xem TestCaseTaxonomy.groupExpected.
+                Object configuredExpected = TestCaseTaxonomy.groupExpected(m);
+                if (configuredExpected == null) configuredExpected = m.get("expected");
                 if (configuredExpected != null && !String.valueOf(configuredExpected).isBlank()) {
-                    // Expected trong rubric là nội dung giáo viên đã cấu hình, nên là nguồn
-                    // sự thật cuối cùng khi dựng result_json kể cả grader trả metadata cũ.
                     tc.put("expected", configuredExpected);
                 }
             }

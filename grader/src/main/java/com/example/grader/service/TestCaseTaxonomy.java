@@ -1,13 +1,16 @@
 package com.example.grader.service;
 
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 /**
- * TRỤC PHÂN LOẠI TESTCASE cho `result.json` v2 — nguồn sự thật DUY NHẤT của {@code layer}
- * và {@code rubric}. Dùng chung cho lúc SINH đề ({@link TestcaseTemplateService}) và lúc
- * GHÉP kết quả ({@link BatchGradingService}) để hai bên không lệch nhau.
+ * TRỤC PHÂN LOẠI TESTCASE cho `result.json` v2 — nguồn sự thật DUY NHẤT của {@code layer},
+ * {@code rubric} và {@code expected} của testcase GROUP. Dùng chung cho lúc SINH đề
+ * ({@link TestcaseTemplateService}) và lúc GHÉP kết quả ({@link BatchGradingService}) để hai
+ * bên không lệch nhau.
  *
  * <p><b>layer</b> — tầng kiểm thử. Tiêu chí phân tầng là ĐIỀU ĐƯỢC KHẲNG ĐỊNH, không phải
  * cách dựng widget: trong engine chung mọi runner đều khởi động ứng dụng thật nên không thể
@@ -152,6 +155,65 @@ public final class TestCaseTaxonomy {
             if (value != null) return value;
         }
         return null;
+    }
+
+    // ── expected của testcase GROUP ───────────────────────────────
+
+    /** Câu `expected` mà bản cũ tự sinh cho testcase GROUP — phải thay khi gặp lại. */
+    private static final Pattern LEGACY_GROUP_EXPECTED =
+            Pattern.compile("^Tất cả\\s+\\d+\\s+assert trong nhóm phải đạt\\.?$", Pattern.CASE_INSENSITIVE);
+
+    /**
+     * `expected` của testcase GROUP — DẪN XUẤT từ tên nhóm ghép với `expected` của các
+     * testcase con, vì một nhóm chỉ có MỘT kết quả nên yêu cầu của nó là hợp của các con.
+     *
+     * <p>Trả về {@code null} khi KHÔNG cần thay: row không phải GROUP, hoặc `expected` hiện tại
+     * là nội dung đáng giữ (giáo viên viết tay lúc ra đề — bao giờ cũng sát đề hơn bản ghép máy).
+     * Chỉ dựng câu mới khi `expected` còn trống, hoặc còn là câu tự sinh của bản cũ
+     * ({@code "Tất cả N assert trong nhóm phải đạt."}): câu đó đếm số testcase và dùng chữ
+     * "assert" — đều là từ vựng nội bộ của hệ thống chấm, sinh viên không kiểm chứng được trên
+     * bài của mình, mà `expected` thì đi thẳng tới sinh viên qua bản nhận xét.
+     *
+     * <p>Gọi ở CẢ HAI đầu — lúc sinh matrix và lúc ghép result.json — nên đề đã publish trước
+     * bản sửa cũng không còn phát ra câu cũ, giáo viên không phải publish lại.
+     *
+     * <p>Lưu ý: UI hiện KHÔNG có ô cho giáo viên nhập `expected` của nhóm. Nếu sau này thêm,
+     * phải phân biệt "trống vì chưa nhập" với "giáo viên xoá có ý" ngay tại đây.
+     */
+    public static String groupExpected(Map<?, ?> row) {
+        if (row == null) return null;
+        if (!"GROUP".equalsIgnoreCase(String.valueOf(row.get("runner")).trim())) return null;
+
+        String current = text(row.get("expected"));
+        if (current != null && !LEGACY_GROUP_EXPECTED.matcher(current).matches()) return null;
+
+        // Trùng nội dung thì chỉ lấy một lần, giữ nguyên thứ tự giáo viên xếp testcase.
+        Set<String> parts = new LinkedHashSet<>();
+        if (row.get("children") instanceof List<?> list) {
+            for (Object child : list) {
+                if (!(child instanceof Map<?, ?> childRow)) continue;
+                String childExpected = text(childRow.get("expected"));
+                if (childExpected != null) parts.add(sentence(childExpected));
+            }
+        }
+
+        String title = groupTitle(row);
+        if (parts.isEmpty()) {
+            return title == null ? null : "Phải thực hiện đúng yêu cầu \"" + title + "\".";
+        }
+        String body = String.join(" ", parts);
+        return title == null ? body : title + ": " + body;
+    }
+
+    /** Tên nhóm giáo viên đặt; null khi chỉ là mã kỹ thuật, để không ghép mã vào câu cho SV đọc. */
+    private static String groupTitle(Map<?, ?> row) {
+        String name = text(row.get("name"));
+        return name == null || name.equalsIgnoreCase(text(row.get("group_id"))) ? null : name;
+    }
+
+    /** Bảo đảm mỗi vế là câu trọn vẹn trước khi nối nhiều `expected` lại với nhau. */
+    private static String sentence(String s) {
+        return ".!?…:".indexOf(s.charAt(s.length() - 1)) >= 0 ? s : s + ".";
     }
 
     private static String text(Object value) {

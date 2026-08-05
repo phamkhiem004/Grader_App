@@ -17,6 +17,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -39,6 +40,10 @@ class FixtureResultAssemblyTest {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final Path FIXTURE = Path.of("..", "fixtures", "result-json-v2");
+    /** Từ vựng nội bộ của hệ thống chấm — sinh viên không kiểm chứng được số lượng test. */
+    private static final java.util.regex.Pattern INTERNAL_TEST_COUNT =
+            java.util.regex.Pattern.compile("\\b\\d+\\s+(assert|testcase|test|phép kiểm)\\b",
+                    java.util.regex.Pattern.CASE_INSENSITIVE);
 
     @Test
     void assemblesLabelsForEveryFixtureSubmission() throws Exception {
@@ -67,6 +72,20 @@ class FixtureResultAssemblyTest {
                 // A3: layer phải nằm trong enum của SPEC.
                 assertTrue(TestCaseTaxonomy.LAYERS.contains(tc.get("layer")),
                         variant + "/" + id + ": layer = " + tc.get("layer"));
+                // `expected` đi thẳng tới sinh viên nên không được chứa từ vựng nội bộ
+                // của hệ thống chấm: chữ "assert", hay đếm số testcase/test.
+                String expected = String.valueOf(tc.get("expected"));
+                assertFalse(expected.toLowerCase().contains("assert"),
+                        variant + "/" + id + ": expected lộ từ vựng nội bộ — " + expected);
+                assertFalse(INTERNAL_TEST_COUNT.matcher(expected).find(),
+                        variant + "/" + id + ": expected đếm số test — " + expected);
+                // Chứng minh harness đã chạy sanitizeTestCaseErrors: mọi câu FAIL phải có
+                // đủ error + student_safe_summary hệt như backend gửi đi.
+                if (String.valueOf(tc.get("status")).contains("fail")) {
+                    assertNotNull(tc.get("error"), variant + "/" + id + ": thiếu error");
+                    assertFalse(String.valueOf(tc.get("student_safe_summary")).isBlank(),
+                            variant + "/" + id + ": thiếu student_safe_summary");
+                }
             }
             done++;
         }
@@ -104,6 +123,12 @@ class FixtureResultAssemblyTest {
         assertEquals(7, byId.get("TC_LIST_VISIBLE").get("chapter"));
         assertEquals("STATE_MANAGEMENT", byId.get("TC_DELETE_CONFIRM").get("category"));
         assertEquals(6, byId.get("TC_DELETE_CONFIRM").get("chapter"));
+
+        // GROUP có expected giáo viên viết tay: bản ghép máy KHÔNG được ghi đè, vì câu viết
+        // tay bao giờ cũng sát đề hơn.
+        assertEquals("Nhập họ tên và email hợp lệ rồi lưu thì người dùng mới phải xuất hiện "
+                        + "trong danh sách và không còn thông báo lỗi.",
+                byId.get("TC_ADD_USER").get("expected"));
     }
 
     // ── dựng lại luồng ghép, gọi THẬT các bước P1 đã đổi ───────────────────
@@ -119,17 +144,25 @@ class FixtureResultAssemblyTest {
         Exam exam = new Exam();
         exam.setTestcasePath(FIXTURE.resolve("exam").toAbsolutePath().toString());
 
+        // ĐÚNG THỨ TỰ của assembleResultJson. Thiếu một bước là artifact không trung thực:
+        // sanitizeTestCaseErrors mới là chỗ sinh `error` + `student_safe_summary`, nên bỏ nó
+        // thì nhóm luật E của ACCEPTANCE xanh giả (từng làm samples/ sai, xem CHANGELOG_FOR_NLP).
         Object matrix = invoke(batch, "loadSkillsMatrix", new Class<?>[]{Exam.class}, exam);
         assertNotNull(matrix, "Không đọc được skills_matrix.json của fixture");
         invoke(batch, "enrichTestCases", new Class<?>[]{List.class, Map.class}, tcs, matrix);
         invoke(batch, "annotateTaxonomy", new Class<?>[]{List.class, Map.class}, tcs, matrix);
-        new CompetencyService().annotateTestCases(tcs, resolver);
+        invoke(batch, "normalizeExpectedFields", new Class<?>[]{List.class}, tcs);
+        invoke(batch, "sanitizeTestCaseErrors", new Class<?>[]{List.class}, tcs);
+        CompetencyService competency = new CompetencyService();
+        competency.annotateTestCases(tcs, resolver);
 
         Map<String, Object> root = new LinkedHashMap<>();
         root.put("student", Map.of("id", "FIXTURE_" + variant.toUpperCase(), "name", "Fixture " + variant));
         root.put("exam", Map.of("code", "FIXTURE_V2", "title", "Fixture result.json v2", "total_score", 10));
         root.put("grading_result", MAPPER.convertValue(grader.get("grading_result"), Map.class));
         root.put("test_cases", tcs);
+        // Backend phát hành cả khối này; thiếu nó thì bên đọc tưởng nó đã bị bỏ.
+        root.put("competency_assessment", competency.assess(tcs, resolver));
         root.put("teacher_note", "");
         return root;
     }

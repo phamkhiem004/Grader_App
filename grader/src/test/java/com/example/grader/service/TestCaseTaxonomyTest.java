@@ -13,6 +13,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -112,6 +113,77 @@ class TestCaseTaxonomyTest {
     void rubricSkipsBlankValues() {
         assertEquals("BEHAVIOR", TestCaseTaxonomy.rubricOf(
                 row("group_id", "   ", "testcase_group", "BEHAVIOR")));
+    }
+
+    // ── expected của testcase GROUP ───────────────────────────────
+    private static Map<String, Object> group(String name, String... childExpected) {
+        List<Map<String, Object>> children = new java.util.ArrayList<>();
+        for (String e : childExpected) children.add(row("runner", "WIDGET_VISIBLE", "expected", e));
+        return row("runner", "GROUP", "group_id", "THEM_USER", "name", name, "children", children);
+    }
+
+    @Test
+    void groupExpectedJoinsChildrenUnderGroupName() {
+        assertEquals("Thêm người dùng: Form phải có ô nhập họ tên. Sau khi lưu, người dùng mới "
+                        + "phải nằm trong danh sách.",
+                TestCaseTaxonomy.groupExpected(group("Thêm người dùng",
+                        "Form phải có ô nhập họ tên.",
+                        "Sau khi lưu, người dùng mới phải nằm trong danh sách.")));
+    }
+
+    @Test
+    void groupExpectedNeverLeaksTestCountOrInternalVocabulary() {
+        // Bản cũ sinh "Tất cả N assert trong nhóm phải đạt." — đếm testcase và dùng chữ
+        // "assert", cả hai đều là từ vựng nội bộ mà sinh viên không kiểm chứng được.
+        String out = TestCaseTaxonomy.groupExpected(group("Thêm người dùng",
+                "Form phải có ô nhập họ tên.", "Form phải có ô nhập email.", "Phải có nút lưu."));
+        assertTrue(out.contains("ô nhập email"), out);
+        assertFalse(out.toLowerCase().contains("assert"), out);
+        assertFalse(Pattern.compile("\\b\\d+\\s+(assert|testcase|test)\\b").matcher(out).find(), out);
+    }
+
+    @Test
+    void groupExpectedKeepsWhatTeacherWrote() {
+        Map<String, Object> g = group("Thêm người dùng", "Form phải có ô nhập họ tên.");
+        g.put("expected", "Nhập hợp lệ rồi lưu thì người dùng mới xuất hiện trong danh sách.");
+        assertNull(TestCaseTaxonomy.groupExpected(g), "Không được ghi đè câu giáo viên viết tay");
+    }
+
+    @Test
+    void groupExpectedReplacesLegacyGeneratedSentence() {
+        // Đề đã publish trước bản sửa: phải dựng lại khi ĐỌC, không cần publish lại đề.
+        Map<String, Object> g = group("Thêm người dùng", "Form phải có ô nhập họ tên.");
+        g.put("expected", "Tất cả 2 assert trong nhóm phải đạt.");
+        assertEquals("Thêm người dùng: Form phải có ô nhập họ tên.", TestCaseTaxonomy.groupExpected(g));
+    }
+
+    @Test
+    void groupExpectedNormalizesChildSentences() {
+        // Giáo viên nhập không dấu chấm cuối, và hai con trùng nội dung.
+        assertEquals("Thêm người dùng: Phải có nút lưu.",
+                TestCaseTaxonomy.groupExpected(group("Thêm người dùng",
+                        "Phải có nút lưu", "Phải có nút lưu.")));
+    }
+
+    @Test
+    void groupExpectedOmitsTechnicalGroupIdAsTitle() {
+        // name chưa đặt thì bằng group_id — mã kỹ thuật, không được ghép vào câu cho SV đọc.
+        assertEquals("Form phải có ô nhập họ tên.",
+                TestCaseTaxonomy.groupExpected(group("THEM_USER", "Form phải có ô nhập họ tên.")));
+    }
+
+    @Test
+    void groupExpectedFallsBackToGroupNameWhenChildrenSaySilent() {
+        assertEquals("Phải thực hiện đúng yêu cầu \"Thêm người dùng\".",
+                TestCaseTaxonomy.groupExpected(group("Thêm người dùng")));
+        assertNull(TestCaseTaxonomy.groupExpected(group("THEM_USER")));
+    }
+
+    @Test
+    void groupExpectedIgnoresNonGroupRows() {
+        assertNull(TestCaseTaxonomy.groupExpected(null));
+        assertNull(TestCaseTaxonomy.groupExpected(row("runner", "WIDGET_VISIBLE", "expected", "x")));
+        assertNull(TestCaseTaxonomy.groupExpected(row("expected", "x")));
     }
 
     /**

@@ -861,13 +861,15 @@ public class TestcaseTemplateService {
         row.put("runner", "GROUP");
         row.put("group_id", groupId);
         row.put("name", groupName);
-        row.put("expected", "Tất cả " + children.size() + " assert trong nhóm phải đạt.");
+        row.put("expected", null);   // giữ chỗ; dựng ở cuối hàm vì cần children
         row.put("difficulty", difficulty);
         row.put("weight", totalWeight);
         row.put("skill_code", skillCodes.isEmpty() ? "UI_SCAFFOLD_APPBAR" : skillCodes.iterator().next());
         row.put("skill_codes", new ArrayList<>(skillCodes));
         row.put("children", childRows);
-        // Đặt sau children vì layer của nhóm là tầng CAO NHẤT trong các testcase con.
+        // Ba field dưới đây đều DẪN XUẤT từ các testcase con nên phải dựng sau `children`:
+        // expected là yêu cầu của các con ghép lại, layer là tầng CAO NHẤT trong các con.
+        row.put("expected", TestCaseTaxonomy.groupExpected(row));
         row.put("rubric", TestCaseTaxonomy.rubricOf(row));
         row.put("layer", TestCaseTaxonomy.layerOf(row, groupId));
         return row;

@@ -48,7 +48,7 @@ sinh viên.** Mọi tranh cãi thiết kế phân xử bằng nguyên tắc này
 |---|---|---|---|
 | **P0** | Chốt hợp đồng + thước đo + fixture | ✅ **Xong** 2026-08-05 | verify tự kiểm 29/29 vi phạm; fixture chạy lại cho kết quả y hệt |
 | **P1** | `rubric` + `layer` + `chapter` | ✅ **Xong** 2026-08-05 | A3, A4, A5, B1, B2 xanh trên bài chấm thật; 22 test đơn vị; điểm không đổi (không đụng Dart) |
-| **P3** | Engine chung v2 (đọc event `print`, `grading_result` đầy đủ, `engine_version`) | 🔜 kế tiếp | **Điểm y hệt** trên cả 4 bài fixture |
+| **P3** | Engine chung v2 (đọc event `print`, `grading_result` đầy đủ, `engine_version`) | ✅ **Xong** 2026-08-05 | Điểm y hệt trên cả 4 bài (10.0 / 6.0 / 0.0 / 0.0); FAIL giảm 5·9·9·10 → 5·7·8·8, không luật nào đỏ thêm |
 | **P3b** | Sửa 2 khiếm khuyết CHẤM SAI ĐIỂM của engine (`_byKey` fallback, `_settle`) | ⬜ sau P3 | Điểm **đổi có chủ ý**: cập nhật `expected/*.json` kèm lý do từng bài; bỏ được cách né trong fixture |
 | **P4** | `executed` / `not_run` **+ P2a: thêm `error_code` phẳng** | ⬜ | A7, A8, A9, A10, C8 xanh trên `broken-compile` |
 | **P5** | Sinh `actual` tự động | ⬜ | C1–C7 xanh trên `medium` |
@@ -86,18 +86,20 @@ thật của fixture) rồi đưa qua `verify_result.py`:
 |---|---|---|---|---|
 | Trước P1 | — | 13 FAIL | — | — |
 | Sau P1 (harness còn thiếu bước) | 5 | 7 | — | — |
-| **Sau khi trả nợ — số THẬT** | **5** | **9** | **9** | **10** |
+| Sau khi trả nợ — số THẬT | 5 | 9 | 9 | 10 |
+| **Sau P3** | **5** | **7** | **8** | **8** |
 
 Luật còn đỏ và thuộc phase nào:
 
 | Luật | Bài nào đỏ | Về phase |
 |---|---|---|
 | A1 (thiếu `executed`), A7, A8 (`schema_version`), A9, D6 | cả 4 | **P4** |
-| C6 (`actual` trùng nhau: 1/5 · 1/13 · 1/13) | medium, 2 bài hỏng | **P5** |
-| C4 (log tiếng Anh), F2 (lộ đường dẫn `.dart`) | broken-compile | **P4** (bài không biên dịch được phải là `not_run`) |
-| E1, E2, E3 | medium, 2 bài hỏng | **P2b** |
+| C6 (`actual` trùng nhau) | 2 bài hỏng | **P4** (thành `not_run` thì C6 bỏ qua đúng luật) + **P5** |
+| E1, E2 | medium, 2 bài hỏng | **P2b** |
 
 `high` chỉ 5 FAIL vì không có testcase fail nào, nên nhóm C/E không có gì để vi phạm.
+P3 làm xanh được: **C4** và **F2** (broken-compile không còn phát lỗi biên dịch thô ra `actual`),
+**C6** trên medium, **E3** cả ba bài.
 
 ## Điểm neo trong code
 

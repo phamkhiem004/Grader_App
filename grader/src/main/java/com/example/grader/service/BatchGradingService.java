@@ -465,7 +465,9 @@ public class BatchGradingService {
         TestErrorClassifier.Result res = errorClassifier.classify(raw);
         String actual = res.actual();
         if (actual != null && !actual.isBlank()) tc.put("actual", actual);
-        else tc.put("actual", "Không có giá trị actual — testcase dừng do exception");
+        // Không tách được gì từ log thì nói đúng chừng đó. Câu cũ ("dừng do exception") NÓI SAI
+        // nguyên nhân với bài không biên dịch được — ở đó chẳng có exception nào.
+        else tc.put("actual", "Không thu được kết quả quan sát cho testcase này");
         Map<String, Object> err = new LinkedHashMap<>();
         err.put("code", res.code());
         String technicalMessage = TestErrorClassifier.shorten(res.message(), 240);

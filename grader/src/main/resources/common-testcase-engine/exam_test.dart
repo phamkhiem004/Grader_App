@@ -164,13 +164,16 @@ Future<void> _checkGroup(
     try {
       await _runCase(tester, '$groupId/$childId', child);
     } catch (error) {
-      failures.add('$childId: $error');
+      // Nêu TÊN yêu cầu con (tiếng Việt, giáo viên nhập) chứ không nêu instance_id:
+      // chuỗi này chảy vào result_json nên không được lộ định danh nội bộ.
+      failures.add('${_text(child, 'name', 'Yêu cầu con')}: $error');
     }
   }
 
   if (failures.isNotEmpty) {
-    fail('Nhóm ${metadata['name'] ?? groupId} thất bại vì assert con không đạt:\n'
-        '${failures.join('\n')}');
+    // Không dùng chữ "assert" và không đếm số testcase con — từ vựng nội bộ của hệ thống
+    // chấm, sinh viên không kiểm chứng được (cùng lý do đã sửa `expected` của GROUP).
+    fail('Chưa đạt yêu cầu "${metadata['name'] ?? groupId}":\n${failures.join('\n')}');
   }
 }
 

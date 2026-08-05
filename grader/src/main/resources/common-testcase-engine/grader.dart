@@ -1,6 +1,13 @@
 import 'dart:convert';
 import 'dart:io';
 
+/// Phiên bản engine ĐÃ CHẤM, để truy vết khi kết quả bất thường.
+///
+/// PHẢI tăng mỗi lần đổi hành vi engine. Quan trọng vì engine được chép ĐÓNG BĂNG
+/// vào thư mục testcase của đề lúc publish: đề publish trước bản này vẫn chạy engine
+/// cũ khi chấm lại, và khi đó trường `engine_version` sẽ VẮNG MẶT.
+const String kEngineVersion = 'COMMON_V1-2.0.0';
+
 Future<void> main() async {
   final matrix = _loadMatrix();
   final process = await Process.run(
@@ -18,6 +25,16 @@ Future<void> main() async {
     'test_cases': <Map<String, dynamic>>[],
   };
   final cases = output['test_cases'] as List<Map<String, dynamic>>;
+
+  // Cả bộ test không khởi động được (lib/ không biên dịch, runner crash) thì KHÔNG một
+  // testcase nào của matrix có kết quả. Đây là lỗi RUNNER, khác hẳn "bài làm sai".
+  final ranAny = matrix.keys.any(runs.containsKey);
+  final runnerError = ranAny ? null : _shorten(_processError(process), 400);
+  // Log thô của runner là tiếng Anh + đường dẫn file: để trong grading_result.runner_error
+  // cho giáo viên, KHÔNG đưa vào `actual` vì actual đi thẳng tới sinh viên.
+  final fallbackActual = ranAny
+      ? 'Test thất bại.'
+      : 'Không chạy được: bộ test dừng trước khi kiểm được yêu cầu này.';
 
   var passed = 0;
   var earned = 0.0;
@@ -42,7 +59,7 @@ Future<void> main() async {
       'difficulty': metadata['difficulty'] ?? 'basic',
       'skill_code': metadata['skill_code'] ?? 'N/A',
       'expected': metadata['expected']?.toString() ?? id,
-      'actual': ok ? 'Đã đáp ứng yêu cầu' : (result?['message'] ?? _processError(process)),
+      'actual': ok ? 'Đã đáp ứng yêu cầu' : (result?['message'] ?? fallbackActual),
     });
   }
 
@@ -60,11 +77,20 @@ Future<void> main() async {
       .toList();
   output['grading_result'] = <String, dynamic>{
     'score': _round(score),
-    'earned_weight': earned,
-    'total_weight': total,
+    // Engine chung kiểm hoàn toàn blackbox qua semantic key nên KHÔNG có cổng contract
+    // tên public: hai trường dưới luôn bằng score và false. Vẫn phải CÓ MẶT để hợp đồng
+    // không đổi theo engine (SPEC mục 2) — bên đọc không phải biết engine nào đã chấm.
+    'raw_score_before_contract_gate': _round(score),
+    'total_raw_score': earned,
     'passed_tests': passed,
     'failed_tests': cases.length - passed,
     'total_tests': cases.length,
+    'earned_weight': earned,
+    'total_weight': total,
+    'blocked': false,
+    'contract_violation': false,
+    'runner_error': runnerError,
+    'engine_version': kEngineVersion,
   };
 
   stdout.writeln('--- GRADE_RESULT_START ---');
@@ -92,6 +118,7 @@ Map<String, dynamic> _asMap(dynamic value) {
 Map<String, Map<String, dynamic>> _parseReporter(String output) {
   final namesById = <int, String>{};
   final errorsById = <int, List<String>>{};
+  final dumpsById = <int, List<String>>{};
   final runs = <String, Map<String, dynamic>>{};
   for (final line in output.split('\n')) {
     final raw = line.trim();
@@ -109,6 +136,18 @@ Map<String, Map<String, dynamic>> _parseReporter(String output) {
       final id = (test['id'] as num?)?.toInt();
       final name = test['name']?.toString();
       if (id != null && name != null) namesById[id] = name;
+    } else if (type == 'print') {
+      // testWidgets NUỐT exception: event `error` chỉ còn câu bao "Test failed. See
+      // exception logs above." + tên test, còn CHẨN ĐOÁN THẬT nằm trong khối dump mà
+      // flutter_test in ra dưới dạng event `print`. Không đọc event này thì `actual`
+      // vĩnh viễn vô nghĩa (SPEC mục 5.1).
+      final id = (event['testID'] as num?)?.toInt();
+      final message = event['message']?.toString() ?? '';
+      // Lọc chặt: chỉ nhận dump của flutter_test. print thường (log của bài sinh viên,
+      // cảnh báo "tap() derived an Offset...") không phải chẩn đoán, gom vào là nhiễu.
+      if (id != null && _isFailureDump(message)) {
+        dumpsById.putIfAbsent(id, () => <String>[]).add(message);
+      }
     } else if (type == 'error') {
       final id = (event['testID'] as num?)?.toInt();
       if (id != null) {
@@ -123,11 +162,31 @@ Map<String, Map<String, dynamic>> _parseReporter(String output) {
         'passed': ok,
         'message': ok
             ? 'Đã đáp ứng yêu cầu'
-            : (errorsById[id]?.where((value) => value.isNotEmpty).join('\n') ?? 'Test thất bại.'),
+            : _failureMessage(dumpsById[id], errorsById[id]),
       };
     }
   }
   return runs;
+}
+
+/// Khối dump lỗi của flutter_test, phân biệt với print thường của ứng dụng.
+bool _isFailureDump(String message) {
+  final low = message.toLowerCase();
+  return low.contains('exception caught by') ||
+      low.contains('was thrown running a test') ||
+      low.contains('was thrown building');
+}
+
+/// Chẩn đoán của một test hỏng: ưu tiên dump (có nội dung thật), sau đó mới tới
+/// event `error` (thường chỉ là câu bao).
+String _failureMessage(List<String>? dumps, List<String>? errors) {
+  for (final source in <List<String>?>[dumps, errors]) {
+    final joined = (source ?? const <String>[])
+        .where((value) => value.trim().isNotEmpty)
+        .join('\n');
+    if (joined.isNotEmpty) return joined;
+  }
+  return 'Test thất bại.';
 }
 
 String _processError(ProcessResult process) {
@@ -143,3 +202,9 @@ double _number(Map<String, dynamic> map, String key, double fallback) {
 }
 
 double _round(double value) => double.parse(value.toStringAsFixed(2));
+
+/// Gộp khoảng trắng + cắt ngắn để log runner không phình result_json lưu DB.
+String _shorten(String value, int max) {
+  final text = value.replaceAll(RegExp(r'\s+'), ' ').trim();
+  return text.length > max ? '${text.substring(0, max).trim()}…' : text;
+}

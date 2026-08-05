@@ -6,6 +6,16 @@ Sổ theo dõi để không mất mạch giữa các phiên. **Đọc file này 
 - Luật nghiệm thu: `ACCEPTANCE.md` + `verify_result.py` cùng thư mục
 - Bộ đo: `fixtures/result-json-v2/` — `./run-fixture.sh`
 
+## ⚠️ Có phía thứ hai ăn output này
+
+`result.json` là **input duy nhất** của `D:\AGS-PRM393\prm393-feedback-bot` (một phiên Claude
+khác đang làm). Memory hai bên **không dùng chung** — thư mục dự án khác nhau.
+
+**Xong mỗi P mà có đổi schema thì phải ghi vào
+`SPEC_grader_result_json/CHANGELOG_FOR_NLP.md`** trước khi coi là hết việc, kèm mục
+"CẦN LÀM GÌ" cho bên kia. Đó là kênh duy nhất hai bên cùng đọc. Kiểm chéo bằng
+`prm393-feedback-bot/app/schemas.py` — model của họ là hợp đồng phía nhận.
+
 ## Mục tiêu
 
 Biến `result.json` từ bảng điểm thành **hồ sơ bằng chứng tự đủ** cho hệ sinh nhận xét (NLP):

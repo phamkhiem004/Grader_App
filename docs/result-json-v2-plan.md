@@ -77,6 +77,23 @@ sinh viên.** Mọi tranh cãi thiết kế phân xử bằng nguyên tắc này
 **Không chạy song song hai P.** P1/P2/P4 chồng nhau ở `assembleResultJson`; P3/P4/P5 chồng nhau ở
 `grader.dart`. Commit riêng từng P (P2 tách 2 commit backend/frontend).
 
+## Chấm lại sau P3b — hiện KHÔNG có bài nào phải chấm lại
+
+Kiểm ngày 2026-08-06: `exams/` chỉ có **`PE11`**, và đó là đề **legacy** (`grader.dart` riêng, không
+có `testcase-config.json`); `submissions/` cũng chỉ có bài của `PE11`. P3b chỉ sửa **engine dùng
+chung**, còn đề legacy chạy grader của giáo viên và `refreshCommonEngine` cố ý bỏ qua. ⇒ yêu cầu
+chấm lại là **đúng nhưng hiện rỗng**.
+
+**Luật cho tương lai — khi đã có đề engine chung được chấm thật:**
+
+1. Điều kiện phải chấm lại: `grading_result.engine_version` **vắng mặt hoặc `< COMMON_V1-2.1.0`**.
+2. Chấm lại bằng **"Chấm lại đề"** (`POST /api/batch/regrade-exam/{examId}`), KHÔNG chấm lại lẻ —
+   chỉ đường đó mới nâng engine, và mới bảo đảm cả đề dùng chung một engine.
+3. Điểm **sẽ đổi hai chiều**: có bài tăng (trước bị trừ oan ở phép kiểm "đã biến mất" và ở thao tác
+   chạm sau chuyển màn hình), có bài giảm (trước được điểm oan ở `FORM_VALIDATE_FIELDS`). Phải nói
+   trước với người ra quyết định điểm, đừng chấm lại âm thầm.
+4. Nhận xét của bot sinh từ kết quả cũ cũng phải sinh lại.
+
 ## Số đo giữa các P
 
 Chạy `FixtureResultAssemblyTest` (sinh `grader/target/fixture-result-*.json` từ dữ liệu chấm

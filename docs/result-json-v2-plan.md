@@ -11,9 +11,17 @@ Sổ theo dõi để không mất mạch giữa các phiên. **Đọc file này 
 `result.json` là **input duy nhất** của `D:\AGS-PRM393\prm393-feedback-bot` (một phiên Claude
 khác đang làm). Memory hai bên **không dùng chung** — thư mục dự án khác nhau.
 
-**Xong mỗi P mà có đổi schema thì phải ghi vào
-`SPEC_grader_result_json/CHANGELOG_FOR_NLP.md`** trước khi coi là hết việc, kèm mục
-"CẦN LÀM GÌ" cho bên kia. Đó là kênh duy nhất hai bên cùng đọc. Kiểm chéo bằng
+`SPEC_grader_result_json/` nay là **repo git riêng, tài sản chung hai bên** — kênh liên lạc
+hai chiều:
+
+| File | Chiều | Ai ghi |
+|---|---|---|
+| `CHANGELOG_FOR_NLP.md` | Grader → NLP | **Tôi** |
+| `CHANGELOG_FOR_GRADER.md` | NLP → Grader | Họ — **đọc mỗi lần bắt đầu phase** |
+
+**Xong mỗi P mà có đổi schema thì phải ghi `CHANGELOG_FOR_NLP.md` + phát hành `samples/`**
+trước khi coi là hết việc, kèm mục "CẦN LÀM GÌ" cho bên kia. Họ pin test vào `samples/` nên
+**file mẫu mạnh hơn văn xuôi** — mẫu sai còn tệ hơn không có mẫu. Kiểm chéo bằng
 `prm393-feedback-bot/app/schemas.py` — model của họ là hợp đồng phía nhận.
 
 ## Mục tiêu
@@ -40,12 +48,23 @@ sinh viên.** Mọi tranh cãi thiết kế phân xử bằng nguyên tắc này
 |---|---|---|---|
 | **P0** | Chốt hợp đồng + thước đo + fixture | ✅ **Xong** 2026-08-05 | verify tự kiểm 29/29 vi phạm; fixture chạy lại cho kết quả y hệt |
 | **P1** | `rubric` + `layer` + `chapter` | ✅ **Xong** 2026-08-05 | A3, A4, A5, B1, B2 xanh trên bài chấm thật; 22 test đơn vị; điểm không đổi (không đụng Dart) |
-| **P2** | Bỏ `error.message` + `student_safe_summary`, `error_code` phẳng | ⬜ | E1, E2, E3 xanh; FE + bot còn chạy |
-| **P3** | Engine chung v2 (đọc event `print`, `grading_result` đầy đủ, `engine_version`) | ⬜ | **Điểm y hệt** trên cả 4 bài fixture |
-| **P4** | `executed` / `not_run` | ⬜ | A7, A8, A9, A10, C8 xanh trên `broken-compile` |
+| **P3** | Engine chung v2 (đọc event `print`, `grading_result` đầy đủ, `engine_version`) | 🔜 kế tiếp | **Điểm y hệt** trên cả 4 bài fixture |
+| **P4** | `executed` / `not_run` **+ P2a: thêm `error_code` phẳng** | ⬜ | A7, A8, A9, A10, C8 xanh trên `broken-compile` |
 | **P5** | Sinh `actual` tự động | ⬜ | C1–C7 xanh trên `medium` |
+| **P2b** | *Xoá* `error` + `student_safe_summary` | ⬜ | E1, E2, E3 xanh; FE + bot còn chạy |
 | **P4b** | `blocked_by` qua cơ chế `_boot()` | ⬜ | D1–D5 xanh trên `broken-boot` |
 | **P6** | `exam.requirements` | ⬜ | — |
+
+> **P2 đã bị đẩy xuống sau P5** theo phản đối của phía NLP (2026-08-05): P2 chỉ *xoá* trường,
+> P5 mới *tạo ra* thứ thay thế. Xoá trước ⇒ cửa sổ 600–750 bản nhận xét rỗng. Phần *thêm*
+> `error_code` tách thành **P2a**, gộp vào P4 vì không phá vỡ gì.
+
+## Việc nợ, phải làm trước hoặc trong P3
+
+| # | Việc | Vì sao |
+|---|---|---|
+| 1 | `TestcaseTemplateService:864` — `expected` của testcase `GROUP` đang là `"Tất cả N assert trong nhóm phải đạt."` | Lộ từ vựng nội bộ (`assert`) + đếm số test, đi thẳng tới sinh viên. Dựng lại từ `group_name` + `expected` các con |
+| 2 | `FixtureResultAssemblyTest` bỏ qua `sanitizeTestCaseErrors` ⇒ `samples/p1-*.json` **không trung thực** (thiếu `error`, `student_safe_summary`) | Phía NLP sẽ pin test vào `samples/`; mẫu sai làm họ kết luận sai rằng P2 đã xong. Đã báo họ đừng pin cho tới khi phát hành lại |
 
 **Không chạy song song hai P.** P1/P2/P4 chồng nhau ở `assembleResultJson`; P3/P4/P5 chồng nhau ở
 `grader.dart`. Commit riêng từng P (P2 tách 2 commit backend/frontend).

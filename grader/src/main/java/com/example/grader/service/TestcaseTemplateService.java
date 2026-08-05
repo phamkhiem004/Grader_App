@@ -827,6 +827,10 @@ public class TestcaseTemplateService {
         row.put("runner", item.get("runner"));
         row.put("skill_code", item.get("skill_code"));
         row.put("testcase_group", item.get("testcase_group"));
+        // Hai nhãn của result.json v2. Ghi thẳng vào matrix để khâu chấm chỉ việc đọc,
+        // và để giáo viên thấy được testcase thuộc tầng/nhóm chức năng nào.
+        row.put("rubric", TestCaseTaxonomy.rubricOf(item));
+        row.put("layer", TestCaseTaxonomy.layerOf(item, text(item.get("instance_id"))));
         row.put("name", item.get("name"));
         row.put("description", item.get("description"));
         row.put("expected", item.get("expected"));
@@ -863,6 +867,9 @@ public class TestcaseTemplateService {
         row.put("skill_code", skillCodes.isEmpty() ? "UI_SCAFFOLD_APPBAR" : skillCodes.iterator().next());
         row.put("skill_codes", new ArrayList<>(skillCodes));
         row.put("children", childRows);
+        // Đặt sau children vì layer của nhóm là tầng CAO NHẤT trong các testcase con.
+        row.put("rubric", TestCaseTaxonomy.rubricOf(row));
+        row.put("layer", TestCaseTaxonomy.layerOf(row, groupId));
         return row;
     }
 

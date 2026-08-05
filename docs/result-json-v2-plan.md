@@ -29,7 +29,7 @@ sinh viên.** Mọi tranh cãi thiết kế phân xử bằng nguyên tắc này
 | P | Việc | Trạng thái | Cổng nghiệm thu |
 |---|---|---|---|
 | **P0** | Chốt hợp đồng + thước đo + fixture | ✅ **Xong** 2026-08-05 | verify tự kiểm 29/29 vi phạm; fixture chạy lại cho kết quả y hệt |
-| **P1** | `rubric` + `layer` + `chapter` | 🔨 đang làm | A1, A3, A4, A5, B1, B2, B3 xanh; **điểm không đổi** |
+| **P1** | `rubric` + `layer` + `chapter` | ✅ **Xong** 2026-08-05 | A3, A4, A5, B1, B2 xanh trên bài chấm thật; 22 test đơn vị; điểm không đổi (không đụng Dart) |
 | **P2** | Bỏ `error.message` + `student_safe_summary`, `error_code` phẳng | ⬜ | E1, E2, E3 xanh; FE + bot còn chạy |
 | **P3** | Engine chung v2 (đọc event `print`, `grading_result` đầy đủ, `engine_version`) | ⬜ | **Điểm y hệt** trên cả 4 bài fixture |
 | **P4** | `executed` / `not_run` | ⬜ | A7, A8, A9, A10, C8 xanh trên `broken-compile` |
@@ -39,6 +39,20 @@ sinh viên.** Mọi tranh cãi thiết kế phân xử bằng nguyên tắc này
 
 **Không chạy song song hai P.** P1/P2/P4 chồng nhau ở `assembleResultJson`; P3/P4/P5 chồng nhau ở
 `grader.dart`. Commit riêng từng P (P2 tách 2 commit backend/frontend).
+
+## Số đo giữa các P
+
+Chạy `FixtureResultAssemblyTest` (sinh `grader/target/fixture-result-*.json` từ dữ liệu chấm
+thật của fixture) rồi đưa qua `verify_result.py`:
+
+| Mốc | `high` | `medium` | Luật còn đỏ |
+|---|---|---|---|
+| Trước P1 (schema hiện tại) | — | 13 FAIL | A1 A3 A4 A5 B3 · A7 A8 A9 · C1 C2 · E1 E2 E3 |
+| Sau P1 | 5 FAIL | 7 FAIL | A1 A7 A8 A9 D6 (⇒ P4) · C1 C2 (⇒ P5) |
+
+> ⚠️ Nhóm **E xanh trong artifact này chưa có ý nghĩa**: harness không gọi
+> `sanitizeTestCaseErrors` — chính chỗ sinh ra `error.message`/`student_safe_summary`. E chỉ
+> được nghiệm thu thật sau P2, trên `result.json` do backend ghép đầy đủ.
 
 ## Điểm neo trong code
 

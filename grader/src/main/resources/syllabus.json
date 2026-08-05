@@ -35,6 +35,7 @@
       "code": "DART_FUNDAMENTALS",
       "name": "Nền tảng ngôn ngữ Dart",
       "competency_label": "Nền tảng ngôn ngữ Dart",
+      "chapter": 2,
       "order": 1,
       "description": "Chương 2: Nền tảng ngôn ngữ Dart"
     },
@@ -42,6 +43,7 @@
       "code": "PROJECT_ARCHITECTURE",
       "name": "Cấu trúc và kiến trúc dự án Flutter",
       "competency_label": "Cấu trúc và kiến trúc dự án Flutter",
+      "chapter": 3,
       "order": 2,
       "description": "Chương 3–4: Cấu trúc và kiến trúc dự án Flutter"
     },
@@ -49,6 +51,7 @@
       "code": "UI_BASIC_WIDGETS",
       "name": "Widget giao diện cơ bản và bố cục",
       "competency_label": "Widget giao diện cơ bản và bố cục",
+      "chapter": 4,
       "order": 3,
       "description": "Chương 4: Widget giao diện cơ bản và bố cục"
     },
@@ -56,6 +59,7 @@
       "code": "THEMING",
       "name": "Chủ đề giao diện, màu sắc và font chữ",
       "competency_label": "Chủ đề giao diện, màu sắc và font chữ",
+      "chapter": 5,
       "order": 4,
       "description": "Chương 5: Chủ đề giao diện, màu sắc và font chữ"
     },
@@ -63,6 +67,7 @@
       "code": "STATE_MANAGEMENT",
       "name": "Quản lý trạng thái trong Flutter",
       "competency_label": "Quản lý trạng thái trong Flutter",
+      "chapter": 6,
       "order": 5,
       "description": "Chương 6: Quản lý trạng thái trong Flutter"
     },
@@ -70,6 +75,7 @@
       "code": "ADVANCED_WIDGETS",
       "name": "Widget bố cục và hiển thị nâng cao",
       "competency_label": "Widget bố cục và hiển thị nâng cao",
+      "chapter": 7,
       "order": 6,
       "description": "Chương 7: Widget bố cục và hiển thị nâng cao"
     },
@@ -77,6 +83,7 @@
       "code": "NAVIGATION_ROUTING",
       "name": "Điều hướng và định tuyến màn hình",
       "competency_label": "Điều hướng và định tuyến màn hình",
+      "chapter": 8,
       "order": 7,
       "description": "Chương 8: Điều hướng và định tuyến màn hình"
     },
@@ -84,6 +91,7 @@
       "code": "ANIMATIONS",
       "name": "Hoạt ảnh và hiệu ứng chuyển cảnh",
       "competency_label": "Hoạt ảnh và hiệu ứng chuyển cảnh",
+      "chapter": 9,
       "order": 8,
       "description": "Chương 9: Hoạt ảnh và hiệu ứng chuyển cảnh"
     },
@@ -91,6 +99,7 @@
       "code": "ASYNC_PROGRAMMING",
       "name": "Lập trình bất đồng bộ trong Flutter/Dart",
       "competency_label": "Lập trình bất đồng bộ trong Flutter/Dart",
+      "chapter": 10,
       "order": 9,
       "description": "Chương 10: Lập trình bất đồng bộ trong Flutter/Dart"
     }

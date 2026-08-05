@@ -70,6 +70,9 @@ public class CompetencyService {
                         ? c.getCompetencyLabel() : c.getName();
                 tc.put("category_label", label);            // tên category đọc-được (vd "Dart Essentials")
             }
+            // Số chương giáo trình để nhận xét nói được "ôn lại Chương 6". Category không
+            // resolve được thì để null — KHÔNG đoán, theo hợp đồng result.json v2.
+            tc.put("chapter", c != null ? c.resolveChapter() : null);
         }
     }
 

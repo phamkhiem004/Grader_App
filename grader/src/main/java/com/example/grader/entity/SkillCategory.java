@@ -33,6 +33,10 @@ public class SkillCategory {
     @ColumnDefault("0")
     private Integer displayOrder = 0;
 
+    /** Số chương giáo trình tương ứng — dùng để nhận xét "ôn lại Chương 6". */
+    @Column(name = "chapter")
+    private Integer chapter;
+
     /** Ngưỡng xếp loại: ratio < weak => YẾU; weak..good => TRUNG BÌNH; >= good => TỐT. */
     @Column(name = "weak_threshold")
     @ColumnDefault("0.4")
@@ -45,4 +49,14 @@ public class SkillCategory {
     @Column(name = "active")
     @ColumnDefault("true")
     private Boolean active = true;
+
+    /**
+     * Số chương dùng cho result.json: ưu tiên cột `chapter`; hàng cũ chưa có giá trị thì suy
+     * từ `display_order + 1` (syllabus hiện tại xếp 9 category theo đúng thứ tự chương 2..10).
+     * Nhờ vậy không cần re-seed phá dữ liệu chỉnh tay qua CRUD.
+     */
+    public Integer resolveChapter() {
+        if (chapter != null) return chapter;
+        return displayOrder != null ? displayOrder + 1 : null;
+    }
 }

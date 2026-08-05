@@ -301,7 +301,11 @@ public class BatchGradingService {
                 }
             }
             // Bổ sung skill_code/difficulty từ skills_matrix.json của đề (nguồn sự thật) cho mỗi testcase
-            enrichTestCases(testCases, exam);
+            Map<String, Object> matrix = loadSkillsMatrix(exam);
+            enrichTestCases(testCases, matrix);
+
+            // Nhãn phân loại của result.json v2 — xem TestCaseTaxonomy.
+            annotateTaxonomy(testCases, matrix);
 
             // Chuẩn hóa schema kết quả: chỉ dùng expected; expect chỉ được đọc để tương thích dữ liệu cũ.
             normalizeExpectedFields(testCases);
@@ -347,22 +351,46 @@ public class BatchGradingService {
         return out;
     }
 
+    /** Đọc skills_matrix.json của đề; null khi đề chưa có file (bài cũ, đề đã xoá testcase...). */
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> loadSkillsMatrix(Exam exam) {
+        if (exam == null || exam.getTestcasePath() == null) return null;
+        try {
+            Path f = Path.of(exam.getTestcasePath()).resolve("skills_matrix.json");
+            if (!Files.exists(f)) return null;
+            return mapper.convertValue(
+                    mapper.readTree(Files.readString(f, java.nio.charset.StandardCharsets.UTF_8)), Map.class);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
+     * Gắn `rubric` (nhóm chức năng) và `layer` (tầng kiểm thử) cho từng testcase.
+     * <p>Chạy CẢ KHI không có matrix, vì layer của đề legacy vẫn suy được từ tiền tố test_id.
+     * Luôn ĐẶT khoá kể cả giá trị null để bên đọc không phải đoán schema.
+     */
+    @SuppressWarnings("unchecked")
+    private void annotateTaxonomy(List<Map<String, Object>> tcs, Map<String, Object> matrix) {
+        for (Map<String, Object> tc : tcs) {
+            String testId = String.valueOf(tc.get("test_id"));
+            Object raw = matrix == null ? null : matrix.get(testId);
+            Map<String, Object> row = raw instanceof Map<?, ?> m ? (Map<String, Object>) m : null;
+            if (isBlank(tc.get("rubric"))) tc.put("rubric", TestCaseTaxonomy.rubricOf(row));
+            if (isBlank(tc.get("layer")))  tc.put("layer",  TestCaseTaxonomy.layerOf(row, testId));
+        }
+    }
+
+    private boolean isBlank(Object value) {
+        return value == null || String.valueOf(value).isBlank();
+    }
+
     /**
      * Bổ sung skill_code / difficulty / skill (tên hiển thị) cho mỗi testcase, đọc từ
      * skills_matrix.json của đề. Chỉ điền khi testcase CHƯA có (không ghi đè dữ liệu grader).
      */
-    @SuppressWarnings("unchecked")
-    private void enrichTestCases(List<Map<String, Object>> tcs, Exam exam) {
-        if (tcs.isEmpty() || exam == null || exam.getTestcasePath() == null) return;
-        Map<String, Object> matrix;
-        try {
-            Path f = Path.of(exam.getTestcasePath()).resolve("skills_matrix.json");
-            if (!Files.exists(f)) return;
-            matrix = mapper.convertValue(
-                    mapper.readTree(Files.readString(f, java.nio.charset.StandardCharsets.UTF_8)), Map.class);
-        } catch (Exception e) {
-            return;
-        }
+    private void enrichTestCases(List<Map<String, Object>> tcs, Map<String, Object> matrix) {
+        if (tcs.isEmpty() || matrix == null) return;
         for (Map<String, Object> tc : tcs) {
             Object meta = matrix.get(String.valueOf(tc.get("test_id")));
             if (meta instanceof Map<?, ?> m) {

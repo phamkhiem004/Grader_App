@@ -91,7 +91,7 @@ class _HomeScreenState extends State<HomeScreen> {
         if (_nameError != null)
           Text(
             _nameError!,
-            key: const ValueKey<String>('validation.name'),
+            key: const ValueKey<String>('error.name'),
             style: const TextStyle(color: Colors.red),
           ),
         const SizedBox(height: 8),
@@ -103,7 +103,7 @@ class _HomeScreenState extends State<HomeScreen> {
         if (_emailError != null)
           Text(
             _emailError!,
-            key: const ValueKey<String>('validation.email'),
+            key: const ValueKey<String>('error.email'),
             style: const TextStyle(color: Colors.red),
           ),
         const SizedBox(height: 12),

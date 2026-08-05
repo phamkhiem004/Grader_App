@@ -6,7 +6,9 @@ import 'dart:io';
 /// PHẢI tăng mỗi lần đổi hành vi engine. Quan trọng vì engine được chép ĐÓNG BĂNG
 /// vào thư mục testcase của đề lúc publish: đề publish trước bản này vẫn chạy engine
 /// cũ khi chấm lại, và khi đó trường `engine_version` sẽ VẮNG MẶT.
-const String kEngineVersion = 'COMMON_V1-2.0.0';
+/// 2.1.0 — P3b: sửa ba khiếm khuyết CHẤM SAI ĐIỂM (xem exam_test.dart `_goneByKey`,
+/// `_settle`, `_validationErrorFor`). Bài chấm bằng bản < 2.1.0 có thể sai điểm.
+const String kEngineVersion = 'COMMON_V1-2.1.0';
 
 Future<void> main() async {
   final matrix = _loadMatrix();

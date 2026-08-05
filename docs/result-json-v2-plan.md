@@ -49,7 +49,7 @@ sinh viên.** Mọi tranh cãi thiết kế phân xử bằng nguyên tắc này
 | **P0** | Chốt hợp đồng + thước đo + fixture | ✅ **Xong** 2026-08-05 | verify tự kiểm 29/29 vi phạm; fixture chạy lại cho kết quả y hệt |
 | **P1** | `rubric` + `layer` + `chapter` | ✅ **Xong** 2026-08-05 | A3, A4, A5, B1, B2 xanh trên bài chấm thật; 22 test đơn vị; điểm không đổi (không đụng Dart) |
 | **P3** | Engine chung v2 (đọc event `print`, `grading_result` đầy đủ, `engine_version`) | ✅ **Xong** 2026-08-05 | Điểm y hệt trên cả 4 bài (10.0 / 6.0 / 0.0 / 0.0); FAIL giảm 5·9·9·10 → 5·7·8·8, không luật nào đỏ thêm |
-| **P3b** | Sửa 2 khiếm khuyết CHẤM SAI ĐIỂM của engine (`_byKey` fallback, `_settle`) | ⬜ sau P3 | Điểm **đổi có chủ ý**: cập nhật `expected/*.json` kèm lý do từng bài; bỏ được cách né trong fixture |
+| **P3b** | Sửa khiếm khuyết CHẤM SAI ĐIỂM của engine | ✅ **Xong** 2026-08-06 | Bỏ hết cách né trong fixture; engine **trước** P3b chấm `high` 7.8/13 và `medium` đạt oan 1 test, engine **sau** P3b đúng 10.0 / 6.0 / 0.0 / 0.0 |
 | **P4** | `executed` / `not_run` **+ P2a: thêm `error_code` phẳng** | ⬜ | A7, A8, A9, A10, C8 xanh trên `broken-compile` |
 | **P5** | Sinh `actual` tự động | ⬜ | C1–C7 xanh trên `medium` |
 | **P2b** | *Xoá* `error` + `student_safe_summary` | ⬜ | E1, E2, E3 xanh; FE + bot còn chạy |
@@ -119,8 +119,11 @@ P3 làm xanh được: **C4** và **F2** (broken-compile không còn phát lỗi
 2. **Dữ liệu cũ không cứu được.** Lớp normalize khi đọc đã ghi đè log cũ thành một câu chung.
    Nghiệm thu luôn phải trên bài **chấm lại**.
 3. **`commonRubricRow` đang làm rơi `layer`** mà template đã khai sẵn.
-4. **Hai khiếm khuyết engine làm CHẤM SAI ĐIỂM** — xem README của fixture, phải sửa ở P3. Fixture
-   hiện chỉ né chứ chưa sửa.
+4. **Ba khiếm khuyết engine làm CHẤM SAI ĐIỂM** — ✅ sửa ở P3b, xem README của fixture.
+   Bài học: fixture **né** một khiếm khuyết thì cũng không đo được nó. Chỉ sau khi bỏ né mới lộ ra
+   khiếm khuyết thứ ba (`_validationErrorFor` cho điểm oan) và chuyện `homeKey` của `NAVIGATION`
+   là phép kiểm **không thể hỏng** — chính nó đã che một lỗi chấm sai điểm suốt thời gian đó.
+   ⇒ Né trong bộ đo là nợ, không phải giải pháp.
 5. **`actual` không phải bug một dòng.** `testWidgets` nuốt exception; nội dung thật ở event
    `print`, không phải event `error`. Bằng chứng trong `.build/out/medium.log` (testID 11):
    event `error` chỉ có `"Test failed. See exception logs above."`, còn event `print` mới chứa

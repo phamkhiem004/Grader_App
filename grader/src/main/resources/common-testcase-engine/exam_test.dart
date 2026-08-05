@@ -123,7 +123,14 @@ Future<void> _runCase(
       if (backKey.isNotEmpty && homeKey.isNotEmpty) {
         await tester.tap(_byKey(backKey));
         await _settle(tester);
-        expect(_byKey(homeKey), findsOneWidget);
+        expect(_byKey(homeKey), findsOneWidget,
+            reason: 'Sau khi quay lại, không thấy màn hình trước: $homeKey');
+        // Phải kiểm cả chiều BIẾN MẤT. Một mình `homeKey` là phép kiểm KHÔNG THỂ HỎNG:
+        // màn hình trước vẫn nằm trong cây widget suốt lúc màn hình sau đang mở, nên nút
+        // quay lại có bấm được hay không thì nó vẫn đạt. Chính chỗ này từng che lỗi
+        // `_settle` không đẩy đồng hồ ảo, làm cả một lỗi chấm sai điểm không ai thấy.
+        expect(_goneByKey(destinationKey), findsNothing,
+            reason: 'Bấm quay lại nhưng màn hình $destinationKey vẫn đang hiển thị');
       }
       return;
     case 'LIST_VISIBLE':
@@ -193,7 +200,7 @@ Future<void> _checkStateReactiveFlow(
   expect(_byKey(updatedKey), findsOneWidget,
       reason: 'State không cập nhật sau action $actionKey: $updatedKey');
   if (absentKey.isNotEmpty) {
-    expect(_byKey(absentKey), findsNothing,
+    expect(_goneByKey(absentKey), findsNothing,
         reason: 'State cũ vẫn còn sau action $actionKey: $absentKey');
   }
 }
@@ -211,11 +218,29 @@ Future<void> _boot(WidgetTester tester) async {
 }
 
 Future<void> _settle(WidgetTester tester) async {
-  // Chờ có giới hạn để animation/loading nền không khóa cả batch chấm.
+  // Phải chờ HAI loại thời gian khác nhau, thiếu một loại là chấm sai điểm:
+  //
+  //  - `runAsync`: I/O THẬT (SQLite FFI) chỉ chạy được ngoài đồng hồ ảo của test.
+  //  - ĐẨY đồng hồ ảo: hoạt ảnh chuyển route chỉ chạy khi đồng hồ ảo tiến. `pump()` trần
+  //    không đẩy đồng hồ, nên hoạt ảnh không bao giờ kết thúc: lớp phủ chuyển cảnh còn nguyên,
+  //    `tester.tap` vào nút trên AppBar màn hình mới bị chắn và chỉ ghi một dòng cảnh báo —
+  //    sinh viên làm đúng vẫn mất điểm.
+  //
   await tester.runAsync(() async {
     await Future<void>.delayed(const Duration(milliseconds: 300));
   });
-  await tester.pump();
+
+  try {
+    // `pumpAndSettle` CÓ GIỚI HẠN: đúng cơ chế cần (chạy tới khi không còn frame nào được
+    // xếp lịch), nhưng phải chặn timeout kẻo bài có loading/animation không dứt treo cả
+    // batch chấm. Vài nhịp `pump(Duration)` cố định là KHÔNG đủ: hoạt ảnh pop route còn
+    // ticker đang chạy, màn hình cũ chưa bị gỡ khỏi cây widget.
+    await tester.pumpAndSettle(const Duration(milliseconds: 50),
+        EnginePhase.sendSemanticsUpdate, const Duration(seconds: 2));
+  } catch (_) {
+    // Không lặng được trong hạn: vẫn đẩy đồng hồ một nhịp để không đứng im tại t=0.
+    await tester.pump(const Duration(milliseconds: 350));
+  }
 }
 
 Future<void> _responsive(
@@ -443,7 +468,7 @@ Future<void> _checkFormSubmit(
   final resultKey = _text(parameters, 'resultKey');
   if (resultKey.isNotEmpty) expect(_byKey(resultKey), findsOneWidget);
   for (final errorKey in _csv(parameters, 'errorKeys')) {
-    expect(_byKey(errorKey), findsNothing,
+    expect(_goneByKey(errorKey), findsNothing,
         reason: 'Dữ liệu hợp lệ nhưng vẫn còn error key: $errorKey');
   }
 }
@@ -468,7 +493,10 @@ Future<void> _checkDialogFlow(
   final resultKey = _text(parameters, 'resultKey');
   if (resultKey.isNotEmpty) expect(_byKey(resultKey), findsOneWidget);
   final absentKey = _text(parameters, 'absentKey');
-  if (absentKey.isNotEmpty) expect(_byKey(absentKey), findsNothing);
+  if (absentKey.isNotEmpty) {
+    expect(_goneByKey(absentKey), findsNothing,
+        reason: 'Sau khi xác nhận, mục lẽ ra phải biến mất vẫn còn: $absentKey');
+  }
 }
 
 Future<void> _checkWidgetSemanticsLabel(
@@ -667,6 +695,24 @@ FontWeight _fontWeight(String value) {
   return weights[value.toLowerCase()] ?? FontWeight.w400;
 }
 
+/// Finder cho phép kiểm **"ĐÃ BIẾN MẤT"** — chỉ nhận `ValueKey` chính xác, KHÔNG fallback.
+///
+/// Fallback theo vai trò/vị trí của [_byKey] chứng minh được *"có thứ đại loại như vậy"*
+/// nhưng KHÔNG BAO GIỜ chứng minh được *"đúng thứ đó đã mất"* — dùng nó cho `findsNothing`
+/// là chấm sai điểm sinh viên làm đúng:
+///
+///  - `item.1` rơi về `ListTile` ở **vị trí 0**: sinh viên xoá đúng người dùng thứ nhất thì
+///    finder lại bắt được người thứ hai đang đứng đầu ⇒ luôn hỏng.
+///  - `error.name` rơi về bất kỳ `Text` khớp `name|họ|tên|full`: bắt trúng **nhãn của ô nhập**
+///    ("Full name") ⇒ phép kiểm "không còn thông báo lỗi" luôn hỏng.
+///
+/// Không đặt `skipOffstage: false`: màn hình trước trong Navigator vẫn nằm trong cây widget
+/// nhưng đã bị che, không được tính là "còn hiển thị".
+///
+/// Sinh viên không dùng key thì finder rỗng và phép kiểm đạt — cố ý nghiêng về phía sinh viên,
+/// vì phần khẳng định CHÍNH của mỗi runner vẫn phải đạt riêng.
+Finder _goneByKey(String key) => find.byKey(ValueKey<String>(key));
+
 Finder _byKey(String key) {
   final exact = find.byKey(ValueKey<String>(key), skipOffstage: false);
   if (exact.evaluate().isNotEmpty) return exact;
@@ -778,24 +824,30 @@ Finder _buttonWithText(RegExp pattern) {
   return buttons.evaluate().isNotEmpty ? buttons.first : _notFound();
 }
 
+/// Fallback tìm thông báo lỗi của một ô nhập khi bài không đặt `ValueKey`.
+///
+/// ĐIỀU KIỆN BẮT BUỘC: nội dung `Text` phải nói lên chuyện LỖI. Bản trước ưu tiên nhánh
+/// "khớp tên field" mà không đòi thêm gì, nên **nhãn của ô nhập** ("Full name", "Email")
+/// cũng được tính là thông báo lỗi ⇒ form không kiểm dữ liệu gì vẫn đạt. Đó là chấm sai
+/// điểm theo chiều CHO ĐIỂM OAN, ngược với lỗi `_byKey` nhưng cùng một nguồn: fallback
+/// đoán theo chữ hiển thị.
 Finder _validationErrorFor(String key) {
-  final all = find.byWidgetPredicate(
-    (widget) => widget is Text && RegExp(
-      r'required|minimum|min|invalid|bắt buộc|tối thiểu|không hợp lệ|lỗi',
-      caseSensitive: false,
-    ).hasMatch(widget.data ?? ''),
-    skipOffstage: false,
-  );
-  final email = key.toLowerCase().contains('email');
-  final specific = find.byWidgetPredicate(
-    (widget) => widget is Text && (email
-        ? RegExp(r'email|e-mail|định dạng', caseSensitive: false)
-            .hasMatch(widget.data ?? '')
-        : RegExp(r'name|họ|tên|full', caseSensitive: false)
-            .hasMatch(widget.data ?? '')),
-    skipOffstage: false,
-  );
-  return specific.evaluate().isNotEmpty ? specific.first : all;
+  const errorWording = r'required|minimum|min|invalid|bắt buộc|tối thiểu|không hợp lệ|lỗi';
+  final fieldWording = key.toLowerCase().contains('email')
+      ? r'email|e-mail|định dạng'
+      : r'name|họ|tên|full';
+
+  Finder errorTextAlsoMatching(String extra) => find.byWidgetPredicate(
+        (widget) =>
+            widget is Text &&
+            RegExp(errorWording, caseSensitive: false).hasMatch(widget.data ?? '') &&
+            RegExp(extra, caseSensitive: false).hasMatch(widget.data ?? ''),
+        skipOffstage: false,
+      );
+
+  // Ưu tiên thông báo lỗi nói rõ ô nào; không có thì nhận thông báo lỗi bất kỳ.
+  final specific = errorTextAlsoMatching(fieldWording);
+  return specific.evaluate().isNotEmpty ? specific.first : errorTextAlsoMatching('');
 }
 
 Finder _notFound() => find.byWidgetPredicate((_) => false);

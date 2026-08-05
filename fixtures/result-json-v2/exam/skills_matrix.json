@@ -41,7 +41,7 @@
     "expected": "Màn hình danh sách phải hiện danh sách và hai người dùng có sẵn.",
     "difficulty": "basic",
     "weight": 8,
-    "parameters": { "listKey": "list.items", "itemKeys": "item.5,item.6" }
+    "parameters": { "listKey": "list.items", "itemKeys": "item.1,item.2" }
   },
   "TC_LIST_COUNT": {
     "instance_id": "TC_LIST_COUNT",
@@ -56,7 +56,7 @@
     "weight": 8,
     "parameters": {
       "listKey": "list.items",
-      "itemKeys": "item.5,item.6,item.7",
+      "itemKeys": "item.1,item.2,item.3",
       "expectedCount": 2
     }
   },
@@ -138,8 +138,8 @@
           "values": "Nguyen Van A,vana@fpt.edu.vn",
           "fieldType": "input",
           "submitKey": "action.save",
-          "resultKey": "item.7",
-          "errorKeys": "validation.name,validation.email"
+          "resultKey": "item.3",
+          "errorKeys": "error.name,error.email"
         }
       }
     ]
@@ -158,7 +158,7 @@
     "parameters": {
       "fieldKeys": "field.name,field.email",
       "invalidValues": "__EMPTY__,khong-phai-email",
-      "errorKeys": "validation.name,validation.email",
+      "errorKeys": "error.name,error.email",
       "fieldType": "input",
       "submitKey": "action.save"
     }
@@ -175,10 +175,10 @@
     "difficulty": "intermediate",
     "weight": 10,
     "parameters": {
-      "actionKey": "action.delete.5",
+      "actionKey": "action.delete.1",
       "dialogKey": "dialog.delete",
       "decisionKey": "action.delete.confirm",
-      "absentKey": "item.5"
+      "absentKey": "item.1"
     }
   },
   "TC_DETAIL_NAV": {
@@ -193,7 +193,7 @@
     "difficulty": "intermediate",
     "weight": 9,
     "parameters": {
-      "openKey": "action.detail.5",
+      "openKey": "action.detail.1",
       "destinationKey": "screen.detail",
       "backKey": "action.back",
       "homeKey": "screen.home"

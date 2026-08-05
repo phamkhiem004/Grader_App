@@ -11,7 +11,17 @@ class UserDetailScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       key: const ValueKey<String>('screen.detail'),
-      appBar: AppBar(title: const Text('User Detail')),
+      // Nút quay lại đặt TRÊN AppBar — chỗ tự nhiên của nó, và cố ý CHẠM vào lỗi
+      // `_settle` không đẩy đồng hồ ảo: hoạt ảnh chuyển cảnh không chạy xong thì lớp
+      // phủ chắn con trỏ, thao tác chạm của bộ chấm trượt. Đã sửa ở P3b.
+      appBar: AppBar(
+        title: const Text('User Detail'),
+        leading: IconButton(
+          key: const ValueKey<String>('action.back'),
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
+      ),
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -20,14 +30,6 @@ class UserDetailScreen extends StatelessWidget {
             Text(user.fullName, style: Theme.of(context).textTheme.titleLarge),
             const SizedBox(height: 8),
             Text(user.email),
-            const SizedBox(height: 24),
-            // Nút quay lại đặt trong body: AppBar bị lớp phủ chuyển cảnh chắn
-            // con trỏ nên thao tác chạm của bộ chấm không tới nơi.
-            ElevatedButton(
-              key: const ValueKey<String>('action.back'),
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Back'),
-            ),
           ],
         ),
       ),

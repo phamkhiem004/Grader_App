@@ -129,12 +129,15 @@ P3 làm xanh được: **C4** và **F2** (broken-compile không còn phát lỗi
    sát được", nên P3 chỉ cần dẫn event `print` về đúng testcase là `actual` đã dùng được ngay.
 6. `exams/` và `submissions/` trong `.gitignore` đã được neo vào gốc repo — đừng bỏ dấu `/` đầu,
    nếu không `fixtures/*/submissions/` biến mất khỏi git.
-7. **Sửa engine trong `resources` KHÔNG tới được đề đã publish.**
-   `TestcaseTemplateService.materializeEngine` (gọi ở dòng ~345) **chép đóng băng**
-   `exam_test.dart` + `grader.dart` vào `exams/<examId>/` lúc lưu/publish cấu hình testcase. Còn
-   `regradeStudent` thì ưu tiên **testcase HIỆN TẠI trên đĩa của đề** → chấm lại một đề cũ vẫn
-   chạy engine CŨ. ⇒ P3/P3b phải có bước **nâng cấp engine cho đề đã publish** (re-materialize),
-   nếu không bản sửa im lặng không có hiệu lực. Cùng dạng bẫy với mục 1.
+7. **Sửa engine trong `resources` KHÔNG tới được đề đã publish** — ✅ đã xử lý ở P3.
+   `TestcaseTemplateService.materializeEngine` **chép đóng băng** `exam_test.dart` + `grader.dart`
+   vào `exams/<examId>/` lúc lưu/publish, còn `resolveTestcasePath` lúc chấm lại thì ưu tiên đúng
+   thư mục đó → chấm lại đề cũ vẫn chạy engine CŨ. Cùng dạng bẫy với mục 1.
+   Nay `regradeExam` gọi `TestcaseTemplateService.refreshCommonEngine(examId)` trước khi xếp hàng.
+   **Chỉ nâng khi chấm lại CẢ ĐỀ**, không nâng khi chấm lại lẻ — nâng lúc chấm lại một bài thì
+   trong cùng đề sẽ có bài chấm bằng engine mới, bài chấm bằng engine cũ. Đề legacy không bị
+   đụng tới (grader do giáo viên nộp). Khoá bằng `TestcaseEngineRefreshTest`.
+   Dấu hiệu đề còn engine cũ: `grading_result.engine_version` **vắng mặt**.
 8. **Harness đo phải chạy ĐỦ chuỗi hàm của `assembleResultJson`.** Thiếu một bước là luật
    nghiệm thu xanh giả — đã xảy ra với `sanitizeTestCaseErrors` (nhóm E) và `assess`
    (`competency_assessment`). Thêm bước mới vào `assembleResultJson` thì thêm luôn vào

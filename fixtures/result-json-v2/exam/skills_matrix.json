@@ -1,0 +1,240 @@
+{
+  "TC_APP_BOOT": {
+    "instance_id": "TC_APP_BOOT",
+    "runner": "APP_BOOT",
+    "skill_code": "UI_SCAFFOLD_APPBAR",
+    "testcase_group": "BEHAVIOR",
+    "group_id": "KHOI_DONG",
+    "group_name": "Khởi động ứng dụng",
+    "name": "Ứng dụng khởi động không lỗi",
+    "expected": "Ứng dụng phải khởi động từ main() và hiển thị màn hình danh sách, không phát sinh lỗi.",
+    "difficulty": "basic",
+    "weight": 8,
+    "parameters": { "rootKey": "screen.home" }
+  },
+  "TC_HOME_TITLE": {
+    "instance_id": "TC_HOME_TITLE",
+    "runner": "WIDGET_TEXT_CONTENT",
+    "skill_code": "UI_TEXT_IMAGE_ICON",
+    "testcase_group": "WIDGET",
+    "group_id": "XEM_DS",
+    "group_name": "Xem danh sách người dùng",
+    "name": "Tiêu đề màn hình danh sách",
+    "expected": "Màn hình danh sách phải có tiêu đề đúng chữ \"User Manager\".",
+    "difficulty": "basic",
+    "weight": 4,
+    "parameters": {
+      "targetKey": "text.title",
+      "targetType": "text",
+      "expectedText": "User Manager",
+      "matchMode": "equals"
+    }
+  },
+  "TC_LIST_VISIBLE": {
+    "instance_id": "TC_LIST_VISIBLE",
+    "runner": "LIST_VISIBLE",
+    "skill_code": "ADVUI_LISTVIEW",
+    "testcase_group": "WIDGET",
+    "group_id": "XEM_DS",
+    "group_name": "Xem danh sách người dùng",
+    "name": "Danh sách hiển thị người dùng có sẵn",
+    "expected": "Màn hình danh sách phải hiện danh sách và hai người dùng có sẵn.",
+    "difficulty": "basic",
+    "weight": 8,
+    "parameters": { "listKey": "list.items", "itemKeys": "item.5,item.6" }
+  },
+  "TC_LIST_COUNT": {
+    "instance_id": "TC_LIST_COUNT",
+    "runner": "LIST_ITEM_COUNT",
+    "skill_code": "ADVUI_LISTVIEW",
+    "testcase_group": "LOGIC",
+    "group_id": "XEM_DS",
+    "group_name": "Xem danh sách người dùng",
+    "name": "Số người dùng ban đầu",
+    "expected": "Khi mới mở, danh sách phải có đúng 2 người dùng.",
+    "difficulty": "basic",
+    "weight": 8,
+    "parameters": {
+      "listKey": "list.items",
+      "itemKeys": "item.5,item.6,item.7",
+      "expectedCount": 2
+    }
+  },
+  "TC_NAME_FIELD": {
+    "instance_id": "TC_NAME_FIELD",
+    "runner": "WIDGET_VISIBLE",
+    "skill_code": "UI_TEXT_INPUT",
+    "testcase_group": "WIDGET",
+    "group_id": "THEM_USER",
+    "group_name": "Thêm người dùng",
+    "name": "Ô nhập họ tên",
+    "expected": "Form thêm người dùng phải có ô nhập họ tên.",
+    "difficulty": "basic",
+    "weight": 5,
+    "parameters": { "widgetKey": "field.name", "targetType": "input" }
+  },
+  "TC_EMAIL_FIELD": {
+    "instance_id": "TC_EMAIL_FIELD",
+    "runner": "WIDGET_VISIBLE",
+    "skill_code": "UI_TEXT_INPUT",
+    "testcase_group": "WIDGET",
+    "group_id": "THEM_USER",
+    "group_name": "Thêm người dùng",
+    "name": "Ô nhập email",
+    "expected": "Form thêm người dùng phải có ô nhập email.",
+    "difficulty": "basic",
+    "weight": 5,
+    "parameters": { "widgetKey": "field.email", "targetType": "input" }
+  },
+  "TC_SAVE_ENABLED": {
+    "instance_id": "TC_SAVE_ENABLED",
+    "runner": "WIDGET_ENABLED",
+    "skill_code": "UI_BUTTONS_SELECTION",
+    "testcase_group": "BEHAVIOR",
+    "group_id": "THEM_USER",
+    "group_name": "Thêm người dùng",
+    "name": "Nút lưu dùng được",
+    "expected": "Nút lưu phải ở trạng thái bấm được khi mở màn hình.",
+    "difficulty": "basic",
+    "weight": 5,
+    "parameters": {
+      "targetKey": "action.save",
+      "targetType": "button",
+      "expectedEnabled": true
+    }
+  },
+  "TC_ADD_USER": {
+    "instance_id": "TC_ADD_USER",
+    "runner": "GROUP",
+    "group_id": "THEM_USER",
+    "group_name": "Thêm người dùng",
+    "skill_code": "UI_TEXT_INPUT",
+    "testcase_group": "BEHAVIOR",
+    "name": "Thêm người dùng hợp lệ",
+    "expected": "Nhập họ tên và email hợp lệ rồi lưu thì người dùng mới phải xuất hiện trong danh sách và không còn thông báo lỗi.",
+    "difficulty": "intermediate",
+    "weight": 12,
+    "children": [
+      {
+        "instance_id": "TC_ADD_USER_SAVE_VISIBLE",
+        "runner": "WIDGET_VISIBLE",
+        "skill_code": "UI_BUTTONS_SELECTION",
+        "name": "Có nút lưu",
+        "expected": "Form phải có nút lưu.",
+        "difficulty": "basic",
+        "weight": 4,
+        "parameters": { "widgetKey": "action.save", "targetType": "button" }
+      },
+      {
+        "instance_id": "TC_ADD_USER_SUBMIT",
+        "runner": "FORM_SUBMIT",
+        "skill_code": "UI_TEXT_INPUT",
+        "name": "Lưu người dùng mới",
+        "expected": "Sau khi lưu, người dùng mới phải nằm trong danh sách.",
+        "difficulty": "intermediate",
+        "weight": 8,
+        "parameters": {
+          "fieldKeys": "field.name,field.email",
+          "values": "Nguyen Van A,vana@fpt.edu.vn",
+          "fieldType": "input",
+          "submitKey": "action.save",
+          "resultKey": "item.7",
+          "errorKeys": "validation.name,validation.email"
+        }
+      }
+    ]
+  },
+  "TC_VALIDATE_FIELDS": {
+    "instance_id": "TC_VALIDATE_FIELDS",
+    "runner": "FORM_VALIDATE_FIELDS",
+    "skill_code": "UI_TEXT_INPUT",
+    "testcase_group": "LOGIC",
+    "group_id": "THEM_USER",
+    "group_name": "Thêm người dùng",
+    "name": "Báo lỗi từng ô nhập",
+    "expected": "Bỏ trống họ tên và nhập email sai định dạng rồi lưu thì phải hiện thông báo lỗi cho cả hai ô.",
+    "difficulty": "intermediate",
+    "weight": 10,
+    "parameters": {
+      "fieldKeys": "field.name,field.email",
+      "invalidValues": "__EMPTY__,khong-phai-email",
+      "errorKeys": "validation.name,validation.email",
+      "fieldType": "input",
+      "submitKey": "action.save"
+    }
+  },
+  "TC_DELETE_CONFIRM": {
+    "instance_id": "TC_DELETE_CONFIRM",
+    "runner": "DIALOG_FLOW",
+    "skill_code": "STATE_SETSTATE_STATEFUL",
+    "testcase_group": "BEHAVIOR",
+    "group_id": "XOA_USER",
+    "group_name": "Xoá người dùng",
+    "name": "Xoá người dùng có xác nhận",
+    "expected": "Bấm xoá phải hiện hộp thoại xác nhận; xác nhận xong thì người dùng đó biến mất khỏi danh sách.",
+    "difficulty": "intermediate",
+    "weight": 10,
+    "parameters": {
+      "actionKey": "action.delete.5",
+      "dialogKey": "dialog.delete",
+      "decisionKey": "action.delete.confirm",
+      "absentKey": "item.5"
+    }
+  },
+  "TC_DETAIL_NAV": {
+    "instance_id": "TC_DETAIL_NAV",
+    "runner": "NAVIGATION",
+    "skill_code": "NAV_NAVIGATOR_PUSH_POP",
+    "testcase_group": "BEHAVIOR",
+    "group_id": "XEM_CHI_TIET",
+    "group_name": "Xem chi tiết người dùng",
+    "name": "Mở chi tiết rồi quay lại",
+    "expected": "Bấm xem chi tiết phải mở màn hình chi tiết; bấm quay lại phải trở về màn hình danh sách.",
+    "difficulty": "intermediate",
+    "weight": 9,
+    "parameters": {
+      "openKey": "action.detail.5",
+      "destinationKey": "screen.detail",
+      "backKey": "action.back",
+      "homeKey": "screen.home"
+    }
+  },
+  "TC_RESPONSIVE_NO_OVERFLOW": {
+    "instance_id": "TC_RESPONSIVE_NO_OVERFLOW",
+    "runner": "RESPONSIVE_NO_OVERFLOW",
+    "skill_code": "ADVUI_EXPANDED_LAYOUTBUILDER",
+    "testcase_group": "WIDGET",
+    "group_id": "RESPONSIVE",
+    "group_name": "Bố cục theo kích thước màn hình",
+    "name": "Không tràn bố cục ở hai kích thước",
+    "expected": "Giao diện không được tràn khung ở cả điện thoại dọc và máy tính bảng ngang.",
+    "difficulty": "intermediate",
+    "weight": 8,
+    "parameters": {
+      "portraitWidth": 390,
+      "portraitHeight": 844,
+      "landscapeWidth": 1024,
+      "landscapeHeight": 768
+    }
+  },
+  "TC_RESPONSIVE_TARGET": {
+    "instance_id": "TC_RESPONSIVE_TARGET",
+    "runner": "RESPONSIVE_TARGET",
+    "skill_code": "ADVUI_EXPANDED_LAYOUTBUILDER",
+    "testcase_group": "WIDGET",
+    "group_id": "RESPONSIVE",
+    "group_name": "Bố cục theo kích thước màn hình",
+    "name": "Màn hình danh sách còn hiển thị ở cả hai kích thước",
+    "expected": "Màn hình danh sách phải còn hiển thị ở cả điện thoại dọc và máy tính bảng ngang.",
+    "difficulty": "intermediate",
+    "weight": 8,
+    "parameters": {
+      "targetKey": "screen.home",
+      "targetType": "container",
+      "portraitWidth": 390,
+      "portraitHeight": 844,
+      "landscapeWidth": 1024,
+      "landscapeHeight": 768
+    }
+  }
+}

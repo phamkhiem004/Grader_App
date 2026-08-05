@@ -1,0 +1,13 @@
+{
+  "diem": 6.0,
+  "passed": 8,
+  "failed": 5,
+  "total": 13,
+  "failed_ids": [
+    "TC_DELETE_CONFIRM",
+    "TC_HOME_TITLE",
+    "TC_RESPONSIVE_NO_OVERFLOW",
+    "TC_RESPONSIVE_TARGET",
+    "TC_VALIDATE_FIELDS"
+  ]
+}

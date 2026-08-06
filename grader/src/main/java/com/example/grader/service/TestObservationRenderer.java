@@ -79,13 +79,35 @@ public final class TestObservationRenderer {
         return Set.copyOf(ERROR_CODE.values());
     }
 
+    /**
+     * Hai `kind` nói "chưa chạy". Không có `error_code` (chưa chạy thì chưa quan sát được gì để
+     * phân loại) nên chúng không nằm trong {@link #ERROR_CODE}, nhưng vẫn diễn đạt được.
+     */
+    private static final Set<String> NOT_RUN_KINDS = Set.of("NOT_RUN_BOOT", "NOT_RUN_SUITE");
+
+    /**
+     * Mọi `kind` lớp này diễn đạt được — dùng để đối chiếu độ phủ của fixture (A2) và bảng SPEC 5.5.
+     *
+     * <p>Suy từ {@link #ERROR_CODE} chứ không khai lại thành danh sách thứ ba: thêm `kind` mà quên
+     * cập nhật danh sách là đúng kiểu lệch ngầm mà cả A1 lẫn A2 đang dựng chốt chặn để chống.
+     */
+    public static Set<String> renderableKinds() {
+        Set<String> kinds = new java.util.TreeSet<>(ERROR_CODE.keySet());
+        kinds.addAll(NOT_RUN_KINDS);
+        return Set.copyOf(kinds);
+    }
+
     /** Loại thành phần theo cách sinh viên hiểu — bảng ĐÓNG, khớp `_subject` của engine. */
     private static final Map<String, String> SUBJECT = Map.ofEntries(
             Map.entry("field", "ô nhập"),
             Map.entry("input", "ô nhập"),
             Map.entry("button", "nút"),
             Map.entry("list", "danh sách"),
-            Map.entry("item", "mục trong danh sách"),
+            // "mục" chứ không phải "mục trong danh sách": mọi câu ở đây đều ghép chủ ngữ là TÊN
+            // YÊU CẦU rồi mới tới danh từ này, nên cụm dài làm câu sai ngữ pháp ở khuôn "không
+            // thấy <X> nào" — A2 đo được câu "không thấy mục trong danh sách nào". Danh từ trong
+            // bảng này phải là danh từ ĐƠN, ghép được vào mọi khuôn câu.
+            Map.entry("item", "mục"),
             Map.entry("dialog", "hộp thoại"),
             Map.entry("screen", "màn hình"),
             Map.entry("error", "thông báo lỗi"),

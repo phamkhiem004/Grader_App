@@ -15,6 +15,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -50,7 +51,7 @@ class FixtureResultAssemblyTest {
         SyllabusService.Resolver resolver = resolverFromSeedFile();
         int done = 0;
 
-        for (String variant : List.of("high", "medium", "broken-boot", "broken-compile")) {
+        for (String variant : List.of("high", "medium", "sloppy", "broken-boot", "broken-compile")) {
             Path graderOut = FIXTURE.resolve(".build/out/" + variant + ".json");
             if (!Files.exists(graderOut)) continue;
 
@@ -62,7 +63,7 @@ class FixtureResultAssemblyTest {
 
             @SuppressWarnings("unchecked")
             List<Map<String, Object>> tcs = (List<Map<String, Object>>) assembled.get("test_cases");
-            assertEquals(13, tcs.size(), variant + ": số testcase");
+            assertEquals(24, tcs.size(), variant + ": số testcase");
             for (Map<String, Object> tc : tcs) {
                 String id = String.valueOf(tc.get("test_id"));
                 // A1: ba khoá phải CÓ MẶT ở mọi testcase, kể cả giá trị null.
@@ -139,6 +140,61 @@ class FixtureResultAssemblyTest {
         assertEquals("Nhập họ tên và email hợp lệ rồi lưu thì người dùng mới phải xuất hiện "
                         + "trong danh sách và không còn thông báo lỗi.",
                 byId.get("TC_ADD_USER").get("expected"));
+    }
+
+    /**
+     * A2 — CHỐT CHẶN ĐỘ PHỦ RUNNER. Bộ đề fixture phải dùng đủ **mọi** runner của engine chung.
+     *
+     * <p>Vì sao khoá ở test chứ không chỉ ghi vào README: trước A2, mười runner CHƯA TỪNG chạy một
+     * lần nào mà vẫn được công bố trong hợp đồng. Cứ thêm runner mà quên fixture là lặp lại y hệt —
+     * bên đọc xây logic trên code chưa ai chạy. Test này chạy KHÔNG cần Docker, chỉ đọc matrix.
+     */
+    @Test
+    void fixtureExercisesEveryCommonRunner() throws Exception {
+        JsonNode matrix = MAPPER.readTree(
+                Files.readString(FIXTURE.resolve("exam/skills_matrix.json"), StandardCharsets.UTF_8));
+        Set<String> used = new java.util.LinkedHashSet<>();
+        matrix.forEach(row -> {
+            used.add(row.path("runner").asText());
+            row.path("children").forEach(child -> used.add(child.path("runner").asText()));
+        });
+
+        Set<String> declared = new java.util.LinkedHashSet<>(TestCaseTaxonomy.commonRunners());
+        declared.add("GROUP");   // dẫn xuất, không có layer riêng nên không nằm trong bảng
+        Set<String> missing = new java.util.TreeSet<>(declared);
+        missing.removeAll(used);
+        assertTrue(missing.isEmpty(),
+                "Runner của engine chung chưa có testcase nào trong fixture: " + missing);
+    }
+
+    /**
+     * A2 — CHỐT CHẶN ĐỘ PHỦ `kind`. Mọi giá trị `observation.kind` mà engine biết phát đều phải
+     * XUẤT HIỆN THẬT trên ít nhất một bài nộp của fixture.
+     *
+     * <p>Đây là điều kiện để SPEC 5.5 công bố một `kind` ở **Mức 1**. Trước A2 chỉ 6/13 đạt; bài
+     * `sloppy` được dựng riêng để 7 cái còn lại phát ra. Nếu ai gỡ một lỗi cấy trong `sloppy`, hoặc
+     * thêm `kind` mới mà không cấy lỗi tương ứng, test này đỏ ngay.
+     */
+    @Test
+    void fixtureEmitsEveryObservationKind() throws Exception {
+        Set<String> seen = new java.util.TreeSet<>();
+        int done = 0;
+        for (String variant : List.of("high", "medium", "sloppy", "broken-boot", "broken-compile")) {
+            Path graderOut = FIXTURE.resolve(".build/out/" + variant + ".json");
+            if (!Files.exists(graderOut)) continue;
+            done++;
+            JsonNode root = MAPPER.readTree(Files.readString(graderOut, StandardCharsets.UTF_8));
+            for (JsonNode tc : root.path("test_cases")) {
+                JsonNode kind = tc.path("observation").path("kind");
+                if (kind.isTextual()) seen.add(kind.asText());
+            }
+        }
+        assumeTrue(done > 0, "Chưa chấm fixture — chạy fixtures/result-json-v2/run-fixture.sh trước");
+
+        Set<String> missing = new java.util.TreeSet<>(TestObservationRenderer.renderableKinds());
+        missing.removeAll(seen);
+        assertTrue(missing.isEmpty(), "`kind` engine khai nhưng fixture chưa phát thật: " + missing
+                + " (đã phát: " + seen + ")");
     }
 
     // ── dựng lại luồng ghép, gọi THẬT các bước P1 đã đổi ───────────────────

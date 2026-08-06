@@ -41,9 +41,28 @@ class TestObservationRendererTest {
 
     @Test
     void printsCountsBecauseStudentCanRecount() {
-        assertEquals("Số người dùng ban đầu: đếm được 3 mục trong danh sách, cần 2.",
+        assertEquals("Số người dùng ban đầu: đếm được 3 mục, cần 2.",
                 TestObservationRenderer.render("Số người dùng ban đầu",
                         obs("kind", "COUNT_MISMATCH", "subject", "item", "found", 3, "expected", 2)));
+    }
+
+    /**
+     * Danh từ trong bảng `subject` phải là danh từ ĐƠN, vì cùng một giá trị đi qua nhiều khuôn câu
+     * khác nhau. A2 đo được câu sai ngữ pháp *"không thấy mục trong danh sách nào"* — cụm dài rơi
+     * vào khuôn "không thấy &lt;X&gt; nào" là hỏng. Test này chặn kiểu hỏng đó cho MỌI `subject`.
+     */
+    @Test
+    void everySubjectFitsTheMissingSentenceFrame() {
+        for (String subject : List.of("field", "input", "button", "list", "item", "dialog",
+                "screen", "error", "text", "image", "icon", "checkbox", "widget")) {
+            String out = TestObservationRenderer.render("Yêu cầu X",
+                    obs("kind", "MISSING", "subject", subject));
+            assertNotNull(out, subject);
+            // Danh từ đơn thì "nào" đứng ngay sau nó; cụm có giới từ thì "nào" bị đẩy ra sau
+            // bổ ngữ và câu đọc sai. Bắt bằng chính các giới từ hay dùng trong bảng.
+            assertFalse(out.matches(".*\\b(trong|của|trên|ở)\\b.*nào.*"),
+                    subject + " là cụm có giới từ, không ghép được vào khuôn câu: " + out);
+        }
     }
 
     @Test
@@ -140,12 +159,20 @@ class TestObservationRendererTest {
     void everyRenderableKindExceptNotRunHasACode() {
         // Chốt chặn lệch bảng: hai bảng (`kind`→câu và `kind`→mã) nằm cùng class, nhưng vẫn có thể
         // thêm vào một bên mà quên bên kia. Mọi kind diễn đạt được đều phải có mã, trừ NOT_RUN_*.
-        for (String kind : List.of("MISSING", "STILL_PRESENT", "TEXT_MISMATCH", "COUNT_MISMATCH",
-                "NUMBER_MISMATCH", "ENABLED_MISMATCH", "STYLE_MISMATCH", "LABEL_MISMATCH",
-                "OVERFLOW", "LAYOUT_ERROR", "BOOT_FAILED")) {
+        //
+        // Danh sách lấy TỪ CHÍNH lớp đó (`renderableKinds`), không chép tay: chép tay thì thêm
+        // `kind` mới mà quên sửa test là test vẫn xanh — đúng lỗ hổng đang muốn bịt.
+        Set<String> kinds = TestObservationRenderer.renderableKinds();
+        assertEquals(13, kinds.size(), "SPEC 5.5 khai 13 kind: " + kinds);
+        for (String kind : kinds) {
             assertNotNull(TestObservationRenderer.render("Yêu cầu X", obs("kind", kind)), kind);
-            assertNotNull(TestObservationRenderer.errorCodeOf(obs("kind", kind)),
-                    kind + " diễn đạt được nhưng chưa có error_code");
+            if (kind.startsWith("NOT_RUN_")) {
+                assertNull(TestObservationRenderer.errorCodeOf(obs("kind", kind)),
+                        kind + " chưa chạy nên KHÔNG được có error_code");
+            } else {
+                assertNotNull(TestObservationRenderer.errorCodeOf(obs("kind", kind)),
+                        kind + " diễn đạt được nhưng chưa có error_code");
+            }
         }
     }
 

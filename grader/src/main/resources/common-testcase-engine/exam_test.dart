@@ -647,26 +647,35 @@ Future<void> _checkWidgetSemanticsLabel(
   WidgetTester tester,
   Map<String, dynamic> parameters,
 ) async {
+  // PHẢI trả handle trong `finally`, KHÔNG dùng addTearDown: flutter_test kiểm
+  // "còn SemanticsHandle nào đang mở?" NGAY KHI thân test kết thúc, trước khi các
+  // addTearDown chạy. Dùng addTearDown thì runner này KHÔNG BAO GIỜ ĐẠT ĐƯỢC — sinh
+  // viên gắn nhãn trợ năng đúng vẫn mất điểm, và mất theo cách tệ nhất: lỗi báo về
+  // là log tiếng Anh nói chuyện nội bộ của bộ chấm, không phải điều em ấy quan sát được.
   final semantics = tester.ensureSemantics();
-  addTearDown(semantics.dispose);
-  await _boot(tester);
-  final key = _requiredText(parameters, 'targetKey');
-  final targetType = _text(parameters, 'targetType', 'any');
-  final finder = _byKey(key);
-  _expectPresent(finder, _subject(parameters), 'Không tìm thấy target key: $key');
-  _assertTargetType(tester, finder, key, targetType);
-  final actual = tester.getSemantics(finder).label;
-  final expected = _requiredText(parameters, 'expectedLabel');
-  final matchMode = _text(parameters, 'matchMode', 'equals').toLowerCase();
-  // Nhãn trợ năng là chữ trình đọc màn hình đọc lên cho người dùng — được phép in.
-  final labelOk = matchMode == 'contains' ? actual.contains(expected) : actual == expected;
-  if (!labelOk) {
-    _observe('LABEL_MISMATCH', subject: 'widget', seen: actual.isEmpty ? null : actual);
-  }
-  if (matchMode == 'contains') {
-    expect(actual, contains(expected), reason: 'Semantics label của $key không chứa expectedLabel');
-  } else {
-    expect(actual, expected, reason: 'Semantics label của $key không đúng');
+  try {
+    await _boot(tester);
+    final key = _requiredText(parameters, 'targetKey');
+    final targetType = _text(parameters, 'targetType', 'any');
+    final finder = _byKey(key);
+    _expectPresent(finder, _subject(parameters), 'Không tìm thấy target key: $key');
+    _assertTargetType(tester, finder, key, targetType);
+    final actual = tester.getSemantics(finder).label;
+    final expected = _requiredText(parameters, 'expectedLabel');
+    final matchMode = _text(parameters, 'matchMode', 'equals').toLowerCase();
+    // Nhãn trợ năng là chữ trình đọc màn hình đọc lên cho người dùng — được phép in.
+    final labelOk = matchMode == 'contains' ? actual.contains(expected) : actual == expected;
+    if (!labelOk) {
+      _observe('LABEL_MISMATCH', subject: 'widget', seen: actual.isEmpty ? null : actual);
+    }
+    if (matchMode == 'contains') {
+      expect(actual, contains(expected),
+          reason: 'Semantics label của $key không chứa expectedLabel');
+    } else {
+      expect(actual, expected, reason: 'Semantics label của $key không đúng');
+    }
+  } finally {
+    semantics.dispose();
   }
 }
 

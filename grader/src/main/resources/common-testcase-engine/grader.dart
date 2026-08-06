@@ -13,7 +13,12 @@ import 'dart:io';
 /// là hiệu ứng lề, mọi assertion giữ nguyên.
 /// 2.4.0 — A2: `subject` nhận thêm giá trị `checkbox` (trước đó ô chọn rơi về `button`).
 /// Điểm KHÔNG đổi — chỉ đổi từ vựng của quan sát, không đổi một assertion nào.
-const String kEngineVersion = 'COMMON_V1-2.4.0';
+/// 2.5.0 — A2: sửa khiếm khuyết CHẤM SAI ĐIỂM thứ tư — `WIDGET_SEMANTICS_LABEL` trả
+/// SemanticsHandle bằng addTearDown nên KHÔNG BAO GIỜ ĐẠT ĐƯỢC. Bài chấm bằng bản
+/// < 2.5.0 mà có testcase runner này thì SAI ĐIỂM, phải chấm lại.
+/// Kèm theo: chỉ giữ khối chẩn đoán ĐẦU TIÊN của mỗi test (xem `_firstBlock`) — trước đó
+/// một lỗi bố cục lặp lại mỗi khung hình làm `result_json` phình lên 745 KB. Điểm không đổi.
+const String kEngineVersion = 'COMMON_V1-2.5.0';
 
 /// PHẢI khớp hằng cùng tên trong `exam_test.dart` — hai chương trình Dart riêng biệt,
 /// không import nhau nên không chia sẻ được hằng số.
@@ -261,15 +266,29 @@ bool _isFailureDump(String message) {
 }
 
 /// Chẩn đoán của một test hỏng: ưu tiên dump (có nội dung thật), sau đó mới tới
-/// event `error` (thường chỉ là câu bao).
+/// event `error` (thường chỉ là câu bao). Chỉ giữ khối ĐẦU TIÊN, xem [_firstBlock].
 String _failureMessage(List<String>? dumps, List<String>? errors) {
   for (final source in <List<String>?>[dumps, errors]) {
-    final joined = (source ?? const <String>[])
-        .where((value) => value.trim().isNotEmpty)
-        .join('\n');
-    if (joined.isNotEmpty) return joined;
+    for (final value in source ?? const <String>[]) {
+      if (value.trim().isNotEmpty) return _firstBlock(value, 4000);
+    }
   }
   return 'Test thất bại.';
+}
+
+/// Khối chẩn đoán ĐẦU TIÊN, cắt ở [max] ký tự.
+///
+/// Vì sao không gộp cả loạt như trước: lỗi bố cục được flutter_test báo LẠI mỗi khung hình,
+/// nên gộp hết là hàng trăm bản sao của cùng một khối — đo được **174.928 ký tự cho MỘT
+/// testcase** (745 KB cho một bài nộp), mà chuỗi này chảy thẳng vào `result_json` lưu DB rồi
+/// ra API và ra file mẫu gửi bên đọc. Khối đầu là nguyên nhân, các khối sau là hệ quả kéo
+/// theo — cùng lý do kênh quan sát chỉ giữ quan sát đầu tiên.
+///
+/// KHÔNG dùng [_shorten] ở đây: nó gộp cả dấu xuống dòng, mà bộ phân loại lỗi phía backend và
+/// trang Lịch sử còn đọc cấu trúc nhiều dòng của khối dump cho dữ liệu chưa có `observation`.
+String _firstBlock(String value, int max) {
+  final text = value.trim();
+  return text.length > max ? '${text.substring(0, max).trimRight()}\n…' : text;
 }
 
 String _processError(ProcessResult process) {

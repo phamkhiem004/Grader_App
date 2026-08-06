@@ -61,8 +61,34 @@ sinh viên.** Mọi tranh cãi thiết kế phân xử bằng nguyên tắc này
 | **P2b** | *Xoá* `error` + `student_safe_summary` **+ gửi `rubric_label`** | ✅ **Xong** 2026-08-06 | **0 luật FAIL trên cả 4 bài** — lần đầu toàn bộ ACCEPTANCE xanh. 57 test; `tsc` xanh |
 | ~~**P4b**~~ | ~~`blocked_by`~~ | 🚫 **ĐÓNG** 2026-08-06 — xem dưới | — |
 | **A1** | Suy `error_code` từ `observation.kind` + 4 mã mới | ✅ **Xong** 2026-08-06 | **0 giá trị lệch** trên dữ liệu thật (song ánh 1–1); 4 mẫu vẫn 0 luật FAIL; 61 test |
-| **A2** | Mở rộng fixture: 10 runner chưa chạy + 7 `kind` chưa từng phát | ⬜ **nặng** | Nâng 7 `kind` Mức 2 → Mức 1 trong SPEC 5.5 |
+| **A2** | Mở rộng fixture: 10 runner chưa chạy + 7 `kind` chưa từng phát | ✅ **Xong** 2026-08-07 | Fixture 13 → **24 testcase**, phủ **23/23 runner** và **13/13 `kind`**; bài nộp thứ 5 `sloppy`; tìm ra **khiếm khuyết chấm sai điểm thứ tư**; 7 `kind` lên Mức 1 |
 | **P6** | `exam.requirements` | ⬜ | — |
+
+### A2 — mở fixture, và cái giá của việc công bố năng lực chưa chạy
+
+Trước A2, hợp đồng công bố 23 runner và 13 `kind`, nhưng fixture chỉ chạm tới **13 runner** và
+**6 `kind`**. A2 đóng khoảng cách đó: 24 testcase, phủ đủ **23/23 runner** và **13/13 `kind`**.
+
+**Chỉ riêng việc chạy đã tìm ra khiếm khuyết chấm sai điểm thứ tư.** `WIDGET_SEMANTICS_LABEL` trả
+`SemanticsHandle` bằng `addTearDown`, mà `flutter_test` kiểm handle **ngay khi thân test kết thúc**,
+trước lúc `addTearDown` chạy ⇒ runner đó **không bao giờ đạt được**. Sinh viên gắn nhãn trợ năng
+đúng vẫn mất điểm, và lỗi báo về là log nội bộ của bộ chấm. Kèm theo: gộp cả loạt dump lỗi bố cục
+làm `result_json` phình **745 KB** cho một bài nộp.
+
+Đây là lần thứ hai bài học P3b tự chứng minh: **năng lực chưa chạy thì chưa biết nó có đúng không**,
+và công bố nó trong hợp đồng là mời bên đọc xây trên cát. Nên A2 khoá độ phủ bằng test, không bằng
+lời hứa trong README:
+
+| Test | Chặn điều gì | Cần Docker |
+|---|---|---|
+| `fixtureExercisesEveryCommonRunner` | thêm runner mà quên testcase | không |
+| `fixtureEmitsEveryObservationKind` | thêm `kind` mà quên cấy lỗi tương ứng | có |
+
+**Luật mới của A2 — đáp án viết tay trước khi chạy.** P3b có mỏ neo: `expected/*.json` không đụng
+tới nên chính nó làm trọng tài. A2 không có mỏ neo — cùng một người vừa viết bài nộp, vừa cấy lỗi,
+vừa viết đáp án. Nên `expected/*.json` được viết tay và **commit riêng** (`a261ee2`) trước khi chạy
+Docker lần đầu; sau khi chạy, lệch thì **mặc định engine sai**. Áp dụng lần đầu đã ra kết quả: đáp
+án tay chỉ đúng **một** chỗ lệch, và chỗ đó là khiếm khuyết engine — đáp án không sửa một chữ.
 
 ### Vì sao ĐÓNG P4b
 

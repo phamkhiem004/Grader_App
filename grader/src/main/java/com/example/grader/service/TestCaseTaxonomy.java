@@ -92,6 +92,16 @@ public final class TestCaseTaxonomy {
     }
 
     /**
+     * Tên mọi runner của engine chung, TRỪ {@code GROUP} (dẫn xuất, tầng lấy theo con).
+     *
+     * <p>Để fixture đối chiếu được độ phủ: runner nào chưa có testcase nào trong bộ đo thì nó là
+     * năng lực CHƯA TỪNG CHẠY, không được công bố như đã kiểm chứng.
+     */
+    public static Set<String> commonRunners() {
+        return RUNNER_LAYER.keySet();
+    }
+
+    /**
      * Layer của một testcase, theo thứ tự ưu tiên: giá trị đã ghi sẵn trong matrix →
      * suy từ {@code runner} (GROUP lấy tầng cao nhất của các con) → tiền tố test_id (legacy).
      *

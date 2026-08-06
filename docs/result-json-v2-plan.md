@@ -9,7 +9,13 @@ Sổ theo dõi để không mất mạch giữa các phiên. **Đọc file này 
 ## ⚠️ Có phía thứ hai ăn output này
 
 `result.json` là **input duy nhất** của `D:\AGS-PRM393\prm393-feedback-bot` (một phiên Claude
-khác đang làm). Memory hai bên **không dùng chung** — thư mục dự án khác nhau.
+khác đang làm).
+
+⚠️ **Hai phiên CÓ THỂ dùng chung thư mục memory** `C:\Users\ASUS\.claude\projects\d--AGS-PRM393\`
+— đã xảy ra: file `hai-phia-grader-va-nlp.md` từng bị phiên kia ghi lại theo góc nhìn của họ, và
+bản đó khẳng định *"phiên trong thư mục này = phía NLP"*. Ai đọc memory thì **tự xác định vai bằng
+repo đang sửa** (`Grader_App/` → Grader → ghi `CHANGELOG_FOR_NLP.md`), đừng tin câu khẳng định vai
+theo thư mục. Bàn giao **vẫn phải qua file trong repo hợp đồng**, không qua memory.
 
 `SPEC_grader_result_json/` nay là **repo git riêng, tài sản chung hai bên** — kênh liên lạc
 hai chiều:
@@ -52,7 +58,7 @@ sinh viên.** Mọi tranh cãi thiết kế phân xử bằng nguyên tắc này
 | **P3b** | Sửa khiếm khuyết CHẤM SAI ĐIỂM của engine | ✅ **Xong** 2026-08-06 | Bỏ hết cách né trong fixture; engine **trước** P3b chấm `high` 7.8/13 và `medium` đạt oan 1 test, engine **sau** P3b đúng 10.0 / 6.0 / 0.0 / 0.0 |
 | **P4** | `executed` / `not_run` **+ P2a: thêm `error_code` phẳng** | ✅ **Xong** 2026-08-06 | `high` và `broken-compile` **0 luật đỏ**; `medium`/`broken-boot` chỉ còn E1+E2 (thuộc P2b). Điểm không đổi |
 | **P5** | Sinh `actual` tự động | ✅ **Xong** 2026-08-06 | **C1–C7 xanh hết** trên `medium`, C6 đạt **100%** (trước P3: 20%). `actual_source == "observation"` ở mọi test không đạt. Điểm không đổi |
-| **P2b** | *Xoá* `error` + `student_safe_summary` **+ gửi `rubric_label`** | 🟢 **ĐÃ ĐƯỢC MỞ** — NLP báo B2 xong 2026-08-06, xoá giờ là no-op với họ | E1, E2 xanh; FE + bot còn chạy |
+| **P2b** | *Xoá* `error` + `student_safe_summary` **+ gửi `rubric_label`** | ✅ **Xong** 2026-08-06 | **0 luật FAIL trên cả 4 bài** — lần đầu toàn bộ ACCEPTANCE xanh. 57 test; `tsc` xanh |
 | ~~**P4b**~~ | ~~`blocked_by`~~ | 🚫 **ĐÓNG** 2026-08-06 — xem dưới | — |
 | **A** | Mở rộng fixture: 10 runner chưa chạy + 7 `kind` chưa từng phát | ⬜ | Nâng 7 `kind` Mức 2 → Mức 1 trong SPEC 5.5 |
 | **P6** | `exam.requirements` | ⬜ | — |
@@ -120,10 +126,10 @@ thật của fixture) rồi đưa qua `verify_result.py`:
 | Sau khi trả nợ — số THẬT | 5 | 9 | 9 | 10 |
 | Sau P3 | 5 | 7 | 8 | 8 |
 | Sau P4 | 0 ✅ | 2 | 2 | 0 ✅ |
-| **Sau P5** | **0** ✅ | **2** | **2** | **0** ✅ |
+| Sau P5 | 0 ✅ | 2 | 2 | 0 ✅ |
+| **Sau P2b** | **0** ✅ | **0** ✅ | **0** ✅ | **0** ✅ |
 
-Chỉ còn **E1 + E2** trên `medium` và `broken-boot` — thuộc **P2b** (*xoá* `error` +
-`student_safe_summary`), cố ý để sau P5 vì P5 mới tạo ra thứ thay thế.
+**Hết luật đỏ.** P2b gỡ xong E1/E2 — hai luật cuối cùng.
 
 P3 làm xanh: C4, F2 (bài không biên dịch được không còn phát lỗi thô ra `actual`), C6 trên
 medium, E3 cả ba bài. P4 làm xanh: A1, A7, A8, A9, A10, C8, D6 — và C6 trên hai bài hỏng nặng,

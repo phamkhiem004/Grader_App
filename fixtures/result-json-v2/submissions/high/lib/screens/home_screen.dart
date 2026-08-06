@@ -18,6 +18,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
   String? _nameError;
   String? _emailError;
+  bool _notify = true;
+  int? _editingId;
 
   static final RegExp _emailPattern = RegExp(r'^[\w.+-]+@[\w-]+\.[\w.-]+$');
 
@@ -39,10 +41,31 @@ class _HomeScreenState extends State<HomeScreen> {
     if (_nameError != null || _emailError != null) return;
 
     setState(() {
-      _repository.add(fullName: fullName, email: email);
+      final int? editingId = _editingId;
+      if (editingId == null) {
+        _repository.add(fullName: fullName, email: email);
+      } else {
+        _repository.update(id: editingId, fullName: fullName, email: email);
+      }
+      _editingId = null;
       _nameController.clear();
       _emailController.clear();
     });
+  }
+
+  /// Nạp người dùng đang chọn vào form để sửa — nguồn của FORM_PREFILL và BUTTON_ACTION.
+  void _startEdit(User user) {
+    setState(() {
+      _editingId = user.id;
+      _nameController.text = user.fullName;
+      _emailController.text = user.email;
+    });
+  }
+
+  /// Xoá toàn bộ danh sách — nguồn của STATE_REACTIVE_FLOW (trạng thái rỗng phải hiện ra
+  /// VÀ mục cũ phải biến mất).
+  void _clearAll() {
+    setState(_repository.clear);
   }
 
   void _confirmDelete(User user) {
@@ -82,6 +105,33 @@ class _HomeScreenState extends State<HomeScreen> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
       children: <Widget>[
+        Row(
+          children: <Widget>[
+            const Icon(
+              Icons.people_outline,
+              key: ValueKey<String>('icon.header'),
+              semanticLabel: 'Danh sách người dùng',
+            ),
+            const SizedBox(width: 8),
+            Container(
+              key: const ValueKey<String>('box.avatar'),
+              width: 48,
+              height: 48,
+              decoration: const BoxDecoration(
+                color: Color(0xFFE0E0E0),
+                shape: BoxShape.circle,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        if (_editingId != null)
+          const Text(
+            'Đang sửa người dùng',
+            key: ValueKey<String>('message.editing'),
+          ),
+        // Khoảng cách giữa hai ô nhập phải đúng 8 — WIDGET_GAP đo chỗ này, nên đừng
+        // chèn thêm widget nào vào giữa.
         TextField(
           key: const ValueKey<String>('field.name'),
           controller: _nameController,
@@ -106,6 +156,17 @@ class _HomeScreenState extends State<HomeScreen> {
             style: const TextStyle(color: Colors.red),
           ),
         const SizedBox(height: 12),
+        Row(
+          children: <Widget>[
+            Checkbox(
+              key: const ValueKey<String>('field.notify'),
+              value: _notify,
+              onChanged: (bool? value) => setState(() => _notify = value ?? false),
+            ),
+            const Expanded(child: Text('Nhận thông báo khi thêm người dùng')),
+          ],
+        ),
+        const SizedBox(height: 12),
         ElevatedButton(
           key: const ValueKey<String>('action.save'),
           onPressed: _save,
@@ -117,6 +178,11 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _buildList() {
     final List<User> users = _repository.users;
+    if (users.isEmpty) {
+      return const Center(
+        child: Text('Chưa có người dùng', key: ValueKey<String>('state.empty')),
+      );
+    }
     return ListView(
       key: const ValueKey<String>('list.items'),
       children: <Widget>[
@@ -128,6 +194,11 @@ class _HomeScreenState extends State<HomeScreen> {
             trailing: Row(
               mainAxisSize: MainAxisSize.min,
               children: <Widget>[
+                IconButton(
+                  key: ValueKey<String>('action.edit.${user.id}'),
+                  icon: const Icon(Icons.edit_outlined),
+                  onPressed: () => _startEdit(user),
+                ),
                 IconButton(
                   key: ValueKey<String>('action.detail.${user.id}'),
                   icon: const Icon(Icons.info_outline),
@@ -153,12 +224,23 @@ class _HomeScreenState extends State<HomeScreen> {
         title: const Text(
           'User Manager',
           key: ValueKey<String>('text.title'),
+          // Cỡ và độ đậm khai TƯỜNG MINH trên Text: WIDGET_TEXT_STYLE hợp nhất style của
+          // Text lên DefaultTextStyle, để mặc định theo theme thì phép đo phụ thuộc theme.
+          style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
         ),
+        actions: <Widget>[
+          IconButton(
+            key: const ValueKey<String>('action.clear-all'),
+            icon: const Icon(Icons.delete_sweep_outlined),
+            onPressed: _clearAll,
+          ),
+        ],
       ),
       // Máy tính bảng nằm ngang đủ rộng thì tách 2 cột để không dồn dọc gây tràn.
       body: LayoutBuilder(
         builder: (BuildContext context, BoxConstraints constraints) {
           final Widget form = Padding(
+            key: const ValueKey<String>('padding.form'),
             padding: const EdgeInsets.all(16),
             child: SingleChildScrollView(child: _buildForm()),
           );

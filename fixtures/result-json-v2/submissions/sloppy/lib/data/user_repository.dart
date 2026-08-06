@@ -6,9 +6,10 @@ class UserRepository {
   // Id bắt đầu từ 1 — dạng tự nhiên nhất, và cố ý CHẠM vào khoá item.1/item.2 mà
   // engine chung từng có fallback theo chỉ số. Fallback đó đã bị bỏ khỏi phép kiểm
   // "đã biến mất" ở P3b, nên bộ này phải kiểm được chuyện đó không tái diễn.
+  // LỖI 1: đề đòi hai người dùng mẫu, bài chỉ seed một (xoá bớt một dòng seed nhưng
+  // để nguyên _nextId = 3).
   final List<User> _users = <User>[
     const User(id: 1, fullName: 'Tran Thi Binh', email: 'binhtt@fpt.edu.vn'),
-    const User(id: 2, fullName: 'Le Van Cuong', email: 'cuonglv@fpt.edu.vn'),
   ];
 
   int _nextId = 3;

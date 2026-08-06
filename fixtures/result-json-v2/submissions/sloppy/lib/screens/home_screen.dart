@@ -12,8 +12,7 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  // Quên khởi tạo: khung hình đầu tiên ném LateInitializationError.
-  late final UserRepository _repository;
+  final UserRepository _repository = UserRepository();
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _emailController = TextEditingController();
 
@@ -21,6 +20,7 @@ class _HomeScreenState extends State<HomeScreen> {
   String? _emailError;
   bool _notify = true;
   int? _editingId;
+  bool _cleared = false;
 
   static final RegExp _emailPattern = RegExp(r'^[\w.+-]+@[\w-]+\.[\w.-]+$');
 
@@ -66,7 +66,8 @@ class _HomeScreenState extends State<HomeScreen> {
   /// Xoá toàn bộ danh sách — nguồn của STATE_REACTIVE_FLOW (trạng thái rỗng phải hiện ra
   /// VÀ mục cũ phải biến mất).
   void _clearAll() {
-    setState(_repository.clear);
+    // LỖI 6: chỉ bật thông báo rỗng, QUÊN xoá dữ liệu thật.
+    setState(() => _cleared = true);
   }
 
   void _confirmDelete(User user) {
@@ -111,12 +112,14 @@ class _HomeScreenState extends State<HomeScreen> {
             const Icon(
               Icons.people_outline,
               key: ValueKey<String>('icon.header'),
-              semanticLabel: 'Danh sách người dùng',
+              // LỖI 5: nhãn trợ năng để nguyên tiếng Anh, không theo yêu cầu đề.
+              semanticLabel: 'Users',
             ),
             const SizedBox(width: 8),
             Container(
               key: const ValueKey<String>('box.avatar'),
-              width: 48,
+              // LỖI 4: khung ảnh rộng 64 thay vì 48.
+              width: 64,
               height: 48,
               decoration: const BoxDecoration(
                 color: Color(0xFFE0E0E0),
@@ -162,7 +165,8 @@ class _HomeScreenState extends State<HomeScreen> {
             Checkbox(
               key: const ValueKey<String>('field.notify'),
               value: _notify,
-              onChanged: (bool? value) => setState(() => _notify = value ?? false),
+              // LỖI 2: quên gắn onChanged nên ô chọn bị vô hiệu hoá.
+              onChanged: null,
             ),
             const Expanded(child: Text('Nhận thông báo khi thêm người dùng')),
           ],
@@ -179,11 +183,15 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _buildList() {
     final List<User> users = _repository.users;
-    if (users.isEmpty) {
-      return const Center(
-        child: Text('Chưa có người dùng', key: ValueKey<String>('state.empty')),
-      );
-    }
+    // LỖI 6 (phần hiển thị): thông báo rỗng hiện lên nhưng danh sách vẫn còn nguyên.
+    return Column(children: <Widget>[
+      if (_cleared)
+        const Text('Chưa có người dùng', key: ValueKey<String>('state.empty')),
+      Expanded(child: _buildListView(users)),
+    ]);
+  }
+
+  Widget _buildListView(List<User> users) {
     return ListView(
       key: const ValueKey<String>('list.items'),
       children: <Widget>[
@@ -227,7 +235,8 @@ class _HomeScreenState extends State<HomeScreen> {
           key: ValueKey<String>('text.title'),
           // Cỡ và độ đậm khai TƯỜNG MINH trên Text: WIDGET_TEXT_STYLE hợp nhất style của
           // Text lên DefaultTextStyle, để mặc định theo theme thì phép đo phụ thuộc theme.
-          style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+          // LỖI 3: đúng cỡ chữ nhưng không in đậm.
+          style: TextStyle(fontSize: 20, fontWeight: FontWeight.w400),
         ),
         actions: <Widget>[
           IconButton(
@@ -245,6 +254,17 @@ class _HomeScreenState extends State<HomeScreen> {
             padding: const EdgeInsets.all(16),
             child: SingleChildScrollView(child: _buildForm()),
           );
+          // LỖI 7: bố cục máy tính bảng quên Expanded cho danh sách ⇒ viewport dọc
+          // nhận bề rộng vô hạn, bố cục dựng không xong (KHÔNG phải tràn khung).
+          if (constraints.maxWidth >= 1000) {
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Expanded(child: form),
+                _buildList(),
+              ],
+            );
+          }
           if (constraints.maxWidth >= 700) {
             return Row(
               crossAxisAlignment: CrossAxisAlignment.start,

@@ -21,5 +21,13 @@ class UserRepository {
     return user;
   }
 
+  void update({required int id, required String fullName, required String email}) {
+    final int index = _users.indexWhere((user) => user.id == id);
+    if (index < 0) return;
+    _users[index] = _users[index].copyWith(fullName: fullName, email: email);
+  }
+
   void delete(int id) => _users.removeWhere((user) => user.id == id);
+
+  void clear() => _users.clear();
 }

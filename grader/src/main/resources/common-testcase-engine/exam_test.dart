@@ -264,6 +264,7 @@ void _observe(
 String _subject(Map<String, dynamic> parameters, [String fallback = 'widget']) {
   const known = <String>{
     'button', 'text', 'input', 'field', 'list', 'item', 'dialog', 'screen', 'image', 'icon',
+    'checkbox',
   };
   final type = _text(parameters, 'targetType').toLowerCase();
   return known.contains(type) ? type : fallback;

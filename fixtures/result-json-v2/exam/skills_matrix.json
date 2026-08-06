@@ -9,7 +9,7 @@
     "name": "Ứng dụng khởi động không lỗi",
     "expected": "Ứng dụng phải khởi động từ main() và hiển thị màn hình danh sách, không phát sinh lỗi.",
     "difficulty": "basic",
-    "weight": 8,
+    "weight": 7,
     "parameters": { "rootKey": "screen.home" }
   },
   "TC_HOME_TITLE": {
@@ -22,12 +22,31 @@
     "name": "Tiêu đề màn hình danh sách",
     "expected": "Màn hình danh sách phải có tiêu đề đúng chữ \"User Manager\".",
     "difficulty": "basic",
-    "weight": 4,
+    "weight": 3,
     "parameters": {
       "targetKey": "text.title",
       "targetType": "text",
       "expectedText": "User Manager",
       "matchMode": "equals"
+    }
+  },
+  "TC_TITLE_STYLE": {
+    "instance_id": "TC_TITLE_STYLE",
+    "runner": "WIDGET_TEXT_STYLE",
+    "skill_code": "THEME_TYPOGRAPHY_FONTS",
+    "testcase_group": "WIDGET",
+    "group_id": "TRINH_BAY",
+    "group_name": "Trình bày giao diện",
+    "name": "Kiểu chữ của tiêu đề",
+    "expected": "Tiêu đề màn hình danh sách phải có cỡ chữ 20 và in đậm.",
+    "difficulty": "basic",
+    "weight": 2,
+    "parameters": {
+      "targetKey": "text.title",
+      "targetType": "text",
+      "fontSize": 20,
+      "fontWeight": "w700",
+      "tolerance": 0.5
     }
   },
   "TC_LIST_VISIBLE": {
@@ -40,7 +59,7 @@
     "name": "Danh sách hiển thị người dùng có sẵn",
     "expected": "Màn hình danh sách phải hiện danh sách và hai người dùng có sẵn.",
     "difficulty": "basic",
-    "weight": 8,
+    "weight": 6,
     "parameters": { "listKey": "list.items", "itemKeys": "item.1,item.2" }
   },
   "TC_LIST_COUNT": {
@@ -53,11 +72,104 @@
     "name": "Số người dùng ban đầu",
     "expected": "Khi mới mở, danh sách phải có đúng 2 người dùng.",
     "difficulty": "basic",
-    "weight": 8,
+    "weight": 6,
     "parameters": {
       "listKey": "list.items",
       "itemKeys": "item.1,item.2,item.3",
       "expectedCount": 2
+    }
+  },
+  "TC_HEADER_ICON": {
+    "instance_id": "TC_HEADER_ICON",
+    "runner": "WIDGET_TYPE_VISIBLE",
+    "skill_code": "UI_TEXT_IMAGE_ICON",
+    "testcase_group": "WIDGET",
+    "group_id": "TRINH_BAY",
+    "group_name": "Trình bày giao diện",
+    "name": "Biểu tượng đầu form",
+    "expected": "Đầu form phải có một biểu tượng người dùng.",
+    "difficulty": "basic",
+    "weight": 2,
+    "parameters": { "targetKey": "icon.header", "targetType": "icon" }
+  },
+  "TC_HEADER_ICON_LABEL": {
+    "instance_id": "TC_HEADER_ICON_LABEL",
+    "runner": "WIDGET_SEMANTICS_LABEL",
+    "skill_code": "UI_TEXT_IMAGE_ICON",
+    "testcase_group": "WIDGET",
+    "group_id": "TRINH_BAY",
+    "group_name": "Trình bày giao diện",
+    "name": "Nhãn trợ năng của biểu tượng đầu form",
+    "expected": "Biểu tượng đầu form phải có nhãn trợ năng đúng chữ \"Danh sách người dùng\" để trình đọc màn hình đọc được.",
+    "difficulty": "intermediate",
+    "weight": 2,
+    "parameters": {
+      "targetKey": "icon.header",
+      "targetType": "icon",
+      "expectedLabel": "Danh sách người dùng",
+      "matchMode": "equals"
+    }
+  },
+  "TC_AVATAR_SIZE": {
+    "instance_id": "TC_AVATAR_SIZE",
+    "runner": "WIDGET_DIMENSION",
+    "skill_code": "UI_CONTAINER_ROW_COLUMN",
+    "testcase_group": "WIDGET",
+    "group_id": "TRINH_BAY",
+    "group_name": "Trình bày giao diện",
+    "name": "Bề rộng khung ảnh đại diện",
+    "expected": "Khung ảnh đại diện ở đầu form phải rộng 48.",
+    "difficulty": "basic",
+    "weight": 2,
+    "parameters": {
+      "targetKey": "box.avatar",
+      "targetType": "container",
+      "dimension": "width",
+      "expected": 48,
+      "comparison": "equals",
+      "tolerance": 0.5
+    }
+  },
+  "TC_FORM_PADDING": {
+    "instance_id": "TC_FORM_PADDING",
+    "runner": "WIDGET_PADDING",
+    "skill_code": "UI_CONTAINER_ROW_COLUMN",
+    "testcase_group": "WIDGET",
+    "group_id": "TRINH_BAY",
+    "group_name": "Trình bày giao diện",
+    "name": "Khoảng đệm quanh form",
+    "expected": "Form phải có khoảng đệm 16 ở cả bốn phía.",
+    "difficulty": "basic",
+    "weight": 2,
+    "parameters": {
+      "targetKey": "padding.form",
+      "targetType": "padding",
+      "left": 16,
+      "top": 16,
+      "right": 16,
+      "bottom": 16,
+      "tolerance": 0.5
+    }
+  },
+  "TC_FIELD_GAP": {
+    "instance_id": "TC_FIELD_GAP",
+    "runner": "WIDGET_GAP",
+    "skill_code": "UI_CONTAINER_ROW_COLUMN",
+    "testcase_group": "WIDGET",
+    "group_id": "TRINH_BAY",
+    "group_name": "Trình bày giao diện",
+    "name": "Khoảng cách giữa hai ô nhập",
+    "expected": "Ô nhập họ tên và ô nhập email phải cách nhau 8 theo chiều dọc.",
+    "difficulty": "basic",
+    "weight": 2,
+    "parameters": {
+      "fromKey": "field.name",
+      "toKey": "field.email",
+      "fromType": "input",
+      "toType": "input",
+      "axis": "vertical",
+      "expectedGap": 8,
+      "tolerance": 0.5
     }
   },
   "TC_NAME_FIELD": {
@@ -70,7 +182,7 @@
     "name": "Ô nhập họ tên",
     "expected": "Form thêm người dùng phải có ô nhập họ tên.",
     "difficulty": "basic",
-    "weight": 5,
+    "weight": 4,
     "parameters": { "widgetKey": "field.name", "targetType": "input" }
   },
   "TC_EMAIL_FIELD": {
@@ -83,7 +195,7 @@
     "name": "Ô nhập email",
     "expected": "Form thêm người dùng phải có ô nhập email.",
     "difficulty": "basic",
-    "weight": 5,
+    "weight": 4,
     "parameters": { "widgetKey": "field.email", "targetType": "input" }
   },
   "TC_SAVE_ENABLED": {
@@ -96,10 +208,27 @@
     "name": "Nút lưu dùng được",
     "expected": "Nút lưu phải ở trạng thái bấm được khi mở màn hình.",
     "difficulty": "basic",
-    "weight": 5,
+    "weight": 4,
     "parameters": {
       "targetKey": "action.save",
       "targetType": "button",
+      "expectedEnabled": true
+    }
+  },
+  "TC_NOTIFY_ENABLED": {
+    "instance_id": "TC_NOTIFY_ENABLED",
+    "runner": "WIDGET_ENABLED",
+    "skill_code": "UI_BUTTONS_SELECTION",
+    "testcase_group": "BEHAVIOR",
+    "group_id": "THEM_USER",
+    "group_name": "Thêm người dùng",
+    "name": "Ô chọn nhận thông báo",
+    "expected": "Ô chọn \"Nhận thông báo khi thêm người dùng\" phải bấm được để bật/tắt.",
+    "difficulty": "basic",
+    "weight": 2,
+    "parameters": {
+      "targetKey": "field.notify",
+      "targetType": "checkbox",
       "expectedEnabled": true
     }
   },
@@ -113,7 +242,7 @@
     "name": "Thêm người dùng hợp lệ",
     "expected": "Nhập họ tên và email hợp lệ rồi lưu thì người dùng mới phải xuất hiện trong danh sách và không còn thông báo lỗi.",
     "difficulty": "intermediate",
-    "weight": 12,
+    "weight": 9,
     "children": [
       {
         "instance_id": "TC_ADD_USER_SAVE_VISIBLE",
@@ -154,13 +283,30 @@
     "name": "Báo lỗi từng ô nhập",
     "expected": "Bỏ trống họ tên và nhập email sai định dạng rồi lưu thì phải hiện thông báo lỗi cho cả hai ô.",
     "difficulty": "intermediate",
-    "weight": 10,
+    "weight": 7,
     "parameters": {
       "fieldKeys": "field.name,field.email",
       "invalidValues": "__EMPTY__,khong-phai-email",
       "errorKeys": "error.name,error.email",
       "fieldType": "input",
       "submitKey": "action.save"
+    }
+  },
+  "TC_REQUIRED_FIELDS": {
+    "instance_id": "TC_REQUIRED_FIELDS",
+    "runner": "FORM_REQUIRED_FIELDS",
+    "skill_code": "UI_TEXT_INPUT",
+    "testcase_group": "LOGIC",
+    "group_id": "THEM_USER",
+    "group_name": "Thêm người dùng",
+    "name": "Không cho lưu form trống",
+    "expected": "Bấm lưu khi chưa nhập gì thì phải hiện thông báo lỗi cho cả ô họ tên và ô email.",
+    "difficulty": "intermediate",
+    "weight": 4,
+    "parameters": {
+      "fieldKeys": "field.name,field.email",
+      "submitKey": "action.save",
+      "errorKeys": "error.name,error.email"
     }
   },
   "TC_DELETE_CONFIRM": {
@@ -173,11 +319,29 @@
     "name": "Xoá người dùng có xác nhận",
     "expected": "Bấm xoá phải hiện hộp thoại xác nhận; xác nhận xong thì người dùng đó biến mất khỏi danh sách.",
     "difficulty": "intermediate",
-    "weight": 10,
+    "weight": 7,
     "parameters": {
       "actionKey": "action.delete.1",
       "dialogKey": "dialog.delete",
       "decisionKey": "action.delete.confirm",
+      "absentKey": "item.1"
+    }
+  },
+  "TC_CLEAR_ALL": {
+    "instance_id": "TC_CLEAR_ALL",
+    "runner": "STATE_REACTIVE_FLOW",
+    "skill_code": "STATE_SETSTATE_STATEFUL",
+    "testcase_group": "BEHAVIOR",
+    "group_id": "XOA_HET",
+    "group_name": "Xoá hết danh sách",
+    "name": "Xoá hết thì hiện trạng thái rỗng",
+    "expected": "Bấm xoá hết thì danh sách phải trống, hiện thông báo chưa có người dùng và không còn người dùng nào.",
+    "difficulty": "intermediate",
+    "weight": 2,
+    "parameters": {
+      "initialKey": "item.1",
+      "actionKey": "action.clear-all",
+      "updatedKey": "state.empty",
       "absentKey": "item.1"
     }
   },
@@ -191,12 +355,47 @@
     "name": "Mở chi tiết rồi quay lại",
     "expected": "Bấm xem chi tiết phải mở màn hình chi tiết; bấm quay lại phải trở về màn hình danh sách.",
     "difficulty": "intermediate",
-    "weight": 9,
+    "weight": 6,
     "parameters": {
       "openKey": "action.detail.1",
       "destinationKey": "screen.detail",
       "backKey": "action.back",
       "homeKey": "screen.home"
+    }
+  },
+  "TC_EDIT_BANNER": {
+    "instance_id": "TC_EDIT_BANNER",
+    "runner": "BUTTON_ACTION",
+    "skill_code": "STATE_SETSTATE_STATEFUL",
+    "testcase_group": "BEHAVIOR",
+    "group_id": "SUA_USER",
+    "group_name": "Sửa người dùng",
+    "name": "Báo đang sửa người dùng",
+    "expected": "Bấm sửa một người dùng thì trên form phải hiện dòng chữ cho biết đang sửa.",
+    "difficulty": "basic",
+    "weight": 2,
+    "parameters": {
+      "buttonKey": "action.edit.1",
+      "resultKey": "message.editing",
+      "targetType": "text"
+    }
+  },
+  "TC_EDIT_PREFILL": {
+    "instance_id": "TC_EDIT_PREFILL",
+    "runner": "FORM_PREFILL",
+    "skill_code": "UI_TEXT_INPUT",
+    "testcase_group": "BEHAVIOR",
+    "group_id": "SUA_USER",
+    "group_name": "Sửa người dùng",
+    "name": "Điền sẵn form khi sửa",
+    "expected": "Bấm sửa người dùng đầu tiên thì ô họ tên phải sẵn chữ \"Tran Thi Binh\" và ô email sẵn chữ \"binhtt@fpt.edu.vn\".",
+    "difficulty": "intermediate",
+    "weight": 3,
+    "parameters": {
+      "editKey": "action.edit.1",
+      "fieldKeys": "field.name,field.email",
+      "expectedValues": "Tran Thi Binh,binhtt@fpt.edu.vn",
+      "fieldType": "input"
     }
   },
   "TC_RESPONSIVE_NO_OVERFLOW": {
@@ -209,7 +408,7 @@
     "name": "Không tràn bố cục ở hai kích thước",
     "expected": "Giao diện không được tràn khung ở cả điện thoại dọc và máy tính bảng ngang.",
     "difficulty": "intermediate",
-    "weight": 8,
+    "weight": 6,
     "parameters": {
       "portraitWidth": 390,
       "portraitHeight": 844,
@@ -227,7 +426,7 @@
     "name": "Màn hình danh sách còn hiển thị ở cả hai kích thước",
     "expected": "Màn hình danh sách phải còn hiển thị ở cả điện thoại dọc và máy tính bảng ngang.",
     "difficulty": "intermediate",
-    "weight": 8,
+    "weight": 6,
     "parameters": {
       "targetKey": "screen.home",
       "targetType": "container",

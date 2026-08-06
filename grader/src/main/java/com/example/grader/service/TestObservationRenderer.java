@@ -92,6 +92,9 @@ public final class TestObservationRenderer {
             Map.entry("text", "nội dung chữ"),
             Map.entry("image", "ảnh"),
             Map.entry("icon", "biểu tượng"),
+            // A2: ô chọn không phải "nút" — cách sửa khác nhau (đổi `onChanged` chứ không
+            // phải `onPressed`), nên phải có từ riêng thay vì để rơi về fallback.
+            Map.entry("checkbox", "ô chọn"),
             Map.entry("widget", "thành phần"));
 
     /** Bối cảnh kiểm — nói ở ĐÂU quan sát được, giúp sinh viên tái hiện trên máy mình. */

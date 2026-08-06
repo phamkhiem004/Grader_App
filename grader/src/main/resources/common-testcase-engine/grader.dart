@@ -11,7 +11,9 @@ import 'dart:io';
 /// 2.2.0 — P4: phát `status: not_run` + `executed` + `not_run_tests`. Điểm KHÔNG đổi.
 /// 2.3.0 — P5: phát kênh quan sát có cấu trúc (`observation`). Điểm KHÔNG đổi — quan sát chỉ
 /// là hiệu ứng lề, mọi assertion giữ nguyên.
-const String kEngineVersion = 'COMMON_V1-2.3.0';
+/// 2.4.0 — A2: `subject` nhận thêm giá trị `checkbox` (trước đó ô chọn rơi về `button`).
+/// Điểm KHÔNG đổi — chỉ đổi từ vựng của quan sát, không đổi một assertion nào.
+const String kEngineVersion = 'COMMON_V1-2.4.0';
 
 /// PHẢI khớp hằng cùng tên trong `exam_test.dart` — hai chương trình Dart riêng biệt,
 /// không import nhau nên không chia sẻ được hằng số.

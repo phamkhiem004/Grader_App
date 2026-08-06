@@ -52,9 +52,23 @@ sinh viên.** Mọi tranh cãi thiết kế phân xử bằng nguyên tắc này
 | **P3b** | Sửa khiếm khuyết CHẤM SAI ĐIỂM của engine | ✅ **Xong** 2026-08-06 | Bỏ hết cách né trong fixture; engine **trước** P3b chấm `high` 7.8/13 và `medium` đạt oan 1 test, engine **sau** P3b đúng 10.0 / 6.0 / 0.0 / 0.0 |
 | **P4** | `executed` / `not_run` **+ P2a: thêm `error_code` phẳng** | ✅ **Xong** 2026-08-06 | `high` và `broken-compile` **0 luật đỏ**; `medium`/`broken-boot` chỉ còn E1+E2 (thuộc P2b). Điểm không đổi |
 | **P5** | Sinh `actual` tự động | ✅ **Xong** 2026-08-06 | **C1–C7 xanh hết** trên `medium`, C6 đạt **100%** (trước P3: 20%). `actual_source == "observation"` ở mọi test không đạt. Điểm không đổi |
-| **P2b** | *Xoá* `error` + `student_safe_summary` | ⬜ | E1, E2, E3 xanh; FE + bot còn chạy |
-| **P4b** | `blocked_by` qua cơ chế `_boot()` | ⬜ | D1–D5 xanh trên `broken-boot` |
+| **P2b** | *Xoá* `error` + `student_safe_summary` **+ gửi `rubric_label`** | 🟢 **ĐÃ ĐƯỢC MỞ** — NLP báo B2 xong 2026-08-06, xoá giờ là no-op với họ | E1, E2 xanh; FE + bot còn chạy |
+| ~~**P4b**~~ | ~~`blocked_by`~~ | 🚫 **ĐÓNG** 2026-08-06 — xem dưới | — |
+| **A** | Mở rộng fixture: 10 runner chưa chạy + 7 `kind` chưa từng phát | ⬜ | Nâng 7 `kind` Mức 2 → Mức 1 trong SPEC 5.5 |
 | **P6** | `exam.requirements` | ⬜ | — |
+
+### Vì sao ĐÓNG P4b
+
+Không phải vì khó — **P4 đã giải trọn nhu cầu**. Engine chung chỉ có **một** cửa chặn (`_boot()`),
+nên tổ hợp *các test `not_run`* + *testcase `APP_BOOT` mang `failed`* đã xác định thủ phạm, không
+còn chỗ mơ hồ; `blocked_by` chỉ lặp lại thứ bên đọc suy ra được chắc chắn. Phía NLP xác nhận trên
+dữ liệu thật: *"giữ `TC_APP_BOOT` là `failed` cho NLP đúng thứ cần — một testcase để trỏ vào"*.
+
+Tôi từng xếp P4b vào danh sách với lý do *"gần như miễn phí"* — đó là lý do về **chi phí**, không
+phải về **giá trị**. Rẻ không có nghĩa là đáng làm. Ghi lại vì đây là lỗi xếp ưu tiên dễ lặp.
+
+Trường `blocked_by` **giữ nguyên, luôn `null`** (bên đọc đã khai; bỏ là thay đổi phá vỡ vô ích).
+Mở lại chỉ khi engine có **cửa chặn thứ hai** — xem SPEC 4.1.
 
 > **P3 tách khỏi P3b** (user chốt 2026-08-05). Hai việc loại trừ nhau: P3 là refactor hạ tầng nên
 > lấy "điểm không đổi" làm lưới an toàn, còn P3b *phải* làm điểm đổi vì đang có bài bị chấm sai.
@@ -122,6 +136,7 @@ vì chúng thành `not_run` nên C6 bỏ qua **đúng luật** thay vì bị tí
 | Sinh `skills_matrix.json` cho đề mới | `TestcaseTemplateService.commonRubricRow` / `commonGroupRow` |
 | **Kênh quan sát** (engine phát) | `exam_test.dart` — `_observe` + `_expectPresent` / `_expectGone` / `_expectNoLayoutError` / `_assertNumber` |
 | **Render tiếng Việt** (backend, nguồn sự thật DUY NHẤT của `actual`) | `TestObservationRenderer` |
+| Nhãn hiển thị của `rubric` (P2b sẽ gửi) | `TestCaseTaxonomy.rubricOf` lấy `group_id`; nhãn nằm ở `group_name` |
 | Ghép `result.json` | `BatchGradingService.assembleResultJson` → `enrichTestCases` |
 | Gắn nhãn năng lực | `CompetencyService.annotateTestCases` + `SyllabusService.Resolver` |
 | Chuẩn hoá khi ĐỌC (dễ quên, phải sửa cùng lúc) | `ResultController.normalizeResultNode` |
@@ -166,3 +181,14 @@ vì chúng thành `not_run` nên C6 bỏ qua **đúng luật** thay vì bị tí
    nghiệm thu xanh giả — đã xảy ra với `sanitizeTestCaseErrors` (nhóm E) và `assess`
    (`competency_assessment`). Thêm bước mới vào `assembleResultJson` thì thêm luôn vào
    `FixtureResultAssemblyTest.assemble`.
+10. **"Field mới lên ⇒ gỡ guard cũ" gần như luôn SAI** (bài học phía NLP, 2026-08-06). Dữ liệu cũ
+   không biến mất: `result_json` cũ không được migrate, nên trong DB vĩnh viễn tồn tại song song
+   hai đời `actual`. Guard phải gỡ theo **cờ đời dữ liệu** (`actual_source`, `schema_version`,
+   sự có mặt của `chapter`), **không** theo ngày phase lên. ⇒ Grader **cam kết không bỏ**
+   `actual_source` kể cả khi mọi runner đã chuyển xong.
+11. **Rẻ không có nghĩa là đáng làm.** P4b từng nằm trong danh sách với lý do "gần như miễn phí" —
+   lý do về chi phí, không phải về giá trị. Xét lại thì P4 đã giải trọn nhu cầu và P4b chỉ lặp
+   lại thứ suy được. Xếp ưu tiên phải theo **giá trị**, chi phí chỉ là điều kiện phụ.
+12. **Công bố hợp đồng trên code CHƯA CHẠY là lặp lại bẫy cũ.** Bảng `observation.kind` khai 13 giá
+   trị nhưng fixture mới chạy thật 6 ⇒ SPEC 5.5 chia **hai mức**, chỉ cam kết phần đã đo. Cùng
+   dạng với hai lần đã vấp: `samples/` từng không trung thực, fixture từng né khiếm khuyết engine.

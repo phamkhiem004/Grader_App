@@ -15,14 +15,15 @@ import {
 } from "lucide-react";
 
 interface ExamOption { examId: string; examName: string; }
-interface TestError { code?: string; message?: string; }
 interface TestCaseItem {
   test_id?: string; name?: string; status?: string; executed?: boolean; weight?: number;
   skill_code?: string; skill_name?: string; category_label?: string;
   difficulty?: string; skill?: string;
   expected?: string; actual?: string; error_log?: string;
-  student_safe_summary?: string;
-  error?: TestError;
+  // `actual_source === "observation"` = `actual` đã là câu tiếng Việt sạch, hiển thị thẳng.
+  // Vắng cờ = dữ liệu chấm trước P5, `actual` có thể còn là log thô → phải parse.
+  actual_source?: string;
+  error_code?: string;
 }
 
 const DIFF_BADGE: Record<string, string> = {
@@ -74,28 +75,31 @@ const ERR_BADGE: Record<string, string> = {
 
 /**
  * Khối ĐỎ chi tiết lỗi 1 testcase fail.
- * Ưu tiên `error` có cấu trúc { code, message } (backend mới đã làm sạch); nếu không có thì fallback
- * parse log THÔ của flutter test (bài cũ): tách Expected/Actual/lý do, diễn giải exception widget.
+ *
+ * Chọn nhánh theo **CỜ ĐỜI DỮ LIỆU** `actual_source`, không theo sự có mặt của field nào:
+ *  - `"observation"` → `actual` đã là câu tiếng Việt do engine quan sát được, in thẳng.
+ *  - vắng cờ → dữ liệu chấm trước P5, `actual` có thể còn là log thô của flutter test → parse.
+ *
+ * Nhánh parse log CỐ Ý GIỮ LẠI: kết quả cũ trong DB không được migrate nên còn đó vĩnh viễn.
+ * Gỡ nó "vì format mới đã sạch" là làm trang Lịch sử của bài cũ hiện log thô ra cho giáo viên.
+ *
+ * P2b đã bỏ `error.message` và `student_safe_summary` — hai câu tra bảng theo mã lỗi, không phải
+ * điều quan sát được. Chỉ còn `error_code` làm nhãn phân loại.
  */
-function FailureDetail({ requirement, actual, error, studentSafeSummary }:
-  { requirement?: string; actual?: string; error?: TestError; studentSafeSummary?: string }) {
-  // Đường mới: Mong đợi (rubric) · Thực tế (giá trị) · Lỗi [code] + lý do — không còn stack trace.
-  if (error && (error.code || error.message)) {
+function FailureDetail({ requirement, actual, errorCode, actualSource }:
+  { requirement?: string; actual?: string; errorCode?: string; actualSource?: string }) {
+  if (actualSource === "observation") {
     return (
       <div className="mt-1 space-y-0.5 pl-3.5 text-[11px] text-rose-500">
-        {requirement && <p><span className="font-semibold">Mong đợi:</span> <span className="font-mono">{requirement}</span></p>}
-        {actual && <p><span className="font-semibold">Thực tế:</span> <span className="font-mono">{actual}</span></p>}
-        <p className="flex flex-wrap items-baseline gap-1.5">
-          <span className="font-semibold">Lỗi:</span>
-          {error.code && (
-            <span className={`rounded px-1.5 py-0.5 font-mono text-[10px] font-semibold ${ERR_BADGE[error.code] || "bg-slate-100 text-slate-600"}`}>
-              {error.code}
+        {requirement && <p><span className="font-semibold">Đề yêu cầu:</span> {requirement}</p>}
+        {actual && <p><span className="font-semibold">Quan sát được:</span> {actual}</p>}
+        {errorCode && (
+          <p className="flex flex-wrap items-baseline gap-1.5">
+            <span className="font-semibold">Loại lỗi:</span>
+            <span className={`rounded px-1.5 py-0.5 font-mono text-[10px] font-semibold ${ERR_BADGE[errorCode] || "bg-slate-100 text-slate-600"}`}>
+              {errorCode}
             </span>
-          )}
-          {error.message && <span>{error.message}</span>}
-        </p>
-        {studentSafeSummary && (
-          <p><span className="font-semibold">Gợi ý:</span> {studentSafeSummary}</p>
+          </p>
         )}
       </div>
     );
@@ -822,12 +826,12 @@ export default function HistoryPage() {
                                   {tc.skill_code}
                                 </p>
                               )}
-                              {!passed && (tc.error || tc.expected || tc.actual || tc.error_log || tc.student_safe_summary) && (
+                              {!passed && (tc.expected || tc.actual || tc.error_log || tc.error_code) && (
                                 <FailureDetail
                                   requirement={tc.expected}
                                   actual={tc.actual || tc.error_log}
-                                  error={tc.error}
-                                  studentSafeSummary={tc.student_safe_summary}
+                                  errorCode={tc.error_code}
+                                  actualSource={tc.actual_source}
                                 />
                               )}
                             </div>

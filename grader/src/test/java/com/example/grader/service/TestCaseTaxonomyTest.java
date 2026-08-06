@@ -109,6 +109,23 @@ class TestCaseTaxonomyTest {
         assertNull(TestCaseTaxonomy.rubricOf(null));
     }
 
+    // ── rubric_label: nhãn hiển thị của rubric ────────────────────
+    @Test
+    void rubricLabelComesFromTeacherGroupName() {
+        assertEquals("Thêm người dùng", TestCaseTaxonomy.rubricLabelOf(
+                row("group_id", "THEM_USER", "group_name", "Thêm người dùng")));
+    }
+
+    @Test
+    void rubricLabelIsNullRatherThanEchoingTheCode() {
+        // UI để group_name = group_id khi nhóm chưa được đặt tên. Trả về mã đó làm "nhãn" là
+        // đưa định danh nội bộ cho sinh viên đọc — thà không có nhãn, vì mã đã ở `rubric`.
+        assertNull(TestCaseTaxonomy.rubricLabelOf(row("group_id", "THEM_USER", "group_name", "THEM_USER")));
+        assertNull(TestCaseTaxonomy.rubricLabelOf(row("group_id", "THEM_USER")));
+        assertNull(TestCaseTaxonomy.rubricLabelOf(row("group_id", "THEM_USER", "group_name", "  ")));
+        assertNull(TestCaseTaxonomy.rubricLabelOf(null));
+    }
+
     @Test
     void rubricSkipsBlankValues() {
         assertEquals("BEHAVIOR", TestCaseTaxonomy.rubricOf(

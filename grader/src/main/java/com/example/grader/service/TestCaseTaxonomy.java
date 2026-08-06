@@ -157,6 +157,24 @@ public final class TestCaseTaxonomy {
         return null;
     }
 
+    /**
+     * NHÃN HIỂN THỊ của {@link #rubricOf} — tên nhóm chức năng giáo viên đặt trên UI.
+     *
+     * <p>`rubric` là MÃ (`THEM_USER`), không đưa cho sinh viên đọc được. Nhãn phải do phía **sở
+     * hữu dữ liệu** phát ra: bên đọc tự dựng bảng `THEM_USER → "Thêm người dùng"` là tạo ra nguồn
+     * sự thật thứ hai, đúng loại lỗi hai bên đã bỏ ở chỗ khác.
+     *
+     * @return `group_name`; {@code null} nếu chưa có (đề legacy, hoặc nhóm chưa được đặt tên) —
+     *         cố ý KHÔNG trả về mã, vì mã đã nằm ở `rubric` rồi
+     */
+    public static String rubricLabelOf(Map<?, ?> row) {
+        if (row == null) return null;
+        String label = text(row.get("group_name"));
+        if (label == null) return null;
+        // Chưa đặt tên thì UI để group_name = group_id; đó là mã, không phải nhãn.
+        return label.equalsIgnoreCase(text(row.get("group_id"))) ? null : label;
+    }
+
     // ── expected của testcase GROUP ───────────────────────────────
 
     /** Câu `expected` mà bản cũ tự sinh cho testcase GROUP — phải thay khi gặp lại. */

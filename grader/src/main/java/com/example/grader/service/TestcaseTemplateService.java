@@ -870,9 +870,14 @@ public class TestcaseTemplateService {
         row.put("runner", item.get("runner"));
         row.put("skill_code", item.get("skill_code"));
         row.put("testcase_group", item.get("testcase_group"));
-        // Hai nhãn của result.json v2. Ghi thẳng vào matrix để khâu chấm chỉ việc đọc,
+        // group_id/group_name phải ĐI THEO vào matrix, không chỉ nằm trong config: khâu chấm chỉ
+        // đọc matrix, nên thiếu chúng là mất nhãn hiển thị của nhóm chức năng.
+        row.put("group_id", item.get("group_id"));
+        row.put("group_name", item.get("group_name"));
+        // Nhãn của result.json v2. Ghi thẳng vào matrix để khâu chấm chỉ việc đọc,
         // và để giáo viên thấy được testcase thuộc tầng/nhóm chức năng nào.
         row.put("rubric", TestCaseTaxonomy.rubricOf(item));
+        row.put("rubric_label", TestCaseTaxonomy.rubricLabelOf(item));
         row.put("layer", TestCaseTaxonomy.layerOf(item, text(item.get("instance_id"))));
         row.put("name", item.get("name"));
         row.put("description", item.get("description"));
@@ -903,6 +908,7 @@ public class TestcaseTemplateService {
         row.put("instance_id", groupId);
         row.put("runner", "GROUP");
         row.put("group_id", groupId);
+        row.put("group_name", groupName);
         row.put("name", groupName);
         row.put("expected", null);   // giữ chỗ; dựng ở cuối hàm vì cần children
         row.put("difficulty", difficulty);
@@ -914,6 +920,7 @@ public class TestcaseTemplateService {
         // expected là yêu cầu của các con ghép lại, layer là tầng CAO NHẤT trong các con.
         row.put("expected", TestCaseTaxonomy.groupExpected(row));
         row.put("rubric", TestCaseTaxonomy.rubricOf(row));
+        row.put("rubric_label", TestCaseTaxonomy.rubricLabelOf(row));
         row.put("layer", TestCaseTaxonomy.layerOf(row, groupId));
         return row;
     }

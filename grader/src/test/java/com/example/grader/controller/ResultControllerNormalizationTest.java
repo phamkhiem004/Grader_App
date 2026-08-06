@@ -34,7 +34,14 @@ class ResultControllerNormalizationTest {
         assertFalse(normalized.contains("The test description was"));
         assertFalse(normalized.contains("\"expect\""));
         assertTrue(normalized.contains("Không có giá trị actual"));
-        assertTrue(normalized.contains("Testcase dừng do exception;"));
+
+        // P2b — đường ĐỌC không được bơm lại hai trường đã gỡ, và phải lọc chúng khỏi cả dữ
+        // liệu ĐÃ LƯU. Trước đây chỗ này tự sinh `student_safe_summary` bằng câu tra bảng theo
+        // mã lỗi; gỡ ở nơi sinh mà bỏ chỗ này thì vô hiệu (bẫy số 1 trong sổ thi công).
+        assertFalse(normalized.contains("student_safe_summary"), normalized);
+        assertFalse(normalized.contains("\"error\""), normalized);
+        // Nhưng `error.code` phải được rút sang `error_code` TRƯỚC khi xoá, không được mất.
+        assertTrue(normalized.contains("EXCEPTION_THROWN"), normalized);
     }
 
     /**

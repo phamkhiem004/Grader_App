@@ -67,6 +67,7 @@ class FixtureResultAssemblyTest {
                 String id = String.valueOf(tc.get("test_id"));
                 // A1: ba khoá phải CÓ MẶT ở mọi testcase, kể cả giá trị null.
                 assertTrue(tc.containsKey("rubric"), variant + "/" + id + ": thiếu rubric");
+                assertTrue(tc.containsKey("rubric_label"), variant + "/" + id + ": thiếu rubric_label");
                 assertTrue(tc.containsKey("layer"), variant + "/" + id + ": thiếu layer");
                 assertTrue(tc.containsKey("chapter"), variant + "/" + id + ": thiếu chapter");
                 // A3: layer phải nằm trong enum của SPEC.
@@ -79,12 +80,15 @@ class FixtureResultAssemblyTest {
                         variant + "/" + id + ": expected lộ từ vựng nội bộ — " + expected);
                 assertFalse(INTERNAL_TEST_COUNT.matcher(expected).find(),
                         variant + "/" + id + ": expected đếm số test — " + expected);
-                // Chứng minh harness đã chạy sanitizeTestCaseErrors: mọi câu FAIL phải có
-                // đủ error + student_safe_summary hệt như backend gửi đi.
+                // P2b — hai trường phải BIẾN MẤT khỏi mọi testcase. Chúng là câu tra bảng theo
+                // mã lỗi, không phải điều quan sát được; `expected` + `actual` đã thay trọn.
+                assertFalse(tc.containsKey("error"), variant + "/" + id + ": còn object error");
+                assertFalse(tc.containsKey("student_safe_summary"),
+                        variant + "/" + id + ": còn student_safe_summary");
+                // Nhưng phần CÓ GIÁ TRỊ của chúng — mã cho máy gom nhóm — phải còn.
+                assertTrue(tc.containsKey("error_code"), variant + "/" + id + ": thiếu error_code");
                 if (String.valueOf(tc.get("status")).contains("fail")) {
-                    assertNotNull(tc.get("error"), variant + "/" + id + ": thiếu error");
-                    assertFalse(String.valueOf(tc.get("student_safe_summary")).isBlank(),
-                            variant + "/" + id + ": thiếu student_safe_summary");
+                    assertNotNull(tc.get("error_code"), variant + "/" + id + ": error_code null ở test fail");
                 }
                 // P5: `actual` của mọi test KHÔNG đạt phải đến từ kênh quan sát có cấu trúc,
                 // không phải từ bóc log tiếng Anh. Runner nào rơi lại về bóc log thì đỏ ở đây.

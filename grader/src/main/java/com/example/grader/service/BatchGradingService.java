@@ -400,6 +400,10 @@ public class BatchGradingService {
             Map<String, Object> row = raw instanceof Map<?, ?> m ? (Map<String, Object>) m : null;
             if (isBlank(tc.get("rubric"))) tc.put("rubric", TestCaseTaxonomy.rubricOf(row));
             if (isBlank(tc.get("layer")))  tc.put("layer",  TestCaseTaxonomy.layerOf(row, testId));
+            // Nhãn hiển thị của rubric. Đặt khoá kể cả khi null — bên đọc hiểu "khoá vắng mặt =
+            // dữ liệu cũ, được phép tự suy", nên thiếu khoá trên dữ liệu MỚI sẽ đẩy họ đi đoán.
+            if (isBlank(tc.get("rubric_label")))
+                tc.put("rubric_label", TestCaseTaxonomy.rubricLabelOf(row));
         }
     }
 
@@ -429,11 +433,16 @@ public class BatchGradingService {
             if (!(tc.get("executed") instanceof Boolean)) tc.put("executed", !notRun);
             // not_run vẫn tính vào total_weight nhưng điểm phải là 0 (SPEC mục 4).
             if (notRun) tc.put("score", 0);
-            // Mã lỗi PHẲNG cho máy đọc; object error{code,message} sẽ bị xoá ở P2b.
+            // Mã lỗi PHẲNG cho máy đọc. Đọc `error.code` của grader ĐỀ LEGACY (grader riêng của
+            // giáo viên vẫn có thể gửi object error) trước khi bỏ object đó đi.
             if (tc.get("error_code") == null) {
                 Object error = tc.get("error");
                 tc.put("error_code", error instanceof Map<?, ?> m ? m.get("code") : null);
             }
+            // P2b — GỠ HẲN hai trường. Phải gỡ ở đây, sau khi đã rút `error_code` ra: grader của
+            // đề legacy vẫn gửi chúng, và bỏ sót là hợp đồng nói một đằng dữ liệu một nẻo.
+            tc.remove("error");
+            tc.remove("student_safe_summary");
             // Hoãn tới P4b, luôn null — nhưng khoá phải có mặt (SPEC mục 4).
             tc.putIfAbsent("blocked_by", null);
             for (String key : KNOWLEDGE_KEYS) tc.putIfAbsent(key, null);
@@ -491,18 +500,23 @@ public class BatchGradingService {
     }
 
     // ════════════════════════════════════════════════════════════════════════════
-    //  CHUẨN HOÁ LỖI TESTCASE: log thô flutter test → actual + error{code,message}
-    //  + student_safe_summary (lời giải thích/hướng xử lý an toàn cho sinh viên)
+    //  CHUẨN HOÁ LỖI TESTCASE: log thô flutter test → `actual` + `error_code`
     // ════════════════════════════════════════════════════════════════════════════
 
     /**
      * Với mỗi testcase FAIL, biến `actual` (log THÔ của flutter test — Expected/Actual rồi stack
      * trace dài, "EXCEPTION CAUGHT BY...", cây widget → trông như "log backend") thành:
-     *   - `actual`      = KẾT QUẢ THỰC TẾ gọn (giá trị/để so với `expected` của rubric), vd "1".
-     *   - `error.code`  = loại lỗi (VALUE_MISMATCH | WIDGET_NOT_FOUND | EXCEPTION_THROWN | ASSERTION_FAILED).
-     *   - `error.message` = chẩn đoán kỹ thuật ngắn (reason/matcher/exception type).
-     *   - `student_safe_summary` = hướng xử lý an toàn cho sinh viên; không sao chép error.message.
-     * Nhờ vậy các trường bổ sung nhau, không trùng nhau, GV đọc rõ.
+     *   - `actual`     = ĐIỀU QUAN SÁT ĐƯỢC, tiếng Việt (P5 — ưu tiên kênh quan sát có cấu trúc).
+     *   - `error_code` = loại lỗi cho máy đọc, **chỉ mã, không kèm câu diễn giải**.
+     *
+     * <p><b>P2b đã gỡ `error{code,message}` và `student_safe_summary`.</b> Lý do gỡ, ghi lại kẻo
+     * có người thấy tiện mà thêm lại: cả hai đều là câu <b>TRA BẢNG THEO MÃ LỖI</b>, không phải
+     * điều quan sát được — mọi exception đều nhận cùng một câu khuyên *"kiểm tra null/ép kiểu/
+     * parse"* dù lỗi thật là timeout hay thiếu widget. Bên đọc chuyển tiếp nguyên văn cho sinh
+     * viên ⇒ thông tin SAI. Từ P3 `error.message` còn lộ cả semantic key nội bộ.
+     *
+     * <p>Thay thế: `expected` (yêu cầu của đề) + `actual` (điều quan sát được) đã đủ, và
+     * `error_code` giữ lại phần duy nhất có giá trị — mã cho máy gom nhóm.
      */
     private void sanitizeTestCaseErrors(List<Map<String, Object>> tcs) {
         for (Map<String, Object> tc : tcs) {
@@ -515,12 +529,7 @@ public class BatchGradingService {
             Object rawObj = tc.get("actual");
             if (rawObj == null || String.valueOf(rawObj).isBlank()) rawObj = tc.get("error_log");
             String raw = rawObj == null ? "" : String.valueOf(rawObj);
-            if (raw.isBlank()) {
-                // Bài cũ có thể không lưu log; vẫn trả field để client không phải đoán schema.
-                ensureStudentSafeSummary(tc);
-            } else {
-                applyStructuredError(tc, raw);
-            }
+            if (!raw.isBlank()) applyStructuredError(tc, raw);
             // SAU CÙNG: quan sát có cấu trúc ghi đè `actual` do bóc log. Thứ tự này bắt buộc —
             // classifier cần đọc LOG THÔ để ra `error_code` đúng, nên không được thay `actual`
             // trước nó; còn câu cho sinh viên đọc thì quan sát luôn tốt hơn bản đoán từ chữ.
@@ -548,8 +557,13 @@ public class BatchGradingService {
     }
 
     /**
-     * Chuẩn hoá 1 lỗi: nhờ {@link TestErrorClassifier} phân loại log thô → { code, actual, message }
-     * rồi gắn vào testcase. Mọi logic phân loại nằm tập trung trong classifier (dễ mở rộng loại lỗi).
+     * Phân loại log thô → `error_code` + `actual` chống rỗng.
+     *
+     * <p>Classifier vẫn còn việc sau P5: nó là nguồn `error_code` duy nhất cho ca **không có
+     * quan sát** (exception runtime giữa runner, chưa đi qua chỗ bọc assert), và ở đó nó giữ được
+     * độ mịn mà `observation.kind` không mang được (`NULL_ERROR`, `TYPE_ERROR`, `TIMEOUT`…).
+     *
+     * <p>Chỉ lấy `code`; `message` bị bỏ ở P2b vì nó là câu tra bảng, không phải quan sát.
      */
     private void applyStructuredError(Map<String, Object> tc, String raw) {
         TestErrorClassifier.Result res = errorClassifier.classify(raw);
@@ -558,63 +572,7 @@ public class BatchGradingService {
         // Không tách được gì từ log thì nói đúng chừng đó. Câu cũ ("dừng do exception") NÓI SAI
         // nguyên nhân với bài không biên dịch được — ở đó chẳng có exception nào.
         else tc.put("actual", "Không thu được kết quả quan sát cho testcase này");
-        Map<String, Object> err = new LinkedHashMap<>();
-        err.put("code", res.code());
-        String technicalMessage = TestErrorClassifier.shorten(res.message(), 240);
-        if (technicalMessage.isBlank()) technicalMessage = "Testcase không đạt và không có chẩn đoán kỹ thuật.";
-        err.put("message", technicalMessage);
-        tc.put("error", err);
-        tc.put("student_safe_summary", studentSafeSummary(res));
-    }
-
-    /**
-     * Tạo hướng dẫn riêng cho sinh viên. Không lấy nguyên error.message để tránh JSON hiển thị
-     * hai field giống hệt nhau.
-     */
-    private String studentSafeSummary(TestErrorClassifier.Result res) {
-        return studentSafeSummaryForCode(res.code());
-    }
-
-    private String studentSafeSummaryForCode(String code) {
-        return switch (code == null ? "" : code) {
-            case "VALUE_MISMATCH" -> "Đối chiếu actual với expected của testcase và sửa giá trị/logic tương ứng.";
-            case "WIDGET_NOT_FOUND" -> "Kiểm tra widget, text, key hoặc semantics mà đề yêu cầu; bảo đảm widget được render trong viewport.";
-            case "WIDGET_UNEXPECTED" -> "Loại bỏ widget/nhãn xuất hiện ngoài yêu cầu hoặc sửa điều kiện render.";
-            case "WIDGET_COUNT" -> "Kiểm tra số lượng widget thực tế và dữ liệu đầu vào của danh sách.";
-            case "LAYOUT_OVERFLOW" -> "Sửa bố cục bằng cách giới hạn kích thước hoặc cho phép cuộn ở viewport đang được kiểm tra.";
-            case "TIMEOUT" -> "Kiểm tra loading/animation và các thao tác async để chúng luôn kết thúc.";
-            case "NULL_ERROR" -> "Khởi tạo dữ liệu bắt buộc và xử lý null trước khi truy cập thuộc tính/field.";
-            case "TYPE_ERROR" -> "Kiểm tra kiểu dữ liệu và các phép ép kiểu trong luồng testcase.";
-            case "RANGE_ERROR" -> "Kiểm tra index và điều kiện danh sách rỗng trước khi truy cập phần tử.";
-            case "NO_SUCH_METHOD" -> "Kiểm tra tên hàm/thuộc tính và bảo đảm API được định nghĩa đúng trong lib/.";
-            case "FORMAT_ERROR" -> "Kiểm tra dữ liệu đầu vào trước khi parse hoặc chuyển đổi định dạng.";
-            case "STATE_ERROR" -> "Kiểm tra luồng cập nhật state/list và tránh thay đổi dữ liệu khi đang duyệt.";
-            case "BUILD_ERROR" -> "Kiểm tra tham số bắt buộc và lỗi trong build method của widget.";
-            case "COMPILE_ERROR" -> "Kiểm tra import, tên package và dependency trước khi chạy testcase.";
-            case "EXCEPTION_THROWN" -> "Testcase dừng do exception; kiểm tra log runtime và sửa lỗi trong luồng được yêu cầu.";
-            default -> "Đối chiếu yêu cầu testcase với cách triển khai và sửa phần chưa đáp ứng.";
-        };
-    }
-
-    /** Đảm bảo dữ liệu chấm cũ vẫn có field student_safe_summary. */
-    private void ensureStudentSafeSummary(Map<String, Object> tc) {
-        Object current = tc.get("student_safe_summary");
-        Object errorObj = tc.get("error");
-        String errorMessage = "";
-        String errorCode = "";
-        if (errorObj instanceof Map<?, ?> errorMap) {
-            Object message = errorMap.get("message");
-            if (message != null) errorMessage = String.valueOf(message).strip();
-            Object code = errorMap.get("code");
-            if (code != null) errorCode = String.valueOf(code).strip();
-        }
-        if (current != null && !String.valueOf(current).isBlank()
-                && !String.valueOf(current).strip().equals(errorMessage)) {
-            tc.put("student_safe_summary",
-                    TestErrorClassifier.shorten(String.valueOf(current), 240));
-            return;
-        }
-        tc.put("student_safe_summary", studentSafeSummaryForCode(errorCode));
+        tc.put("error_code", res.code());
     }
 
     /** Giới hạn độ dài log lỗi để không phình DB / không tràn cột. */

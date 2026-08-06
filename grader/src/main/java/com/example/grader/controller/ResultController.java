@@ -230,8 +230,9 @@ public class ResultController {
                 tc.put("actual", actual);
             }
 
-            normalizeErrorFields(tc);
+            // Thứ tự bắt buộc: rút `error_code` ra TRƯỚC khi xoá object `error`.
             addContractKeysWithoutGuessing(tc);
+            dropRetiredErrorFields(tc);
         }
         return root;
     }
@@ -276,38 +277,20 @@ public class ResultController {
         return actual;
     }
 
-    /** Tách hướng dẫn SV khỏi error.message cho các JSON cũ bị trùng hai field. */
-    private void normalizeErrorFields(ObjectNode tc) {
-        JsonNode errorNode = tc.get("error");
-        if (!(errorNode instanceof ObjectNode error)) return;
-
-        String code = textOrBlank(error.get("code"));
-        String message = textOrBlank(error.get("message"));
-        String summary = textOrBlank(tc.get("student_safe_summary"));
-        if (summary.isBlank() || summary.equals(message)) {
-            tc.put("student_safe_summary", safeSummaryForCode(code));
-        }
-    }
-
-    private String safeSummaryForCode(String code) {
-        return switch (code == null ? "" : code) {
-            case "VALUE_MISMATCH" -> "Đối chiếu actual với expected của testcase và sửa giá trị/logic tương ứng.";
-            case "WIDGET_NOT_FOUND" -> "Kiểm tra widget, text, key hoặc semantics mà đề yêu cầu; bảo đảm widget được render trong viewport.";
-            case "WIDGET_UNEXPECTED" -> "Loại bỏ widget/nhãn xuất hiện ngoài yêu cầu hoặc sửa điều kiện render.";
-            case "WIDGET_COUNT" -> "Kiểm tra số lượng widget thực tế và dữ liệu đầu vào của danh sách.";
-            case "LAYOUT_OVERFLOW" -> "Sửa bố cục bằng cách giới hạn kích thước hoặc cho phép cuộn ở viewport đang được kiểm tra.";
-            case "TIMEOUT" -> "Kiểm tra loading/animation và các thao tác async để chúng luôn kết thúc.";
-            case "NULL_ERROR" -> "Khởi tạo dữ liệu bắt buộc và xử lý null trước khi truy cập thuộc tính/field.";
-            case "TYPE_ERROR" -> "Kiểm tra kiểu dữ liệu và các phép ép kiểu trong luồng testcase.";
-            case "RANGE_ERROR" -> "Kiểm tra index và điều kiện danh sách rỗng trước khi truy cập phần tử.";
-            case "NO_SUCH_METHOD" -> "Kiểm tra tên hàm/thuộc tính và bảo đảm API được định nghĩa đúng trong lib/.";
-            case "FORMAT_ERROR" -> "Kiểm tra dữ liệu đầu vào trước khi parse hoặc chuyển đổi định dạng.";
-            case "STATE_ERROR" -> "Kiểm tra luồng cập nhật state/list và tránh thay đổi dữ liệu khi đang duyệt.";
-            case "BUILD_ERROR" -> "Kiểm tra tham số bắt buộc và lỗi trong build method của widget.";
-            case "COMPILE_ERROR" -> "Kiểm tra import, tên package và dependency trước khi chạy testcase.";
-            case "EXCEPTION_THROWN" -> "Testcase dừng do exception; kiểm tra log runtime và sửa lỗi trong luồng được yêu cầu.";
-            default -> "Đối chiếu yêu cầu testcase với cách triển khai và sửa phần chưa đáp ứng.";
-        };
+    /**
+     * P2b — GỠ HẲN `error` + `student_safe_summary` khỏi mọi kết quả trả ra, kể cả dữ liệu ĐÃ LƯU.
+     *
+     * <p>Trước đây chỗ này làm điều tệ hơn cả không gỡ: nó **tự bơm lại** `student_safe_summary`
+     * bằng một câu tra bảng theo mã lỗi khi tải JSON. Gỡ ở nơi sinh mà bỏ chỗ này thì vô hiệu —
+     * đúng bẫy số 1 trong sổ thi công.
+     *
+     * <p>Lọc cả dữ liệu cũ (không chỉ ngừng bơm) để hợp đồng không nói một đằng dữ liệu một nẻo:
+     * bên đọc đã bỏ khai hai trường này, gửi thêm là làm lưới "không field nào bị nuốt" của họ đỏ.
+     * `error.code` được rút sang `error_code` trước khi xoá — xem {@link #addContractKeysWithoutGuessing}.
+     */
+    private void dropRetiredErrorFields(ObjectNode tc) {
+        tc.remove("error");
+        tc.remove("student_safe_summary");
     }
 
     private String normalizeJsonString(String json) {

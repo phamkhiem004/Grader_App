@@ -66,6 +66,16 @@ class TestObservationRendererTest {
     }
 
     @Test
+    void saysSomethingIsThereButOfTheWrongKind() {
+        // Không được nói "không thấy" — sinh viên sẽ đi thêm một thành phần nữa vào chỗ đã có sẵn.
+        String out = TestObservationRenderer.render("Biểu tượng đầu form",
+                obs("kind", "TYPE_MISMATCH", "subject", "icon"));
+        assertEquals("Biểu tượng đầu form: chỗ này đang là thành phần khác, "
+                + "không phải biểu tượng như đề yêu cầu.", out);
+        assertFalse(out.contains("không thấy"), out);
+    }
+
+    @Test
     void namesTheViewportWhereOverflowHappened() {
         assertEquals("Không tràn bố cục: giao diện bị tràn khung ở màn hình ngang.",
                 TestObservationRenderer.render("Không tràn bố cục",
@@ -145,7 +155,7 @@ class TestObservationRendererTest {
     @Test
     void neverCollapsesKindsThatNeedDifferentFixes() {
         List<String> kinds = List.of("TEXT_MISMATCH", "NUMBER_MISMATCH", "STYLE_MISMATCH",
-                "LABEL_MISMATCH", "ENABLED_MISMATCH");
+                "LABEL_MISMATCH", "ENABLED_MISMATCH", "MISSING", "TYPE_MISMATCH");
         Set<String> codes = new LinkedHashSet<>();
         for (String kind : kinds) {
             String code = TestObservationRenderer.errorCodeOf(obs("kind", kind));
@@ -163,7 +173,7 @@ class TestObservationRendererTest {
         // Danh sách lấy TỪ CHÍNH lớp đó (`renderableKinds`), không chép tay: chép tay thì thêm
         // `kind` mới mà quên sửa test là test vẫn xanh — đúng lỗ hổng đang muốn bịt.
         Set<String> kinds = TestObservationRenderer.renderableKinds();
-        assertEquals(13, kinds.size(), "SPEC 5.5 khai 13 kind: " + kinds);
+        assertEquals(14, kinds.size(), "SPEC 5.5 khai 14 kind: " + kinds);
         for (String kind : kinds) {
             assertNotNull(TestObservationRenderer.render("Yêu cầu X", obs("kind", kind)), kind);
             if (kind.startsWith("NOT_RUN_")) {

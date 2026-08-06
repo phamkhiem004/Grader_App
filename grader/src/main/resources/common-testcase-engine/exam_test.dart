@@ -90,8 +90,7 @@ Future<void> _runCase(
         _expectPresent(_byKey(key), 'field', 'Thiếu field semantic key: $key');
       }
       final submitKey = _text(parameters, 'submitKey');
-      _expectPresent(_byKey(submitKey), 'button', 'Thiếu submit key: $submitKey');
-      await tester.tap(_byKey(submitKey));
+      await _tap(tester, _byKey(submitKey), 'Thiếu submit key: $submitKey');
       await _settle(tester);
       for (final key in _csv(parameters, 'errorKeys')) {
         _expectPresent(_byKey(key), 'error', 'Thiếu error key: $key',
@@ -120,14 +119,15 @@ Future<void> _runCase(
       await _boot(tester);
       final openKey = _text(parameters, 'openKey');
       final destinationKey = _text(parameters, 'destinationKey');
-      await tester.tap(_byKey(openKey));
+      await _tap(tester, _byKey(openKey), 'Không tìm thấy nút mở màn hình đích: $openKey');
       await _settle(tester);
       _expectPresent(_byKey(destinationKey), 'screen',
           'Không mở được màn hình đích: $destinationKey', where: 'after_action');
       final backKey = _text(parameters, 'backKey');
       final homeKey = _text(parameters, 'homeKey');
       if (backKey.isNotEmpty && homeKey.isNotEmpty) {
-        await tester.tap(_byKey(backKey));
+        await _tap(tester, _byKey(backKey), 'Không tìm thấy nút quay lại: $backKey',
+            where: 'after_action');
         await _settle(tester);
         _expectPresent(_byKey(homeKey), 'screen',
             'Sau khi quay lại, không thấy màn hình trước: $homeKey', where: 'after_action');
@@ -152,7 +152,7 @@ Future<void> _runCase(
       await _boot(tester);
       final buttonKey = _text(parameters, 'buttonKey');
       final resultKey = _text(parameters, 'resultKey');
-      await tester.tap(_byKey(buttonKey));
+      await _tap(tester, _byKey(buttonKey), 'Không tìm thấy nút cần bấm: $buttonKey');
       await _settle(tester);
       _expectPresent(_byKey(resultKey), _subject(parameters),
           'Bấm xong nhưng không thấy kết quả: $resultKey', where: 'after_action');
@@ -202,7 +202,7 @@ Future<void> _checkStateReactiveFlow(
   final updatedKey = _requiredText(parameters, 'updatedKey');
   final absentKey = _text(parameters, 'absentKey');
   _expectPresent(_byKey(initialKey), 'widget', 'Thiếu state ban đầu: $initialKey');
-  await tester.tap(_byKey(actionKey));
+  await _tap(tester, _byKey(actionKey), 'Không tìm thấy nút thao tác: $actionKey');
   await _settle(tester);
   _expectPresent(_byKey(updatedKey), 'widget',
       'State không cập nhật sau action $actionKey: $updatedKey', where: 'after_action');
@@ -261,13 +261,18 @@ void _observe(
 ///
 /// Cố ý KHÔNG suy từ semantic key: key là định danh nội bộ của hệ thống chấm
 /// (`field.name`, `action.save`), sinh viên không kiểm chứng được nên không được lộ ra.
-String _subject(Map<String, dynamic> parameters, [String fallback = 'widget']) {
-  const known = <String>{
-    'button', 'text', 'input', 'field', 'list', 'item', 'dialog', 'screen', 'image', 'icon',
-    'checkbox',
-  };
-  final type = _text(parameters, 'targetType').toLowerCase();
-  return known.contains(type) ? type : fallback;
+String _subject(Map<String, dynamic> parameters, [String fallback = 'widget']) =>
+    _subjectOfType(_text(parameters, 'targetType'), fallback);
+
+/// Bảng ĐÓNG các giá trị `subject` — phải khớp bảng `SUBJECT` của `TestObservationRenderer`.
+const Set<String> kSubjects = <String>{
+  'button', 'text', 'input', 'field', 'list', 'item', 'dialog', 'screen', 'image', 'icon',
+  'checkbox',
+};
+
+String _subjectOfType(String type, [String fallback = 'widget']) {
+  final normalized = type.toLowerCase().trim();
+  return kSubjects.contains(normalized) ? normalized : fallback;
 }
 
 /// Bọc phép kiểm "PHẢI CÓ": phát quan sát trước, rồi assert Y NGUYÊN như cũ.
@@ -280,6 +285,26 @@ void _expectPresent(Finder finder, String subject, String reason, {String? where
     _observe('MISSING', subject: subject, expected: 1, found: found, where: where);
   }
   expect(finder, findsOneWidget, reason: reason);
+}
+
+/// Chạm vào một thành phần — KIỂM SỰ TỒN TẠI TRƯỚC, luôn luôn.
+///
+/// `tester.tap` vào finder rỗng ném lỗi THÔ của flutter_test: không đi qua kênh quan sát, nên
+/// `observation` là null và sinh viên nhận nguyên khối log tiếng Anh thay vì câu nói rõ thiếu cái
+/// gì. Trước A2b có **tám** chỗ chạm không kiểm gì, và đó là lỗ hổng lớn nhất còn lại của kênh
+/// quan sát — mọi runner có thao tác đều đi qua nó.
+///
+/// ĐIỂM KHÔNG ĐỔI: `tester.tap` cũng đòi đúng một widget, nên phép kiểm này không nghiêm hơn —
+/// chỉ đổi cách BÁO khi thiếu. Chủ ngữ luôn là `button`: thứ bộ chấm chạm vào bao giờ cũng là
+/// một thành phần bấm được.
+Future<void> _tap(
+  WidgetTester tester,
+  Finder finder,
+  String reason, {
+  String? where,
+}) async {
+  _expectPresent(finder, 'button', reason, where: where);
+  await tester.tap(finder);
 }
 
 /// Bọc phép kiểm "PHẢI BIẾN MẤT". Luôn dùng [_goneByKey] cho finder, xem lý do ở đó.
@@ -522,7 +547,7 @@ Future<void> _checkFormValidateFields(
     await tester.enterText(fieldFinder, _decodeInput(values[i]));
   }
   final submitKey = _requiredText(parameters, 'submitKey');
-  await tester.tap(_byKey(submitKey));
+  await _tap(tester, _byKey(submitKey), 'Không tìm thấy nút lưu: $submitKey');
   await _settle(tester);
   for (final errorKey in errors) {
     _expectPresent(_byKey(errorKey), 'error',
@@ -558,7 +583,7 @@ Future<void> _checkFormPrefill(
 ) async {
   await _boot(tester);
   final editKey = _requiredText(parameters, 'editKey');
-  await tester.tap(_byKey(editKey));
+  await _tap(tester, _byKey(editKey), 'Không tìm thấy nút sửa: $editKey');
   await _settle(tester);
   final fields = _csv(parameters, 'fieldKeys');
   final expectedValues = _csv(parameters, 'expectedValues');
@@ -599,7 +624,8 @@ Future<void> _checkFormSubmit(
     _assertTargetType(tester, fieldFinder, fields[i], fieldType);
     await tester.enterText(fieldFinder, _decodeInput(values[i]));
   }
-  await tester.tap(_byKey(_requiredText(parameters, 'submitKey')));
+  final submitKey = _requiredText(parameters, 'submitKey');
+  await _tap(tester, _byKey(submitKey), 'Không tìm thấy nút lưu: $submitKey');
   await _settle(tester);
   final resultKey = _text(parameters, 'resultKey');
   if (resultKey.isNotEmpty) {
@@ -618,7 +644,7 @@ Future<void> _checkDialogFlow(
 ) async {
   await _boot(tester);
   final actionKey = _requiredText(parameters, 'actionKey');
-  await tester.tap(_byKey(actionKey));
+  await _tap(tester, _byKey(actionKey), 'Không tìm thấy nút mở hộp thoại: $actionKey');
   await _settle(tester);
 
   final dialogKey = _requiredText(parameters, 'dialogKey');
@@ -628,7 +654,8 @@ Future<void> _checkDialogFlow(
   _assertTargetType(tester, dialogFinder, dialogKey, 'dialog');
 
   final decisionKey = _requiredText(parameters, 'decisionKey');
-  await tester.tap(_byKey(decisionKey));
+  await _tap(tester, _byKey(decisionKey), 'Không tìm thấy nút xác nhận trong hộp thoại: $decisionKey',
+      where: 'after_action');
   await _settle(tester);
   final resultKey = _text(parameters, 'resultKey');
   if (resultKey.isNotEmpty) {
@@ -795,6 +822,13 @@ void _assertTargetType(
     _ => false,
   };
   if (!matches) {
+    // Thành phần CÓ MẶT nhưng SAI LOẠI — chẩn đoán riêng, không phải "không thấy gì". Cách sửa
+    // của sinh viên cũng riêng: dùng đúng loại widget, không phải thêm thành phần còn thiếu.
+    //
+    // Trước A2b chỗ này `fail()` trần: chín runner gọi `_assertTargetType`, nên đây là lỗ hổng
+    // thứ hai của kênh quan sát — sai loại widget là sinh viên nhận nguyên tên class tiếng Anh.
+    // KHÔNG in `widget.runtimeType` vào quan sát: đó là định danh nội bộ của Flutter (luật C3).
+    _observe('TYPE_MISMATCH', subject: _subjectOfType(normalizedType));
     fail('Key $key đang gắn vào ${widget.runtimeType}, không phải targetType=$targetType');
   }
 }

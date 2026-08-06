@@ -1,8 +1,8 @@
 {
   "diem": 6.6,
-  "passed": 15,
+  "passed": 16,
   "failed": 9,
-  "total": 24,
+  "total": 25,
   "failed_ids": [
     "TC_AVATAR_SIZE",
     "TC_CLEAR_ALL",

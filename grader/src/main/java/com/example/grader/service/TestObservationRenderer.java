@@ -51,6 +51,9 @@ public final class TestObservationRenderer {
     private static final Map<String, String> ERROR_CODE = Map.ofEntries(
             Map.entry("MISSING", "WIDGET_NOT_FOUND"),
             Map.entry("STILL_PRESENT", "WIDGET_UNEXPECTED"),
+            // A2b: CÓ MẶT nhưng SAI LOẠI — cách sửa riêng (dùng đúng loại widget), khác hẳn
+            // "thêm thành phần còn thiếu" của MISSING. Chín runner phát được qua _assertTargetType.
+            Map.entry("TYPE_MISMATCH", "WIDGET_TYPE_MISMATCH"),
             Map.entry("COUNT_MISMATCH", "WIDGET_COUNT"),
             Map.entry("TEXT_MISMATCH", "VALUE_MISMATCH"),
             Map.entry("OVERFLOW", "LAYOUT_OVERFLOW"),
@@ -154,6 +157,10 @@ public final class TestObservationRenderer {
 
         return switch (kind.toUpperCase()) {
             case "MISSING" -> "không thấy " + subject + " nào" + suffix + ".";
+            // Nói RÕ là có thứ gì ở đó nhưng sai loại — nếu chỉ nói "không thấy" thì sinh viên đi
+            // thêm một thành phần nữa vào chỗ đã có sẵn một cái.
+            case "TYPE_MISMATCH" -> "chỗ này đang là thành phần khác, không phải "
+                    + subject + " như đề yêu cầu" + suffix + ".";
             case "STILL_PRESENT" -> subject + " lẽ ra phải biến mất thì vẫn còn"
                     + (where == null ? "" : " " + where) + ".";
             case "TEXT_MISMATCH" -> textMismatch(obs);

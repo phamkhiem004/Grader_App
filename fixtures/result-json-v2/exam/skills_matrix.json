@@ -89,7 +89,7 @@
     "name": "Biểu tượng đầu form",
     "expected": "Đầu form phải có một biểu tượng người dùng.",
     "difficulty": "basic",
-    "weight": 2,
+    "weight": 1,
     "parameters": { "targetKey": "icon.header", "targetType": "icon" }
   },
   "TC_HEADER_ICON_LABEL": {
@@ -140,7 +140,7 @@
     "name": "Khoảng đệm quanh form",
     "expected": "Form phải có khoảng đệm 16 ở cả bốn phía.",
     "difficulty": "basic",
-    "weight": 2,
+    "weight": 1,
     "parameters": {
       "targetKey": "padding.form",
       "targetType": "padding",
@@ -326,6 +326,19 @@
       "decisionKey": "action.delete.confirm",
       "absentKey": "item.1"
     }
+  },
+  "TC_CLEAR_BUTTON": {
+    "instance_id": "TC_CLEAR_BUTTON",
+    "runner": "WIDGET_VISIBLE",
+    "skill_code": "UI_BUTTONS_SELECTION",
+    "testcase_group": "WIDGET",
+    "group_id": "XOA_HET",
+    "group_name": "Xoá hết danh sách",
+    "name": "Nút xoá hết danh sách",
+    "expected": "Thanh tiêu đề phải có nút xoá hết danh sách.",
+    "difficulty": "basic",
+    "weight": 2,
+    "parameters": { "widgetKey": "action.clear-all", "targetType": "button" }
   },
   "TC_CLEAR_ALL": {
     "instance_id": "TC_CLEAR_ALL",

@@ -41,6 +41,9 @@ class FixtureResultAssemblyTest {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final Path FIXTURE = Path.of("..", "fixtures", "result-json-v2");
+    /** Sáu bài nộp của fixture — khai MỘT chỗ để ba test độ phủ không lệch nhau. */
+    private static final List<String> FIXTURE_VARIANTS =
+            List.of("high", "medium", "sloppy", "unwired", "broken-boot", "broken-compile");
     /** Từ vựng nội bộ của hệ thống chấm — sinh viên không kiểm chứng được số lượng test. */
     private static final java.util.regex.Pattern INTERNAL_TEST_COUNT =
             java.util.regex.Pattern.compile("\\b\\d+\\s+(assert|testcase|test|phép kiểm)\\b",
@@ -51,7 +54,7 @@ class FixtureResultAssemblyTest {
         SyllabusService.Resolver resolver = resolverFromSeedFile();
         int done = 0;
 
-        for (String variant : List.of("high", "medium", "sloppy", "broken-boot", "broken-compile")) {
+        for (String variant : FIXTURE_VARIANTS) {
             Path graderOut = FIXTURE.resolve(".build/out/" + variant + ".json");
             if (!Files.exists(graderOut)) continue;
 
@@ -63,7 +66,7 @@ class FixtureResultAssemblyTest {
 
             @SuppressWarnings("unchecked")
             List<Map<String, Object>> tcs = (List<Map<String, Object>>) assembled.get("test_cases");
-            assertEquals(24, tcs.size(), variant + ": số testcase");
+            assertEquals(25, tcs.size(), variant + ": số testcase");
             for (Map<String, Object> tc : tcs) {
                 String id = String.valueOf(tc.get("test_id"));
                 // A1: ba khoá phải CÓ MẶT ở mọi testcase, kể cả giá trị null.
@@ -168,6 +171,61 @@ class FixtureResultAssemblyTest {
     }
 
     /**
+     * A2b — CHỐT CHẶN MẠNH HƠN: mỗi runner phải từng **ĐẠT** và từng **HỎNG** trên fixture.
+     *
+     * <p>Vì sao cần cái này khi đã có {@link #fixtureExercisesEveryCommonRunner}: test kia chỉ đòi
+     * runner **có testcase**, nên "phủ 23/23 runner" của A2 vòng 1 chỉ có nghĩa *đã được gọi*. Đo
+     * lại sau A2 thì tám runner **chưa từng đi qua đường hỏng** — nhánh phát quan sát của riêng
+     * chúng vẫn là code chưa ai chạy, và chính chỗ đó là nơi hai lỗ hổng của A2b nằm (tap không
+     * kiểm tồn tại, `_assertTargetType` fail trần). Đường ĐẠT và đường HỎNG là hai đường khác nhau;
+     * phủ một cái không nói gì về cái kia.
+     *
+     * <p><b>FORM_SUBMIT được miễn</b> — nó chỉ tồn tại làm con của GROUP, mà `result.json` không
+     * báo trạng thái từng testcase con, nên từ output KHÔNG quan sát được. Nó vẫn chạy cả hai
+     * đường (đạt ở `high`, hỏng ở `unwired`), chỉ là quy về GROUP. Miễn có ghi lý do, không im lặng.
+     */
+    private static final Set<String> RUNNERS_ONLY_AS_GROUP_CHILD = Set.of("FORM_SUBMIT");
+
+    @Test
+    void everyRunnerHasBothAPassAndAFailSomewhere() throws Exception {
+        JsonNode matrix = MAPPER.readTree(
+                Files.readString(FIXTURE.resolve("exam/skills_matrix.json"), StandardCharsets.UTF_8));
+        Map<String, String> runnerOf = new LinkedHashMap<>();
+        matrix.properties().forEach(e ->
+                runnerOf.put(e.getKey(), e.getValue().path("runner").asText()));
+
+        Map<String, java.util.Set<String>> outcomes = new LinkedHashMap<>();
+        int done = 0;
+        for (String variant : FIXTURE_VARIANTS) {
+            Path graderOut = FIXTURE.resolve(".build/out/" + variant + ".json");
+            if (!Files.exists(graderOut)) continue;
+            done++;
+            JsonNode root = MAPPER.readTree(Files.readString(graderOut, StandardCharsets.UTF_8));
+            for (JsonNode tc : root.path("test_cases")) {
+                String runner = runnerOf.get(tc.path("test_id").asText());
+                if (runner == null) continue;
+                outcomes.computeIfAbsent(runner, k -> new java.util.TreeSet<>())
+                        .add(tc.path("status").asText());
+            }
+        }
+        assumeTrue(done > 0, "Chưa chấm fixture — chạy fixtures/result-json-v2/run-fixture.sh trước");
+
+        java.util.List<String> gaps = new ArrayList<>();
+        for (String runner : new java.util.TreeSet<>(TestCaseTaxonomy.commonRunners())) {
+            if (RUNNERS_ONLY_AS_GROUP_CHILD.contains(runner)) continue;
+            java.util.Set<String> seen = outcomes.getOrDefault(runner, java.util.Set.of());
+            if (!seen.contains("passed")) gaps.add(runner + " chưa từng ĐẠT");
+            if (!seen.contains("failed")) gaps.add(runner + " chưa từng HỎNG");
+        }
+        // GROUP không nằm trong bảng layer nên phải kiểm riêng.
+        java.util.Set<String> group = outcomes.getOrDefault("GROUP", java.util.Set.of());
+        if (!group.contains("passed")) gaps.add("GROUP chưa từng ĐẠT");
+        if (!group.contains("failed")) gaps.add("GROUP chưa từng HỎNG");
+
+        assertTrue(gaps.isEmpty(), "Runner chưa chạy đủ hai đường: " + gaps);
+    }
+
+    /**
      * A2 — CHỐT CHẶN ĐỘ PHỦ `kind`. Mọi giá trị `observation.kind` mà engine biết phát đều phải
      * XUẤT HIỆN THẬT trên ít nhất một bài nộp của fixture.
      *
@@ -179,7 +237,7 @@ class FixtureResultAssemblyTest {
     void fixtureEmitsEveryObservationKind() throws Exception {
         Set<String> seen = new java.util.TreeSet<>();
         int done = 0;
-        for (String variant : List.of("high", "medium", "sloppy", "broken-boot", "broken-compile")) {
+        for (String variant : FIXTURE_VARIANTS) {
             Path graderOut = FIXTURE.resolve(".build/out/" + variant + ".json");
             if (!Files.exists(graderOut)) continue;
             done++;

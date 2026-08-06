@@ -18,7 +18,11 @@ import 'dart:io';
 /// < 2.5.0 mà có testcase runner này thì SAI ĐIỂM, phải chấm lại.
 /// Kèm theo: chỉ giữ khối chẩn đoán ĐẦU TIÊN của mỗi test (xem `_firstBlock`) — trước đó
 /// một lỗi bố cục lặp lại mỗi khung hình làm `result_json` phình lên 745 KB. Điểm không đổi.
-const String kEngineVersion = 'COMMON_V1-2.5.0';
+/// 2.6.0 — A2b: vá hai lỗ hổng của kênh quan sát, cả hai đều làm `observation` null nên sinh
+/// viên nhận log tiếng Anh. (a) tám chỗ `tester.tap` không kiểm nút có tồn tại — nay qua `_tap`;
+/// (b) `_assertTargetType` `fail()` trần — nay phát `TYPE_MISMATCH` (`kind` thứ 14, chín runner
+/// gọi tới). Điểm KHÔNG đổi: hai phép kiểm này không nghiêm hơn `tester.tap`, chỉ báo khác.
+const String kEngineVersion = 'COMMON_V1-2.6.0';
 
 /// PHẢI khớp hằng cùng tên trong `exam_test.dart` — hai chương trình Dart riêng biệt,
 /// không import nhau nên không chia sẻ được hằng số.

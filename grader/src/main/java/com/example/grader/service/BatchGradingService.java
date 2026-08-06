@@ -549,6 +549,12 @@ public class BatchGradingService {
     private void renderObservation(Map<String, Object> tc) {
         Object raw = tc.get("observation");
         if (!(raw instanceof Map<?, ?> observation)) return;
+        // A1 — `error_code` cũng suy từ quan sát, GHI ĐÈ giá trị classifier vừa bóc từ log. Cùng lý
+        // do như `actual`: runner tự khai điều nó khẳng định, còn bóc log là đoán ngược từ chữ.
+        // null (kind lạ, hoặc NOT_RUN_*) thì GIỮ giá trị cũ — mã sai tệ hơn không có mã.
+        String code = TestObservationRenderer.errorCodeOf(observation);
+        if (code != null) tc.put("error_code", code);
+
         String rendered = TestObservationRenderer.render(
                 String.valueOf(tc.getOrDefault("name", "")), observation);
         if (rendered == null || rendered.isBlank()) return;

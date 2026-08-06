@@ -3,8 +3,10 @@ package com.example.grader.service;
 import org.junit.jupiter.api.Test;
 
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -93,6 +95,58 @@ class TestObservationRendererTest {
         String out = TestObservationRenderer.render(longName,
                 obs("kind", "TEXT_MISMATCH", "subject", "text", "seen", "x".repeat(200)));
         assertTrue(out.length() <= 160, "dài " + out.length());
+    }
+
+    // ── A1: error_code suy từ kind ────────────────────────────────
+    @Test
+    void mapsKindToErrorCode() {
+        assertEquals("WIDGET_NOT_FOUND", TestObservationRenderer.errorCodeOf(obs("kind", "MISSING")));
+        assertEquals("LAYOUT_OVERFLOW", TestObservationRenderer.errorCodeOf(obs("kind", "OVERFLOW")));
+        assertEquals("VALUE_MISMATCH", TestObservationRenderer.errorCodeOf(obs("kind", "TEXT_MISMATCH")));
+        assertEquals("EXCEPTION_THROWN", TestObservationRenderer.errorCodeOf(obs("kind", "BOOT_FAILED")));
+    }
+
+    @Test
+    void givesNoCodeForNotRunOrUnknownKind() {
+        // Chưa chạy thì không quan sát được gì để phân loại. Và `kind` lạ phải trả null để bên gọi
+        // giữ giá trị của classifier — một mã SAI còn tệ hơn không có mã, vì bên đọc gom nhóm theo nó.
+        assertNull(TestObservationRenderer.errorCodeOf(obs("kind", "NOT_RUN_BOOT")));
+        assertNull(TestObservationRenderer.errorCodeOf(obs("kind", "NOT_RUN_SUITE")));
+        assertNull(TestObservationRenderer.errorCodeOf(obs("kind", "MOT_LOAI_CHUA_BIET")));
+        assertNull(TestObservationRenderer.errorCodeOf(null));
+    }
+
+    /**
+     * ĐIỀU KIỆN CỦA PHÍA NLP: không được ép nhiều `kind` vào cùng một `error_code` khi cách sửa của
+     * sinh viên khác nhau — trùng mã thì bên đọc gộp làm một đoạn góp ý, sinh viên sửa một nửa.
+     *
+     * <p>Năm ca dưới đây có năm cách sửa khác nhau: sửa chuỗi · sửa số đo · sửa kiểu chữ · thêm
+     * nhãn trợ năng · sửa logic bật-tắt. Thêm `kind` mới mà dồn vào mã có sẵn thì test này đỏ.
+     */
+    @Test
+    void neverCollapsesKindsThatNeedDifferentFixes() {
+        List<String> kinds = List.of("TEXT_MISMATCH", "NUMBER_MISMATCH", "STYLE_MISMATCH",
+                "LABEL_MISMATCH", "ENABLED_MISMATCH");
+        Set<String> codes = new LinkedHashSet<>();
+        for (String kind : kinds) {
+            String code = TestObservationRenderer.errorCodeOf(obs("kind", kind));
+            assertNotNull(code, kind);
+            assertTrue(codes.add(code), kind + " bị dồn vào mã đã dùng: " + code);
+        }
+        assertEquals(kinds.size(), codes.size());
+    }
+
+    @Test
+    void everyRenderableKindExceptNotRunHasACode() {
+        // Chốt chặn lệch bảng: hai bảng (`kind`→câu và `kind`→mã) nằm cùng class, nhưng vẫn có thể
+        // thêm vào một bên mà quên bên kia. Mọi kind diễn đạt được đều phải có mã, trừ NOT_RUN_*.
+        for (String kind : List.of("MISSING", "STILL_PRESENT", "TEXT_MISMATCH", "COUNT_MISMATCH",
+                "NUMBER_MISMATCH", "ENABLED_MISMATCH", "STYLE_MISMATCH", "LABEL_MISMATCH",
+                "OVERFLOW", "LAYOUT_ERROR", "BOOT_FAILED")) {
+            assertNotNull(TestObservationRenderer.render("Yêu cầu X", obs("kind", kind)), kind);
+            assertNotNull(TestObservationRenderer.errorCodeOf(obs("kind", kind)),
+                    kind + " diễn đạt được nhưng chưa có error_code");
+        }
     }
 
     // ── không diễn đạt được thì trả null để bên gọi giữ giá trị cũ ──

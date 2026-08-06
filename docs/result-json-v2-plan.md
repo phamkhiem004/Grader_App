@@ -60,7 +60,8 @@ sinh viên.** Mọi tranh cãi thiết kế phân xử bằng nguyên tắc này
 | **P5** | Sinh `actual` tự động | ✅ **Xong** 2026-08-06 | **C1–C7 xanh hết** trên `medium`, C6 đạt **100%** (trước P3: 20%). `actual_source == "observation"` ở mọi test không đạt. Điểm không đổi |
 | **P2b** | *Xoá* `error` + `student_safe_summary` **+ gửi `rubric_label`** | ✅ **Xong** 2026-08-06 | **0 luật FAIL trên cả 4 bài** — lần đầu toàn bộ ACCEPTANCE xanh. 57 test; `tsc` xanh |
 | ~~**P4b**~~ | ~~`blocked_by`~~ | 🚫 **ĐÓNG** 2026-08-06 — xem dưới | — |
-| **A** | Mở rộng fixture: 10 runner chưa chạy + 7 `kind` chưa từng phát | ⬜ | Nâng 7 `kind` Mức 2 → Mức 1 trong SPEC 5.5 |
+| **A1** | Suy `error_code` từ `observation.kind` + 4 mã mới | ✅ **Xong** 2026-08-06 | **0 giá trị lệch** trên dữ liệu thật (song ánh 1–1); 4 mẫu vẫn 0 luật FAIL; 61 test |
+| **A2** | Mở rộng fixture: 10 runner chưa chạy + 7 `kind` chưa từng phát | ⬜ **nặng** | Nâng 7 `kind` Mức 2 → Mức 1 trong SPEC 5.5 |
 | **P6** | `exam.requirements` | ⬜ | — |
 
 ### Vì sao ĐÓNG P4b
@@ -141,7 +142,7 @@ vì chúng thành `not_run` nên C6 bỏ qua **đúng luật** thay vì bị tí
 |---|---|
 | Sinh `skills_matrix.json` cho đề mới | `TestcaseTemplateService.commonRubricRow` / `commonGroupRow` |
 | **Kênh quan sát** (engine phát) | `exam_test.dart` — `_observe` + `_expectPresent` / `_expectGone` / `_expectNoLayoutError` / `_assertNumber` |
-| **Render tiếng Việt** (backend, nguồn sự thật DUY NHẤT của `actual`) | `TestObservationRenderer` |
+| **Render tiếng Việt** + **bảng `kind` → `error_code`** (nguồn sự thật DUY NHẤT của cả hai) | `TestObservationRenderer` |
 | Nhãn hiển thị của `rubric` (P2b sẽ gửi) | `TestCaseTaxonomy.rubricOf` lấy `group_id`; nhãn nằm ở `group_name` |
 | Ghép `result.json` | `BatchGradingService.assembleResultJson` → `enrichTestCases` |
 | Gắn nhãn năng lực | `CompetencyService.annotateTestCases` + `SyllabusService.Resolver` |

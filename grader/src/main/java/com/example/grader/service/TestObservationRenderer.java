@@ -1,6 +1,7 @@
 package com.example.grader.service;
 
 import java.util.Map;
+import java.util.Set;
 
 /**
  * DIỄN ĐẠT QUAN SÁT → câu tiếng Việt cho `actual` của result.json (SPEC mục 5.3–5.4).
@@ -29,6 +30,54 @@ public final class TestObservationRenderer {
 
     /** Trần độ dài của `actual` theo luật C5. */
     private static final int MAX_LENGTH = 160;
+
+    /**
+     * `kind` → `error_code`. Đặt CÙNG CHỖ với bảng diễn đạt, không tách class riêng: hai bảng đều
+     * nhận cùng một từ vựng `kind`, tách ra là tạo nguồn sự thật thứ hai — thêm `kind` mà quên một
+     * bên thì lệch ngầm.
+     *
+     * <p><b>Vì sao suy `error_code` từ `kind`:</b> `error_code` vốn do {@link TestErrorClassifier}
+     * bóc regex từ log tiếng Anh — đúng cơ chế P5 dựng ra để thay. Đo trên bộ mẫu thì hai khoá là
+     * **song ánh 1–1** trên mọi test đã chạy thật, nên đổi nguồn KHÔNG làm lệch cách gom nhóm của
+     * bên đọc ở dữ liệu hôm nay, mà chỉ sạch hơn ở dữ liệu mai.
+     *
+     * <p><b>Không ép N→1.</b> Bốn `kind` cuối được mã RIÊNG thay vì dồn hết vào
+     * {@code VALUE_MISMATCH}: năm ca đó có năm cách sửa khác nhau (sửa chuỗi / sửa số đo / sửa kiểu
+     * chữ / thêm nhãn trợ năng / sửa logic bật-tắt). Trùng mã ⇒ bên đọc gộp làm MỘT đoạn góp ý ⇒
+     * sinh viên chỉ sửa một nửa.
+     *
+     * <p>`NOT_RUN_*` cố ý **không có mã**: chưa chạy thì không quan sát được gì để phân loại.
+     */
+    private static final Map<String, String> ERROR_CODE = Map.ofEntries(
+            Map.entry("MISSING", "WIDGET_NOT_FOUND"),
+            Map.entry("STILL_PRESENT", "WIDGET_UNEXPECTED"),
+            Map.entry("COUNT_MISMATCH", "WIDGET_COUNT"),
+            Map.entry("TEXT_MISMATCH", "VALUE_MISMATCH"),
+            Map.entry("OVERFLOW", "LAYOUT_OVERFLOW"),
+            Map.entry("LAYOUT_ERROR", "BUILD_ERROR"),
+            Map.entry("BOOT_FAILED", "EXCEPTION_THROWN"),
+            // Bốn mã MỚI ở A1 — chỉ xuất hiện khi các kind Mức 2 chạy thật.
+            Map.entry("NUMBER_MISMATCH", "SIZE_MISMATCH"),
+            Map.entry("STYLE_MISMATCH", "TEXT_STYLE_MISMATCH"),
+            Map.entry("LABEL_MISMATCH", "SEMANTICS_MISMATCH"),
+            Map.entry("ENABLED_MISMATCH", "ENABLED_MISMATCH"));
+
+    /**
+     * Mã lỗi suy từ quan sát; {@code null} khi không suy được — bên gọi giữ giá trị của classifier.
+     *
+     * <p>Trả {@code null} cho `NOT_RUN_*` và cho `kind` lạ. Đừng đổi thành một mã "mặc định":
+     * mã sai còn tệ hơn không có mã, vì bên đọc gom nhóm theo nó.
+     */
+    public static String errorCodeOf(Map<?, ?> observation) {
+        if (observation == null) return null;
+        String kind = text(observation.get("kind"));
+        return kind == null ? null : ERROR_CODE.get(kind.toUpperCase());
+    }
+
+    /** Mọi giá trị `error_code` mà đường quan sát có thể phát — để test đối chiếu với SPEC. */
+    public static Set<String> observationErrorCodes() {
+        return Set.copyOf(ERROR_CODE.values());
+    }
 
     /** Loại thành phần theo cách sinh viên hiểu — bảng ĐÓNG, khớp `_subject` của engine. */
     private static final Map<String, String> SUBJECT = Map.ofEntries(

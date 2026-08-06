@@ -36,6 +36,12 @@ luật **B2** (nhóm lấy tầng cao nhất của các con: `widget` + `integra
 `TestCaseTaxonomy.commonRunners()`. Thêm runner vào engine mà quên bổ sung testcase là đỏ ngay —
 vì trước A2 đã có **mười** runner được công bố trong hợp đồng mà chưa từng chạy một lần nào.
 
+> ⚠️ **"23/23" nghĩa là ĐÃ GỌI, không phải ĐÃ HỎNG.** Đo trên 5 bài: chỉ **14/22** runner từng đi
+> qua đường hỏng. Tám runner sau **chỉ từng đạt** — `BUTTON_ACTION`, `FORM_PREFILL`, `GROUP`,
+> `NAVIGATION`, `WIDGET_GAP`, `WIDGET_PADDING`, `WIDGET_TYPE_VISIBLE`, `WIDGET_VISIBLE` — nên nhánh
+> phát quan sát của riêng chúng vẫn chưa ai chạy. Việc còn lại: cấy lỗi cho tám cái đó rồi siết test
+> thành *"mỗi runner phải từng đạt VÀ từng hỏng"*. Ghi ở đây để con số 23/23 không bị đọc quá mạnh.
+
 ## Năm bài nộp
 
 | Bài | Điểm | Đạt | Dùng để kiểm |

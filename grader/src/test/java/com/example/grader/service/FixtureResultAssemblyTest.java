@@ -155,11 +155,20 @@ class FixtureResultAssemblyTest {
         invoke(batch, "sanitizeTestCaseErrors", new Class<?>[]{List.class}, tcs);
         CompetencyService competency = new CompetencyService();
         competency.annotateTestCases(tcs, resolver);
+        // Chạy SAU khối gắn nhãn, y như assembleResultJson — đây là chỗ bảo đảm khoá hợp đồng.
+        invoke(batch, "guaranteeContractKeys", new Class<?>[]{List.class}, tcs);
+
+        Map<String, Object> gradingResult = MAPPER.convertValue(grader.get("grading_result"), Map.class);
+        gradingResult.putIfAbsent("not_run_tests",
+                invoke(batch, "countStatus", new Class<?>[]{List.class, String.class}, tcs, "not_run"));
+        // Fixture chạy resolver thật và không ngã, nên luôn null — vẫn phải có mặt.
+        gradingResult.put("annotation_error", null);
 
         Map<String, Object> root = new LinkedHashMap<>();
+        root.put("schema_version", "2");
         root.put("student", Map.of("id", "FIXTURE_" + variant.toUpperCase(), "name", "Fixture " + variant));
         root.put("exam", Map.of("code", "FIXTURE_V2", "title", "Fixture result.json v2", "total_score", 10));
-        root.put("grading_result", MAPPER.convertValue(grader.get("grading_result"), Map.class));
+        root.put("grading_result", gradingResult);
         root.put("test_cases", tcs);
         // Backend phát hành cả khối này; thiếu nó thì bên đọc tưởng nó đã bị bỏ.
         root.put("competency_assessment", competency.assess(tcs, resolver));

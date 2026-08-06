@@ -14,6 +14,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
+import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -58,6 +59,9 @@ public class BatchGradingService {
     @Autowired private SyllabusService    syllabusService;
     @Autowired private CompetencyService  competencyService;
     @Autowired private TestcaseTemplateService templateService;
+
+    /** Bản hợp đồng `result.json` mà backend này phát hành — xem SPEC_grader_result_json/. */
+    private static final String SCHEMA_VERSION = "2";
 
     private final ObjectMapper mapper = new ObjectMapper();
     /** Bộ phân loại lỗi testcase (log thô → code/actual/message) — bao quát nhiều loại lỗi Dart/Flutter. */
@@ -262,6 +266,9 @@ public class BatchGradingService {
             String title = (exam != null && exam.getExamName() != null) ? exam.getExamName() : job.examId();
 
             Map<String, Object> root = new LinkedHashMap<>();
+            // Đặt ĐẦU TIÊN: bên đọc biết ngay đang xử lý hợp đồng bản nào. Dữ liệu chấm trước
+            // P4 không có khoá này — vắng mặt chính là dấu hiệu "bản 1", đừng bơm ngược vào.
+            root.put("schema_version", SCHEMA_VERSION);
 
             Map<String, Object> student = new LinkedHashMap<>();
             student.put("id", job.studentId());
@@ -275,18 +282,20 @@ public class BatchGradingService {
             root.put("exam", examNode);
 
             // grading_result: ưu tiên từ grader (mới); fallback dựng từ field cũ
+            Map<String, Object> gradingResult;
             if (g.has("grading_result")) {
-                root.put("grading_result", mapper.convertValue(g.get("grading_result"), Object.class));
+                gradingResult = mapper.convertValue(g.get("grading_result"),
+                        new TypeReference<LinkedHashMap<String, Object>>() {});
             } else {
                 int pass  = g.path("soTestPass").asInt(0);
                 int total = g.path("tongSoTest").asInt(0);
-                Map<String, Object> gr = new LinkedHashMap<>();
-                gr.put("score", g.path("diem").asDouble(0));
-                gr.put("passed_tests", pass);
-                gr.put("failed_tests", total - pass);
-                gr.put("total_tests", total);
-                root.put("grading_result", gr);
+                gradingResult = new LinkedHashMap<>();
+                gradingResult.put("score", g.path("diem").asDouble(0));
+                gradingResult.put("passed_tests", pass);
+                gradingResult.put("failed_tests", total - pass);
+                gradingResult.put("total_tests", total);
             }
+            root.put("grading_result", gradingResult);
 
             // test_cases: ưu tiên từ grader (mới, có skill/expected/actual); fallback từ chiTiet
             List<Map<String, Object>> testCases = new ArrayList<>();
@@ -316,18 +325,30 @@ public class BatchGradingService {
             // error.message là chẩn đoán kỹ thuật; student_safe_summary là hướng dẫn riêng cho SV.
             sanitizeTestCaseErrors(testCases);
 
+            // Đặt trước khối try để giữ thứ tự khoá test_cases → competency_assessment. Đây là
+            // CÙNG tham chiếu list, nên các bước sửa bên dưới vẫn phản ánh vào JSON.
+            if (!testCases.isEmpty()) root.put("test_cases", testCases);
+
             // Gắn nhãn KIẾN THỨC (skill_name/category/category_label) + ĐỘ KHÓ cho từng testcase,
             // rồi tính NĂNG LỰC theo category — dùng chung 1 resolver.
+            String annotationError = null;
             try {
                 SyllabusService.Resolver resolver = syllabusService.resolver();
                 competencyService.annotateTestCases(testCases, resolver);
-                if (!testCases.isEmpty()) root.put("test_cases", testCases);
                 List<Map<String, Object>> comp = competencyService.assess(testCases, resolver);
                 if (!comp.isEmpty()) root.put("competency_assessment", comp);
             } catch (Exception ce) {
-                if (!testCases.isEmpty()) root.put("test_cases", testCases);
+                // Khối trên ngã thì bài này bị SUY GIẢM. Phải nói ra, nếu không nó trông y hệt
+                // một bài bình thường và bên đọc sẽ nhận xét như thể mọi nhãn đều đầy đủ.
+                annotationError = ce.getClass().getSimpleName()
+                        + (ce.getMessage() == null ? "" : ": " + TestErrorClassifier.shorten(ce.getMessage(), 160));
                 log.warn("Tính competency/annotate lỗi cho {}: {}", job.studentId(), ce.getMessage());
             }
+
+            // SAU khối try: khoá hợp đồng phải có mặt kể cả khi khối trên đã ngã.
+            guaranteeContractKeys(testCases);
+            gradingResult.putIfAbsent("not_run_tests", countStatus(testCases, "not_run"));
+            gradingResult.put("annotation_error", annotationError);
 
             if (g.has("analyze_result"))
                 root.put("analyze_result", mapper.convertValue(g.get("analyze_result"), Object.class));
@@ -384,6 +405,47 @@ public class BatchGradingService {
 
     private boolean isBlank(Object value) {
         return value == null || String.valueOf(value).isBlank();
+    }
+
+    /** Nhãn kiến thức do CompetencyService gắn — cả khối biến mất nếu resolver ném lỗi. */
+    private static final List<String> KNOWLEDGE_KEYS =
+            List.of("chapter", "category", "category_label", "skill_name", "difficulty_label");
+
+    /**
+     * Bảo đảm mọi khoá của hợp đồng CÓ MẶT ở từng testcase, kể cả khi giá trị là null.
+     *
+     * <p>Chạy SAU khối gắn nhãn kiến thức, vì khối đó nằm trong try/catch: `syllabusService`
+     * ném lỗi là mất sạch `chapter`/`category`/`skill_name`/`difficulty_label`. Bên đọc hiểu
+     * *"khoá vắng mặt = dữ liệu cũ, được phép tự suy"*, nên thiếu khoá trên dữ liệu MỚI sẽ đẩy
+     * họ quay lại đoán — đúng thứ hai bên đã thống nhất bỏ.
+     *
+     * <p>Ở đây chỉ ĐẶT KHOÁ, không bịa giá trị.
+     */
+    private void guaranteeContractKeys(List<Map<String, Object>> tcs) {
+        for (Map<String, Object> tc : tcs) {
+            String status = String.valueOf(tc.getOrDefault("status", "")).toLowerCase();
+            boolean notRun = "not_run".equals(status);
+            // Dẫn xuất từ status. Engine chung đã gửi sẵn; đề legacy thì suy tại đây.
+            if (!(tc.get("executed") instanceof Boolean)) tc.put("executed", !notRun);
+            // not_run vẫn tính vào total_weight nhưng điểm phải là 0 (SPEC mục 4).
+            if (notRun) tc.put("score", 0);
+            // Mã lỗi PHẲNG cho máy đọc; object error{code,message} sẽ bị xoá ở P2b.
+            if (tc.get("error_code") == null) {
+                Object error = tc.get("error");
+                tc.put("error_code", error instanceof Map<?, ?> m ? m.get("code") : null);
+            }
+            // Hoãn tới P4b, luôn null — nhưng khoá phải có mặt (SPEC mục 4).
+            tc.putIfAbsent("blocked_by", null);
+            for (String key : KNOWLEDGE_KEYS) tc.putIfAbsent(key, null);
+        }
+    }
+
+    private int countStatus(List<Map<String, Object>> tcs, String status) {
+        int n = 0;
+        for (Map<String, Object> tc : tcs) {
+            if (status.equals(String.valueOf(tc.get("status")).toLowerCase())) n++;
+        }
+        return n;
     }
 
     /**

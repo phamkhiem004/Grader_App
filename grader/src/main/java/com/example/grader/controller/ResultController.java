@@ -231,8 +231,28 @@ public class ResultController {
             }
 
             normalizeErrorFields(tc);
+            addContractKeysWithoutGuessing(tc);
         }
         return root;
+    }
+
+    /**
+     * Bổ sung khoá hợp đồng cho JSON ĐÃ LƯU — chỉ những khoá suy được mà KHÔNG phải đoán.
+     *
+     * <p>Cố ý KHÔNG bơm `executed` và `schema_version`: dữ liệu chấm trước P4 ghi mọi test chưa
+     * chạy thành `failed`, nên gán `executed = true` cho chúng là nói sai. Sự VẮNG MẶT của hai
+     * khoá đó chính là dấu hiệu "dữ liệu bản 1" mà bên đọc dựa vào — bơm vào là xoá mất dấu hiệu.
+     */
+    private void addContractKeysWithoutGuessing(ObjectNode tc) {
+        // Hoãn tới P4b nên luôn null; đặt khoá để bên đọc không phải đoán schema.
+        if (!tc.has("blocked_by")) tc.putNull("blocked_by");
+        // Mã lỗi phẳng: chép từ error.code đang có, không sinh giá trị mới.
+        if (!tc.has("error_code")) {
+            JsonNode error = tc.get("error");
+            String code = error instanceof ObjectNode obj ? textOrBlank(obj.get("code")) : "";
+            if (code.isBlank()) tc.putNull("error_code");
+            else tc.put("error_code", code);
+        }
     }
 
     /**

@@ -3,5 +3,6 @@
   "passed": 13,
   "failed": 0,
   "total": 13,
-  "failed_ids": []
+  "failed_ids": [],
+  "not_run_ids": []
 }

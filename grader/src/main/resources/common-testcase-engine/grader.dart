@@ -8,7 +8,12 @@ import 'dart:io';
 /// cũ khi chấm lại, và khi đó trường `engine_version` sẽ VẮNG MẶT.
 /// 2.1.0 — P3b: sửa ba khiếm khuyết CHẤM SAI ĐIỂM (xem exam_test.dart `_goneByKey`,
 /// `_settle`, `_validationErrorFor`). Bài chấm bằng bản < 2.1.0 có thể sai điểm.
-const String kEngineVersion = 'COMMON_V1-2.1.0';
+/// 2.2.0 — P4: phát `status: not_run` + `executed` + `not_run_tests`. Điểm KHÔNG đổi.
+const String kEngineVersion = 'COMMON_V1-2.2.0';
+
+/// PHẢI khớp hằng cùng tên trong `exam_test.dart` — hai chương trình Dart riêng biệt,
+/// không import nhau nên không chia sẻ được hằng số.
+const String kBootFailedMarker = '###GRADER_BOOT_FAILED###';
 
 Future<void> main() async {
   final matrix = _loadMatrix();
@@ -32,36 +37,65 @@ Future<void> main() async {
   // testcase nào của matrix có kết quả. Đây là lỗi RUNNER, khác hẳn "bài làm sai".
   final ranAny = matrix.keys.any(runs.containsKey);
   final runnerError = ranAny ? null : _shorten(_processError(process), 400);
-  // Log thô của runner là tiếng Anh + đường dẫn file: để trong grading_result.runner_error
-  // cho giáo viên, KHÔNG đưa vào `actual` vì actual đi thẳng tới sinh viên.
-  final fallbackActual = ranAny
-      ? 'Test thất bại.'
-      : 'Không chạy được: bộ test dừng trước khi kiểm được yêu cầu này.';
-
   var passed = 0;
+  var notRun = 0;
   var earned = 0.0;
   var total = 0.0;
   for (final entry in matrix.entries) {
     final id = entry.key;
     final metadata = _asMap(entry.value);
     final weight = _number(metadata, 'weight', 1);
+    final runner = (metadata['runner'] ?? '').toString();
     final result = runs[id];
     final ok = result?['passed'] == true;
+
+    // `not_run` = CHƯA CÓ CƠ HỘI CHẠY, khác hẳn `failed` (đã chạy tới nơi và không đạt).
+    // Chỉ gán khi QUAN SÁT ĐƯỢC, tuyệt đối không suy đoán từ thứ tự hay tầng của test:
+    //
+    //  a) Cả bộ test không khởi động được ⇒ không testcase nào có kết quả.
+    //  b) `_boot()` chung ném lỗi ⇒ runner chưa tới phần khẳng định của chính nó
+    //     (engine in kBootFailedMarker ngay tại chỗ, xem exam_test.dart).
+    //
+    // Ngoại lệ của (b): yêu cầu của APP_BOOT CHÍNH LÀ khởi động được, nên nó ĐÃ chạy và ĐÃ
+    // có phán quyết — gắn `not_run` cho nó là nói sai, và làm mất luôn nguyên nhân gốc.
+    final bootFailed = result?['bootFailed'] == true;
+    final isNotRun =
+        !ok && (!ranAny || (bootFailed && runner != 'APP_BOOT'));
+
     if (ok) {
       passed++;
       earned += weight;
+    } else if (isNotRun) {
+      notRun++;
     }
     total += weight;
+
+    // `actual` của test chưa chạy phải nêu VÌ SAO chưa chạy, không được lẫn chẩn đoán
+    // (SPEC mục 5.4). Log thô của runner là tiếng Anh + đường dẫn file nên chỉ nằm ở
+    // grading_result.runner_error cho giáo viên, không đi tới sinh viên.
+    final String actual;
+    if (ok) {
+      actual = 'Đã đáp ứng yêu cầu';
+    } else if (isNotRun) {
+      actual = ranAny
+          ? 'Chưa chạy: ứng dụng không mở được nên bộ chấm chưa kiểm tới yêu cầu này.'
+          : 'Chưa chạy: bộ test không khởi động được nên chưa kiểm tới yêu cầu này.';
+    } else {
+      actual = (result?['message'] ?? 'Test thất bại.').toString();
+    }
+
     cases.add(<String, dynamic>{
       'test_id': id,
       'name': metadata['name'] ?? id,
-      'status': ok ? 'passed' : 'failed',
+      'status': ok ? 'passed' : (isNotRun ? 'not_run' : 'failed'),
+      // Trường DẪN XUẤT của `status`, để bên đọc lọc nhanh mà không phải so chuỗi.
+      'executed': !isNotRun,
       'score': ok ? weight : 0,
       'max_score': weight,
       'difficulty': metadata['difficulty'] ?? 'basic',
       'skill_code': metadata['skill_code'] ?? 'N/A',
       'expected': metadata['expected']?.toString() ?? id,
-      'actual': ok ? 'Đã đáp ứng yêu cầu' : (result?['message'] ?? fallbackActual),
+      'actual': actual,
     });
   }
 
@@ -85,8 +119,11 @@ Future<void> main() async {
     'raw_score_before_contract_gate': _round(score),
     'total_raw_score': earned,
     'passed_tests': passed,
+    // `failed_tests` GIỮ nghĩa cũ = mọi test không passed, `not_run` là TẬP CON của nó
+    // (SPEC mục 2) — đổi nghĩa sẽ làm lệch số liệu và biểu đồ đang có của frontend.
     'failed_tests': cases.length - passed,
     'total_tests': cases.length,
+    'not_run_tests': notRun,
     'earned_weight': earned,
     'total_weight': total,
     'blocked': false,
@@ -121,6 +158,7 @@ Map<String, Map<String, dynamic>> _parseReporter(String output) {
   final namesById = <int, String>{};
   final errorsById = <int, List<String>>{};
   final dumpsById = <int, List<String>>{};
+  final bootFailedIds = <int>{};
   final runs = <String, Map<String, dynamic>>{};
   for (final line in output.split('\n')) {
     final raw = line.trim();
@@ -145,9 +183,12 @@ Map<String, Map<String, dynamic>> _parseReporter(String output) {
       // vĩnh viễn vô nghĩa (SPEC mục 5.1).
       final id = (event['testID'] as num?)?.toInt();
       final message = event['message']?.toString() ?? '';
+      if (id == null) continue;
+      // Engine tự khai "chưa chạy tới phần khẳng định của mình" ngay tại `_boot()`.
+      if (message.contains(kBootFailedMarker)) bootFailedIds.add(id);
       // Lọc chặt: chỉ nhận dump của flutter_test. print thường (log của bài sinh viên,
       // cảnh báo "tap() derived an Offset...") không phải chẩn đoán, gom vào là nhiễu.
-      if (id != null && _isFailureDump(message)) {
+      if (_isFailureDump(message)) {
         dumpsById.putIfAbsent(id, () => <String>[]).add(message);
       }
     } else if (type == 'error') {
@@ -162,6 +203,7 @@ Map<String, Map<String, dynamic>> _parseReporter(String output) {
       final ok = event['result'] == 'success' || event['skipped'] == true;
       runs[name] = <String, dynamic>{
         'passed': ok,
+        'bootFailed': bootFailedIds.contains(id),
         'message': ok
             ? 'Đã đáp ứng yêu cầu'
             : _failureMessage(dumpsById[id], errorsById[id]),

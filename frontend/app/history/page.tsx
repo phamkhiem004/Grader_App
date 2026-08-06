@@ -17,7 +17,7 @@ import {
 interface ExamOption { examId: string; examName: string; }
 interface TestError { code?: string; message?: string; }
 interface TestCaseItem {
-  test_id?: string; name?: string; status?: string; weight?: number;
+  test_id?: string; name?: string; status?: string; executed?: boolean; weight?: number;
   skill_code?: string; skill_name?: string; category_label?: string;
   difficulty?: string; skill?: string;
   expected?: string; actual?: string; error_log?: string;
@@ -778,7 +778,12 @@ export default function HistoryPage() {
                       <p className="text-sm font-bold text-slate-700">Chi tiết testcase</p>
                       <div className="space-y-1.5">
                         {detail.test_cases.map((tc, i) => {
-                          const passed = (tc.status || "").toLowerCase() === "passed";
+                          const status = (tc.status || "").toLowerCase();
+                          const passed = status === "passed";
+                          // not_run = CHƯA CÓ CƠ HỘI CHẠY, không phải làm sai. Tô cùng màu đỏ
+                          // với testcase hỏng thật sẽ khiến GV đọc thành "sai 12 chỗ khác nhau"
+                          // trong khi chỉ có MỘT nguyên nhân gốc.
+                          const notRun = status === "not_run";
                           return (
                             <div
                               key={tc.test_id || i}
@@ -786,11 +791,16 @@ export default function HistoryPage() {
                             >
                               <div className="flex items-center gap-2">
                                 <span
-                                  className={`h-1.5 w-1.5 shrink-0 rounded-full ${passed ? "bg-emerald-500" : "bg-rose-500"}`}
+                                  className={`h-1.5 w-1.5 shrink-0 rounded-full ${passed ? "bg-emerald-500" : notRun ? "bg-slate-300" : "bg-rose-500"}`}
                                 />
                                 <span className="min-w-0 flex-1 truncate text-xs font-medium text-slate-700">
                                   {tc.name || tc.test_id}
                                 </span>
+                                {notRun && (
+                                  <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-500">
+                                    Chưa chạy
+                                  </span>
+                                )}
                                 {(tc.skill_name || tc.skill_code) && (
                                   <span
                                     className="shrink-0 rounded bg-indigo-50 px-1.5 py-0.5 text-[10px] font-medium text-indigo-600"

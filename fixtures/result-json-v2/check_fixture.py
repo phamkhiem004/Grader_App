@@ -4,8 +4,11 @@
 
     python check_fixture.py <tên bài> <kết quả.json> <kỳ vọng.json>
 
-Chỉ so ĐIỂM và DANH SÁCH test hỏng — đó là phần phải bất biến qua các phase.
-Nội dung `actual` cố tình KHÔNG so, vì P5 sẽ thay đổi nó.
+Chỉ so ĐIỂM, DANH SÁCH test hỏng và cách chia `failed`/`not_run` — đó là phần phải bất
+biến qua các phase. Nội dung `actual` cố tình KHÔNG so, vì P5 sẽ thay đổi nó.
+
+`not_run_ids` được ghim riêng vì nó mang một khẳng định NHÂN QUẢ: test chưa có cơ hội chạy,
+khác hẳn đã chạy và không đạt. Chỉ đếm số lượng thì không bắt được lỗi gán sai test nào.
 """
 from __future__ import annotations
 
@@ -21,8 +24,11 @@ def summarize(result: dict) -> dict:
         "passed": result.get("soTestPass"),
         "failed": result.get("soTestFail"),
         "total": result.get("tongSoTest"),
+        # failed_ids giữ nghĩa cũ = mọi test không passed, not_run là tập con (SPEC mục 2).
         "failed_ids": sorted(str(tc.get("test_id")) for tc in cases
                              if tc.get("status") != "passed"),
+        "not_run_ids": sorted(str(tc.get("test_id")) for tc in cases
+                              if tc.get("status") == "not_run"),
     }
 
 
@@ -45,7 +51,7 @@ def main() -> int:
 
     want = json.loads(expected_path.read_text(encoding="utf-8"))
     diffs = [f"{key}: {got.get(key)!r} != {want.get(key)!r}"
-             for key in ("diem", "passed", "failed", "total", "failed_ids")
+             for key in ("diem", "passed", "failed", "total", "failed_ids", "not_run_ids")
              if got.get(key) != want.get(key)]
     if diffs:
         print(f"  [LỆCH] {name}: " + "; ".join(diffs))

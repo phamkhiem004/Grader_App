@@ -205,6 +205,17 @@ Future<void> _checkStateReactiveFlow(
   }
 }
 
+/// Dấu hiệu MÁY ĐỌC cho `grader.dart`: khung hình đầu tiên của ứng dụng không dựng được,
+/// nên runner **chưa chạy tới phần khẳng định của chính nó** ⇒ `status: not_run`.
+///
+/// Đây là *cơ chế phụ thuộc thật lúc chạy* mà SPEC mục 4.1 đòi hỏi, KHÔNG phải heuristic:
+/// mọi runner của engine chung đều gọi `_boot()` trước khi kiểm phần của mình, nên lỗi xảy ra
+/// BÊN TRONG `_boot()` là bằng chứng chắc chắn — khác hẳn kiểu suy đoán "test tầng cao hỏng
+/// sau test tầng thấp thì coi là bị chặn".
+///
+/// PHẢI khớp hằng cùng tên trong `grader.dart` (hai chương trình Dart riêng, không import nhau).
+const String kBootFailedMarker = '###GRADER_BOOT_FAILED###';
+
 Future<void> _boot(WidgetTester tester) async {
   // SQLite FFI là I/O thật; gọi main trong FakeAsync khiến Future loadUsers không
   // được hoàn tất, còn pumpAndSettle thì chờ vô hạn vì CircularProgressIndicator.
@@ -214,7 +225,12 @@ Future<void> _boot(WidgetTester tester) async {
     await Future<void>.delayed(const Duration(milliseconds: 500));
   });
   await tester.pump();
-  expect(tester.takeException(), isNull);
+  final exception = tester.takeException();
+  // In TRƯỚC khi assertion ném: sau đó không còn cơ hội in nữa.
+  if (exception != null) print(kBootFailedMarker);
+  // Giữ nguyên dạng `expect(..., isNull)`: backend đã có luật đọc `Actual:` là đối tượng lỗi
+  // Dart và đổi thành câu tiếng Việt, đừng tự nhét exception vào thông điệp fail.
+  expect(exception, isNull);
 }
 
 Future<void> _settle(WidgetTester tester) async {

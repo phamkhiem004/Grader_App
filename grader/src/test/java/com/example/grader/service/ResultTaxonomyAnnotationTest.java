@@ -141,6 +141,79 @@ class ResultTaxonomyAnnotationTest {
         assertEquals(written, tcs.get(0).get("expected"));
     }
 
+    // ── P4: bảo đảm khoá hợp đồng ─────────────────────────────────
+    private static List<Map<String, Object>> guarantee(List<Map<String, Object>> tcs) throws Exception {
+        Method m = BatchGradingService.class
+                .getDeclaredMethod("guaranteeContractKeys", List.class);
+        m.setAccessible(true);
+        m.invoke(new BatchGradingService(), tcs);
+        return tcs;
+    }
+
+    @Test
+    void derivesExecutedFromStatusForLegacyGraderOutput() throws Exception {
+        // Đề legacy không gửi `executed`; phải suy tại backend, không được bỏ trống.
+        List<Map<String, Object>> tcs = guarantee(cases(
+                map("test_id", "A", "status", "passed"),
+                map("test_id", "B", "status", "failed"),
+                map("test_id", "C", "status", "not_run")));
+
+        assertEquals(true, tcs.get(0).get("executed"));
+        assertEquals(true, tcs.get(1).get("executed"));
+        assertEquals(false, tcs.get(2).get("executed"));
+    }
+
+    @Test
+    void keepsExecutedSentByEngine() throws Exception {
+        // Engine chung là nơi BIẾT CHẮC; backend không được ghi đè phán quyết của nó.
+        List<Map<String, Object>> tcs = guarantee(cases(
+                map("test_id", "A", "status", "failed", "executed", false)));
+        assertEquals(false, tcs.get(0).get("executed"));
+    }
+
+    @Test
+    void forcesScoreToZeroForNotRun() throws Exception {
+        // not_run vẫn tính vào total_weight nhưng KHÔNG được mang điểm (SPEC mục 4).
+        List<Map<String, Object>> tcs = guarantee(cases(
+                map("test_id", "A", "status", "not_run", "score", 5)));
+        assertEquals(0, tcs.get(0).get("score"));
+    }
+
+    @Test
+    void flattensErrorCodeWithoutInventingOne() throws Exception {
+        List<Map<String, Object>> tcs = guarantee(cases(
+                map("test_id", "A", "status", "failed", "error", map("code", "WIDGET_NOT_FOUND")),
+                map("test_id", "B", "status", "passed")));
+
+        assertEquals("WIDGET_NOT_FOUND", tcs.get(0).get("error_code"));
+        assertTrue(tcs.get(1).containsKey("error_code"));
+        assertNull(tcs.get(1).get("error_code"));
+    }
+
+    @Test
+    void keepsEveryContractKeyPresentWhenKnowledgeLabellingFellOver() throws Exception {
+        // Ca SUY GIẢM: `syllabusService.resolver()` ném lỗi nên CompetencyService không chạy.
+        // Khoá vắng mặt sẽ bị bên đọc hiểu là "dữ liệu cũ, được phép tự suy" — đúng thứ hai
+        // bên đã thống nhất bỏ. Nên khoá phải CÓ MẶT, giá trị null là hợp lệ.
+        List<Map<String, Object>> tcs = guarantee(cases(map("test_id", "A", "status", "failed")));
+        Map<String, Object> tc = tcs.get(0);
+
+        for (String key : List.of("executed", "error_code", "blocked_by",
+                "chapter", "category", "category_label", "skill_name", "difficulty_label")) {
+            assertTrue(tc.containsKey(key), "thiếu khoá " + key);
+        }
+        assertNull(tc.get("chapter"));
+        assertNull(tc.get("blocked_by"));
+    }
+
+    @Test
+    void doesNotOverwriteKnowledgeLabelsAlreadyResolved() throws Exception {
+        List<Map<String, Object>> tcs = guarantee(cases(
+                map("test_id", "A", "status", "passed", "chapter", 6, "category", "STATE_MANAGEMENT")));
+        assertEquals(6, tcs.get(0).get("chapter"));
+        assertEquals("STATE_MANAGEMENT", tcs.get(0).get("category"));
+    }
+
     // ── chapter ───────────────────────────────────────────────────
     @Test
     void chapterPrefersExplicitColumnThenDerivesFromOrder() {

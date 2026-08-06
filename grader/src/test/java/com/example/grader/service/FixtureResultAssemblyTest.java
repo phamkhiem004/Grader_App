@@ -86,6 +86,12 @@ class FixtureResultAssemblyTest {
                     assertFalse(String.valueOf(tc.get("student_safe_summary")).isBlank(),
                             variant + "/" + id + ": thiếu student_safe_summary");
                 }
+                // P5: `actual` của mọi test KHÔNG đạt phải đến từ kênh quan sát có cấu trúc,
+                // không phải từ bóc log tiếng Anh. Runner nào rơi lại về bóc log thì đỏ ở đây.
+                if (!"passed".equals(tc.get("status"))) {
+                    assertEquals("observation", tc.get("actual_source"),
+                            variant + "/" + id + ": actual còn dựng từ log — " + tc.get("actual"));
+                }
             }
             done++;
         }

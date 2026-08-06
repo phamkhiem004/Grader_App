@@ -34,14 +34,18 @@ Future<void> _runCase(
     case 'APP_BOOT':
       await _boot(tester);
       final rootKey = _text(parameters, 'rootKey');
-      if (rootKey.isNotEmpty) expect(_byKey(rootKey), findsOneWidget);
+      if (rootKey.isNotEmpty) {
+        _expectPresent(_byKey(rootKey), 'screen',
+            'Không tìm thấy màn hình gốc: $rootKey');
+      }
       expect(tester.takeException(), isNull);
       return;
     case 'WIDGET_VISIBLE':
       await _boot(tester);
       final widgetKey = _requiredText(parameters, 'widgetKey');
       final widgetFinder = _byKey(widgetKey);
-      expect(widgetFinder, findsOneWidget, reason: 'Không tìm thấy widget key: $widgetKey');
+      _expectPresent(widgetFinder, _subject(parameters),
+          'Không tìm thấy widget key: $widgetKey');
       final visibleType = _text(parameters, 'targetType');
       if (visibleType.isNotEmpty) {
         _assertTargetType(tester, widgetFinder, widgetKey, visibleType);
@@ -83,14 +87,15 @@ Future<void> _runCase(
     case 'FORM_REQUIRED_FIELDS':
       await _boot(tester);
       for (final key in _csv(parameters, 'fieldKeys')) {
-        expect(_byKey(key), findsOneWidget, reason: 'Thiếu field semantic key: $key');
+        _expectPresent(_byKey(key), 'field', 'Thiếu field semantic key: $key');
       }
       final submitKey = _text(parameters, 'submitKey');
-      expect(_byKey(submitKey), findsOneWidget, reason: 'Thiếu submit key: $submitKey');
+      _expectPresent(_byKey(submitKey), 'button', 'Thiếu submit key: $submitKey');
       await tester.tap(_byKey(submitKey));
       await _settle(tester);
       for (final key in _csv(parameters, 'errorKeys')) {
-        expect(_byKey(key), findsOneWidget, reason: 'Thiếu error key: $key');
+        _expectPresent(_byKey(key), 'error', 'Thiếu error key: $key',
+            where: 'after_action');
       }
       return;
     case 'RESPONSIVE_NO_OVERFLOW':
@@ -117,28 +122,30 @@ Future<void> _runCase(
       final destinationKey = _text(parameters, 'destinationKey');
       await tester.tap(_byKey(openKey));
       await _settle(tester);
-      expect(_byKey(destinationKey), findsOneWidget);
+      _expectPresent(_byKey(destinationKey), 'screen',
+          'Không mở được màn hình đích: $destinationKey', where: 'after_action');
       final backKey = _text(parameters, 'backKey');
       final homeKey = _text(parameters, 'homeKey');
       if (backKey.isNotEmpty && homeKey.isNotEmpty) {
         await tester.tap(_byKey(backKey));
         await _settle(tester);
-        expect(_byKey(homeKey), findsOneWidget,
-            reason: 'Sau khi quay lại, không thấy màn hình trước: $homeKey');
+        _expectPresent(_byKey(homeKey), 'screen',
+            'Sau khi quay lại, không thấy màn hình trước: $homeKey', where: 'after_action');
         // Phải kiểm cả chiều BIẾN MẤT. Một mình `homeKey` là phép kiểm KHÔNG THỂ HỎNG:
         // màn hình trước vẫn nằm trong cây widget suốt lúc màn hình sau đang mở, nên nút
         // quay lại có bấm được hay không thì nó vẫn đạt. Chính chỗ này từng che lỗi
         // `_settle` không đẩy đồng hồ ảo, làm cả một lỗi chấm sai điểm không ai thấy.
-        expect(_goneByKey(destinationKey), findsNothing,
-            reason: 'Bấm quay lại nhưng màn hình $destinationKey vẫn đang hiển thị');
+        _expectGone(_goneByKey(destinationKey), 'screen',
+            'Bấm quay lại nhưng màn hình $destinationKey vẫn đang hiển thị',
+            where: 'after_action');
       }
       return;
     case 'LIST_VISIBLE':
       await _boot(tester);
       final listKey = _text(parameters, 'listKey');
-      expect(_byKey(listKey), findsOneWidget);
+      _expectPresent(_byKey(listKey), 'list', 'Không tìm thấy list key: $listKey');
       for (final key in _csv(parameters, 'itemKeys')) {
-        expect(_byKey(key), findsOneWidget, reason: 'Thiếu item semantic key: $key');
+        _expectPresent(_byKey(key), 'item', 'Thiếu item semantic key: $key');
       }
       return;
     case 'BUTTON_ACTION':
@@ -147,7 +154,8 @@ Future<void> _runCase(
       final resultKey = _text(parameters, 'resultKey');
       await tester.tap(_byKey(buttonKey));
       await _settle(tester);
-      expect(_byKey(resultKey), findsOneWidget);
+      _expectPresent(_byKey(resultKey), _subject(parameters),
+          'Bấm xong nhưng không thấy kết quả: $resultKey', where: 'after_action');
       return;
     default:
       fail('Testcase $testId chưa có common runner: $runner');
@@ -193,16 +201,93 @@ Future<void> _checkStateReactiveFlow(
   final actionKey = _requiredText(parameters, 'actionKey');
   final updatedKey = _requiredText(parameters, 'updatedKey');
   final absentKey = _text(parameters, 'absentKey');
-  expect(_byKey(initialKey), findsOneWidget,
-      reason: 'Thiếu state ban đầu: $initialKey');
+  _expectPresent(_byKey(initialKey), 'widget', 'Thiếu state ban đầu: $initialKey');
   await tester.tap(_byKey(actionKey));
   await _settle(tester);
-  expect(_byKey(updatedKey), findsOneWidget,
-      reason: 'State không cập nhật sau action $actionKey: $updatedKey');
+  _expectPresent(_byKey(updatedKey), 'widget',
+      'State không cập nhật sau action $actionKey: $updatedKey', where: 'after_action');
   if (absentKey.isNotEmpty) {
-    expect(_goneByKey(absentKey), findsNothing,
-        reason: 'State cũ vẫn còn sau action $actionKey: $absentKey');
+    _expectGone(_goneByKey(absentKey), 'widget',
+        'State cũ vẫn còn sau action $actionKey: $absentKey', where: 'after_action');
   }
+}
+
+/// KÊNH QUAN SÁT CÓ CẤU TRÚC (SPEC mục 5.3) — nguồn của `actual` trong result.json.
+///
+/// Runner là nơi DUY NHẤT biết chính xác nó kiểm gì và thấy gì trước khi assertion nổ. Nó phát
+/// ra dữ liệu MÁY ĐỌC ở đây; toàn bộ việc diễn ra tiếng Việt do **backend** làm.
+///
+/// Vì sao render ở backend chứ không ở đây: file này bị chép ĐÓNG BĂNG vào thư mục testcase của
+/// từng đề lúc publish. Câu chữ để trong này thì sửa một chữ cũng phải nâng engine cho mọi đề đã
+/// publish; để ở backend thì sửa một lần là đề cũ lẫn đề mới đều hưởng.
+///
+/// LUẬT NỘI DUNG (SPEC mục 5.4) — payload chỉ được chứa:
+///  - `kind`: loại quan sát (bảng đóng, xem `_ObsKind` phía backend);
+///  - `subject`: loại thành phần theo cách SINH VIÊN hiểu (`field`, `button`, `list`, `item`,
+///    `dialog`, `screen`, `error`, `text`) — **KHÔNG BAO GIỜ** là semantic key nội bộ;
+///  - số đếm / giá trị QUAN SÁT ĐƯỢC (`expected`, `found`, `seen`, `unit`, `dimension`);
+///  - `where`: bối cảnh kiểm (`portrait`, `landscape`, `after_action`…).
+///
+/// Tuyệt đối không đưa `ValueKey`, tên hàm test hay số thứ tự test vào đây.
+const String kObservationMarker = '###GRADER_OBS###';
+
+void _observe(
+  String kind, {
+  String? subject,
+  num? expected,
+  num? found,
+  String? seen,
+  String? unit,
+  String? dimension,
+  String? where,
+}) {
+  final payload = <String, dynamic>{'kind': kind};
+  void put(String key, Object? value) {
+    if (value != null) payload[key] = value;
+  }
+
+  put('subject', subject);
+  put('expected', expected);
+  put('found', found);
+  // Chữ NGƯỜI DÙNG THẤY trên màn hình được phép in (SPEC 5.4); cắt ngắn cho gọn JSON.
+  put('seen', seen == null ? null : (seen.length > 80 ? '${seen.substring(0, 80)}…' : seen));
+  put('unit', unit);
+  put('dimension', dimension);
+  put('where', where);
+  print('$kObservationMarker${jsonEncode(payload)}');
+}
+
+/// Loại thành phần theo cách SINH VIÊN hiểu, suy từ `targetType` mà template đã khai.
+///
+/// Cố ý KHÔNG suy từ semantic key: key là định danh nội bộ của hệ thống chấm
+/// (`field.name`, `action.save`), sinh viên không kiểm chứng được nên không được lộ ra.
+String _subject(Map<String, dynamic> parameters, [String fallback = 'widget']) {
+  const known = <String>{
+    'button', 'text', 'input', 'field', 'list', 'item', 'dialog', 'screen', 'image', 'icon',
+  };
+  final type = _text(parameters, 'targetType').toLowerCase();
+  return known.contains(type) ? type : fallback;
+}
+
+/// Bọc phép kiểm "PHẢI CÓ": phát quan sát trước, rồi assert Y NGUYÊN như cũ.
+///
+/// Quan sát chỉ là hiệu ứng lề — assertion không đổi một chữ nên **điểm không thể lệch**. Đó là
+/// cổng bắt buộc của P5 và là lý do chọn cách bọc thay vì viết lại từng runner.
+void _expectPresent(Finder finder, String subject, String reason, {String? where}) {
+  final found = finder.evaluate().length;
+  if (found != 1) {
+    _observe('MISSING', subject: subject, expected: 1, found: found, where: where);
+  }
+  expect(finder, findsOneWidget, reason: reason);
+}
+
+/// Bọc phép kiểm "PHẢI BIẾN MẤT". Luôn dùng [_goneByKey] cho finder, xem lý do ở đó.
+void _expectGone(Finder finder, String subject, String reason, {String? where}) {
+  final found = finder.evaluate().length;
+  if (found != 0) {
+    _observe('STILL_PRESENT', subject: subject, expected: 0, found: found, where: where);
+  }
+  expect(finder, findsNothing, reason: reason);
 }
 
 /// Dấu hiệu MÁY ĐỌC cho `grader.dart`: khung hình đầu tiên của ứng dụng không dựng được,
@@ -227,7 +312,10 @@ Future<void> _boot(WidgetTester tester) async {
   await tester.pump();
   final exception = tester.takeException();
   // In TRƯỚC khi assertion ném: sau đó không còn cơ hội in nữa.
-  if (exception != null) print(kBootFailedMarker);
+  if (exception != null) {
+    print(kBootFailedMarker);
+    _observe('BOOT_FAILED');
+  }
   // Giữ nguyên dạng `expect(..., isNull)`: backend đã có luật đọc `Actual:` là đối tượng lỗi
   // Dart và đổi thành câu tiếng Việt, đừng tự nhét exception vào thông điệp fail.
   expect(exception, isNull);
@@ -278,11 +366,24 @@ Future<void> _responsive(
 
   tester.view.physicalSize = portrait;
   await _boot(tester);
-  expect(tester.takeException(), isNull);
+  _expectNoLayoutError(tester, where: 'portrait');
 
   tester.view.physicalSize = landscape;
   await _settle(tester);
-  expect(tester.takeException(), isNull);
+  _expectNoLayoutError(tester, where: 'landscape');
+}
+
+/// Không có lỗi bố cục ở kích thước đang kiểm.
+///
+/// Tràn khung là điều QUAN SÁT ĐƯỢC: sinh viên mở máy ở đúng kích thước đó là thấy vệt vàng.
+/// Nên chỉ cần nói *tràn ở kích thước nào*, không cần dán log tiếng Anh.
+void _expectNoLayoutError(WidgetTester tester, {required String where}) {
+  final exception = tester.takeException();
+  if (exception != null) {
+    final text = exception.toString().toLowerCase();
+    _observe(text.contains('overflow') ? 'OVERFLOW' : 'LAYOUT_ERROR', where: where);
+  }
+  expect(exception, isNull);
 }
 
 Future<void> _responsiveTarget(
@@ -306,18 +407,18 @@ Future<void> _responsiveTarget(
 
   tester.view.physicalSize = portrait;
   await _boot(tester);
-  expect(tester.takeException(), isNull);
+  _expectNoLayoutError(tester, where: 'portrait');
   final portraitFinder = _byKey(targetKey);
-  expect(portraitFinder, findsOneWidget,
-      reason: 'Thiếu target ở portrait: $targetKey');
+  _expectPresent(portraitFinder, _subject(parameters),
+      'Thiếu target ở portrait: $targetKey', where: 'portrait');
   _assertTargetType(tester, portraitFinder, targetKey, targetType);
 
   tester.view.physicalSize = landscape;
   await _settle(tester);
-  expect(tester.takeException(), isNull);
+  _expectNoLayoutError(tester, where: 'landscape');
   final landscapeFinder = _byKey(targetKey);
-  expect(landscapeFinder, findsOneWidget,
-      reason: 'Thiếu target ở landscape: $targetKey');
+  _expectPresent(landscapeFinder, _subject(parameters),
+      'Thiếu target ở landscape: $targetKey', where: 'landscape');
   _assertTargetType(tester, landscapeFinder, targetKey, targetType);
 }
 
@@ -329,7 +430,7 @@ Future<void> _checkWidgetDimension(
   final key = _requiredText(parameters, 'targetKey');
   final targetType = _requiredText(parameters, 'targetType');
   final finder = _byKey(key);
-  expect(finder, findsOneWidget, reason: 'Không tìm thấy target key: $key');
+  _expectPresent(finder, _subject(parameters), 'Không tìm thấy target key: $key');
   _assertTargetType(tester, finder, key, targetType);
 
   final dimension = _text(parameters, 'dimension').toLowerCase();
@@ -338,7 +439,8 @@ Future<void> _checkWidgetDimension(
   final size = tester.getSize(finder);
   final actual = dimension == 'width' ? size.width : size.height;
   _assertNumber(actual, expected, tolerance, _text(parameters, 'comparison'),
-      '$key ($targetType) có $dimension=$actual, mong đợi $expected');
+      '$key ($targetType) có $dimension=$actual, mong đợi $expected',
+      dimension: dimension == 'width' ? 'chiều rộng' : 'chiều cao');
 }
 
 Future<void> _checkWidgetTypeVisible(
@@ -349,7 +451,7 @@ Future<void> _checkWidgetTypeVisible(
   final key = _requiredText(parameters, 'targetKey');
   final targetType = _requiredText(parameters, 'targetType');
   final finder = _byKey(key);
-  expect(finder, findsOneWidget, reason: 'Không tìm thấy target key: $key');
+  _expectPresent(finder, _subject(parameters), 'Không tìm thấy target key: $key');
   _assertTargetType(tester, finder, key, targetType);
 }
 
@@ -361,12 +463,16 @@ Future<void> _checkWidgetTextContent(
   final key = _requiredText(parameters, 'targetKey');
   final targetType = _text(parameters, 'targetType', 'text');
   final finder = _byKey(key);
-  expect(finder, findsOneWidget, reason: 'Không tìm thấy target key: $key');
+  _expectPresent(finder, 'text', 'Không tìm thấy target key: $key');
   _assertTargetType(tester, finder, key, targetType);
   final widget = tester.widget<Text>(finder);
   final actual = widget.data ?? widget.textSpan?.toPlainText() ?? '';
   final expected = _requiredText(parameters, 'expectedText');
   final matchMode = _text(parameters, 'matchMode', 'equals').toLowerCase();
+  final ok = matchMode == 'contains' ? actual.contains(expected) : actual == expected;
+  // Chữ SINH VIÊN đang hiển thị được phép in nguyên văn (SPEC 5.4): đó là thứ em ấy tự
+  // nhìn thấy trên máy mình, không phải khoá nội bộ hay log của hệ thống chấm.
+  if (!ok) _observe('TEXT_MISMATCH', subject: 'text', seen: actual);
   if (matchMode == 'contains') {
     expect(actual, contains(expected), reason: 'Nội dung $key không chứa expectedText');
   } else {
@@ -382,14 +488,18 @@ Future<void> _checkWidgetEnabled(
   final key = _requiredText(parameters, 'targetKey');
   final targetType = _requiredText(parameters, 'targetType');
   final finder = _byKey(key);
-  expect(finder, findsOneWidget, reason: 'Không tìm thấy target key: $key');
+  _expectPresent(finder, _subject(parameters, 'button'), 'Không tìm thấy target key: $key');
   _assertTargetType(tester, finder, key, targetType);
   final enabled = _enabledState(tester.widget<Widget>(finder));
   if (enabled == null) {
     fail('Không đọc được trạng thái enabled của $key (${targetType}).');
   }
-  expect(enabled, _bool(parameters, 'expectedEnabled', true),
-      reason: 'Trạng thái enabled của $key không đúng');
+  final wantEnabled = _bool(parameters, 'expectedEnabled', true);
+  if (enabled != wantEnabled) {
+    _observe('ENABLED_MISMATCH', subject: _subject(parameters, 'button'),
+        seen: enabled == true ? 'enabled' : 'disabled');
+  }
+  expect(enabled, wantEnabled, reason: 'Trạng thái enabled của $key không đúng');
 }
 
 Future<void> _checkFormValidateFields(
@@ -406,7 +516,7 @@ Future<void> _checkFormValidateFields(
   final fieldType = _text(parameters, 'fieldType', 'input');
   for (var i = 0; i < fields.length; i++) {
     final fieldFinder = _byKey(fields[i]);
-    expect(fieldFinder, findsOneWidget, reason: 'Thiếu field key: ${fields[i]}');
+    _expectPresent(fieldFinder, 'field', 'Thiếu field key: ${fields[i]}');
     _assertTargetType(tester, fieldFinder, fields[i], fieldType);
     await tester.enterText(fieldFinder, _decodeInput(values[i]));
   }
@@ -414,8 +524,8 @@ Future<void> _checkFormValidateFields(
   await tester.tap(_byKey(submitKey));
   await _settle(tester);
   for (final errorKey in errors) {
-    expect(_byKey(errorKey), findsOneWidget,
-        reason: 'Thiếu lỗi validation key: $errorKey');
+    _expectPresent(_byKey(errorKey), 'error',
+        'Thiếu lỗi validation key: $errorKey', where: 'after_action');
   }
 }
 
@@ -426,15 +536,19 @@ Future<void> _checkListItemCount(
   await _boot(tester);
   final listKey = _requiredText(parameters, 'listKey');
   final listFinder = _byKey(listKey);
-  expect(listFinder, findsOneWidget, reason: 'Không tìm thấy list key: $listKey');
+  _expectPresent(listFinder, 'list', 'Không tìm thấy list key: $listKey');
   final itemKeys = _csv(parameters, 'itemKeys');
   if (itemKeys.isEmpty) fail('Thiếu itemKeys khi kiểm tra list.');
   var count = 0;
   for (final itemKey in itemKeys) {
     count += find.descendant(of: listFinder, matching: _byKey(itemKey)).evaluate().length;
   }
-  expect(count, _number(parameters, 'expectedCount', double.nan).toInt(),
-      reason: 'Số item trong $listKey không đúng');
+  final wanted = _number(parameters, 'expectedCount', double.nan).toInt();
+  // Số đếm là quan sát được và vô hại: sinh viên tự đếm lại trên màn hình của mình.
+  if (count != wanted) {
+    _observe('COUNT_MISMATCH', subject: 'item', expected: wanted, found: count);
+  }
+  expect(count, wanted, reason: 'Số item trong $listKey không đúng');
 }
 
 Future<void> _checkFormPrefill(
@@ -453,11 +567,16 @@ Future<void> _checkFormPrefill(
   final fieldType = _text(parameters, 'fieldType', 'input');
   for (var i = 0; i < fields.length; i++) {
     final fieldFinder = _byKey(fields[i]);
-    expect(fieldFinder, findsOneWidget, reason: 'Thiếu field key: ${fields[i]}');
+    _expectPresent(fieldFinder, 'field', 'Thiếu field key: ${fields[i]}');
     _assertTargetType(tester, fieldFinder, fields[i], fieldType);
     final editable = find.descendant(of: fieldFinder, matching: find.byType(EditableText));
-    expect(editable, findsOneWidget, reason: 'Field ${fields[i]} không phải editable input');
-    expect(tester.widget<EditableText>(editable).controller.text, _decodeInput(expectedValues[i]),
+    _expectPresent(editable, 'field', 'Field ${fields[i]} không phải editable input');
+    final filled = tester.widget<EditableText>(editable).controller.text;
+    // Giá trị đang nằm trong ô nhập là thứ sinh viên tự nhìn thấy được.
+    if (filled != _decodeInput(expectedValues[i])) {
+      _observe('TEXT_MISMATCH', subject: 'field', seen: filled, where: 'after_action');
+    }
+    expect(filled, _decodeInput(expectedValues[i]),
         reason: 'Field ${fields[i]} không được prefill đúng');
   }
 }
@@ -475,17 +594,20 @@ Future<void> _checkFormSubmit(
   final fieldType = _text(parameters, 'fieldType', 'input');
   for (var i = 0; i < fields.length; i++) {
     final fieldFinder = _byKey(fields[i]);
-    expect(fieldFinder, findsOneWidget, reason: 'Thiếu field key: ${fields[i]}');
+    _expectPresent(fieldFinder, 'field', 'Thiếu field key: ${fields[i]}');
     _assertTargetType(tester, fieldFinder, fields[i], fieldType);
     await tester.enterText(fieldFinder, _decodeInput(values[i]));
   }
   await tester.tap(_byKey(_requiredText(parameters, 'submitKey')));
   await _settle(tester);
   final resultKey = _text(parameters, 'resultKey');
-  if (resultKey.isNotEmpty) expect(_byKey(resultKey), findsOneWidget);
+  if (resultKey.isNotEmpty) {
+    _expectPresent(_byKey(resultKey), 'item',
+        'Lưu xong nhưng không thấy kết quả: $resultKey', where: 'after_action');
+  }
   for (final errorKey in _csv(parameters, 'errorKeys')) {
-    expect(_goneByKey(errorKey), findsNothing,
-        reason: 'Dữ liệu hợp lệ nhưng vẫn còn error key: $errorKey');
+    _expectGone(_goneByKey(errorKey), 'error',
+        'Dữ liệu hợp lệ nhưng vẫn còn error key: $errorKey', where: 'after_action');
   }
 }
 
@@ -500,18 +622,23 @@ Future<void> _checkDialogFlow(
 
   final dialogKey = _requiredText(parameters, 'dialogKey');
   final dialogFinder = _byKey(dialogKey);
-  expect(dialogFinder, findsOneWidget, reason: 'Không tìm thấy dialog key: $dialogKey');
+  _expectPresent(dialogFinder, 'dialog',
+      'Không tìm thấy dialog key: $dialogKey', where: 'after_action');
   _assertTargetType(tester, dialogFinder, dialogKey, 'dialog');
 
   final decisionKey = _requiredText(parameters, 'decisionKey');
   await tester.tap(_byKey(decisionKey));
   await _settle(tester);
   final resultKey = _text(parameters, 'resultKey');
-  if (resultKey.isNotEmpty) expect(_byKey(resultKey), findsOneWidget);
+  if (resultKey.isNotEmpty) {
+    _expectPresent(_byKey(resultKey), 'item',
+        'Xác nhận xong nhưng không thấy kết quả: $resultKey', where: 'after_action');
+  }
   final absentKey = _text(parameters, 'absentKey');
   if (absentKey.isNotEmpty) {
-    expect(_goneByKey(absentKey), findsNothing,
-        reason: 'Sau khi xác nhận, mục lẽ ra phải biến mất vẫn còn: $absentKey');
+    _expectGone(_goneByKey(absentKey), 'item',
+        'Sau khi xác nhận, mục lẽ ra phải biến mất vẫn còn: $absentKey',
+        where: 'after_action');
   }
 }
 
@@ -525,11 +652,16 @@ Future<void> _checkWidgetSemanticsLabel(
   final key = _requiredText(parameters, 'targetKey');
   final targetType = _text(parameters, 'targetType', 'any');
   final finder = _byKey(key);
-  expect(finder, findsOneWidget, reason: 'Không tìm thấy target key: $key');
+  _expectPresent(finder, _subject(parameters), 'Không tìm thấy target key: $key');
   _assertTargetType(tester, finder, key, targetType);
   final actual = tester.getSemantics(finder).label;
   final expected = _requiredText(parameters, 'expectedLabel');
   final matchMode = _text(parameters, 'matchMode', 'equals').toLowerCase();
+  // Nhãn trợ năng là chữ trình đọc màn hình đọc lên cho người dùng — được phép in.
+  final labelOk = matchMode == 'contains' ? actual.contains(expected) : actual == expected;
+  if (!labelOk) {
+    _observe('LABEL_MISMATCH', subject: 'widget', seen: actual.isEmpty ? null : actual);
+  }
   if (matchMode == 'contains') {
     expect(actual, contains(expected), reason: 'Semantics label của $key không chứa expectedLabel');
   } else {
@@ -545,20 +677,20 @@ Future<void> _checkWidgetPadding(
   final key = _requiredText(parameters, 'targetKey');
   final targetType = _requiredText(parameters, 'targetType');
   final finder = _byKey(key);
-  expect(finder, findsOneWidget, reason: 'Không tìm thấy target key: $key');
+  _expectPresent(finder, _subject(parameters), 'Không tìm thấy target key: $key');
   _assertTargetType(tester, finder, key, targetType);
 
   final render = tester.renderObject<RenderPadding>(finder);
   final padding = render.padding.resolve(TextDirection.ltr);
   final tolerance = _number(parameters, 'tolerance', 0.5);
   _assertNumber(padding.left, _number(parameters, 'left', double.nan), tolerance,
-      'equals', '$key left padding');
+      'equals', '$key left padding', dimension: 'khoảng đệm bên trái');
   _assertNumber(padding.top, _number(parameters, 'top', double.nan), tolerance,
-      'equals', '$key top padding');
+      'equals', '$key top padding', dimension: 'khoảng đệm phía trên');
   _assertNumber(padding.right, _number(parameters, 'right', double.nan), tolerance,
-      'equals', '$key right padding');
+      'equals', '$key right padding', dimension: 'khoảng đệm bên phải');
   _assertNumber(padding.bottom, _number(parameters, 'bottom', double.nan), tolerance,
-      'equals', '$key bottom padding');
+      'equals', '$key bottom padding', dimension: 'khoảng đệm phía dưới');
 }
 
 Future<void> _checkWidgetTextStyle(
@@ -569,7 +701,7 @@ Future<void> _checkWidgetTextStyle(
   final key = _requiredText(parameters, 'targetKey');
   final targetType = _requiredText(parameters, 'targetType');
   final finder = _byKey(key);
-  expect(finder, findsOneWidget, reason: 'Không tìm thấy target key: $key');
+  _expectPresent(finder, 'text', 'Không tìm thấy target key: $key');
   _assertTargetType(tester, finder, key, targetType);
 
   final text = tester.widget<Text>(finder);
@@ -580,10 +712,13 @@ Future<void> _checkWidgetTextStyle(
   final expectedSize = _number(parameters, 'fontSize', double.nan);
   if (!expectedSize.isNaN) {
     _assertNumber(resolved.fontSize ?? double.nan, expectedSize, tolerance,
-        'equals', '$key fontSize');
+        'equals', '$key fontSize', dimension: 'cỡ chữ');
   }
   final expectedWeight = _text(parameters, 'fontWeight');
   if (expectedWeight.isNotEmpty) {
+    if (resolved.fontWeight != _fontWeight(expectedWeight)) {
+      _observe('STYLE_MISMATCH', subject: 'text', dimension: 'độ đậm chữ');
+    }
     expect(resolved.fontWeight, _fontWeight(expectedWeight),
         reason: '$key fontWeight không đúng');
   }
@@ -598,8 +733,8 @@ Future<void> _checkWidgetGap(
   final toKey = _requiredText(parameters, 'toKey');
   final fromFinder = _byKey(fromKey);
   final toFinder = _byKey(toKey);
-  expect(fromFinder, findsOneWidget, reason: 'Không tìm thấy fromKey: $fromKey');
-  expect(toFinder, findsOneWidget, reason: 'Không tìm thấy toKey: $toKey');
+  _expectPresent(fromFinder, 'widget', 'Không tìm thấy fromKey: $fromKey');
+  _expectPresent(toFinder, 'widget', 'Không tìm thấy toKey: $toKey');
   final fromType = _text(parameters, 'fromType');
   final toType = _text(parameters, 'toType');
   if (fromType.isNotEmpty) _assertTargetType(tester, fromFinder, fromKey, fromType);
@@ -611,7 +746,7 @@ Future<void> _checkWidgetGap(
   final actual = axis == 'horizontal' ? to.left - from.right : to.top - from.bottom;
   _assertNumber(actual, _number(parameters, 'expectedGap', double.nan),
       _number(parameters, 'tolerance', 0.5), 'equals',
-      'Khoảng cách $fromKey → $toKey');
+      'Khoảng cách $fromKey → $toKey', dimension: 'khoảng cách giữa hai thành phần');
 }
 
 String _requiredText(Map<String, dynamic> map, String key) {
@@ -675,16 +810,33 @@ bool _bool(Map<String, dynamic> map, String key, bool fallback) {
   return value == null ? fallback : value.toString().toLowerCase() == 'true';
 }
 
+/// Điểm chung của WIDGET_DIMENSION / WIDGET_PADDING / WIDGET_GAP / WIDGET_TEXT_STYLE —
+/// nên phát quan sát ở đây là phủ được cả bốn runner bằng một chỗ.
+///
+/// [dimension] là tên phép đo hiển thị cho sinh viên (`chiều rộng`, `khoảng cách`…), KHÔNG phải
+/// semantic key. Số đo là quan sát được: sinh viên đo lại trên máy mình là ra.
 void _assertNumber(
   double actual,
   double expected,
   double tolerance,
   String comparison,
-  String reason,
-) {
+  String reason, {
+  String dimension = 'kích thước',
+  String unit = 'px',
+}) {
   if (expected.isNaN) fail('Thiếu giá trị số khi kiểm tra: $reason');
   final margin = tolerance < 0 ? 0 : tolerance;
-  switch (comparison.isEmpty ? 'equals' : comparison.toLowerCase()) {
+  final mode = comparison.isEmpty ? 'equals' : comparison.toLowerCase();
+  final ok = switch (mode) {
+    'at_least' => actual >= expected - margin,
+    'at_most' => actual <= expected + margin,
+    _ => (actual - expected).abs() <= margin,
+  };
+  if (!ok) {
+    _observe('NUMBER_MISMATCH',
+        dimension: dimension, expected: expected, found: actual, unit: unit);
+  }
+  switch (mode) {
     case 'at_least':
       expect(actual, greaterThanOrEqualTo(expected - margin), reason: reason);
       return;

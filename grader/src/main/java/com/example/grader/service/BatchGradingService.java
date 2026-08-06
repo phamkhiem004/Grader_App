@@ -507,17 +507,44 @@ public class BatchGradingService {
     private void sanitizeTestCaseErrors(List<Map<String, Object>> tcs) {
         for (Map<String, Object> tc : tcs) {
             String status = String.valueOf(tc.getOrDefault("status", "")).toLowerCase();
-            if (!status.contains("fail")) continue;                 // chỉ xử lý câu fail
+            // not_run cũng cần diễn đạt lý do chưa chạy, nhưng KHÔNG phân loại lỗi.
+            if (!status.contains("fail")) {
+                renderObservation(tc);
+                continue;
+            }
             Object rawObj = tc.get("actual");
             if (rawObj == null || String.valueOf(rawObj).isBlank()) rawObj = tc.get("error_log");
             String raw = rawObj == null ? "" : String.valueOf(rawObj);
             if (raw.isBlank()) {
                 // Bài cũ có thể không lưu log; vẫn trả field để client không phải đoán schema.
                 ensureStudentSafeSummary(tc);
-                continue;
+            } else {
+                applyStructuredError(tc, raw);
             }
-            applyStructuredError(tc, raw);
+            // SAU CÙNG: quan sát có cấu trúc ghi đè `actual` do bóc log. Thứ tự này bắt buộc —
+            // classifier cần đọc LOG THÔ để ra `error_code` đúng, nên không được thay `actual`
+            // trước nó; còn câu cho sinh viên đọc thì quan sát luôn tốt hơn bản đoán từ chữ.
+            renderObservation(tc);
         }
+    }
+
+    /**
+     * P5 — `actual` dựng từ KÊNH QUAN SÁT CÓ CẤU TRÚC của engine, thay cho việc bóc log tiếng Anh.
+     *
+     * <p>Chạy SAU {@link #applyStructuredError} vì classifier cần đọc LOG THÔ ở `actual` để ra
+     * `error_code` đúng. Nhưng câu cho SINH VIÊN đọc thì quan sát luôn thắng: runner tự khai
+     * *"tôi kiểm gì, tôi thấy gì"*, còn bóc log là đoán ngược từ chữ tiếng Anh.
+     *
+     * <p>Đánh dấu `actual_source` để đo được còn bao nhiêu runner chưa chuyển sang kênh này.
+     */
+    private void renderObservation(Map<String, Object> tc) {
+        Object raw = tc.get("observation");
+        if (!(raw instanceof Map<?, ?> observation)) return;
+        String rendered = TestObservationRenderer.render(
+                String.valueOf(tc.getOrDefault("name", "")), observation);
+        if (rendered == null || rendered.isBlank()) return;
+        tc.put("actual", rendered);
+        tc.put("actual_source", "observation");
     }
 
     /**

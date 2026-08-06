@@ -1,0 +1,164 @@
+package com.example.grader.service;
+
+import java.util.Map;
+
+/**
+ * DIỄN ĐẠT QUAN SÁT → câu tiếng Việt cho `actual` của result.json (SPEC mục 5.3–5.4).
+ *
+ * <p>Engine chung phát ra quan sát dạng MÁY ĐỌC ({@code kind} + {@code subject} + số đo);
+ * lớp này là nơi DUY NHẤT biến nó thành câu cho sinh viên đọc.
+ *
+ * <p><b>Vì sao render ở backend chứ không ở Dart:</b> {@code exam_test.dart} và
+ * {@code grader.dart} bị chép ĐÓNG BĂNG vào thư mục testcase của từng đề lúc publish. Câu chữ
+ * để trong đó thì sửa một chữ cũng phải nâng engine cho mọi đề đã publish; để ở đây thì sửa một
+ * lần là đề cũ lẫn đề mới đều hưởng.
+ *
+ * <p><b>Ba điều tuyệt đối không được xuất hiện trong câu trả về</b> (SPEC mục 5.4, luật C3/C4/F1
+ * của ACCEPTANCE):
+ * <ol>
+ *   <li>semantic key nội bộ ({@code field.name}, {@code action.save}) — sinh viên không kiểm
+ *       chứng được;</li>
+ *   <li>log tiếng Anh của Flutter, tên hàm test, đường dẫn file;</li>
+ *   <li>suy đoán nguyên nhân trong code sinh viên — chỉ nói ĐIỀU QUAN SÁT ĐƯỢC.</li>
+ * </ol>
+ * Payload từ engine đã được thiết kế để không mang được ba thứ đó, nên ở đây chỉ cần ghép câu.
+ */
+public final class TestObservationRenderer {
+
+    private TestObservationRenderer() {}
+
+    /** Trần độ dài của `actual` theo luật C5. */
+    private static final int MAX_LENGTH = 160;
+
+    /** Loại thành phần theo cách sinh viên hiểu — bảng ĐÓNG, khớp `_subject` của engine. */
+    private static final Map<String, String> SUBJECT = Map.ofEntries(
+            Map.entry("field", "ô nhập"),
+            Map.entry("input", "ô nhập"),
+            Map.entry("button", "nút"),
+            Map.entry("list", "danh sách"),
+            Map.entry("item", "mục trong danh sách"),
+            Map.entry("dialog", "hộp thoại"),
+            Map.entry("screen", "màn hình"),
+            Map.entry("error", "thông báo lỗi"),
+            Map.entry("text", "nội dung chữ"),
+            Map.entry("image", "ảnh"),
+            Map.entry("icon", "biểu tượng"),
+            Map.entry("widget", "thành phần"));
+
+    /** Bối cảnh kiểm — nói ở ĐÂU quan sát được, giúp sinh viên tái hiện trên máy mình. */
+    private static final Map<String, String> WHERE = Map.of(
+            "portrait", "ở màn hình dọc",
+            "landscape", "ở màn hình ngang",
+            "after_action", "sau khi thực hiện thao tác");
+
+    /**
+     * Ghép câu `actual`.
+     *
+     * @param name        tên testcase (tiếng Việt, giáo viên nhập) — làm chủ ngữ của câu
+     * @param observation payload từ engine; có thể null
+     * @return câu tiếng Việt, hoặc {@code null} khi không diễn đạt được (bên gọi giữ giá trị cũ)
+     */
+    public static String render(String name, Map<?, ?> observation) {
+        if (observation == null) return null;
+        String kind = text(observation.get("kind"));
+        if (kind == null) return null;
+
+        String detail = detail(kind, observation);
+        if (detail == null) return null;
+
+        String subject = text(name);
+        // Chủ ngữ là tên yêu cầu giáo viên đặt. Không có thì để câu quan sát đứng một mình,
+        // KHÔNG thay bằng test_id — đó là định danh nội bộ (luật C2).
+        String sentence = subject == null ? capitalize(detail) : subject + ": " + detail;
+        return shorten(sentence);
+    }
+
+    private static String detail(String kind, Map<?, ?> obs) {
+        String subject = subjectOf(obs);
+        String where = WHERE.get(text(obs.get("where")) == null ? "" : text(obs.get("where")));
+        String suffix = where == null ? "" : " " + where;
+
+        return switch (kind.toUpperCase()) {
+            case "MISSING" -> "không thấy " + subject + " nào" + suffix + ".";
+            case "STILL_PRESENT" -> subject + " lẽ ra phải biến mất thì vẫn còn"
+                    + (where == null ? "" : " " + where) + ".";
+            case "TEXT_MISMATCH" -> textMismatch(obs);
+            case "COUNT_MISMATCH" -> countMismatch(obs, subject);
+            case "NUMBER_MISMATCH" -> numberMismatch(obs);
+            case "LABEL_MISMATCH" -> {
+                String seen = text(obs.get("seen"));
+                yield seen == null
+                        ? "chưa có nhãn trợ năng cho thành phần này."
+                        : "nhãn trợ năng đang là \"" + seen + "\".";
+            }
+            case "STYLE_MISMATCH" -> {
+                String dimension = text(obs.get("dimension"));
+                yield (dimension == null ? "kiểu chữ" : dimension) + " chưa đúng yêu cầu.";
+            }
+            case "ENABLED_MISMATCH" -> subject + " đang ở trạng thái "
+                    + ("enabled".equals(text(obs.get("seen"))) ? "bấm được" : "không bấm được") + ".";
+            case "OVERFLOW" -> "giao diện bị tràn khung" + suffix + ".";
+            case "LAYOUT_ERROR" -> "bố cục dựng không xong" + suffix + ".";
+            case "BOOT_FAILED" -> "ứng dụng không mở được, chưa hiện được nội dung nào.";
+            // Hai ca `not_run`: nêu VÌ SAO chưa chạy, không nêu chẩn đoán (SPEC mục 5.4).
+            case "NOT_RUN_BOOT" -> "chưa chạy vì ứng dụng không mở được, bộ chấm chưa kiểm tới đây.";
+            case "NOT_RUN_SUITE" -> "chưa chạy vì bộ test không khởi động được.";
+            default -> null;
+        };
+    }
+
+    private static String textMismatch(Map<?, ?> obs) {
+        String seen = text(obs.get("seen"));
+        // Chữ sinh viên ĐANG hiển thị được phép in nguyên văn — em ấy tự đối chiếu được.
+        if (seen == null) return "nội dung chữ không đúng yêu cầu.";
+        return "đang hiển thị \"" + seen + "\".";
+    }
+
+    private static String countMismatch(Map<?, ?> obs, String subject) {
+        Integer found = number(obs.get("found"));
+        Integer expected = number(obs.get("expected"));
+        if (found == null || expected == null) return "số lượng " + subject + " không đúng.";
+        return "đếm được " + found + " " + subject + ", cần " + expected + ".";
+    }
+
+    private static String numberMismatch(Map<?, ?> obs) {
+        String dimension = text(obs.get("dimension"));
+        Integer found = number(obs.get("found"));
+        Integer expected = number(obs.get("expected"));
+        String unit = text(obs.get("unit"));
+        if (dimension == null || found == null || expected == null) {
+            return "kích thước không đúng yêu cầu.";
+        }
+        String u = unit == null ? "" : unit;
+        return dimension + " đo được " + found + u + ", cần " + expected + u + ".";
+    }
+
+    private static String subjectOf(Map<?, ?> obs) {
+        String raw = text(obs.get("subject"));
+        return SUBJECT.getOrDefault(raw == null ? "" : raw.toLowerCase(), "thành phần");
+    }
+
+    private static String capitalize(String s) {
+        return s.isEmpty() ? s : Character.toUpperCase(s.charAt(0)) + s.substring(1);
+    }
+
+    private static String shorten(String s) {
+        String t = s.replaceAll("\\s+", " ").strip();
+        return t.length() > MAX_LENGTH ? t.substring(0, MAX_LENGTH - 1).strip() + "…" : t;
+    }
+
+    private static String text(Object value) {
+        if (value == null) return null;
+        String s = String.valueOf(value).trim();
+        return s.isEmpty() ? null : s;
+    }
+
+    private static Integer number(Object value) {
+        if (value instanceof Number n) return n.intValue();
+        try {
+            return value == null ? null : (int) Double.parseDouble(String.valueOf(value));
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+}

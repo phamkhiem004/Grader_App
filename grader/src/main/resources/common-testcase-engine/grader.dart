@@ -9,11 +9,14 @@ import 'dart:io';
 /// 2.1.0 — P3b: sửa ba khiếm khuyết CHẤM SAI ĐIỂM (xem exam_test.dart `_goneByKey`,
 /// `_settle`, `_validationErrorFor`). Bài chấm bằng bản < 2.1.0 có thể sai điểm.
 /// 2.2.0 — P4: phát `status: not_run` + `executed` + `not_run_tests`. Điểm KHÔNG đổi.
-const String kEngineVersion = 'COMMON_V1-2.2.0';
+/// 2.3.0 — P5: phát kênh quan sát có cấu trúc (`observation`). Điểm KHÔNG đổi — quan sát chỉ
+/// là hiệu ứng lề, mọi assertion giữ nguyên.
+const String kEngineVersion = 'COMMON_V1-2.3.0';
 
 /// PHẢI khớp hằng cùng tên trong `exam_test.dart` — hai chương trình Dart riêng biệt,
 /// không import nhau nên không chia sẻ được hằng số.
 const String kBootFailedMarker = '###GRADER_BOOT_FAILED###';
+const String kObservationMarker = '###GRADER_OBS###';
 
 Future<void> main() async {
   final matrix = _loadMatrix();
@@ -96,6 +99,14 @@ Future<void> main() async {
       'skill_code': metadata['skill_code'] ?? 'N/A',
       'expected': metadata['expected']?.toString() ?? id,
       'actual': actual,
+      // Quan sát MÁY ĐỌC; backend dựng `actual` tiếng Việt từ đây (SPEC mục 5.3).
+      // `actual` ở trên chỉ là PHƯƠNG ÁN CHỐNG RỖNG cho backend cũ — câu chữ chính thức do
+      // backend render, vì file này bị đóng băng vào từng đề lúc publish.
+      'observation': ok
+          ? null
+          : isNotRun
+              ? <String, dynamic>{'kind': ranAny ? 'NOT_RUN_BOOT' : 'NOT_RUN_SUITE'}
+              : result?['observation'],
     });
   }
 
@@ -159,6 +170,7 @@ Map<String, Map<String, dynamic>> _parseReporter(String output) {
   final errorsById = <int, List<String>>{};
   final dumpsById = <int, List<String>>{};
   final bootFailedIds = <int>{};
+  final obsById = <int, Map<String, dynamic>>{};
   final runs = <String, Map<String, dynamic>>{};
   for (final line in output.split('\n')) {
     final raw = line.trim();
@@ -186,6 +198,10 @@ Map<String, Map<String, dynamic>> _parseReporter(String output) {
       if (id == null) continue;
       // Engine tự khai "chưa chạy tới phần khẳng định của mình" ngay tại `_boot()`.
       if (message.contains(kBootFailedMarker)) bootFailedIds.add(id);
+      // Kênh quan sát có cấu trúc: giữ quan sát ĐẦU TIÊN của mỗi test. Cái đầu là nguyên
+      // nhân, các cái sau (nếu có, ví dụ trong GROUP) chỉ là hệ quả kéo theo.
+      final observation = _parseObservation(message);
+      if (observation != null) obsById.putIfAbsent(id, () => observation);
       // Lọc chặt: chỉ nhận dump của flutter_test. print thường (log của bài sinh viên,
       // cảnh báo "tap() derived an Offset...") không phải chẩn đoán, gom vào là nhiễu.
       if (_isFailureDump(message)) {
@@ -204,6 +220,7 @@ Map<String, Map<String, dynamic>> _parseReporter(String output) {
       runs[name] = <String, dynamic>{
         'passed': ok,
         'bootFailed': bootFailedIds.contains(id),
+        'observation': obsById[id],
         'message': ok
             ? 'Đã đáp ứng yêu cầu'
             : _failureMessage(dumpsById[id], errorsById[id]),
@@ -211,6 +228,26 @@ Map<String, Map<String, dynamic>> _parseReporter(String output) {
     }
   }
   return runs;
+}
+
+/// Bóc payload quan sát có cấu trúc khỏi một dòng print; null nếu dòng đó không phải quan sát.
+///
+/// Chỉ CHUYỂN TIẾP dữ liệu, không diễn giải: việc render tiếng Việt nằm ở backend để sửa câu
+/// chữ không phải nâng engine cho mọi đề đã publish (SPEC mục 5.3).
+Map<String, dynamic>? _parseObservation(String message) {
+  final at = message.indexOf(kObservationMarker);
+  if (at < 0) return null;
+  var json = message.substring(at + kObservationMarker.length);
+  // print có thể gộp nhiều dòng; payload luôn nằm gọn trên dòng đầu.
+  final nl = json.indexOf('\n');
+  if (nl >= 0) json = json.substring(0, nl);
+  json = json.trim();
+  try {
+    final value = jsonDecode(json);
+    return value is Map ? _asMap(value) : null;
+  } catch (_) {
+    return null;
+  }
 }
 
 /// Khối dump lỗi của flutter_test, phân biệt với print thường của ứng dụng.

@@ -9,6 +9,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Service;
 
@@ -17,6 +18,7 @@ import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.StandardCopyOption;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -40,8 +42,29 @@ public class TestcaseTemplateService {
     private static final String TEMPLATE_CREATED_BY = "system";
     private static final String TEMPLATE_CREATED_AT = "2026-08-02T00:00:00Z";
     private static final String COMMON_ENGINE = "COMMON_V1";
+    private static final String CUSTOM_TEMPLATE_VERSION = "teacher-v1";
+    private static final String CUSTOM_TEMPLATE_FILE = "custom-testcase-templates.json";
+    private static final Pattern DART_IDENTIFIER = Pattern.compile("[A-Za-z_][A-Za-z0-9_]*");
+    private static final Set<String> SUITE_PROFILES = Set.of(
+            "COMMON_UI", "FLUTTER_LAYERED", "PERSISTENCE", "REPOSITORY_SQLITE", "GOLDEN_RESPONSIVE");
+    private static final Set<String> RESET_STRATEGIES = Set.of(
+            "APP_RESTART", "FIXTURE_STEPS", "CLEAR_STORAGE", "PERSISTENCE_PHASE");
+    private static final Set<String> SOURCE_CONTRACT_TYPES = Set.of(
+            "model", "repository", "provider", "screen", "helper", "service");
     private static final Pattern SAFE_INSTANCE_ID = Pattern.compile("[A-Za-z0-9_-]{1,60}");
+    private static final Pattern SEMANTIC_KEY = Pattern.compile("[a-z][a-z0-9_-]*(?:\\.[a-z0-9_-]+)+");
     private static final Set<String> DIFFICULTIES = Set.of("basic", "intermediate", "advanced");
+    private static final Set<String> LAYERS = Set.of(
+            "CONTRACT", "MODEL", "REPOSITORY", "VIEWMODEL", "SCREEN", "BLACKBOX", "RESPONSIVE");
+    private static final Set<String> SUPPORTED_COMMON_RUNNERS = Set.of(
+            "APP_BOOT", "WIDGET_VISIBLE", "FORM_REQUIRED_FIELDS", "RESPONSIVE_NO_OVERFLOW",
+            "RESPONSIVE_TARGET", "NAVIGATION", "LIST_VISIBLE", "BUTTON_ACTION", "WIDGET_DIMENSION",
+            "WIDGET_PADDING", "WIDGET_TEXT_STYLE", "WIDGET_GAP", "WIDGET_TYPE_VISIBLE",
+            "WIDGET_TEXT_CONTENT", "WIDGET_ENABLED", "FORM_VALIDATE_FIELDS", "LIST_ITEM_COUNT",
+            "DIALOG_FLOW", "FORM_PREFILL", "FORM_SUBMIT", "WIDGET_SEMANTICS_LABEL",
+            "STATE_REACTIVE_FLOW", "DIRECT_FUNCTION");
+    private static final Set<String> SUITE_STEP_TYPES = Set.of(
+            "tap", "enter_text", "expect_visible", "expect_absent", "wait_for_visible");
     /** Nhóm lọc hiển thị ở Khu vực 1; không thay thế category/skill của syllabus. */
     private static final Map<String, String> TESTCASE_GROUP_LABELS = Map.of(
             "LOGIC", "Testcase Logic",
@@ -195,6 +218,9 @@ public class TestcaseTemplateService {
     private final ObjectMapper mapper = new ObjectMapper();
     private final Map<String, Map<String, Object>> templates = new LinkedHashMap<>();
 
+    @Value("${grader.exams-dir:exams}")
+    private String examsDirectory;
+
     @Autowired private ExamRepository examRepository;
     @Autowired private SyllabusService syllabusService;
     @Autowired private ExamService examService;
@@ -205,6 +231,31 @@ public class TestcaseTemplateService {
         if (loadClasspathTemplates("common-testcase-templates.json", COMMON_ENGINE))
             log.info("✅ Nạp {} testcase dùng chung từ common-testcase-templates.json", templates.size());
         else log.error("Không nạp được thư viện testcase dùng chung.");
+        loadCustomTemplates();
+    }
+
+    private void loadCustomTemplates() {
+        Path file = customTemplateFile();
+        if (!Files.exists(file)) return;
+        try {
+            List<Map<String, Object>> rows = mapper.readValue(Files.readString(file, StandardCharsets.UTF_8),
+                    new TypeReference<List<Map<String, Object>>>() {});
+            for (Map<String, Object> source : rows) {
+                String id = text(source.get("template_id"));
+                if (id == null || id.isBlank() || templates.containsKey(id)) continue;
+                Map<String, Object> row = new LinkedHashMap<>(source);
+                if (!COMMON_ENGINE.equals(text(row.get("engine_type"), COMMON_ENGINE))) continue;
+                String runner = text(row.get("runner"), "").toUpperCase();
+                if (!SUPPORTED_COMMON_RUNNERS.contains(runner)) continue;
+                if (!(row.get("parameters_schema") instanceof Map<?, ?>)) continue;
+                row.put("custom", true);
+                row.put("engine_type", COMMON_ENGINE);
+                templates.put(id, row);
+            }
+            log.info("Loaded {} custom testcase templates from {}", rows.size(), file);
+        } catch (Exception e) {
+            log.warn("Cannot read custom testcase template library {}: {}", file, e.getMessage());
+        }
     }
 
     private boolean loadClasspathTemplates(String resourceName, String engineType) {
@@ -224,6 +275,98 @@ public class TestcaseTemplateService {
             log.warn("Không nạp được {}: {}", resourceName, e.getMessage());
             return false;
         }
+    }
+
+    /** Tạo template dùng lại từ runner đã được common engine hỗ trợ. */
+    public synchronized Map<String, Object> createTemplate(Map<String, Object> body, String teacherEmail) {
+        ensureReferenceTemplatesLoaded();
+        if (body == null) throw new IllegalArgumentException("Thiếu dữ liệu template testcase");
+        String id = text(body.get("template_id"));
+        if (id == null || id.isBlank()) id = "CUSTOM_" + slug(text(body.get("name"), "CUSTOM_TESTCASE"));
+        id = id.trim().toUpperCase();
+        if (!Pattern.compile("[A-Z][A-Z0-9_-]{2,79}").matcher(id).matches())
+            throw new IllegalArgumentException("template_id phải gồm chữ in hoa, số, _ hoặc - (3-80 ký tự)");
+        if (templates.containsKey(id)) throw new IllegalArgumentException("template_id đã tồn tại: " + id);
+
+        String runner = text(body.get("runner"), "").trim().toUpperCase();
+        if (!SUPPORTED_COMMON_RUNNERS.contains(runner))
+            throw new IllegalArgumentException("Runner chưa được engine hỗ trợ: " + runner);
+        String skillCode = text(body.get("skill_code"), "").trim();
+        Skill skill = findSkill(skillCode);
+        if (skill == null || Boolean.TRUE.equals(skill.getDeprecated()))
+            throw new IllegalArgumentException("skill_code không tồn tại hoặc đã ngừng dùng: " + skillCode);
+        String layer = text(body.get("layer"), "").trim().toUpperCase();
+        if (!LAYERS.contains(layer)) throw new IllegalArgumentException("layer không hợp lệ: " + layer);
+        String group = text(body.get("testcase_group"), testcaseGroup(runner, layer)).trim().toUpperCase();
+        if (!TESTCASE_GROUP_LABELS.containsKey(group)) throw new IllegalArgumentException("testcase_group không hợp lệ: " + group);
+
+        String name = requiredLimitedText(body.get("name"), 160, "Tên template");
+        String description = requiredLimitedText(body.get("description"), 1000, "Mô tả template");
+        String expected = requiredLimitedText(body.get("expected_template"), 1000, "Expected template");
+        String difficulty = text(body.get("difficulty"), "basic").trim().toLowerCase();
+        if (!DIFFICULTIES.contains(difficulty)) throw new IllegalArgumentException("difficulty không hợp lệ: " + difficulty);
+        double weight = number(body.get("weight_default"), 1);
+        if (!Double.isFinite(weight) || weight < 0 || weight > 100)
+            throw new IllegalArgumentException("weight_default phải nằm trong khoảng 0-100");
+        if (!(body.get("parameters_schema") instanceof Map<?, ?>))
+            throw new IllegalArgumentException("parameters_schema phải là một JSON object");
+        Map<String, Object> schema = normalizeTemplateParameters(castMap(body.get("parameters_schema")), id);
+        validateCommonParameters(runner, schema, id);
+
+        Instant now = Instant.now();
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("template_id", id); row.put("template_version", CUSTOM_TEMPLATE_VERSION);
+        row.put("engine_type", COMMON_ENGINE); row.put("runner", runner);
+        row.put("skill_code", skillCode); row.put("layer", layer); row.put("testcase_group", group);
+        row.put("name", name); row.put("description", description); row.put("difficulty", difficulty);
+        row.put("weight_default", weight); row.put("parameters_schema", schema);
+        row.put("expected_template", expected); row.put("execution_key", id);
+        row.put("custom", true); row.put("created_by", text(teacherEmail, "unknown"));
+        row.put("created_at", now.toString());
+        templates.put(id, row);
+        try { persistCustomTemplates(); } catch (Exception e) {
+            templates.remove(id);
+            throw new IllegalStateException("Không lưu được template custom: " + e.getMessage(), e);
+        }
+        return enrichTemplate(row);
+    }
+
+    private Map<String, Object> normalizeTemplateParameters(Map<String, Object> input, String templateId) {
+        if (input.size() > 50) throw new IllegalArgumentException("parameters_schema không được quá 50 tham số");
+        Map<String, Object> out = new LinkedHashMap<>();
+        for (Map.Entry<String, Object> entry : input.entrySet()) {
+            String key = entry.getKey(); Object value = entry.getValue();
+            if (!DART_IDENTIFIER.matcher(key).matches()) throw new IllegalArgumentException("Tên tham số không hợp lệ ở " + templateId + ": " + key);
+            if (value instanceof Map<?, ?> || value instanceof List<?>) throw new IllegalArgumentException("Tham số " + key + " phải là giá trị đơn giản");
+            if (value instanceof String string && string.length() > 2000) throw new IllegalArgumentException("Tham số " + key + " quá dài");
+            out.put(key, value);
+        }
+        return out;
+    }
+
+    private void persistCustomTemplates() throws Exception {
+        Path file = customTemplateFile(); Files.createDirectories(file.getParent());
+        List<Map<String, Object>> custom = templates.values().stream().filter(row -> bool(row.get("custom"), false)).toList();
+        Path temporary = file.resolveSibling(file.getFileName() + ".tmp");
+        Files.writeString(temporary, mapper.writerWithDefaultPrettyPrinter().writeValueAsString(custom), StandardCharsets.UTF_8);
+        try { Files.move(temporary, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE); }
+        catch (java.nio.file.AtomicMoveNotSupportedException e) { Files.move(temporary, file, StandardCopyOption.REPLACE_EXISTING); }
+    }
+
+    private Path customTemplateFile() {
+        return Path.of(examsDirectory == null || examsDirectory.isBlank() ? "exams" : examsDirectory, "_template-library", CUSTOM_TEMPLATE_FILE).toAbsolutePath().normalize();
+    }
+
+    private String requiredLimitedText(Object raw, int maxLength, String field) {
+        String value = text(raw);
+        if (value == null || value.isBlank()) throw new IllegalArgumentException(field + " không được để trống");
+        return limitedText(value, "", maxLength, field);
+    }
+
+    private String slug(String value) {
+        String normalized = value == null ? "CUSTOM_TESTCASE" : value.toUpperCase().replaceAll("[^A-Z0-9]+", "_").replaceAll("^_+|_+$", "");
+        if (normalized.length() < 3) normalized = "TESTCASE";
+        return normalized.substring(0, Math.min(normalized.length(), 70));
     }
 
     /** Danh sách template kèm skill/category để frontend dựng 3 khu vực kéo-thả. */
@@ -260,6 +403,7 @@ public class TestcaseTemplateService {
                     ? exam.getTestcaseStatus() : "UNSAVED");
             empty.put("version", exam != null ? exam.getTestcaseVersion() : null);
             empty.put("template_version", TEMPLATE_VERSION);
+            empty.put("suite", defaultSuite());
             empty.put("items", List.of());
             empty.put("total_weight", 0);
             return empty;
@@ -268,6 +412,7 @@ public class TestcaseTemplateService {
             Map<String, Object> config = mapper.readValue(exam.getTestcaseConfigJson(),
                     new TypeReference<LinkedHashMap<String, Object>>() {});
             List<Map<String, Object>> items = normalizeExistingItems(config.get("items"));
+            config.put("suite", normalizeSuite(config.get("suite"), null));
             config.put("items", items);
             config.put("total_weight", totalWeight(items));
             return config;
@@ -302,6 +447,7 @@ public class TestcaseTemplateService {
         Map<String, Object> oldConfig = parseConfig(exam.getTestcaseConfigJson());
         Map<String, Map<String, Object>> oldById = indexItems(oldConfig.get("items"));
         List<Map<String, Object>> items = normalizeItems(examId, body.get("items"), oldById, teacherEmail);
+        Map<String, Object> suite = normalizeSuite(body.get("suite"), oldConfig.get("suite"));
         String engineType = engineType(items);
 
         int currentVersion = exam.getTestcaseVersion() == null ? 0 : exam.getTestcaseVersion();
@@ -312,7 +458,7 @@ public class TestcaseTemplateService {
         if (firstCreatedAt == null) firstCreatedAt = now.toString();
 
         Map<String, Object> config = new LinkedHashMap<>();
-        config.put("schema_version", 1);
+        config.put("schema_version", 2);
         config.put("exam_id", examId);
         config.put("status", publish ? "PUBLISHED" : "DRAFT");
         config.put("template_version", TEMPLATE_VERSION);
@@ -326,11 +472,12 @@ public class TestcaseTemplateService {
         config.put("updated_at", now.toString());
         if (publish) config.put("published_at", now.toString());
         else if (oldConfig.get("published_at") != null) config.put("published_at", oldConfig.get("published_at"));
+        config.put("suite", suite);
         config.put("items", items);
 
         try {
             String skillsMatrixJson = mapper.writerWithDefaultPrettyPrinter()
-                    .writeValueAsString(toSkillsMatrix(items, engineType));
+                    .writeValueAsString(toSkillsMatrix(items, engineType, suite));
             validateGeneratedMatrix(skillsMatrixJson);
             Map<String, Object> generatedMatrix = mapper.readValue(skillsMatrixJson,
                     new TypeReference<LinkedHashMap<String, Object>>() {});
@@ -343,6 +490,7 @@ public class TestcaseTemplateService {
             Path dir = examService.testcaseDirectoryForConfiguration(examId);
             Files.createDirectories(dir);
             materializeEngine(dir, engineType);
+            if (COMMON_ENGINE.equals(engineType)) materializeDirectFunctionRunner(dir, items);
             Files.writeString(dir.resolve("skills_matrix.json"), mapper.writerWithDefaultPrettyPrinter()
                     .writeValueAsString(publishedMatrix), StandardCharsets.UTF_8);
             Files.writeString(dir.resolve("testcase-config.json"), mapper.writerWithDefaultPrettyPrinter()
@@ -378,6 +526,51 @@ public class TestcaseTemplateService {
         }
     }
 
+    private void materializeDirectFunctionRunner(Path dir, List<Map<String, Object>> items) throws Exception {
+        List<Map<String, Object>> directItems = items.stream()
+                .filter(item -> bool(item.get("enabled"), true) && "DIRECT_FUNCTION".equals(item.get("runner")))
+                .toList();
+        if (directItems.isEmpty()) return;
+
+        Path examTest = dir.resolve("exam_test.dart");
+        String source = Files.readString(examTest, StandardCharsets.UTF_8);
+        source = renderDirectFunctionRunner(source, directItems);
+        Files.writeString(examTest, source, StandardCharsets.UTF_8);
+    }
+
+    String renderDirectFunctionRunner(String source, List<Map<String, Object>> directItems) {
+        StringBuilder imports = new StringBuilder();
+        StringBuilder dispatch = new StringBuilder();
+        int index = 0;
+        for (Map<String, Object> item : directItems) {
+            Map<String, Object> params = map(item.get("parameters"));
+            String functionPath = text(params.get("functionPath"), "");
+            String functionName = text(params.get("functionName"), "");
+            String alias = "direct_" + index++;
+            int argumentCount = directArgumentCount(params.get("argumentsJson"));
+            imports.append("import '../").append(functionPath).append("' as ").append(alias).append(";\n");
+            dispatch.append("    case '").append(functionPath).append("::").append(functionName).append("':\n")
+                    .append("      return ").append(alias).append('.').append(functionName).append('(');
+            for (int argument = 0; argument < argumentCount; argument++) {
+                if (argument > 0) dispatch.append(", ");
+                dispatch.append("arguments[").append(argument).append(']');
+            }
+            dispatch.append(");\n");
+        }
+        source = source.replace("// __DIRECT_FUNCTION_IMPORTS__", imports.toString().stripTrailing());
+        source = source.replace("    // __DIRECT_FUNCTION_CASES__", dispatch.toString().stripTrailing());
+        return source;
+    }
+
+    private int directArgumentCount(Object rawArguments) {
+        try {
+            List<?> arguments = mapper.readValue(text(rawArguments, "[]"), new TypeReference<List<Object>>() {});
+            return arguments.size();
+        } catch (Exception e) {
+            throw new IllegalArgumentException("argumentsJson khong hop le khi sinh dispatcher: " + e.getMessage(), e);
+        }
+    }
+
     private void copyClasspathEngine(Path dir, String resourceName, String targetName) throws Exception {
         ClassPathResource resource = new ClassPathResource(resourceName);
         if (!resource.exists()) throw new IllegalStateException("Thiếu engine testcase: " + resourceName);
@@ -407,6 +600,7 @@ public class TestcaseTemplateService {
         out.put("template_version", config.get("template_version"));
         out.put("engine_type", config.get("engine_type"));
         out.put("profile_id", config.get("profile_id"));
+        out.put("suite", config.get("suite"));
         out.put("items", items);
         out.put("total_weight", totalWeight(items));
         boolean engineReady = exam.getTestcasePath() != null
@@ -417,6 +611,218 @@ public class TestcaseTemplateService {
             out.put("warning", "Đã Publish cấu hình, nhưng đề chưa có exam_test.dart và grader.dart để chạy chấm.");
         }
         return out;
+    }
+
+    /**
+     * Khung chay chung cua mot bo de. Chi nhan thao tac UI trong whitelist de bo testcase
+     * van doc lap voi model/repository rieng cua tung starter.
+     */
+    Map<String, Object> normalizeSuite(Object rawSuite, Object fallbackSuite) {
+        Object source = rawSuite instanceof Map<?, ?> ? rawSuite : fallbackSuite;
+        Map<String, Object> input = source instanceof Map<?, ?> ? castMap(source) : Map.of();
+        Map<String, Object> suite = defaultSuite();
+        boolean hasSuite = source instanceof Map<?, ?>;
+
+        suite.put("name", limitedText(input.get("name"), text(suite.get("name")), 120, "Ten khung bo testcase"));
+        suite.put("context", limitedText(input.get("context"), "", 120, "Ngu canh bo testcase"));
+        suite.put("fixture_name", limitedText(input.get("fixture_name"), "", 120, "Ten fixture"));
+        suite.put("fixture_description", limitedText(input.get("fixture_description"), "", 500, "Mo ta fixture"));
+        suite.put("profile", enumValue(input.get("profile"), "COMMON_UI", SUITE_PROFILES, "profile"));
+        suite.put("reset_strategy", enumValue(input.get("reset_strategy"), "APP_RESTART", RESET_STRATEGIES, "reset_strategy"));
+        suite.put("source_contracts", normalizeSourceContracts(input.get("source_contracts")));
+        suite.put("persistence", normalizePersistence(input.get("persistence")));
+        suite.put("golden", normalizeGolden(input.get("golden")));
+        suite.put("strict_semantic_keys", bool(input.get("strict_semantic_keys"), hasSuite));
+        suite.put("ready_key", optionalSemanticKey(input.get("ready_key"), "ready_key"));
+        suite.put("required_keys", semanticKeyList(input.get("required_keys"), "required_keys", 100));
+        suite.put("boot_timeout_ms", boundedInt(input.get("boot_timeout_ms"), 3000, 100, 30000,
+                "boot_timeout_ms"));
+        suite.put("step_timeout_ms", boundedInt(input.get("step_timeout_ms"), 2000, 100, 30000,
+                "step_timeout_ms"));
+        suite.put("setup_steps", normalizeSetupSteps(input.get("setup_steps"), "khung bo testcase", 30));
+        return suite;
+    }
+
+    private Map<String, Object> defaultSuite() {
+        Map<String, Object> suite = new LinkedHashMap<>();
+        suite.put("suite_version", 1);
+        suite.put("name", "Khung mac dinh");
+        suite.put("context", "");
+        suite.put("fixture_name", "");
+        suite.put("fixture_description", "");
+        suite.put("profile", "COMMON_UI");
+        suite.put("reset_strategy", "APP_RESTART");
+        suite.put("source_contracts", List.of());
+        suite.put("persistence", defaultPersistence());
+        suite.put("golden", defaultGolden());
+        suite.put("strict_semantic_keys", false);
+        suite.put("ready_key", "");
+        suite.put("required_keys", List.of());
+        suite.put("boot_timeout_ms", 3000);
+        suite.put("step_timeout_ms", 2000);
+        suite.put("setup_steps", List.of());
+        return suite;
+    }
+
+    private List<Map<String, Object>> normalizeSourceContracts(Object raw) {
+        if (raw == null) return new ArrayList<>();
+        if (!(raw instanceof List<?> list)) throw new IllegalArgumentException("source_contracts phai la mot mang");
+        if (list.size() > 30) throw new IllegalArgumentException("source_contracts khong duoc vuot qua 30 muc");
+        List<Map<String, Object>> out = new ArrayList<>();
+        for (int i = 0; i < list.size(); i++) {
+            if (!(list.get(i) instanceof Map<?, ?>)) throw new IllegalArgumentException("source_contracts #" + (i + 1) + " phai la object");
+            Map<String, Object> input = castMap(list.get(i));
+            String type = text(input.get("type"), "").trim().toLowerCase();
+            if (!SOURCE_CONTRACT_TYPES.contains(type)) throw new IllegalArgumentException("type source contract khong hop le: " + type);
+            String path = text(input.get("path"), "").trim().replace('\\', '/');
+            if (path.isBlank() || path.startsWith("/") || path.contains("..") || !path.startsWith("lib/"))
+                throw new IllegalArgumentException("path source contract phai la duong dan tuong doi trong lib/: " + path);
+            List<String> symbols = new ArrayList<>();
+            Object rawSymbols = input.get("symbols");
+            if (rawSymbols instanceof List<?> values) for (Object value : values) {
+                String symbol = text(value, "").trim();
+                if (!DART_IDENTIFIER.matcher(symbol).matches()) throw new IllegalArgumentException("Ten symbol Dart khong hop le: " + symbol);
+                if (!symbols.contains(symbol)) symbols.add(symbol);
+            } else if (rawSymbols != null) {
+                for (String value : String.valueOf(rawSymbols).split(",")) {
+                    String symbol = value.trim();
+                    if (!symbol.isBlank() && !DART_IDENTIFIER.matcher(symbol).matches()) throw new IllegalArgumentException("Ten symbol Dart khong hop le: " + symbol);
+                    if (!symbol.isBlank() && !symbols.contains(symbol)) symbols.add(symbol);
+                }
+            }
+            if (symbols.isEmpty()) throw new IllegalArgumentException("source contract phai co it nhat mot symbol");
+            Map<String, Object> contract = new LinkedHashMap<>();
+            contract.put("type", type); contract.put("path", path); contract.put("symbols", symbols);
+            out.add(contract);
+        }
+        return out;
+    }
+
+    private Map<String, Object> normalizePersistence(Object raw) {
+        Map<String, Object> input = raw instanceof Map<?, ?> ? castMap(raw) : Map.of();
+        Map<String, Object> out = defaultPersistence();
+        out.put("enabled", bool(input.get("enabled"), false));
+        out.put("storage_kind", enumValue(input.get("storage_kind"), "none", Set.of("none", "sqlite", "api", "shared_preferences"), "persistence.storage_kind"));
+        out.put("reload_key", optionalSemanticKey(input.get("reload_key"), "persistence.reload_key"));
+        out.put("reset_steps", normalizeSetupSteps(input.get("reset_steps"), "persistence reset", 20));
+        out.put("notes", limitedText(input.get("notes"), "", 500, "persistence.notes"));
+        return out;
+    }
+
+    private Map<String, Object> defaultPersistence() {
+        Map<String, Object> out = new LinkedHashMap<>(); out.put("enabled", false); out.put("storage_kind", "none");
+        out.put("reload_key", ""); out.put("reset_steps", List.of()); out.put("notes", ""); return out;
+    }
+
+    private Map<String, Object> normalizeGolden(Object raw) {
+        Map<String, Object> input = raw instanceof Map<?, ?> ? castMap(raw) : Map.of();
+        Map<String, Object> out = defaultGolden();
+        out.put("enabled", bool(input.get("enabled"), false));
+        out.put("portrait_asset", relativeAsset(input.get("portrait_asset"), "golden.portrait_asset"));
+        out.put("landscape_asset", relativeAsset(input.get("landscape_asset"), "golden.landscape_asset"));
+        out.put("threshold", boundedDecimal(input.get("threshold"), 0.01, 0, 1, "golden.threshold"));
+        return out;
+    }
+
+    private Map<String, Object> defaultGolden() {
+        Map<String, Object> out = new LinkedHashMap<>(); out.put("enabled", false); out.put("portrait_asset", "");
+        out.put("landscape_asset", ""); out.put("threshold", 0.01); return out;
+    }
+
+    private String relativeAsset(Object raw, String field) {
+        String value = text(raw, "").trim().replace('\\', '/');
+        if (!value.isBlank() && (value.startsWith("/") || value.contains(".."))) throw new IllegalArgumentException(field + " phai la duong dan tuong doi");
+        return value;
+    }
+
+    private double boundedDecimal(Object raw, double fallback, double min, double max, String field) {
+        double value = number(raw, fallback); if (!Double.isFinite(value) || value < min || value > max) throw new IllegalArgumentException(field + " phai nam trong khoang " + min + " den " + max); return value;
+    }
+
+    private String enumValue(Object raw, String fallback, Set<String> allowed, String field) {
+        String value = text(raw, fallback).trim(); if (!allowed.contains(value)) throw new IllegalArgumentException(field + " khong hop le: " + value); return value;
+    }
+
+    private List<Map<String, Object>> normalizeSetupSteps(Object raw, String owner, int maxSteps) {
+        if (raw == null) return new ArrayList<>();
+        if (!(raw instanceof List<?> steps))
+            throw new IllegalArgumentException("setup_steps cua " + owner + " phai la mot mang");
+        if (steps.size() > maxSteps)
+            throw new IllegalArgumentException("setup_steps cua " + owner + " khong duoc vuot qua " + maxSteps + " buoc");
+        List<Map<String, Object>> out = new ArrayList<>();
+        int index = 1;
+        for (Object rawStep : steps) {
+            if (!(rawStep instanceof Map<?, ?>))
+                throw new IllegalArgumentException("Buoc setup " + index + " cua " + owner + " phai la object");
+            Map<String, Object> input = castMap(rawStep);
+            String type = text(input.get("type"), "").trim().toLowerCase();
+            if (!SUITE_STEP_TYPES.contains(type))
+                throw new IllegalArgumentException("Loai buoc setup khong hop le o " + owner + " #" + index + ": " + type);
+            String key = requiredSemanticKey(input.get("key"), owner + " setup #" + index);
+            Map<String, Object> step = new LinkedHashMap<>();
+            step.put("type", type);
+            step.put("key", key);
+            if ("enter_text".equals(type)) {
+                String value = text(input.get("value"));
+                if (value == null) throw new IllegalArgumentException("Thieu value o " + owner + " setup #" + index);
+                if (value.length() > 1000) throw new IllegalArgumentException("value qua dai o " + owner + " setup #" + index);
+                step.put("value", value);
+            }
+            if (input.get("timeout_ms") != null) {
+                step.put("timeout_ms", boundedInt(input.get("timeout_ms"), 2000, 100, 30000,
+                        owner + " setup #" + index + " timeout_ms"));
+            }
+            out.add(step);
+            index++;
+        }
+        return out;
+    }
+
+    private List<String> semanticKeyList(Object raw, String field, int maxItems) {
+        List<String> values = new ArrayList<>();
+        if (raw instanceof List<?> list) {
+            for (Object item : list) {
+                String key = text(item);
+                if (key != null && !key.isBlank()) values.add(key.trim());
+            }
+        } else if (raw != null) {
+            for (String part : String.valueOf(raw).split(",")) {
+                if (!part.trim().isEmpty()) values.add(part.trim());
+            }
+        }
+        if (values.size() > maxItems)
+            throw new IllegalArgumentException(field + " khong duoc vuot qua " + maxItems + " key");
+        LinkedHashSet<String> unique = new LinkedHashSet<>();
+        for (String value : values) unique.add(requiredSemanticKey(value, field));
+        return new ArrayList<>(unique);
+    }
+
+    private String optionalSemanticKey(Object raw, String field) {
+        String value = text(raw, "").trim();
+        return value.isEmpty() ? "" : requiredSemanticKey(value, field);
+    }
+
+    private String requiredSemanticKey(Object raw, String field) {
+        String value = text(raw, "").trim();
+        if (!SEMANTIC_KEY.matcher(value).matches())
+            throw new IllegalArgumentException(field + " phai la semantic key dang screen.home, action.save hoac field.title");
+        return value;
+    }
+
+    private String limitedText(Object raw, String fallback, int maxLength, String field) {
+        String value = text(raw);
+        if (value == null) value = fallback;
+        value = value == null ? "" : value.trim();
+        if (value.length() > maxLength)
+            throw new IllegalArgumentException(field + " khong duoc vuot qua " + maxLength + " ky tu");
+        return value;
+    }
+
+    private int boundedInt(Object raw, int fallback, int min, int max, String field) {
+        double value = number(raw, fallback);
+        if (!Double.isFinite(value) || value < min || value > max || value != Math.rint(value))
+            throw new IllegalArgumentException(field + " phai la so nguyen tu " + min + " den " + max);
+        return (int) value;
     }
 
     private List<Map<String, Object>> normalizeItems(String examId, Object rawItems,
@@ -474,6 +880,8 @@ public class TestcaseTemplateService {
             item.put("order", index++);
             item.put("weight", weight);
             item.put("parameters", params);
+            item.put("setup_steps", normalizeSetupSteps(input.get("setup_steps"),
+                    "testcase " + instanceId, 15));
             String generatedExpected = renderExpected(text(template.get("expected_template")), params);
             String configuredExpected = text(input.get("expected"));
             boolean expectedCustom = bool(input.get("expected_custom"), false)
@@ -599,9 +1007,38 @@ public class TestcaseTemplateService {
             case "WIDGET_PADDING" -> validateWidgetPadding(params, instanceId);
             case "WIDGET_TEXT_STYLE" -> validateWidgetTextStyle(params, instanceId);
             case "WIDGET_GAP" -> validateWidgetGap(params, instanceId);
+            case "DIRECT_FUNCTION" -> validateDirectFunction(params, instanceId);
             case "APP_BOOT" -> { /* rootKey có thể để trống nếu app không công bố root key. */ }
             default -> throw new IllegalArgumentException("Common runner không tồn tại: " + runner);
         }
+    }
+
+    private void validateDirectFunction(Map<String, Object> params, String instanceId) {
+        String path = text(params.get("functionPath"), "").trim().replace('\\', '/');
+        if (path.isBlank() || path.startsWith("/") || path.contains("..") || !path.startsWith("lib/")
+                || !path.endsWith(".dart")) {
+            throw new IllegalArgumentException("functionPath phai la file Dart tuong doi trong lib/ o " + instanceId);
+        }
+        String functionName = text(params.get("functionName"), "").trim();
+        if (!DART_IDENTIFIER.matcher(functionName).matches())
+            throw new IllegalArgumentException("functionName khong hop le o " + instanceId + ": " + functionName);
+        String argumentsJson = text(params.get("argumentsJson"), "[]").trim();
+        try {
+            Object arguments = mapper.readValue(argumentsJson, Object.class);
+            if (!(arguments instanceof List<?> list) || list.size() > 5)
+                throw new IllegalArgumentException("argumentsJson phai la mang JSON toi da 5 phan tu o " + instanceId);
+        } catch (IllegalArgumentException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IllegalArgumentException("argumentsJson khong hop le o " + instanceId + ": " + e.getMessage());
+        }
+        String expectedType = text(params.get("expectedType"), "string").toLowerCase();
+        if (!Set.of("string", "bool", "int", "double", "json", "null").contains(expectedType))
+            throw new IllegalArgumentException("expectedType khong hop le o " + instanceId);
+        String matchMode = text(params.get("matchMode"), "equals").toLowerCase();
+        if (!Set.of("equals", "contains").contains(matchMode))
+            throw new IllegalArgumentException("matchMode khong hop le o " + instanceId);
+        requireParameter(params, "expectedValue", instanceId);
     }
 
     private void validateResponsiveSizes(Map<String, Object> params, String instanceId) {
@@ -797,7 +1234,8 @@ public class TestcaseTemplateService {
         }
     }
 
-    private Map<String, Object> toSkillsMatrix(List<Map<String, Object>> items, String engineType) {
+    Map<String, Object> toSkillsMatrix(List<Map<String, Object>> items, String engineType,
+                                               Map<String, Object> suite) {
         Map<String, Object> matrix = new LinkedHashMap<>();
         Set<String> emittedGroups = new LinkedHashSet<>();
         for (Map<String, Object> item : items) {
@@ -811,17 +1249,17 @@ public class TestcaseTemplateService {
                         .filter(child -> bool(child.get("enabled"), true)
                                 && groupId.equals(text(child.get("group_id"))))
                         .toList();
-                matrix.put(groupId, commonGroupRow(groupId, children));
+                matrix.put(groupId, commonGroupRow(groupId, children, suite));
                 continue;
             }
             matrix.put(String.valueOf(item.get("instance_id")),
-                    commonRubricRow(item));
+                    commonRubricRow(item, suite));
         }
         return matrix;
     }
 
     /** Matrix của engine chung: runner đọc semantic key và parameters, không biết domain đề. */
-    private Map<String, Object> commonRubricRow(Map<String, Object> item) {
+    private Map<String, Object> commonRubricRow(Map<String, Object> item, Map<String, Object> suite) {
         Map<String, Object> row = new LinkedHashMap<>();
         row.put("instance_id", item.get("instance_id"));
         row.put("runner", item.get("runner"));
@@ -833,11 +1271,14 @@ public class TestcaseTemplateService {
         row.put("difficulty", item.get("difficulty"));
         row.put("weight", item.get("weight"));
         row.put("parameters", item.get("parameters"));
+        row.put("setup_steps", item.getOrDefault("setup_steps", List.of()));
+        row.put("suite", suite);
         return row;
     }
 
     /** Một testcase cha chỉ có một kết quả; mọi testcase con phải đạt thì nhóm mới đạt. */
-    private Map<String, Object> commonGroupRow(String groupId, List<Map<String, Object>> children) {
+    private Map<String, Object> commonGroupRow(String groupId, List<Map<String, Object>> children,
+                                                       Map<String, Object> suite) {
         Map<String, Object> row = new LinkedHashMap<>();
         List<Map<String, Object>> childRows = new ArrayList<>();
         Set<String> skillCodes = new LinkedHashSet<>();
@@ -845,7 +1286,7 @@ public class TestcaseTemplateService {
         String groupName = groupId;
         String difficulty = "basic";
         for (Map<String, Object> child : children) {
-            childRows.add(commonRubricRow(child));
+            childRows.add(commonRubricRow(child, suite));
             String skillCode = text(child.get("skill_code"));
             if (skillCode != null && !skillCode.isBlank()) skillCodes.add(skillCode);
             totalWeight += number(child.get("weight"), 0);
@@ -863,6 +1304,7 @@ public class TestcaseTemplateService {
         row.put("skill_code", skillCodes.isEmpty() ? "UI_SCAFFOLD_APPBAR" : skillCodes.iterator().next());
         row.put("skill_codes", new ArrayList<>(skillCodes));
         row.put("children", childRows);
+        row.put("suite", suite);
         return row;
     }
 

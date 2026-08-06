@@ -434,5 +434,27 @@
       "absentKey": "state.empty"
     },
     "expected_template": "Sau khi bấm {actionKey}, state phải chuyển từ {initialKey} sang {updatedKey}."
+  },
+  {
+    "template_id": "COMMON_DIRECT_FUNCTION",
+    "template_version": "common-v1",
+    "engine_type": "COMMON_V1",
+    "profile_id": "COMMON_SEMANTIC_V1",
+    "runner": "DIRECT_FUNCTION",
+    "skill_code": "DART_CLASSES_OOP",
+    "layer": "CONTRACT",
+    "name": "Gọi trực tiếp hàm Dart theo tên cấu hình",
+    "description": "Import file lib đã khai báo, gọi top-level function theo đúng tên, truyền arguments JSON và so sánh giá trị trả về. Đổi functionName sẽ đổi hàm được gọi trong exam_test.dart sinh ra.",
+    "difficulty": "advanced",
+    "weight_default": 2,
+    "parameters_schema": {
+      "functionPath": "lib/utils/validator.dart",
+      "functionName": "isValidEmail",
+      "argumentsJson": "[\"student@example.com\"]",
+      "expectedType": "bool",
+      "expectedValue": "true",
+      "matchMode": "equals"
+    },
+    "expected_template": "Hàm {functionName} trong {functionPath} phải trả về {expectedValue}."
   }
 ]

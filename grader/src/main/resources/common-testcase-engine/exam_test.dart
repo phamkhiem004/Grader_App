@@ -8,6 +8,10 @@ import 'package:flutter_test/flutter_test.dart';
 
 // Engine chung chỉ nhìn vào semantic key công khai, không import model/repository của bài.
 import '../lib/main.dart' as student_app;
+// __DIRECT_FUNCTION_IMPORTS__
+
+Map<String, dynamic> _activeCase = <String, dynamic>{};
+Map<String, dynamic> _activeSuite = <String, dynamic>{};
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -27,10 +31,16 @@ Future<void> _runCase(
   String testId,
   Map<String, dynamic> metadata,
 ) async {
+  _activeCase = metadata;
+  _activeSuite = _asMap(metadata['suite']);
+  await _checkSourceContracts();
   final runner = (metadata['runner'] ?? '').toString();
   final parameters = _asMap(metadata['parameters']);
 
   switch (runner) {
+    case 'DIRECT_FUNCTION':
+      await _checkDirectFunction(parameters);
+      return;
     case 'APP_BOOT':
       await _boot(tester);
       final rootKey = _text(parameters, 'rootKey');
@@ -147,6 +157,80 @@ Future<void> _runCase(
   }
 }
 
+Future<void> _checkDirectFunction(Map<String, dynamic> parameters) async {
+  final functionPath = _requiredText(parameters, 'functionPath');
+  final functionName = _requiredText(parameters, 'functionName');
+  final rawArguments = _text(parameters, 'argumentsJson', '[]');
+  dynamic decoded;
+  try {
+    decoded = jsonDecode(rawArguments);
+  } catch (error) {
+    fail('argumentsJson không hợp lệ: $error');
+  }
+  if (decoded is! List) fail('argumentsJson phải là một mảng JSON.');
+
+  dynamic actual = _invokeDirectFunction(
+    '$functionPath::$functionName',
+    List<dynamic>.from(decoded as List),
+  );
+  if (actual is Future) actual = await actual;
+
+  final expectedType = _text(parameters, 'expectedType', 'string').toLowerCase();
+  final expectedRaw = _text(parameters, 'expectedValue');
+  final expected = _parseDirectExpected(expectedRaw, expectedType);
+  final matchMode = _text(parameters, 'matchMode', 'equals').toLowerCase();
+  if (matchMode == 'contains') {
+    expect(actual.toString(), contains(expected.toString()),
+        reason: '$functionName không chứa giá trị mong đợi');
+  } else {
+    // equals() so sánh sâu List/Map; expect(actual, expected) chỉ so sánh cùng object.
+    expect(actual, equals(expected), reason: '$functionName trả về giá trị không đúng');
+  }
+}
+
+dynamic _invokeDirectFunction(String target, List<dynamic> arguments) {
+  switch (target) {
+    // __DIRECT_FUNCTION_CASES__
+    default:
+      fail('Chưa sinh dispatcher cho hàm $target. Hãy lưu lại Draft/Publish.');
+  }
+}
+
+dynamic _parseDirectExpected(String value, String type) {
+  switch (type) {
+    case 'bool':
+      return value.toLowerCase() == 'true';
+    case 'int':
+      return int.parse(value);
+    case 'double':
+      return double.parse(value);
+    case 'json':
+      return jsonDecode(value);
+    case 'null':
+      return null;
+    default:
+      return value;
+  }
+}
+
+Future<void> _checkSourceContracts() async {
+  final contracts = _asList(_activeSuite['source_contracts']);
+  for (final raw in contracts) {
+    final contract = _asMap(raw);
+    final path = _text(contract, 'path');
+    final type = _text(contract, 'type', 'symbol');
+    final symbols = _asList(contract['symbols']).map((value) => value.toString()).toList();
+    final file = File(path);
+    expect(file.existsSync(), isTrue, reason: 'Khong tim thay source contract $path');
+    final source = file.readAsStringSync();
+    for (final symbol in symbols) {
+      final escaped = RegExp.escape(symbol);
+      final declaration = RegExp('\\b(?:class|mixin|enum|extension|typedef)\\s+$escaped\\b|\\b(?:final|const|var|late)\\s+$escaped\\b|\\b$escaped\\s*\\(');
+      expect(declaration.hasMatch(source), isTrue, reason: 'Thieu $type symbol $symbol trong $path');
+    }
+  }
+}
+
 Future<void> _checkGroup(
   WidgetTester tester,
   String groupId,
@@ -196,15 +280,73 @@ Future<void> _checkStateReactiveFlow(
 }
 
 Future<void> _boot(WidgetTester tester) async {
-  // SQLite FFI là I/O thật; gọi main trong FakeAsync khiến Future loadUsers không
-  // được hoàn tất, còn pumpAndSettle thì chờ vô hạn vì CircularProgressIndicator.
+  // Mỗi testcase tự khởi động lại app rồi áp dụng fixture/setup UI chung.
   await tester.runAsync(() async {
     student_app.main();
-    await tester.pump();
     await Future<void>.delayed(const Duration(milliseconds: 500));
   });
   await tester.pump();
   expect(tester.takeException(), isNull);
+  await _applySuiteSetup(tester);
+}
+
+Future<void> _applySuiteSetup(WidgetTester tester) async {
+  final requiredKeys = _suiteCsv('required_keys');
+  for (final key in requiredKeys) {
+    expect(_byKey(key), findsOneWidget,
+        reason: 'Suite yêu cầu semantic key nhưng không tìm thấy: $key');
+  }
+  final readyKey = _suiteText('ready_key');
+  if (readyKey.isNotEmpty) await _waitForVisible(tester, readyKey, _suiteNumber('boot_timeout_ms', 3000));
+  await _runSetupSteps(tester, _asList(_activeSuite['setup_steps']), 'suite');
+  await _runSetupSteps(tester, _asList(_activeCase['setup_steps']), 'testcase');
+}
+
+Future<void> _runSetupSteps(WidgetTester tester, List<dynamic> rawSteps, String owner) async {
+  var index = 1;
+  for (final raw in rawSteps) {
+    final step = _asMap(raw);
+    final type = _text(step, 'type').toLowerCase();
+    final key = _requiredText(step, 'key');
+    final timeout = _number(step, 'timeout_ms', _suiteNumber('step_timeout_ms', 2000));
+    switch (type) {
+      case 'tap':
+        expect(_byKey(key), findsOneWidget, reason: 'Setup $owner #$index thiếu key: $key');
+        await tester.tap(_byKey(key));
+        await _settle(tester);
+        break;
+      case 'enter_text':
+        final finder = _byKey(key);
+        expect(finder, findsOneWidget, reason: 'Setup $owner #$index thiếu field: $key');
+        await tester.enterText(finder, _decodeInput(_text(step, 'value')));
+        await _settle(tester);
+        break;
+      case 'expect_visible':
+        expect(_byKey(key), findsOneWidget, reason: 'Setup $owner #$index cần thấy key: $key');
+        break;
+      case 'expect_absent':
+        expect(_byKey(key), findsNothing, reason: 'Setup $owner #$index cần ẩn key: $key');
+        break;
+      case 'wait_for_visible':
+        await _waitForVisible(tester, key, timeout.toInt());
+        break;
+      default:
+        fail('Setup $owner #$index có loại bước không được hỗ trợ: $type');
+    }
+    index++;
+  }
+}
+
+Future<void> _waitForVisible(WidgetTester tester, String key, int timeoutMs) async {
+  final deadline = DateTime.now().add(Duration(milliseconds: timeoutMs));
+  while (DateTime.now().isBefore(deadline)) {
+    if (_byKey(key).evaluate().isNotEmpty) return;
+    await tester.runAsync(() async {
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+    });
+    await tester.pump();
+  }
+  expect(_byKey(key), findsOneWidget, reason: 'Không xuất hiện semantic key sau khi chờ: $key');
 }
 
 Future<void> _settle(WidgetTester tester) async {
@@ -667,8 +809,9 @@ FontWeight _fontWeight(String value) {
 Finder _byKey(String key) {
   final exact = find.byKey(ValueKey<String>(key), skipOffstage: false);
   if (exact.evaluate().isNotEmpty) return exact;
+  if (_suiteBool('strict_semantic_keys', false)) return _notFound();
 
-  // Public contract của starter không ép ValueKey. Khi không có key, dùng
+  // Legacy fallback chỉ được phép khi suite tắt strict_semantic_keys. Khi starter không ép ValueKey, dùng
   // fallback theo vai trò hiển thị để template vẫn đánh giá được hành vi.
   switch (key) {
     case 'screen.home':
@@ -796,6 +939,24 @@ Finder _validationErrorFor(String key) {
 }
 
 Finder _notFound() => find.byWidgetPredicate((_) => false);
+
+Map<String, dynamic> _suiteMap() => _activeSuite;
+
+String _suiteText(String key, [String fallback = '']) => _text(_suiteMap(), key, fallback);
+
+bool _suiteBool(String key, bool fallback) => _bool(_suiteMap(), key, fallback);
+
+double _suiteNumber(String key, double fallback) => _number(_suiteMap(), key, fallback);
+
+List<String> _suiteCsv(String key) {
+  final value = _suiteMap()[key];
+  if (value is List) {
+    return value.map((item) => item.toString().trim()).where((item) => item.isNotEmpty).toList();
+  }
+  return _text(_suiteMap(), key).split(',').map((item) => item.trim()).where((item) => item.isNotEmpty).toList();
+}
+
+List<dynamic> _asList(dynamic value) => value is List ? value : <dynamic>[];
 
 Map<String, dynamic> _loadMatrix() {
   for (final path in <String>['test/skills_matrix.json', 'skills_matrix.json']) {

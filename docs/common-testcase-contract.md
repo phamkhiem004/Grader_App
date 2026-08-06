@@ -129,3 +129,60 @@ Có thể chọn nhiều testcase common rồi gộp thành một group. Mỗi t
 group vẫn là một assert/runner độc lập, nhưng `exam_test.dart` chỉ công bố một kết quả
 cho group. Engine vẫn chạy toàn bộ testcase con để báo đủ lỗi; chỉ cần một testcase
 con hoặc một assert fail thì group fail. Điểm của group bằng tổng điểm các testcase con.
+
+
+## Khung b? testcase (suite contract)
+
+Khi t?o b? testcase m?i, gi?ng vi?n c? th? khai b?o `suite` ? c?p b? ??. C?u h?nh n?y ???c
+l?u trong `testcase-config.json` v? ???c nh?ng v?o t?ng d?ng c?a `skills_matrix.json`, do ??
+ZIP legacy g?m `exam_test.dart`, `grader.dart`, `skills_matrix.json` v?n ch?y b?nh th??ng.
+
+```json
+{
+  "suite": {
+    "suite_version": 1,
+    "name": "Todo CRUD c? b?n",
+    "context": "todo_crud",
+    "fixture_name": "one_existing_todo",
+    "fixture_description": "Starter m? l?n c? m?t Todo ?? s?a.",
+    "strict_semantic_keys": true,
+    "ready_key": "screen.home.ready",
+    "required_keys": ["screen.home", "list.items", "action.add"],
+    "boot_timeout_ms": 3000,
+    "step_timeout_ms": 2000,
+    "setup_steps": [
+      {"type": "tap", "key": "action.add"},
+      {"type": "expect_visible", "key": "screen.form"}
+    ]
+  }
+}
+```
+
+`setup_steps` ch? h? tr? thao t?c black-box trong whitelist:
+
+- `tap`: b?m semantic key.
+- `enter_text`: nh?p `value` v?o semantic key c?a input.
+- `expect_visible`: y?u c?u key xu?t hi?n ngay.
+- `expect_absent`: y?u c?u key kh?ng xu?t hi?n.
+- `wait_for_visible`: ch? key xu?t hi?n trong `timeout_ms`.
+
+M?i testcase c?ng c? th? c? `setup_steps` ri?ng. Engine ch?y theo th? t?:
+
+```text
+boot app m?i ? ki?m tra required_keys ? ch? ready_key ? suite.setup_steps ? testcase.setup_steps ? assertion
+```
+
+Starter/template d?ng khung strict ph?i c?ng b? `ValueKey` ?n ??nh, v? d?:
+
+```dart
+Scaffold(key: const ValueKey('screen.home'))
+ListView(key: const ValueKey('list.items'))
+ElevatedButton(key: const ValueKey('action.add'), onPressed: ...)
+```
+
+Kh?ng ??a Dart code, model, repository ho?c t?n provider v?o `suite`. N?u y?u c?u c?n seed
+database, API mock ho?c ki?m tra persistence th?t, ?? l? profile testcase ri?ng ch? kh?ng ph?i
+fixture black-box c?a common engine.
+
+C?u h?nh testcase c? kh?ng c? `suite` v?n ch?y ? ch? ?? t??ng th?ch fallback. B? ?? m?i n?n
+b?t `strict_semantic_keys` ?? thi?u key s? fail r? r?ng thay v? runner t? ?o?n theo User CRUD.

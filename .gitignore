@@ -80,3 +80,9 @@ secret.properties
 *.sqlite3
 mysql/data/
 mysql_data/
+
+# Rác Dart/Flutter sinh ra trong thư mục bài nộp fixture khi IDE chạy `pub get`.
+# Bài nộp chỉ gồm `lib/` + `pubspec.yaml`; container chấm không đọc gì khác.
+fixtures/result-json-v2/submissions/*/.dart_tool/
+fixtures/result-json-v2/submissions/*/.flutter-plugins-dependencies
+fixtures/result-json-v2/submissions/*/pubspec.lock

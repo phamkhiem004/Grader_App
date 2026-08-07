@@ -1,5 +1,7 @@
 package com.example.grader.service;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
 import java.io.InputStream;
@@ -226,5 +228,50 @@ class TestCaseTaxonomyTest {
             assertNotNull(TestCaseTaxonomy.layerForRunner(runner),
                     "Runner " + runner + " chưa có layer trong TestCaseTaxonomy");
         }
+    }
+
+    /**
+     * CHIỀU CÒN LẠI: mọi runner GIÁO VIÊN CHỌN ĐƯỢC phải là runner engine CHẠY ĐƯỢC.
+     *
+     * <p>{@link #everyEngineRunnerHasALayer} canh chiều *engine → bảng layer*. Nhưng thư viện
+     * template là thứ giáo viên bấm chọn trên UI, và nó là một danh sách RIÊNG — nếu một template
+     * khai `runner` mà {@code exam_test.dart} không có nhánh, thì không gì đỏ cả: lỗi chỉ lộ ra
+     * **lúc chấm bài thật**, khi engine rơi vào {@code default: fail('… chưa có common runner')}.
+     * Tức là một lỗi CẤU HÌNH, nhưng người chịu hậu quả là **sinh viên** — testcase đó hỏng trên
+     * bài của em ấy. Bắt ở đây thì nó chỉ là một test đỏ lúc build.
+     *
+     * <p>Hôm nay hai danh sách khớp nhau (22 template ⊆ 23 runner engine, chênh đúng `GROUP` —
+     * nhóm được tạo bằng cách gom trên UI, không có template riêng). Test này giữ cho nó khớp.
+     */
+    @Test
+    void everyTemplateRunnerIsImplementedByTheEngine() throws Exception {
+        JsonNode templates;
+        try (InputStream in = getClass().getResourceAsStream("/common-testcase-templates.json")) {
+            assertNotNull(in, "Không tìm thấy thư viện template trên classpath");
+            templates = new ObjectMapper().readTree(in);
+        }
+        Set<String> pickable = new LinkedHashSet<>();
+        for (JsonNode t : templates) {
+            String runner = t.path("runner").asText(null);
+            if (runner != null && !runner.isBlank()) pickable.add(runner);
+        }
+        // Cùng lý do như test trên: đọc hỏng ⇒ tập rỗng ⇒ mọi phép kiểm dưới đạt vô nghĩa.
+        assertTrue(pickable.size() >= 20,
+                "Chỉ đọc được " + pickable.size() + " template — file có thể đã đổi hình dạng");
+
+        String source;
+        try (InputStream in = getClass().getResourceAsStream("/common-testcase-engine/exam_test.dart")) {
+            assertNotNull(in, "Không tìm thấy engine chung trên classpath");
+            source = new String(in.readAllBytes(), StandardCharsets.UTF_8);
+        }
+        Set<String> implemented = new LinkedHashSet<>();
+        Matcher m = Pattern.compile("case '([A-Z][A-Z_]*)':").matcher(source);
+        while (m.find()) implemented.add(m.group(1));
+
+        Set<String> orphan = new LinkedHashSet<>(pickable);
+        orphan.removeAll(implemented);
+        assertTrue(orphan.isEmpty(),
+                "Template cho giáo viên chọn nhưng engine không chạy được: " + orphan
+                        + " — sinh viên sẽ nhận testcase hỏng lúc chấm");
     }
 }

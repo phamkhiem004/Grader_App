@@ -167,15 +167,25 @@ class TestObservationRendererTest {
      */
     @Test
     void neverCollapsesKindsThatNeedDifferentFixes() {
-        List<String> kinds = List.of("TEXT_MISMATCH", "NUMBER_MISMATCH", "STYLE_MISMATCH",
-                "LABEL_MISMATCH", "ENABLED_MISMATCH", "MISSING", "TYPE_MISMATCH");
+        // Danh sách lấy TỪ CHÍNH bảng, không chép tay: bản trước chép tay 7 trong 12 `kind`, nên
+        // một `kind` mới trùng mã vẫn XANH — đúng kịch bản phía NLP nêu khi họ nói lưới này
+        // "gánh cho cả NLP". Nay quét TOÀN BỘ, thêm `kind` mà quên mã riêng là đỏ ngay.
+        Set<String> kinds = TestObservationRenderer.renderableKinds();
         Set<String> codes = new LinkedHashSet<>();
         for (String kind : kinds) {
             String code = TestObservationRenderer.errorCodeOf(obs("kind", kind));
-            assertNotNull(code, kind);
+            if (code == null) {
+                assertTrue(kind.startsWith("NOT_RUN_"),
+                        kind + " không có mã mà cũng không phải NOT_RUN_*");
+                continue;
+            }
             assertTrue(codes.add(code), kind + " bị dồn vào mã đã dùng: " + code);
         }
-        assertEquals(kinds.size(), codes.size());
+        // SONG ÁNH TOÀN CỤC: số mã phân biệt = số kind có mã. Phía NLP gom nhóm bằng `error_code`
+        // mà mã đó suy từ `kind`, nên một ô N→1 làm nhóm của họ thô đi mà KHÔNG test nào bên họ đỏ.
+        // Đây là lưới duy nhất chặn chuyện đó — nới nó là THAY ĐỔI PHÁ VỠ, phải báo trước.
+        assertEquals(TestObservationRenderer.observationErrorCodes().size(), codes.size(),
+                "bảng kind → error_code không còn là song ánh: " + codes);
     }
 
     @Test

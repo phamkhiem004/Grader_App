@@ -42,8 +42,8 @@ class FixtureResultAssemblyTest {
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final Path FIXTURE = Path.of("..", "fixtures", "result-json-v2");
     /** Sáu bài nộp của fixture — khai MỘT chỗ để ba test độ phủ không lệch nhau. */
-    private static final List<String> FIXTURE_VARIANTS =
-            List.of("high", "medium", "sloppy", "unwired", "broken-boot", "broken-compile");
+    private static final List<String> FIXTURE_VARIANTS = List.of(
+            "high", "medium", "sloppy", "unwired", "broken-action", "broken-boot", "broken-compile");
     /** Từ vựng nội bộ của hệ thống chấm — sinh viên không kiểm chứng được số lượng test. */
     private static final java.util.regex.Pattern INTERNAL_TEST_COUNT =
             java.util.regex.Pattern.compile("\\b\\d+\\s+(assert|testcase|test|phép kiểm)\\b",

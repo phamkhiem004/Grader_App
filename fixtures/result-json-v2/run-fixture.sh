@@ -24,7 +24,7 @@ to_host_path() {
 
 VARIANTS=("$@")
 if [ ${#VARIANTS[@]} -eq 0 ]; then
-  VARIANTS=(high medium sloppy unwired broken-boot broken-compile)
+  VARIANTS=(high medium sloppy unwired broken-action broken-boot broken-compile)
 fi
 
 # Thư mục testcase = engine chung (grader + exam_test) + matrix của đề fixture.

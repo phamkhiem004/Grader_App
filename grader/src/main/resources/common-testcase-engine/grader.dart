@@ -22,7 +22,13 @@ import 'dart:io';
 /// viên nhận log tiếng Anh. (a) tám chỗ `tester.tap` không kiểm nút có tồn tại — nay qua `_tap`;
 /// (b) `_assertTargetType` `fail()` trần — nay phát `TYPE_MISMATCH` (`kind` thứ 14, chín runner
 /// gọi tới). Điểm KHÔNG đổi: hai phép kiểm này không nghiêm hơn `tester.tap`, chỉ báo khác.
-const String kEngineVersion = 'COMMON_V1-2.6.0';
+/// 2.7.0 — A2c: NGUYÊN NHÂN GỐC thắng triệu chứng. `flutter_test` KHÔNG dừng thân test khi
+/// handler của bài ném lỗi, nên assertion của runner hỏng vì HỆ QUẢ và ghi đè nguyên nhân:
+/// app ném RangeError lúc bấm xoá mà báo cáo nói "không thấy hộp thoại nào", error_code
+/// WIDGET_NOT_FOUND. Nay mọi thao tác đi kèm `_failIfActionThrew` (10 chỗ) phát `ACTION_FAILED`
+/// — kind cố ý KHÔNG mang error_code để classifier giữ độ mịn (RANGE_ERROR/NULL_ERROR/
+/// STATE_ERROR). Điểm KHÔNG đổi: lỗi chưa lấy đi vẫn làm flutter_test đánh hỏng test.
+const String kEngineVersion = 'COMMON_V1-2.7.0';
 
 /// PHẢI khớp hằng cùng tên trong `exam_test.dart` — hai chương trình Dart riêng biệt,
 /// không import nhau nên không chia sẻ được hằng số.

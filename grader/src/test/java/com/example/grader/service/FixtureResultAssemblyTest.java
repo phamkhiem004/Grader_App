@@ -99,6 +99,17 @@ class FixtureResultAssemblyTest {
                 if (!"passed".equals(tc.get("status"))) {
                     assertEquals("observation", tc.get("actual_source"),
                             variant + "/" + id + ": actual còn dựng từ log — " + tc.get("actual"));
+                    // A2c — ĐIỀU ĐÁNG KHẲNG ĐỊNH THẬT SỰ. Bất biến trên chỉ nói `actual` ĐẾN TỪ
+                    // ĐÂU, mà lúc nó xanh trên 6 mẫu tôi đã coi đó là "kênh quan sát phủ trọn" —
+                    // thật ra nó xanh vì fixture chưa có bài nào ném ngoại lệ giữa lúc runner
+                    // đang chạy. Cái phải giữ là NỘI DUNG: dù đến từ nguồn nào, `actual` tới tay
+                    // sinh viên không được là log của bộ chấm (SPEC 5.4, luật C3/C4).
+                    String actual = String.valueOf(tc.get("actual"));
+                    for (String leak : List.of("EXCEPTION CAUGHT BY", "was thrown", ".dart",
+                            "package:flutter", "#0 ", "TC_")) {
+                        assertFalse(actual.contains(leak), variant + "/" + id
+                                + ": actual lộ log bộ chấm (\"" + leak + "\") — " + actual);
+                    }
                 }
             }
             done++;

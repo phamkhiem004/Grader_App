@@ -63,6 +63,7 @@ sinh viên.** Mọi tranh cãi thiết kế phân xử bằng nguyên tắc này
 | **A1** | Suy `error_code` từ `observation.kind` + 4 mã mới | ✅ **Xong** 2026-08-06 | **0 giá trị lệch** trên dữ liệu thật (song ánh 1–1); 4 mẫu vẫn 0 luật FAIL; 61 test |
 | **A2** | Mở rộng fixture: 10 runner chưa chạy + 7 `kind` chưa từng phát | ✅ **Xong** 2026-08-07 | Fixture 13 → **24 testcase**, phủ **23/23 runner** và **13/13 `kind`**; bài nộp thứ 5 `sloppy`; tìm ra **khiếm khuyết chấm sai điểm thứ tư**; 7 `kind` lên Mức 1 |
 | **A2b** | Tám runner *chỉ từng đạt* phải chạy cả đường **HỎNG** | ✅ **Xong** 2026-08-07 | Fixture → **25 testcase**, bài nộp thứ 6 `unwired`; **22/22 runner đủ hai đường**; bít **hai lỗ hổng kênh quan sát**; `kind` thứ 14 `TYPE_MISMATCH`; **0 test `failed` thiếu `observation`**; điểm 5 bài cũ KHÔNG đổi |
+| **A2c** | Trả nợ hai lỗ hổng NLP phơi ra | ✅ **Xong** 2026-08-07 | Tìm ra ca **CHẨN ĐOÁN SAI LỆCH**; `kind` thứ 15 `ACTION_FAILED`; bài nộp thứ 7 `broken-action`; mã classifier chạy thật **0/9 → 3/9**; 0 luật FAIL trên 7 mẫu |
 | **P6** | `exam.requirements` | ⬜ | — |
 
 ### A2 — mở fixture, và cái giá của việc công bố năng lực chưa chạy
@@ -116,6 +117,29 @@ Docker lần đầu; sau khi chạy, lệch thì **mặc định engine sai**. �
 án tay chỉ đúng **một** chỗ lệch, và chỗ đó là khiếm khuyết engine — đáp án không sửa một chữ.
 Ở A2b thì **6/6 khớp ngay lần đầu**, kể cả bốn con số điểm phải giữ nguyên khi mẫu số đổi từ 24 lên
 25 testcase — vì trọng số được chọn có chủ đích để đúng như vậy.
+
+#### A2c — khuyết tật nặng nhất không phải sai điểm, mà là NÓI SAI NGUYÊN NHÂN
+
+Phía NLP đo lại bộ mẫu A2b và phát hiện hai chỗ tôi yếu hơn mức họ đang tin (xem
+`CHANGELOG_FOR_GRADER.md` `e861d21`). Trả nợ cả hai thì lộ ra thứ nặng hơn cả hai:
+
+`flutter_test` **không dừng thân test** khi handler của bài ném lỗi. Nó bắt lấy, test chạy tiếp, rồi
+phần khẳng định của runner hỏng vì *hệ quả* — và luật A1 *"quan sát thắng classifier"* ghi đè nguyên
+nhân gốc bằng triệu chứng. App ném `RangeError` lúc bấm xoá, báo cáo nói *"không thấy hộp thoại nào"*
+với `error_code: WIDGET_NOT_FOUND`. **Sai lệch tệ hơn xấu**: sinh viên đi tìm widget thiếu.
+
+Luật A1 là của tôi, và tôi dựng nó trên phép đo **không có ca crash nào** — bijection 12↔12 đo trên
+dữ liệu chưa từng chạm đường này. Bài học: *"đo xong thấy an toàn"* chỉ đúng trong phạm vi dữ liệu đã
+đo, và phạm vi đó phải nói ra cùng với kết luận.
+
+Sửa: `_failIfActionThrew` sau mọi thao tác (10 chỗ) phát **`ACTION_FAILED`** — `kind` thứ 15, cố ý
+**không mang `error_code`** để classifier giữ độ mịn. Ở ca này **classifier biết nhiều hơn engine**:
+engine chỉ biết *"app ném lỗi"*, classifier bóc được loại. Hai nguồn bổ sung nhau, không cạnh tranh —
+và đó là bằng chứng cụ thể cho việc `kind` **hẹp hơn** `error_code`.
+
+Hai lỗ hổng ban đầu cũng vá xong: lưới song ánh `kind`→`error_code` chỉ quét 7/12 (danh sách chép
+tay) → nay lấy từ chính bảng; và bất biến `actual_source == "observation"` là overclaim (xanh vì
+fixture né) → nay kiểm **nội dung** `actual` không chứa log của bộ chấm.
 
 ### Vì sao ĐÓNG P4b
 

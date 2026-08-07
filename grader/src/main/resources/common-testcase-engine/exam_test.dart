@@ -92,6 +92,7 @@ Future<void> _runCase(
       final submitKey = _text(parameters, 'submitKey');
       await _tap(tester, _byKey(submitKey), 'Thiếu submit key: $submitKey');
       await _settle(tester);
+      _failIfActionThrew(tester);
       for (final key in _csv(parameters, 'errorKeys')) {
         _expectPresent(_byKey(key), 'error', 'Thiếu error key: $key',
             where: 'after_action');
@@ -121,6 +122,7 @@ Future<void> _runCase(
       final destinationKey = _text(parameters, 'destinationKey');
       await _tap(tester, _byKey(openKey), 'Không tìm thấy nút mở màn hình đích: $openKey');
       await _settle(tester);
+      _failIfActionThrew(tester);
       _expectPresent(_byKey(destinationKey), 'screen',
           'Không mở được màn hình đích: $destinationKey', where: 'after_action');
       final backKey = _text(parameters, 'backKey');
@@ -129,6 +131,7 @@ Future<void> _runCase(
         await _tap(tester, _byKey(backKey), 'Không tìm thấy nút quay lại: $backKey',
             where: 'after_action');
         await _settle(tester);
+        _failIfActionThrew(tester);
         _expectPresent(_byKey(homeKey), 'screen',
             'Sau khi quay lại, không thấy màn hình trước: $homeKey', where: 'after_action');
         // Phải kiểm cả chiều BIẾN MẤT. Một mình `homeKey` là phép kiểm KHÔNG THỂ HỎNG:
@@ -154,6 +157,7 @@ Future<void> _runCase(
       final resultKey = _text(parameters, 'resultKey');
       await _tap(tester, _byKey(buttonKey), 'Không tìm thấy nút cần bấm: $buttonKey');
       await _settle(tester);
+      _failIfActionThrew(tester);
       _expectPresent(_byKey(resultKey), _subject(parameters),
           'Bấm xong nhưng không thấy kết quả: $resultKey', where: 'after_action');
       return;
@@ -204,6 +208,7 @@ Future<void> _checkStateReactiveFlow(
   _expectPresent(_byKey(initialKey), 'widget', 'Thiếu state ban đầu: $initialKey');
   await _tap(tester, _byKey(actionKey), 'Không tìm thấy nút thao tác: $actionKey');
   await _settle(tester);
+  _failIfActionThrew(tester);
   _expectPresent(_byKey(updatedKey), 'widget',
       'State không cập nhật sau action $actionKey: $updatedKey', where: 'after_action');
   if (absentKey.isNotEmpty) {
@@ -305,6 +310,29 @@ Future<void> _tap(
 }) async {
   _expectPresent(finder, 'button', reason, where: where);
   await tester.tap(finder);
+}
+
+/// Sau MỖI thao tác: ứng dụng có ném lỗi không? Nếu có thì đó là **nguyên nhân gốc**, phải nói ra
+/// trước khi phần khẳng định của runner kịp phát hiện *triệu chứng*.
+///
+/// Vì sao bắt buộc: `flutter_test` KHÔNG dừng thân test khi handler của bài ném lỗi — nó bắt lấy,
+/// test chạy tiếp, rồi assertion của runner hỏng vì hệ quả. Đo được ở bài `broken-action`: app ném
+/// `RangeError` lúc bấm xoá, nhưng báo cáo nói *"không thấy hộp thoại nào"* và `error_code` là
+/// `WIDGET_NOT_FOUND`. Sinh viên đi tìm widget thiếu, trong khi lỗi là truy cập ngoài phạm vi.
+/// Đó là **chẩn đoán sai lệch** — tệ hơn chẩn đoán xấu.
+///
+/// KHÔNG in đối tượng lỗi vào quan sát: tên class là định danh nội bộ của Dart (luật C3). `kind`
+/// này cố ý **không mang `error_code`** để `error_code` giữ giá trị của classifier — chỉ nó bóc
+/// được loại ngoại lệ (`RANGE_ERROR`, `NULL_ERROR`, `STATE_ERROR`…), độ mịn mà `kind` không mang
+/// được. Hai nguồn bổ sung nhau, không cạnh tranh.
+///
+/// ĐIỂM KHÔNG ĐỔI: lỗi chưa lấy đi vẫn làm `flutter_test` đánh hỏng test lúc kết thúc, nên phán
+/// quyết y nguyên — chỉ đổi chỗ hỏng và cách BÁO.
+void _failIfActionThrew(WidgetTester tester, {String where = 'after_action'}) {
+  final exception = tester.takeException();
+  if (exception == null) return;
+  _observe('ACTION_FAILED', where: where);
+  fail('Ứng dụng ném lỗi khi thực hiện thao tác: $exception');
 }
 
 /// Bọc phép kiểm "PHẢI BIẾN MẤT". Luôn dùng [_goneByKey] cho finder, xem lý do ở đó.
@@ -549,6 +577,7 @@ Future<void> _checkFormValidateFields(
   final submitKey = _requiredText(parameters, 'submitKey');
   await _tap(tester, _byKey(submitKey), 'Không tìm thấy nút lưu: $submitKey');
   await _settle(tester);
+  _failIfActionThrew(tester);
   for (final errorKey in errors) {
     _expectPresent(_byKey(errorKey), 'error',
         'Thiếu lỗi validation key: $errorKey', where: 'after_action');
@@ -585,6 +614,7 @@ Future<void> _checkFormPrefill(
   final editKey = _requiredText(parameters, 'editKey');
   await _tap(tester, _byKey(editKey), 'Không tìm thấy nút sửa: $editKey');
   await _settle(tester);
+  _failIfActionThrew(tester);
   final fields = _csv(parameters, 'fieldKeys');
   final expectedValues = _csv(parameters, 'expectedValues');
   if (fields.isEmpty || fields.length != expectedValues.length) {
@@ -627,6 +657,7 @@ Future<void> _checkFormSubmit(
   final submitKey = _requiredText(parameters, 'submitKey');
   await _tap(tester, _byKey(submitKey), 'Không tìm thấy nút lưu: $submitKey');
   await _settle(tester);
+  _failIfActionThrew(tester);
   final resultKey = _text(parameters, 'resultKey');
   if (resultKey.isNotEmpty) {
     _expectPresent(_byKey(resultKey), 'item',
@@ -646,6 +677,7 @@ Future<void> _checkDialogFlow(
   final actionKey = _requiredText(parameters, 'actionKey');
   await _tap(tester, _byKey(actionKey), 'Không tìm thấy nút mở hộp thoại: $actionKey');
   await _settle(tester);
+  _failIfActionThrew(tester);
 
   final dialogKey = _requiredText(parameters, 'dialogKey');
   final dialogFinder = _byKey(dialogKey);
@@ -657,6 +689,7 @@ Future<void> _checkDialogFlow(
   await _tap(tester, _byKey(decisionKey), 'Không tìm thấy nút xác nhận trong hộp thoại: $decisionKey',
       where: 'after_action');
   await _settle(tester);
+  _failIfActionThrew(tester);
   final resultKey = _text(parameters, 'resultKey');
   if (resultKey.isNotEmpty) {
     _expectPresent(_byKey(resultKey), 'item',

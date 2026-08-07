@@ -8,7 +8,7 @@ dữ liệu nào để đo**. Không có thước đo thì không phase nào ngh
 ## Chạy
 
 ```bash
-./run-fixture.sh                 # chấm cả 6 bài rồi so với expected/
+./run-fixture.sh                 # chấm cả 7 bài rồi so với expected/
 ./run-fixture.sh medium          # chấm 1 bài
 ```
 
@@ -47,7 +47,7 @@ vì trước A2 đã có **mười** runner được công bố trong hợp đ�
 > không báo trạng thái từng testcase con nên từ output không quan sát được. Nó vẫn chạy cả hai đường
 > (đạt ở `high`, hỏng ở `unwired`), chỉ là quy về `GROUP`.
 
-## Sáu bài nộp
+## Bảy bài nộp
 
 | Bài | Điểm | Đạt | Dùng để kiểm |
 |---|---|---|---|
@@ -55,14 +55,21 @@ vì trước A2 đã có **mười** runner được công bố trong hợp đ�
 | `medium` | 6.7 | 19/25 | C1–C6, B1–B2 — hỏng rải ở 3 nhóm chức năng |
 | `sloppy` | 6.6 | 16/25 | **Chạy được nhưng sai hàng loạt chi tiết đo được.** Bài làm 7 `kind` Mức 2 của SPEC 5.5 phát ra thật |
 | `unwired` | 7.0 | 15/25 | **Giao diện dựng xong nhưng nhiều chỗ chưa nối.** Bài làm tám runner *chỉ từng đạt* đi qua đường HỎNG, và làm `TYPE_MISMATCH` phát ra thật |
+| `broken-action` | 8.6 | 21/25 | **App mở được, giao diện đúng, nhưng ba handler ném lỗi lúc chạy.** Bài duy nhất làm **đường classifier** chạy thật — ca `observation` không thể có |
 | `broken-boot` | 0.0 | 0/25 | Ứng dụng **biên dịch được nhưng crash ở khung hình đầu**. Mọi test đều CHẠY và cùng hỏng vì một nguyên nhân gốc → ca kiểm `blocked_by` của P4b |
 | `broken-compile` | 0.0 | 0/25 | `lib/` **không biên dịch được** → không test nào chạy → ca kiểm `not_run`, A9, A10, C8 |
 
 `unwired` **cao điểm hơn** `medium` (7.0 vs 6.7) và đó là đúng: nó đúng gần hết phần tĩnh, chỉ chưa
 nối hành vi; `medium` thì hỏng ở những chỗ nặng điểm hơn (kiểm dữ liệu nhập, xác nhận xoá, bố cục).
 
-Hai bài hỏng tách đôi có chủ đích: chúng là **hai cơ chế khác nhau**, và bản 1 của SPEC gộp
-chung làm một nên mới bế tắc ở `blocked_by`.
+**Ba bài `broken-*` là ba cơ chế khác nhau, tách có chủ đích** — bản 1 của SPEC gộp chúng làm một
+nên mới bế tắc ở `blocked_by`:
+
+| Bài | Hỏng ở đâu | Trạng thái testcase |
+|---|---|---|
+| `broken-compile` | `lib/` không biên dịch | **tất cả** `not_run` |
+| `broken-boot` | crash ở khung hình đầu | `TC_APP_BOOT` `failed`, còn lại `not_run` |
+| `broken-action` | handler ném lỗi khi thao tác | chỉ 4 testcase liên quan `failed`, phần còn lại **đạt bình thường** |
 
 Lỗi được cấy vào `medium`: sai tiêu đề màn hình · bỏ hẳn kiểm tra dữ liệu nhập · xoá không hỏi
 xác nhận · bố cục tràn khung ở máy tính bảng ngang.
@@ -166,6 +173,30 @@ Lỗi bố cục được `flutter_test` báo LẠI mỗi khung hình, mà `_fai
 vào `result_json` lưu DB, ra API, và ra file mẫu gửi phía NLP. → Sửa: chỉ giữ khối chẩn đoán **đầu
 tiên**, cắt ở 4.000 ký tự (`_firstBlock`). Không dùng `_shorten` vì nó gộp cả dấu xuống dòng, mà
 bộ phân loại lỗi còn cần cấu trúc nhiều dòng cho dữ liệu chưa có `observation`. Điểm không đổi.
+
+## Chẩn đoán SAI LỆCH — ✅ đã sửa ở A2c
+
+Khuyết tật nặng nhất tìm được trong cả A2: không phải điểm sai, mà **báo cáo nói sai nguyên nhân**.
+
+`flutter_test` **không dừng thân test** khi handler của bài ném lỗi — nó bắt lấy, test chạy tiếp, rồi
+phần khẳng định của runner hỏng vì *hệ quả*. Luật A1 (*"quan sát thắng classifier"*) khi đó ghi đè
+nguyên nhân gốc bằng triệu chứng:
+
+| Thật ra app | Báo cho sinh viên (trước A2c) | `error_code` |
+|---|---|---|
+| ném `RangeError` khi bấm xoá | *"không thấy hộp thoại nào"* | `WIDGET_NOT_FOUND` |
+| ném `Bad state` khi bấm xoá hết | *"không thấy thành phần nào"* | `WIDGET_NOT_FOUND` |
+| ném `Null check operator` khi bấm sửa | *"không thấy nội dung chữ nào"* | `WIDGET_NOT_FOUND` |
+
+Sinh viên đi tìm widget thiếu trong khi lỗi là truy cập ngoài phạm vi. → Sửa: mọi thao tác kiểm ngoại
+lệ ngay sau khi thực hiện (`_failIfActionThrew`, 10 chỗ) và phát **`ACTION_FAILED`** — `kind` thứ 15 —
+TRƯỚC khi triệu chứng kịp phát. **Điểm không đổi**: lỗi chưa lấy đi vẫn làm `flutter_test` đánh hỏng
+test, nên phán quyết y nguyên.
+
+`ACTION_FAILED` cố ý **không mang `error_code`**, để classifier giữ độ mịn: engine chỉ biết *"app ném
+lỗi"*, còn classifier bóc được LOẠI (`RANGE_ERROR`/`NULL_ERROR`/`STATE_ERROR`). Hai nguồn bổ sung
+nhau — và đó là bằng chứng cụ thể cho việc `kind` **hẹp hơn** `error_code`, lý do phía NLP giữ
+`error_code` làm khoá gom nhóm.
 
 ## Hai lỗ hổng của chính kênh quan sát — ✅ đã sửa ở A2b
 

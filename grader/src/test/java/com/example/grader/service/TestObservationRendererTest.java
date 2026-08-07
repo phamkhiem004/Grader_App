@@ -88,6 +88,21 @@ class TestObservationRendererTest {
         assertFalse(out.contains("không thấy"), out);
     }
 
+    /**
+     * A2c — ứng dụng ném lỗi khi thao tác thì phải nói NGUYÊN NHÂN GỐC, và phải để `error_code` cho
+     * classifier: chỉ nó bóc được LOẠI ngoại lệ. Trước A2c, ca này bị assertion của runner ghi đè
+     * thành "không thấy hộp thoại nào" + `WIDGET_NOT_FOUND` — chẩn đoán SAI LỆCH.
+     */
+    @Test
+    void reportsTheCrashItselfAndLeavesTheCodeToTheClassifier() {
+        assertEquals("Xoá người dùng có xác nhận: ứng dụng báo lỗi khi thực hiện thao tác, "
+                        + "nên chưa kiểm được tới cuối yêu cầu.",
+                TestObservationRenderer.render("Xoá người dùng có xác nhận",
+                        obs("kind", "ACTION_FAILED", "where", "after_action")));
+        assertNull(TestObservationRenderer.errorCodeOf(obs("kind", "ACTION_FAILED")),
+                "ACTION_FAILED tự gán mã là xoá mất RANGE_ERROR/NULL_ERROR/STATE_ERROR");
+    }
+
     @Test
     void namesTheViewportWhereOverflowHappened() {
         assertEquals("Không tràn bố cục: giao diện bị tràn khung ở màn hình ngang.",
@@ -175,8 +190,8 @@ class TestObservationRendererTest {
         for (String kind : kinds) {
             String code = TestObservationRenderer.errorCodeOf(obs("kind", kind));
             if (code == null) {
-                assertTrue(kind.startsWith("NOT_RUN_"),
-                        kind + " không có mã mà cũng không phải NOT_RUN_*");
+                assertTrue(TestObservationRenderer.kindsWithoutCode().contains(kind),
+                        kind + " không có mã mà cũng không nằm trong danh sách cố ý không có mã");
                 continue;
             }
             assertTrue(codes.add(code), kind + " bị dồn vào mã đã dùng: " + code);
@@ -196,12 +211,13 @@ class TestObservationRendererTest {
         // Danh sách lấy TỪ CHÍNH lớp đó (`renderableKinds`), không chép tay: chép tay thì thêm
         // `kind` mới mà quên sửa test là test vẫn xanh — đúng lỗ hổng đang muốn bịt.
         Set<String> kinds = TestObservationRenderer.renderableKinds();
-        assertEquals(14, kinds.size(), "SPEC 5.5 khai 14 kind: " + kinds);
+        assertEquals(15, kinds.size(), "SPEC 5.5 khai 15 kind: " + kinds);
+        Set<String> noCode = TestObservationRenderer.kindsWithoutCode();
         for (String kind : kinds) {
             assertNotNull(TestObservationRenderer.render("Yêu cầu X", obs("kind", kind)), kind);
-            if (kind.startsWith("NOT_RUN_")) {
+            if (noCode.contains(kind)) {
                 assertNull(TestObservationRenderer.errorCodeOf(obs("kind", kind)),
-                        kind + " chưa chạy nên KHÔNG được có error_code");
+                        kind + " phải để error_code cho classifier, không được tự gán");
             } else {
                 assertNotNull(TestObservationRenderer.errorCodeOf(obs("kind", kind)),
                         kind + " diễn đạt được nhưng chưa có error_code");

@@ -83,10 +83,19 @@ public final class TestObservationRenderer {
     }
 
     /**
-     * Hai `kind` nói "chưa chạy". Không có `error_code` (chưa chạy thì chưa quan sát được gì để
-     * phân loại) nên chúng không nằm trong {@link #ERROR_CODE}, nhưng vẫn diễn đạt được.
+     * `kind` diễn đạt được nhưng **cố ý KHÔNG mang `error_code`**, để `error_code` giữ giá trị của
+     * {@link TestErrorClassifier}. Hai lý do khác nhau:
+     *
+     * <ul>
+     *   <li>`NOT_RUN_*` — chưa chạy thì chưa quan sát được gì để phân loại;</li>
+     *   <li>`ACTION_FAILED` (A2c) — ứng dụng ném lỗi khi thao tác. Ở đây **classifier biết nhiều
+     *       hơn** engine: nó bóc được LOẠI ngoại lệ (`RANGE_ERROR`, `NULL_ERROR`, `STATE_ERROR`…),
+     *       độ mịn mà `kind` không mang được. Hai nguồn bổ sung nhau, không cạnh tranh — `kind` nói
+     *       *tình huống*, `error_code` nói *loại lỗi*.</li>
+     * </ul>
      */
-    private static final Set<String> NOT_RUN_KINDS = Set.of("NOT_RUN_BOOT", "NOT_RUN_SUITE");
+    private static final Set<String> KINDS_WITHOUT_CODE =
+            Set.of("NOT_RUN_BOOT", "NOT_RUN_SUITE", "ACTION_FAILED");
 
     /**
      * Mọi `kind` lớp này diễn đạt được — dùng để đối chiếu độ phủ của fixture (A2) và bảng SPEC 5.5.
@@ -96,8 +105,13 @@ public final class TestObservationRenderer {
      */
     public static Set<String> renderableKinds() {
         Set<String> kinds = new java.util.TreeSet<>(ERROR_CODE.keySet());
-        kinds.addAll(NOT_RUN_KINDS);
+        kinds.addAll(KINDS_WITHOUT_CODE);
         return Set.copyOf(kinds);
+    }
+
+    /** `kind` cố ý không mang `error_code` — xem {@link #KINDS_WITHOUT_CODE}. */
+    public static Set<String> kindsWithoutCode() {
+        return KINDS_WITHOUT_CODE;
     }
 
     /** Loại thành phần theo cách sinh viên hiểu — bảng ĐÓNG, khớp `_subject` của engine. */
@@ -181,6 +195,12 @@ public final class TestObservationRenderer {
             case "OVERFLOW" -> "giao diện bị tràn khung" + suffix + ".";
             case "LAYOUT_ERROR" -> "bố cục dựng không xong" + suffix + ".";
             case "BOOT_FAILED" -> "ứng dụng không mở được, chưa hiện được nội dung nào.";
+            // NGUYÊN NHÂN GỐC, không phải triệu chứng. Trước A2c chỗ này không tồn tại: app ném
+            // lỗi lúc bấm thì báo cáo nói "không thấy hộp thoại nào" — sinh viên đi tìm widget
+            // thiếu trong khi lỗi là truy cập ngoài phạm vi. Câu này chỉ nói ĐIỀU QUAN SÁT ĐƯỢC
+            // (app báo lỗi khi thao tác); LOẠI lỗi nằm ở `error_code` do classifier bóc ra.
+            case "ACTION_FAILED" -> "ứng dụng báo lỗi khi thực hiện thao tác, "
+                    + "nên chưa kiểm được tới cuối yêu cầu.";
             // Hai ca `not_run`: nêu VÌ SAO chưa chạy, không nêu chẩn đoán (SPEC mục 5.4).
             case "NOT_RUN_BOOT" -> "chưa chạy vì ứng dụng không mở được, bộ chấm chưa kiểm tới đây.";
             case "NOT_RUN_SUITE" -> "chưa chạy vì bộ test không khởi động được.";

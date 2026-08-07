@@ -60,11 +60,14 @@ const ERR_BADGE: Record<string, string> = {
   WIDGET_NOT_FOUND: "bg-amber-100 text-amber-700",
   WIDGET_UNEXPECTED: "bg-amber-100 text-amber-700",
   WIDGET_COUNT: "bg-amber-100 text-amber-700",
-  // Bốn mã của đường quan sát (A1) — tách riêng vì cách sửa khác nhau, không dồn VALUE_MISMATCH.
+  // Năm mã của đường quan sát (A1 + A2b) — tách riêng vì cách sửa khác nhau, không dồn chung.
   SIZE_MISMATCH: "bg-rose-100 text-rose-700",
   TEXT_STYLE_MISMATCH: "bg-rose-100 text-rose-700",
   SEMANTICS_MISMATCH: "bg-amber-100 text-amber-700",
   ENABLED_MISMATCH: "bg-amber-100 text-amber-700",
+  // Cùng màu hổ phách với nhóm "thành phần chưa đúng", KHÔNG cùng màu WIDGET_NOT_FOUND để
+  // giáo viên nhìn badge là phân biệt được "thiếu hẳn" với "có nhưng sai loại".
+  WIDGET_TYPE_MISMATCH: "bg-yellow-100 text-yellow-800",
   LAYOUT_OVERFLOW: "bg-orange-100 text-orange-700",
   TIMEOUT: "bg-orange-100 text-orange-700",
   NULL_ERROR: "bg-red-100 text-red-700",

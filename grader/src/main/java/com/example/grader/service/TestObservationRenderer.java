@@ -191,8 +191,11 @@ public final class TestObservationRenderer {
     private static String textMismatch(Map<?, ?> obs) {
         String seen = text(obs.get("seen"));
         // Chữ sinh viên ĐANG hiển thị được phép in nguyên văn — em ấy tự đối chiếu được.
-        if (seen == null) return "nội dung chữ không đúng yêu cầu.";
-        return "đang hiển thị \"" + seen + "\".";
+        if (seen != null) return "đang hiển thị \"" + seen + "\".";
+        // Phân biệt hai ca mà `text()` gộp lại: engine KHÔNG GỬI chữ, và chữ gửi về là RỖNG.
+        // "Đang để trống" là chẩn đoán khác hẳn, và là ca thường gặp nhất của FORM_PREFILL —
+        // sinh viên nối nút sửa nhưng chưa nạp dữ liệu vào form.
+        return obs.containsKey("seen") ? "đang để trống." : "nội dung chữ không đúng yêu cầu.";
     }
 
     private static String countMismatch(Map<?, ?> obs, String subject) {

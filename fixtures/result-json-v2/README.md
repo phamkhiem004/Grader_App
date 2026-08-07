@@ -8,7 +8,7 @@ dữ liệu nào để đo**. Không có thước đo thì không phase nào ngh
 ## Chạy
 
 ```bash
-./run-fixture.sh                 # chấm cả 5 bài rồi so với expected/
+./run-fixture.sh                 # chấm cả 6 bài rồi so với expected/
 ./run-fixture.sh medium          # chấm 1 bài
 ```
 
@@ -19,13 +19,13 @@ ghép với `exam/skills_matrix.json`, nên nó luôn đo đúng engine hiện t
 
 ## Bộ đề
 
-`exam/skills_matrix.json` — **24 testcase**, tổng trọng số 100, phủ **đủ 23/23 runner** của engine
+`exam/skills_matrix.json` — **25 testcase**, tổng trọng số 100, phủ **đủ 23/23 runner** của engine
 chung, cả ba `layer` và 9 nhóm chức năng (`rubric`).
 
 | `layer` | Testcase |
 |---|---|
 | `integration` | TC_APP_BOOT, TC_ADD_USER (GROUP), TC_VALIDATE_FIELDS, TC_REQUIRED_FIELDS, TC_DELETE_CONFIRM, TC_CLEAR_ALL, TC_DETAIL_NAV, TC_EDIT_BANNER, TC_EDIT_PREFILL |
-| `widget` | TC_HOME_TITLE, TC_TITLE_STYLE, TC_LIST_VISIBLE, TC_LIST_COUNT, TC_HEADER_ICON, TC_HEADER_ICON_LABEL, TC_AVATAR_SIZE, TC_FORM_PADDING, TC_FIELD_GAP, TC_NAME_FIELD, TC_EMAIL_FIELD, TC_SAVE_ENABLED, TC_NOTIFY_ENABLED |
+| `widget` | TC_HOME_TITLE, TC_TITLE_STYLE, TC_LIST_VISIBLE, TC_LIST_COUNT, TC_HEADER_ICON, TC_HEADER_ICON_LABEL, TC_AVATAR_SIZE, TC_FORM_PADDING, TC_FIELD_GAP, TC_NAME_FIELD, TC_EMAIL_FIELD, TC_SAVE_ENABLED, TC_NOTIFY_ENABLED, TC_CLEAR_BUTTON |
 | `responsive` | TC_RESPONSIVE_NO_OVERFLOW, TC_RESPONSIVE_TARGET |
 
 `TC_ADD_USER` là testcase `GROUP` có hai con (`WIDGET_VISIBLE` + `FORM_SUBMIT`) — dùng để kiểm
@@ -36,21 +36,30 @@ luật **B2** (nhóm lấy tầng cao nhất của các con: `widget` + `integra
 `TestCaseTaxonomy.commonRunners()`. Thêm runner vào engine mà quên bổ sung testcase là đỏ ngay —
 vì trước A2 đã có **mười** runner được công bố trong hợp đồng mà chưa từng chạy một lần nào.
 
-> ⚠️ **"23/23" nghĩa là ĐÃ GỌI, không phải ĐÃ HỎNG.** Đo trên 5 bài: chỉ **14/22** runner từng đi
-> qua đường hỏng. Tám runner sau **chỉ từng đạt** — `BUTTON_ACTION`, `FORM_PREFILL`, `GROUP`,
-> `NAVIGATION`, `WIDGET_GAP`, `WIDGET_PADDING`, `WIDGET_TYPE_VISIBLE`, `WIDGET_VISIBLE` — nên nhánh
-> phát quan sát của riêng chúng vẫn chưa ai chạy. Việc còn lại: cấy lỗi cho tám cái đó rồi siết test
-> thành *"mỗi runner phải từng đạt VÀ từng hỏng"*. Ghi ở đây để con số 23/23 không bị đọc quá mạnh.
+> **"Đã gọi" và "đã hỏng" là hai chuyện khác nhau — A2b đóng cả hai.** Sau A2 vòng 1, "phủ 23/23"
+> chỉ có nghĩa *đã được gọi*: đo lại thì chỉ **14/22** runner từng đi qua đường hỏng, tám cái còn lại
+> chỉ từng ĐẠT (`BUTTON_ACTION`, `FORM_PREFILL`, `GROUP`, `NAVIGATION`, `WIDGET_GAP`,
+> `WIDGET_PADDING`, `WIDGET_TYPE_VISIBLE`, `WIDGET_VISIBLE`) — nhánh phát quan sát của riêng chúng
+> vẫn là code chưa ai chạy. Bài `unwired` cấy lỗi cho đủ tám cái, và cổng thứ ba
+> `everyRunnerHasBothAPassAndAFailSomewhere` khoá lại: **mỗi runner phải từng ĐẠT và từng HỎNG**.
+>
+> `FORM_SUBMIT` được **miễn có ghi lý do**: nó chỉ tồn tại làm con của `GROUP`, mà `result.json`
+> không báo trạng thái từng testcase con nên từ output không quan sát được. Nó vẫn chạy cả hai đường
+> (đạt ở `high`, hỏng ở `unwired`), chỉ là quy về `GROUP`.
 
-## Năm bài nộp
+## Sáu bài nộp
 
 | Bài | Điểm | Đạt | Dùng để kiểm |
 |---|---|---|---|
-| `high` | 10.0 | 24/24 | C7, A6, A7 — trạng thái "mọi thứ đúng" |
-| `medium` | 6.7 | 18/24 | C1–C6, B1–B2 — hỏng rải ở 3 nhóm chức năng |
-| `sloppy` | 6.6 | 15/24 | **Chạy được nhưng sai hàng loạt chi tiết đo được.** Bài duy nhất làm 7 `kind` Mức 2 của SPEC 5.5 phát ra thật |
-| `broken-boot` | 0.0 | 0/24 | Ứng dụng **biên dịch được nhưng crash ở khung hình đầu**. Mọi test đều CHẠY và cùng hỏng vì một nguyên nhân gốc → ca kiểm `blocked_by` của P4b |
-| `broken-compile` | 0.0 | 0/24 | `lib/` **không biên dịch được** → không test nào chạy → ca kiểm `not_run`, A9, A10, C8 |
+| `high` | 10.0 | 25/25 | C7, A6, A7 — trạng thái "mọi thứ đúng" |
+| `medium` | 6.7 | 19/25 | C1–C6, B1–B2 — hỏng rải ở 3 nhóm chức năng |
+| `sloppy` | 6.6 | 16/25 | **Chạy được nhưng sai hàng loạt chi tiết đo được.** Bài làm 7 `kind` Mức 2 của SPEC 5.5 phát ra thật |
+| `unwired` | 7.0 | 15/25 | **Giao diện dựng xong nhưng nhiều chỗ chưa nối.** Bài làm tám runner *chỉ từng đạt* đi qua đường HỎNG, và làm `TYPE_MISMATCH` phát ra thật |
+| `broken-boot` | 0.0 | 0/25 | Ứng dụng **biên dịch được nhưng crash ở khung hình đầu**. Mọi test đều CHẠY và cùng hỏng vì một nguyên nhân gốc → ca kiểm `blocked_by` của P4b |
+| `broken-compile` | 0.0 | 0/25 | `lib/` **không biên dịch được** → không test nào chạy → ca kiểm `not_run`, A9, A10, C8 |
+
+`unwired` **cao điểm hơn** `medium` (7.0 vs 6.7) và đó là đúng: nó đúng gần hết phần tĩnh, chỉ chưa
+nối hành vi; `medium` thì hỏng ở những chỗ nặng điểm hơn (kiểm dữ liệu nhập, xác nhận xoá, bố cục).
 
 Hai bài hỏng tách đôi có chủ đích: chúng là **hai cơ chế khác nhau**, và bản 1 của SPEC gộp
 chung làm một nên mới bế tắc ở `blocked_by`.
@@ -78,8 +87,28 @@ thông điệp không chứa chữ `overflow` — đúng nhánh phân biệt hai
 kiểm KHÔNG THỂ HỎNG** trên bài này, đúng khuyết tật P3b vừa dọn. Seed 1 người dùng kéo theo
 TC_LIST_VISIBLE hỏng, và đó là dữ liệu THẬT đáng có: **một nguyên nhân gốc làm hai testcase hỏng**.
 
-Độ phủ `kind` cũng được khoá bằng test: `fixtureEmitsEveryObservationKind` đòi cả 13 giá trị của
+Độ phủ `kind` cũng được khoá bằng test: `fixtureEmitsEveryObservationKind` đòi cả **14** giá trị của
 `TestObservationRenderer.renderableKinds()` phải xuất hiện trong output thật của ít nhất một bài.
+
+### `unwired` — bảy lỗi, tám runner lần đầu chạy đường hỏng
+
+| Lỗi cấy vào bài | Runner lần đầu HỎNG | `kind` |
+|---|---|---|
+| `_save` kiểm dữ liệu xong nhưng **quên gọi lưu** | `GROUP` (qua con `FORM_SUBMIT`) | `MISSING` |
+| `_startEdit` còn trống | `BUTTON_ACTION` + `FORM_PREFILL` | `MISSING` + `TEXT_MISMATCH` |
+| `_openDetail` còn trống | `NAVIGATION` | `MISSING` |
+| Thiếu hẳn nút xoá hết | `WIDGET_VISIBLE` + `STATE_REACTIVE_FLOW` | `MISSING` |
+| `icon.header` gắn lên `Text('👥')` thay vì `Icon` | `WIDGET_TYPE_VISIBLE` + `WIDGET_SEMANTICS_LABEL` | **`TYPE_MISMATCH`** 🆕 |
+| Khoảng cách hai ô nhập 24, đề đòi 8 | `WIDGET_GAP` | `NUMBER_MISMATCH` |
+| Khoảng đệm form 8, đề đòi 16 | `WIDGET_PADDING` | `NUMBER_MISMATCH` |
+
+Ba lỗi kéo theo **hai** testcase mỗi lỗi — đó là dữ liệu thật đáng có, không phải tác dụng phụ.
+
+Bài này cần thêm testcase `TC_CLEAR_BUTTON` (`WIDGET_VISIBLE` trên `action.clear-all`) vì hai
+testcase `WIDGET_VISIBLE` cũ **không thể hỏng**: `_byKey('field.name')` có fallback rơi về
+`TextFormField` đầu tiên, nên xoá khoá đi vẫn tìm ra ô nhập khác. `action.clear-all` không có
+fallback nào. Trọng số của nó (2) lấy từ `TC_HEADER_ICON` và `TC_FORM_PADDING` (mỗi cái 2 → 1) —
+chọn đúng hai chỗ đó để **điểm 5 bài cũ không đổi một số nào**.
 
 ## Cách đo
 
@@ -137,6 +166,26 @@ Lỗi bố cục được `flutter_test` báo LẠI mỗi khung hình, mà `_fai
 vào `result_json` lưu DB, ra API, và ra file mẫu gửi phía NLP. → Sửa: chỉ giữ khối chẩn đoán **đầu
 tiên**, cắt ở 4.000 ký tự (`_firstBlock`). Không dùng `_shorten` vì nó gộp cả dấu xuống dòng, mà
 bộ phân loại lỗi còn cần cấu trúc nhiều dòng cho dữ liệu chưa có `observation`. Điểm không đổi.
+
+## Hai lỗ hổng của chính kênh quan sát — ✅ đã sửa ở A2b
+
+Cả hai làm `observation` **null**, nên `actual` rơi về log tiếng Anh: sinh viên nhận nguyên khối
+chẩn đoán nội bộ của bộ chấm thay vì câu nói rõ thiếu cái gì. Cả hai **không đổi điểm**.
+
+**1. Tám chỗ `tester.tap` không kiểm nút có tồn tại.** `tester.tap` vào finder rỗng ném lỗi thô của
+`flutter_test`, không đi qua kênh quan sát. → Sửa: mọi thao tác chạm qua `_tap()` — `_expectPresent`
+rồi mới chạm. Không nghiêm hơn `tester.tap` (cùng đòi đúng một widget), chỉ đổi cách BÁO khi thiếu.
+
+**2. `_assertTargetType` `fail()` trần.** **Chín** runner gọi hàm này, nên sai loại widget là sinh
+viên nhận nguyên tên class tiếng Anh của Flutter. → Sửa: phát `TYPE_MISMATCH` — `kind` thứ 14.
+
+`TYPE_MISMATCH` **không** gộp vào `MISSING`: `MISSING` là *chưa có gì*, `TYPE_MISMATCH` là *có rồi
+nhưng sai loại*. Gộp lại thì câu góp ý bảo sinh viên "thêm thành phần còn thiếu" vào chỗ đã có sẵn
+một cái — em ấy thêm cái thứ hai và bài càng sai.
+
+**Vì sao hai lỗ hổng này sống tới A2b:** ở A2 tôi đã thấy chúng nhưng **cố ý không sửa**, vì lúc đó
+không bài nộp nào chạm vào — sửa là thêm code chưa ai chạy, đúng thứ A2 đang dọn. Bài `unwired` là
+điều kiện đó: cấy lỗi trước, sửa sau, và cả hai đường sửa đều có dữ liệu thật chứng minh.
 
 ## Ba khiếm khuyết CHẤM SAI ĐIỂM của engine chung — ✅ đã sửa ở P3b
 

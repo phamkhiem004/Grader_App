@@ -40,6 +40,19 @@ class TestObservationRendererTest {
     }
 
     @Test
+    void saysTheFieldIsEmptyInsteadOfSayingNothingUseful() {
+        // Ô để trống là chẩn đoán RIÊNG, không phải "chưa đúng yêu cầu" chung chung: đây là ca
+        // thường gặp nhất của FORM_PREFILL. Phân biệt bằng CÓ MẶT khoá `seen` với giá trị rỗng.
+        assertEquals("Điền sẵn form khi sửa: đang để trống.",
+                TestObservationRenderer.render("Điền sẵn form khi sửa",
+                        obs("kind", "TEXT_MISMATCH", "subject", "field", "seen", "")));
+        // Engine không gửi `seen` thì KHÔNG được suy là rỗng — chỉ nói chung chung.
+        assertEquals("Điền sẵn form khi sửa: nội dung chữ không đúng yêu cầu.",
+                TestObservationRenderer.render("Điền sẵn form khi sửa",
+                        obs("kind", "TEXT_MISMATCH", "subject", "field")));
+    }
+
+    @Test
     void printsCountsBecauseStudentCanRecount() {
         assertEquals("Số người dùng ban đầu: đếm được 3 mục, cần 2.",
                 TestObservationRenderer.render("Số người dùng ban đầu",

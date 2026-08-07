@@ -62,6 +62,7 @@ sinh viên.** Mọi tranh cãi thiết kế phân xử bằng nguyên tắc này
 | ~~**P4b**~~ | ~~`blocked_by`~~ | 🚫 **ĐÓNG** 2026-08-06 — xem dưới | — |
 | **A1** | Suy `error_code` từ `observation.kind` + 4 mã mới | ✅ **Xong** 2026-08-06 | **0 giá trị lệch** trên dữ liệu thật (song ánh 1–1); 4 mẫu vẫn 0 luật FAIL; 61 test |
 | **A2** | Mở rộng fixture: 10 runner chưa chạy + 7 `kind` chưa từng phát | ✅ **Xong** 2026-08-07 | Fixture 13 → **24 testcase**, phủ **23/23 runner** và **13/13 `kind`**; bài nộp thứ 5 `sloppy`; tìm ra **khiếm khuyết chấm sai điểm thứ tư**; 7 `kind` lên Mức 1 |
+| **A2b** | Tám runner *chỉ từng đạt* phải chạy cả đường **HỎNG** | ✅ **Xong** 2026-08-07 | Fixture → **25 testcase**, bài nộp thứ 6 `unwired`; **22/22 runner đủ hai đường**; bít **hai lỗ hổng kênh quan sát**; `kind` thứ 14 `TYPE_MISMATCH`; **0 test `failed` thiếu `observation`**; điểm 5 bài cũ KHÔNG đổi |
 | **P6** | `exam.requirements` | ⬜ | — |
 
 ### A2 — mở fixture, và cái giá của việc công bố năng lực chưa chạy
@@ -83,12 +84,38 @@ lời hứa trong README:
 |---|---|---|
 | `fixtureExercisesEveryCommonRunner` | thêm runner mà quên testcase | không |
 | `fixtureEmitsEveryObservationKind` | thêm `kind` mà quên cấy lỗi tương ứng | có |
+| `everyRunnerHasBothAPassAndAFailSomewhere` (A2b) | runner chỉ chạy một đường | có |
+
+#### A2b — "đã gọi" không phải "đã hỏng"
+
+A2 vòng 1 công bố "phủ 23/23 runner", rồi tôi tự soát lại và thấy mình **overclaim đúng kiểu A2 dựng
+ra để chống**: 23/23 là *đã được gọi*. Đo lại thì chỉ **14/22** runner từng đi qua đường hỏng.
+
+Và tám runner chưa chạy đường hỏng **chính là nơi hai lỗ hổng còn lại của kênh quan sát nằm** — cả
+hai làm `observation` null nên sinh viên nhận log tiếng Anh:
+
+| Lỗ hổng | Phạm vi | Sửa |
+|---|---|---|
+| `tester.tap` không kiểm nút có tồn tại | **tám** chỗ | qua `_tap()`, phát `MISSING` |
+| `_assertTargetType` `fail()` trần | **chín** runner gọi | phát `TYPE_MISMATCH` (`kind` thứ 14) |
+
+Ở A2 tôi đã **thấy** cả hai nhưng cố ý không sửa, vì lúc đó không bài nộp nào chạm vào — sửa là thêm
+code chưa ai chạy, đúng thứ A2 đang dọn. Bài `unwired` tạo đúng điều kiện đó: **cấy lỗi trước, sửa
+sau**. Nay `0` test `failed` nào thiếu `observation`.
+
+`TYPE_MISMATCH` cố ý **không** gộp vào `MISSING`: gộp thì câu góp ý bảo sinh viên *thêm thành phần
+còn thiếu* vào chỗ **đã có sẵn một cái** — em ấy thêm cái thứ hai.
+
+Cổng thứ ba: **`everyRunnerHasBothAPassAndAFailSomewhere`** — mỗi runner phải từng ĐẠT và từng HỎNG.
+Đường đạt và đường hỏng là hai đường khác nhau; phủ một cái không nói gì về cái kia.
 
 **Luật mới của A2 — đáp án viết tay trước khi chạy.** P3b có mỏ neo: `expected/*.json` không đụng
 tới nên chính nó làm trọng tài. A2 không có mỏ neo — cùng một người vừa viết bài nộp, vừa cấy lỗi,
 vừa viết đáp án. Nên `expected/*.json` được viết tay và **commit riêng** (`a261ee2`) trước khi chạy
 Docker lần đầu; sau khi chạy, lệch thì **mặc định engine sai**. Áp dụng lần đầu đã ra kết quả: đáp
 án tay chỉ đúng **một** chỗ lệch, và chỗ đó là khiếm khuyết engine — đáp án không sửa một chữ.
+Ở A2b thì **6/6 khớp ngay lần đầu**, kể cả bốn con số điểm phải giữ nguyên khi mẫu số đổi từ 24 lên
+25 testcase — vì trọng số được chọn có chủ đích để đúng như vậy.
 
 ### Vì sao ĐÓNG P4b
 

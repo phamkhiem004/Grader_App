@@ -6,6 +6,95 @@ Sổ theo dõi để không mất mạch giữa các phiên. **Đọc file này 
 - Luật nghiệm thu: `ACCEPTANCE.md` + `verify_result.py` cùng thư mục
 - Bộ đo: `fixtures/result-json-v2/` — `./run-fixture.sh`
 
+---
+
+# 🚩 BẮT ĐẦU TỪ ĐÂY (phiên mới đọc phần này trước)
+
+## Đang ở đâu — 2026-08-08
+
+**P0 → A2c xong.** `origin/main` = engine `COMMON_V1-2.7.0`, 69 test xanh, fixture **25 testcase /
+7 bài nộp**, **0 luật FAIL** trên cả 7 mẫu đã phát hành. Bảng tiến độ chi tiết ở mục *Tiến độ* dưới.
+
+## Việc kế tiếp, theo thứ tự
+
+**1. (c) — dọn `expected` máy sinh.** Chưa làm. Đo được: **20/22 `expected_template` trong
+`common-testcase-templates.json` nhét semantic key thẳng vào `expected`** (`Bấm {actionKey} phải mở
+{dialogKey}…` → `Bấm action.delete.1 phải mở dialog.delete…`), 7/22 còn kèm từ vựng tiếng Anh. Giáo
+viên để trống ô `expected` là dính bản mặc định này. Phạm vi:
+
+| | |
+|---|---|
+| 1 | Viết lại 22 `expected_template` — tiếng Việt, mô tả hành vi, **không khoá, không jargon** |
+| 2 | Test cấm `{…Key}` và từ vựng Anh trong mọi `expected_template` |
+| 3 | Test chạy **đúng đường soạn đề thật** (`renderExpected` trên 22 template với tham số thật) + áp luật C3/C4 như `actual` |
+| 4 | Phát **một mẫu `expected` đi đường MÁY SINH** — phía NLP xin, xem `CHANGELOG_FOR_GRADER.md` 2026-08-10 |
+| 5 | `verify_result.py` quét `expected` phần máy sinh; SPEC ghi rõ phần giảng viên gõ chỉ bảo đảm nguyên văn |
+
+> Vì sao lỗi này sống lâu: **`exam/skills_matrix.json` của fixture là JSON gõ tay**, không đi qua
+> `TestcaseTemplateService` lần nào. Fixture đo **đường CHẤM**, chưa bao giờ đo **đường SOẠN ĐỀ**.
+
+**2. P6 — `exam.requirements`.** Hình dạng **đã chốt với cả chủ đồ án lẫn phía NLP**, không phải bàn lại:
+
+- **mảng chuỗi phẳng**, mỗi dòng giảng viên xuống dòng là một phần tử;
+- **y nguyên văn** — không cắt, không đánh số, không chuẩn hoá;
+- ở **`exam.requirements`**, giữ đúng thứ tự nhập; **không** `requirement_id`;
+- **bắt buộc, không rỗng** với đề tạo từ P6; đề cũ **bù `[]`** ⇒ `[]` chỉ có nghĩa *"đề trước P6"*;
+- để trên **bảng `exam`** (không phải `testcase-config.json`) — vì đề legacy không có file đó để bù;
+- **trần độ dài ở khâu NHẬP** (giảng viên thấy ngay), không cắt lúc kết xuất;
+- P6 tách hai nửa: **P6a** backend + hợp đồng (không chạm file FE nào) · **P6b** một ô nhập trong
+  `frontend/app/teacher/testcases/page.tsx`.
+
+## Luồng vận hành thật — chủ đồ án xác nhận 2026-08-08
+
+```
+sinh viên nộp ZIP → KHẢO THÍ chấm trong Grader → result.json
+   → giảng viên BẤM MỘT NÚT, bot NLP sinh nhận xét cho TOÀN BỘ bài nộp
+   → khảo thí gửi HÀNG LOẠT qua Gmail (Grader chưa có code gửi mail — để sau)
+   → CHỈ bài bị GẮN CỜ mới có người xem lại
+```
+
+Bốn điều rút ra, **đừng suy lại từ đầu**:
+
+1. **Sinh viên KHÔNG truy cập Grader.** Không có entity `Student`; chỉ hai tài khoản nội bộ (giảng
+   viên + khảo thí). `result.json` không tới tay sinh viên.
+2. Vậy luật *"không lộ khoá nội bộ"* vẫn giữ, nhưng lý do là **vệ sinh đầu vào cho bot** — bot có
+   thể chép nguyên chúng vào nhận xét.
+3. **Gửi hàng loạt** ⇒ một chữ sai không dừng ở một sinh viên; **cờ của bot NLP là chốt kiểm soát
+   duy nhất của con người** trong cả luồng.
+4. **`actual` = điều Grader QUAN SÁT ĐƯỢC từ hành vi app**, không phải sự thật *về mã nguồn*. Engine
+   chấm blackbox qua semantic key, **không đọc code sinh viên**. Nói *"hàm delete thiếu setState"* là
+   suy đoán ⇒ cấm. Ba trạng thái: `passed` → "Đã đáp ứng yêu cầu"; `failed` → điều quan sát được;
+   `not_run` → **vì sao chưa quan sát được gì**.
+
+## Luật làm việc (chủ đồ án đặt, giữ nguyên)
+
+- ⛔ **Không code khi chưa được cho phép.** Xin phép theo từng mốc.
+- ✅ **Tự ghi `CHANGELOG_FOR_NLP.md`** khi có việc cần bàn với phía NLP — không phải hỏi. Nhưng
+  **code thì vẫn xin phép**.
+- 🤝 *"Như hai con người, phản biện nhau xong mới bắt tay vào làm; còn cãi nhau thì phải giải quyết."*
+- 📏 **Đáp án viết tay TRƯỚC khi chạy, commit riêng.** Lệch thì **mặc định engine sai**; muốn sửa
+  `expected/*.json` phải nói được vì sao đáp án tay ghi sai. Luật này đã bắt được khiếm khuyết thứ tư.
+- 🔁 Nhắc chủ đồ án commit theo từng mốc, đừng để dồn.
+- ✂️ Trả lời ngắn gọn, hỏi gì đáp nấy.
+
+## Bài học đắt nhất, lặp lại 5 lần — đọc kỹ
+
+**Phát biểu rộng hơn phép đo.** Mọi lần đều cùng hình dạng: một cổng/mẫu/lưới xanh, rồi kết luận
+"đường đó an toàn" — trong khi nó xanh vì **bộ đo né ca đó**.
+
+| Lần | Tưởng | Thật |
+|---|---|---|
+| 1 | fixture đo được engine | fixture **né** 3 khiếm khuyết chấm sai điểm (P3b) |
+| 2 | "phủ 23/23 runner" | đó là *đã gọi*, chỉ 14/22 từng chạy đường **hỏng** (A2b) |
+| 3 | "0 test thiếu `observation`" | vì fixture không có bài nào ném lỗi giữa runner (A2c) |
+| 4 | "cổng độ phủ của tôi có lỗ hổng" | **không có lỗ hổng** — cổng đã tồn tại từ P1, tôi soát nhầm class |
+| 5 | "`expected` sạch" | 25/25 `expected` của fixture **gõ tay**; đường máy sinh chưa đo lần nào |
+
+Kèm hai lần phát biểu sai về **code của phía NLP** mà không chạy thử, một lần còn kèm số dòng file.
+**Quy tắc rút ra: đo trước khi phát biểu, và nói rõ phạm vi đã đo.**
+
+---
+
 ## ⚠️ Có phía thứ hai ăn output này
 
 `result.json` là **input duy nhất** của `D:\AGS-PRM393\prm393-feedback-bot` (một phiên Claude

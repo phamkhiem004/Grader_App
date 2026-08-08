@@ -22,14 +22,18 @@ Việc còn lại DUY NHẤT của plan: **P6b** (một ô nhập FE). Bảng ti
 **1. ~~(c) — dọn `expected` máy sinh.~~ ✅ XONG** — xem mục *(c)* dưới. Còn **hai chỗ mở** nó phơi
 ra, chưa đóng:
 
-- **(c-nợ-1) `group_id` mang HAI nghĩa.** Khâu soạn đề hiểu là *gom thành một testcase lớn* (UI:
-  *"N testcase nhỏ · một assert fail sẽ làm cả nhóm fail"*), còn fixture + cả 7 mẫu dùng nó làm
-  *nhãn rubric* trên 25 dòng / 9 nhóm. ⇒ **hình dạng đề trong mọi mẫu đã phát không phải hình dạng
-  khâu soạn đề sinh ra.** Chưa biết bên nào sai; **chưa sửa gì**, đã báo NLP vì họ gom nhận xét theo
-  `rubric`.
-- **(c-nợ-2) không có cờ phân biệt `expected` máy sinh với `expected` giảng viên gõ** trong
-  `result.json`. NLP không gỡ lưới theo mốc này được. Làm được ngay bằng `expected_source` lấy từ
-  `expected_custom` — nhưng là thêm trường vào hợp đồng nên **chờ NLP xin**.
+- **(c-nợ-1) `group_id` mang HAI nghĩa — ✅ ĐO XONG 2026-08-08, chờ chủ đồ án duyệt đề xuất.**
+  Bốn phép đo độc lập chốt: hình fixture (25 độc lập / 9 rubric) **không sản xuất được** từ đường
+  soạn đề — có `group_id` là bị gộp thành GROUP row (một test_case, all-or-nothing); không có thì
+  rubric rơi về 3 mã thô LOGIC/WIDGET/BEHAVIOR mà SPEC 3.3 cấm coi là rubric. `validateGroups`
+  còn TỪ CHỐI chính hình fixture (nhóm 1 thành viên). Kết luận: **không bên nào sai — sản phẩm
+  THIẾU khái niệm "nhãn nhóm chức năng" tách khỏi "gộp testcase lớn"**. Đề xuất tách hai thao tác
+  (nhãn = metadata thuần ≥1 thành viên, nguồn rubric; gộp = như cũ ≥2) — hình fixture thành hình
+  chuẩn, 8 mẫu giữ nguyên. Đã ghi CHANGELOG_FOR_NLP entry 2026-08-12, chờ họ phản biện một câu
+  hỏi: có cần field riêng phân biệt "kết quả gộp" không hay `runner=="GROUP"` đủ. **Chưa code.**
+- **(c-nợ-2) `expected_source` — 🚫 ĐÓNG 2026-08-08: NLP quyết KHÔNG xin** (lưới họ quyết theo
+  loại hiện vật, không đọc cờ nguồn; cờ không phân biệt được sạch/bẩn; field không ai dùng =
+  `kind` không ai phát). Mở lại chỉ khi có chỗ dùng thật.
 
 **2. ~~P6a~~ ✅ XONG 2026-08-08 → còn P6b.** Hình dạng đã thành dữ liệu thật (8/8 mẫu). Những gì
 P6a đã chốt bằng code:

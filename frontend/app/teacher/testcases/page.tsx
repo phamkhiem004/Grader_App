@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 
 type JsonMap = Record<string, unknown>;
+type EngineMode = "TODO_USER_V12" | "COMMON_V1";
 
 interface SkillOption {
   code: string;
@@ -23,6 +24,8 @@ interface Template {
   template_id: string;
   template_version: string;
   engine_type?: string;
+  execution_key?: string;
+  fixed_contract?: boolean;
   runner?: string;
   skill_code: string;
   skill_name?: string;
@@ -42,10 +45,34 @@ interface Template {
   created_at?: string;
 }
 
+interface TestcasePackScope {
+  scope_id: "LOGIC" | "WIDGET" | "BEHAVIOR";
+  name: string;
+  description: string;
+  template_ids: string[];
+  testcase_count: number;
+}
+
+interface TestcasePack {
+  pack_id: string;
+  pack_version: string;
+  engine_type: EngineMode;
+  profile_id: string;
+  name: string;
+  description: string;
+  starter_file: string;
+  testcase_count: number;
+  default_weight: number;
+  template_ids: string[];
+  scopes: TestcasePackScope[];
+}
+
 interface TestcaseItem {
   instance_id: string;
   template_id: string;
   template_version: string;
+  engine_type?: string;
+  execution_key?: string;
   skill_code: string;
   layer: string;
   testcase_group?: string;
@@ -88,7 +115,7 @@ interface SuiteConfig {
   boot_timeout_ms: number;
   step_timeout_ms: number;
   setup_steps: SetupStep[];
-  profile: "COMMON_UI" | "FLUTTER_LAYERED" | "PERSISTENCE" | "REPOSITORY_SQLITE" | "GOLDEN_RESPONSIVE";
+  profile: "COMMON_UI" | "FLUTTER_LAYERED" | "PERSISTENCE" | "REPOSITORY_SQLITE" | "GOLDEN_RESPONSIVE" | "TODO_STARTER_V12";
   reset_strategy: "APP_RESTART" | "FIXTURE_STEPS" | "CLEAR_STORAGE" | "PERSISTENCE_PHASE";
   source_contracts: SourceContract[];
   persistence: PersistenceConfig;
@@ -139,7 +166,8 @@ const RUNNER_LABEL: Record<string, string> = {
 };
 
 const ENGINE_LABEL: Record<string, string> = {
-  COMMON_V1: "Bộ testcase dùng chung",
+  TODO_USER_V12: "Bộ testcase chấm theo khung template mẫu",
+  COMMON_V1: "Bộ testcase 3 tầng chấm theo Key",
 };
 
 const SKILL_LABEL: Record<string, string> = {
@@ -348,6 +376,21 @@ function emptySuite(): SuiteConfig {
   };
 }
 
+function todoStarterSuite(): SuiteConfig {
+  return {
+    ...emptySuite(),
+    name: "User CRUD starter V12",
+    context: "fixed_todo_contract",
+    strict_semantic_keys: false,
+    profile: "TODO_STARTER_V12",
+    required_keys: "",
+    source_contracts: [],
+    setup_steps: [],
+    persistence: { enabled: false, storage_kind: "none", reload_key: "", notes: "", reset_steps: [] },
+    golden: { enabled: false, portrait_asset: "", landscape_asset: "", threshold: 0.01 },
+  };
+}
+
 function formatParam(value: unknown) {
   if (typeof value === "object" && value !== null) return JSON.stringify(value);
   return String(value ?? "");
@@ -429,12 +472,14 @@ const PARAMETER_LABELS: Record<string, string> = {
 
 export default function TestcasesPage() {
   const [templates, setTemplates] = useState<Template[]>([]);
+  const [templatePacks, setTemplatePacks] = useState<TestcasePack[]>([]);
+  const [engineMode, setEngineMode] = useState<EngineMode>("TODO_USER_V12");
   const [skillOptions, setSkillOptions] = useState<SkillOption[]>([]);
   const [examId, setExamId] = useState("");
   const [examName, setExamName] = useState("");
   const [teacherNote, setTeacherNote] = useState("");
   const [items, setItems] = useState<TestcaseItem[]>([]);
-  const [suite, setSuite] = useState<SuiteConfig>(emptySuite);
+  const [suite, setSuite] = useState<SuiteConfig>(todoStarterSuite);
   const [status, setStatus] = useState("");
   const [version, setVersion] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -502,10 +547,14 @@ export default function TestcasesPage() {
             setExamName(String(exam.examName || normalized));
             setTeacherNote(String(exam.teacherNote || ""));
             setItems(config.items as TestcaseItem[]);
+            const loadedEngine = String(config.engine_type || config.items[0]?.engine_type || "");
+            if (loadedEngine === "TODO_USER_V12" || loadedEngine === "COMMON_V1") {
+              setEngineMode(loadedEngine);
+            }
             if (config.suite && typeof config.suite === "object") {
               const loaded = config.suite as Partial<SuiteConfig>;
               setSuite({
-                ...emptySuite(),
+                ...(loadedEngine === "TODO_USER_V12" ? todoStarterSuite() : emptySuite()),
                 ...loaded,
                 required_keys: Array.isArray(loaded.required_keys)
                   ? loaded.required_keys.join(", ")
@@ -535,12 +584,15 @@ export default function TestcasesPage() {
     const headers = { Authorization: `Bearer ${getToken() ?? ""}` };
     Promise.all([
       fetch(`${API_BASE}/testcase-templates`, { headers }).then((r) => r.ok ? r.json() : []),
+      fetch(`${API_BASE}/testcase-templates/packs`, { headers }).then((r) => r.ok ? r.json() : []),
       fetch(`${API_BASE}/syllabus/skills?testable=auto`, { headers }).then((r) => r.ok ? r.json() : []),
     ])
-      .then(([templateRows, skillRows]) => {
+      .then(([templateRows, packRows, skillRows]) => {
         const loadedTemplates = Array.isArray(templateRows) ? templateRows as Template[] : [];
+        const loadedPacks = Array.isArray(packRows) ? packRows as TestcasePack[] : [];
         const loadedSkills = Array.isArray(skillRows) ? (skillRows as SkillOption[]).filter((skill) => !skill.deprecated) : [];
         setTemplates(loadedTemplates);
+        setTemplatePacks(loadedPacks);
         setSkillOptions(loadedSkills);
         setSelectedCategory("ALL");
       })
@@ -548,10 +600,15 @@ export default function TestcasesPage() {
       .finally(() => setLoading(false));
   }, []);
 
+  const templatesForEngine = useMemo(
+    () => templates.filter((template) => (template.engine_type || "COMMON_V1") === engineMode),
+    [templates, engineMode],
+  );
+
   const categories = useMemo(() => {
     const counts = new Map<string, number>(TESTCASE_GROUP_ORDER.map((code) => [code, 0]));
-    counts.set("ALL", templates.length);
-    templates.forEach((template) => {
+    counts.set("ALL", templatesForEngine.length);
+    templatesForEngine.forEach((template) => {
       const code = testcaseGroup(template);
       counts.set(code, (counts.get(code) || 0) + 1);
     });
@@ -560,9 +617,9 @@ export default function TestcasesPage() {
       label: TESTCASE_GROUP_LABEL[code],
       count: counts.get(code) || 0,
     }));
-  }, [templates]);
+  }, [templatesForEngine]);
 
-  const visibleTemplates = useMemo(() => templates.filter((t) => {
+  const visibleTemplates = useMemo(() => templatesForEngine.filter((t) => {
     const categoryMatch = selectedCategory === "ALL" || testcaseGroup(t) === selectedCategory;
     const query = search.trim().toLowerCase();
     const skillLabel = SKILL_LABEL[t.skill_code] || t.skill_name || t.skill_code;
@@ -570,11 +627,17 @@ export default function TestcasesPage() {
       ENGINE_LABEL[t.engine_type || ""] || ""]
       .some((value) => value.toLowerCase().includes(query));
     return categoryMatch && searchMatch;
-  }), [templates, selectedCategory, search]);
+  }), [templatesForEngine, selectedCategory, search]);
 
   const selectedTemplate = templates.find((t) => t.template_id === selectedTemplateId) || null;
   const templateMap = useMemo(() => new Map(templates.map((t) => [t.template_id, t])), [templates]);
-  const activeEngine = items.length ? templateMap.get(items[0].template_id)?.engine_type : undefined;
+  const activeEngine = items.length
+    ? (items[0].engine_type || templateMap.get(items[0].template_id)?.engine_type)
+    : engineMode;
+  const activePack = templatePacks.find((pack) => pack.engine_type === engineMode) || null;
+  const selectedPackCount = activePack
+    ? activePack.template_ids.filter((id) => items.some((item) => item.template_id === id)).length
+    : 0;
   const supportsGrouping = activeEngine === "COMMON_V1";
   const totalWeight = items.reduce((sum, item) => item.enabled ? sum + Number(item.weight || 0) : sum, 0);
   const groupSummaries = useMemo(() => {
@@ -593,7 +656,25 @@ export default function TestcasesPage() {
     [items, selectedItemIds],
   );
 
+  const selectEngineMode = (next: EngineMode) => {
+    if (next === engineMode) return;
+    if (items.length > 0) {
+      setMessage({ type: "error", text: "Hãy xóa các testcase đang chọn trước khi đổi kiểu starter/engine." });
+      return;
+    }
+    setEngineMode(next);
+    setSelectedCategory("ALL");
+    setSelectedTemplateId(null);
+    setSearch("");
+    setSuite(next === "TODO_USER_V12" ? todoStarterSuite() : emptySuite());
+    setMessage(null);
+  };
+
   const openNewTemplate = () => {
+    if (engineMode !== "COMMON_V1") {
+      setMessage({ type: "error", text: "Bộ chấm theo khung template mẫu dùng contract cố định. Chỉ bộ testcase 3 tầng chấm theo Key mới cho phép tạo runner tùy chỉnh." });
+      return;
+    }
     setNewTemplateError("");
     setNewTemplateOpen(true);
   };
@@ -641,13 +722,25 @@ export default function TestcasesPage() {
   const addTemplate = (templateId: string) => {
     const template = templateMap.get(templateId);
     if (!template) return;
+    const templateEngine = (template.engine_type || "COMMON_V1") as EngineMode;
+    if (templateEngine !== engineMode || (items.length > 0 && activeEngine !== templateEngine)) {
+      setMessage({ type: "error", text: "Không thể trộn testcase của hai engine trong cùng một đề." });
+      return;
+    }
+    if (templateEngine === "TODO_USER_V12" && items.some((item) => item.template_id === templateId)) {
+      setMessage({ type: "error", text: "Testcase cố định này đã có trong đề." });
+      return;
+    }
     const usedIds = new Set(items.map((item) => item.instance_id));
     let nextNumber = items.length + 1;
     while (usedIds.has(`${examId.trim() || "exam"}_item_${pad(nextNumber)}`)) nextNumber += 1;
+    const fixedId = template.execution_key || template.template_id;
     const item: TestcaseItem = {
-      instance_id: `${examId.trim() || "exam"}_item_${pad(nextNumber)}`,
+      instance_id: templateEngine === "TODO_USER_V12" ? fixedId : `${examId.trim() || "exam"}_item_${pad(nextNumber)}`,
       template_id: template.template_id,
       template_version: template.template_version,
+      engine_type: templateEngine,
+      execution_key: fixedId,
       skill_code: template.skill_code,
       layer: template.layer,
       testcase_group: testcaseGroup(template),
@@ -665,6 +758,70 @@ export default function TestcasesPage() {
     setEditingId(item.instance_id);
     setSelectedTemplateId(template.template_id);
     setMessage(null);
+  };
+
+  const addPackTemplates = (templateIds: string[], label: string) => {
+    if (engineMode !== "TODO_USER_V12") return;
+    const existingIds = new Set(items.map((item) => item.template_id));
+    const missing = templateIds
+      .map((id) => templateMap.get(id))
+      .filter((template): template is Template => Boolean(template)
+        && template?.engine_type === "TODO_USER_V12"
+        && !existingIds.has(template.template_id));
+    if (missing.length === 0) {
+      setMessage({ type: "ok", text: `${label} đã được chọn đủ, không có tiêu chí nào cần thêm.` });
+      return;
+    }
+    const created = missing.map((template, offset): TestcaseItem => {
+      const fixedId = template.execution_key || template.template_id;
+      return {
+        instance_id: fixedId,
+        template_id: template.template_id,
+        template_version: template.template_version,
+        engine_type: "TODO_USER_V12",
+        execution_key: fixedId,
+        skill_code: template.skill_code,
+        layer: template.layer,
+        testcase_group: testcaseGroup(template),
+        name: template.name,
+        description: template.description,
+        difficulty: template.difficulty,
+        enabled: true,
+        order: items.length + offset + 1,
+        weight: Number(template.weight_default || 0),
+        parameters: {},
+        expected: template.expected_template,
+        expected_custom: false,
+        setup_steps: [],
+      };
+    });
+    setItems((current) => [...current, ...created].map((item, index) => ({ ...item, order: index + 1 })));
+    setEditingId(created[created.length - 1]?.instance_id || null);
+    setMessage({ type: "ok", text: `Đã chọn thêm ${missing.length} tiêu chí từ ${label}. Các tiêu chí đã có được giữ nguyên.` });
+  };
+
+  const removePackTemplates = (templateIds: string[], label: string) => {
+    const removeIds = new Set(templateIds);
+    const removedCount = items.filter((item) => removeIds.has(item.template_id)).length;
+    if (removedCount === 0) {
+      setMessage({ type: "ok", text: `${label} chưa có tiêu chí nào trong đề.` });
+      return;
+    }
+    setItems((current) => current
+      .filter((item) => !removeIds.has(item.template_id))
+      .map((item, index) => ({ ...item, order: index + 1 })));
+    setSelectedItemIds((current) => current.filter((id) => !items.some(
+      (item) => item.instance_id === id && removeIds.has(item.template_id),
+    )));
+    setEditingId(null);
+    setMessage({ type: "ok", text: `Đã bỏ ${removedCount} tiêu chí của ${label}. Bạn có thể chọn lại bất cứ lúc nào trước khi lưu.` });
+  };
+
+  const focusContractTests = (query: string) => {
+    setSelectedCategory("ALL");
+    setSearch(query);
+    setSelectedTemplateId(null);
+    window.setTimeout(() => document.getElementById("testcase-library")?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
   };
 
   const updateItem = (instanceId: string, patch: Partial<TestcaseItem>) => {
@@ -889,7 +1046,7 @@ export default function TestcasesPage() {
       setVersion(Number(data.version ?? version));
       if (data.suite && typeof data.suite === "object") {
         const loadedSuite = data.suite as Partial<SuiteConfig>;
-        setSuite({ ...emptySuite(), ...loadedSuite, required_keys: Array.isArray(loadedSuite.required_keys) ? loadedSuite.required_keys.join(", ") : String(loadedSuite.required_keys || ""), setup_steps: Array.isArray(loadedSuite.setup_steps) ? loadedSuite.setup_steps : [] });
+        setSuite({ ...(engineMode === "TODO_USER_V12" ? todoStarterSuite() : emptySuite()), ...loadedSuite, required_keys: Array.isArray(loadedSuite.required_keys) ? loadedSuite.required_keys.join(", ") : String(loadedSuite.required_keys || ""), setup_steps: Array.isArray(loadedSuite.setup_steps) ? loadedSuite.setup_steps : [] });
       }
       setItems(Array.isArray(data.items) ? data.items as TestcaseItem[] : items);
       const previewResponse = await fetch(`${API_BASE}/exam-setup/${encodeURIComponent(examId.trim())}/testcase`, { headers: { Authorization: `Bearer ${getToken() ?? ""}` } });
@@ -934,7 +1091,7 @@ export default function TestcasesPage() {
   return (
     <SidebarLayout
       title="Tạo testcase từ template"
-      subtitle="Kéo-thả testcase chung theo semantic key → dùng lại cho nhiều đề Flutter"
+      subtitle="Chọn chấm theo khung template mẫu hoặc chấm 3 tầng theo Key"
       activePath="/teacher/testcases"
     >
       <div className="space-y-5">
@@ -993,6 +1150,56 @@ export default function TestcasesPage() {
           </div>
         </div>
 
+        <section className="card p-4">
+          <div className="mb-3">
+            <p className="eyebrow">Cách chấm</p>
+            <h2 className="mt-1 text-sm font-bold text-slate-800">Chọn contract phù hợp với template phát cho sinh viên</h2>
+          </div>
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+            <button type="button" onClick={() => selectEngineMode("TODO_USER_V12")} className={`rounded-xl border p-4 text-left transition ${engineMode === "TODO_USER_V12" ? "border-indigo-400 bg-indigo-50 ring-2 ring-indigo-100" : "border-slate-200 hover:border-indigo-200"}`}>
+              <div className="flex items-center justify-between gap-3"><strong className="text-sm text-slate-800">Bộ testcase chấm theo khung template mẫu</strong><span className="rounded-full bg-emerald-100 px-2 py-1 text-[10px] font-bold text-emerald-700">TEMPLATE MẪU</span></div>
+              <p className="mt-2 text-xs leading-relaxed text-slate-500">Mỗi đề phải có pack riêng khớp với starter đã phát. Sinh viên giữ public contract và hoàn thành TODO trong khung code đó.</p>
+            </button>
+            <button type="button" onClick={() => selectEngineMode("COMMON_V1")} className={`rounded-xl border p-4 text-left transition ${engineMode === "COMMON_V1" ? "border-indigo-400 bg-indigo-50 ring-2 ring-indigo-100" : "border-slate-200 hover:border-indigo-200"}`}>
+              <div className="flex items-center justify-between gap-3"><strong className="text-sm text-slate-800">Bộ testcase 3 tầng chấm theo Key</strong><span className="rounded-full bg-amber-100 px-2 py-1 text-[10px] font-bold text-amber-700">LOGIC – WIDGET – BEHAVIOR</span></div>
+              <p className="mt-2 text-xs leading-relaxed text-slate-500">Dùng contract Key để tìm widget và chấm ba tầng. Phù hợp khi sinh viên được tự do xây dựng cấu trúc UI hơn.</p>
+            </button>
+          </div>
+          {items.length > 0 && <p className="mt-3 text-[11px] font-semibold text-amber-600">Kiểu chấm được khóa khi đề đã có testcase. Xóa tất cả testcase nếu cần đổi engine.</p>}
+        </section>
+
+        {engineMode === "TODO_USER_V12" ? (
+        <section className="card overflow-hidden">
+          <div className="border-b border-slate-100 bg-emerald-50/70 px-4 py-3">
+            <p className="eyebrow">Contract starter đã khóa</p>
+            <div className="mt-1 flex flex-wrap items-center justify-between gap-3"><h2 className="text-sm font-bold text-slate-800">{activePack?.name || "Bộ testcase chấm theo khung template mẫu"}</h2>{activePack && <div className="flex flex-wrap gap-2">{selectedPackCount < activePack.testcase_count ? <button type="button" onClick={() => addPackTemplates(activePack.template_ids, activePack.name)} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-bold text-white hover:bg-emerald-700">Chọn {activePack.testcase_count - selectedPackCount} tiêu chí còn thiếu</button> : <span className="rounded-lg bg-emerald-100 px-3 py-2 text-xs font-bold text-emerald-700">Đã chọn đủ {activePack.testcase_count}/{activePack.testcase_count}</span>}{selectedPackCount > 0 && <button type="button" onClick={() => removePackTemplates(activePack.template_ids, activePack.name)} className="rounded-lg border border-rose-200 bg-white px-3 py-2 text-xs font-bold text-rose-600 hover:bg-rose-50">Bỏ toàn bộ pack</button>}</div>}</div>
+            <p className="mt-1 text-xs text-slate-500">Chọn tiêu chí nghĩa là đưa tiêu chí đó vào cột “Testcase trong đề” để tính điểm khi chấm. Việc này không thay đổi starter của sinh viên.</p>
+          </div>
+          {activePack && <div className="border-b border-slate-100 p-4">
+            <div className="flex flex-wrap items-center gap-2 text-[10px]"><span className="rounded bg-indigo-100 px-2 py-1 font-bold text-indigo-700">PACK {activePack.pack_version}</span><span className="rounded bg-slate-100 px-2 py-1 font-mono text-slate-600">{activePack.pack_id}</span><span className="text-slate-500">Starter: {activePack.starter_file}</span><span className="ml-auto font-bold text-indigo-700">{activePack.default_weight} điểm mặc định</span></div>
+            <p className="mt-2 text-xs leading-relaxed text-slate-600">{activePack.description}</p><p className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[10px] font-semibold leading-relaxed text-amber-800">Pack này chỉ dùng cho đúng đề User CRUD và đúng starter file ghi phía trên. Đề khác phải tạo pack template mẫu khác, không áp dụng máy móc 48 tiêu chí này.</p>
+            <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-3">{activePack.scopes.map((scope) => {
+              const selectedCount = scope.template_ids.filter((id) => items.some((item) => item.template_id === id)).length;
+              const complete = selectedCount === scope.testcase_count;
+              return <div key={scope.scope_id} className={`rounded-lg border p-3 ${complete ? "border-emerald-200 bg-emerald-50/50" : "border-indigo-100 bg-indigo-50/40"}`}><div className="flex items-center justify-between gap-2"><p className="text-xs font-bold text-indigo-800">{scope.name}</p><span className={`text-[10px] font-semibold ${complete ? "text-emerald-600" : "text-indigo-600"}`}>{selectedCount}/{scope.testcase_count} đã chọn</span></div><p className="mt-1 min-h-8 text-[10px] leading-relaxed text-slate-500">{scope.description}</p>{complete ? <button type="button" onClick={() => removePackTemplates(scope.template_ids, scope.name)} className="mt-2 w-full rounded-md border border-rose-200 bg-white px-2 py-1.5 text-[10px] font-bold text-rose-600 hover:bg-rose-50">Bỏ tầng {scope.scope_id}</button> : <button type="button" onClick={() => addPackTemplates(scope.template_ids, scope.name)} className="mt-2 w-full rounded-md border border-indigo-200 bg-white px-2 py-1.5 text-[10px] font-bold text-indigo-700 hover:bg-indigo-100">Chọn thêm {scope.testcase_count - selectedCount} tiêu chí</button>}</div>;
+            })}</div>
+          </div>}
+          <div className="border-b border-slate-100 px-4 pt-4"><p className="text-xs font-bold text-slate-700">Các phần code mà pack sẽ chấm</p><p className="mt-1 text-[10px] text-slate-500">Đây không phải các trường cần nhập. Bấm vào một phần để lọc và xem các tiêu chí chấm tương ứng ở thư viện phía dưới.</p></div>
+          <div className="grid grid-cols-1 gap-3 p-4 md:grid-cols-2 xl:grid-cols-4">
+            {[
+              ["Model", "lib/models/user_model.dart", "UserModel, copyWith, fromMap, toMap", "Model"],
+              ["SQLite", "lib/database/database_service.dart", "DatabaseService, SqliteDatabaseService", "SQLite"],
+              ["Repository", "lib/repositories/user_repository.dart", "UserRepository, SqliteUserRepository", "Repository"],
+              ["State", "lib/viewmodels/user_view_model.dart", "Riverpod providers và UserViewModel", "ViewModel"],
+              ["Danh sách", "lib/screens/user_list_screen.dart", "UserListScreen / HomeScreen", "danh sách"],
+              ["Chi tiết", "lib/screens/user_detail_screen.dart", "UserDetailScreen", "chi tiết"],
+              ["Khởi động", "lib/main.dart", "ProviderScope và MaterialApp", "khởi động"],
+              ["Giao diện", "Behavior/Text/Semantics", "Không bắt buộc Widget Key", "giao diện"],
+            ].map(([title, path, symbols, query]) => <button type="button" key={title} onClick={() => focusContractTests(query)} className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-left transition hover:border-indigo-300 hover:bg-indigo-50"><div className="flex items-center justify-between gap-2"><p className="text-xs font-bold text-slate-700">{title}</p><span className="text-[9px] font-bold text-indigo-600">Xem tiêu chí ↓</span></div><p className="mt-1 break-all font-mono text-[10px] text-indigo-600">{path}</p><p className="mt-1 text-[10px] leading-relaxed text-slate-500">{symbols}</p></button>)}
+          </div>
+          <div className="border-t border-slate-100 px-4 py-3 text-xs text-slate-500"><strong className="text-slate-700">Lưu ý:</strong> không đổi tên/xóa các public symbol starter. Sinh viên vẫn tự thiết kế phần UI bên trong hai screen, miễn luồng Add/Edit/Delete/Detail và validation hoạt động.</div>
+        </section>
+        ) : (
         <section className="card overflow-hidden">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 bg-slate-50/70 px-4 py-3">
             <div>
@@ -1030,10 +1237,11 @@ export default function TestcasesPage() {
             {suite.setup_steps.length === 0 ? <p className="mt-3 rounded-md border border-dashed border-slate-200 p-3 text-xs text-slate-400">Chưa có setup chung. Fixture phải ở đúng trạng thái sau khi app khởi động.</p> : <div className="mt-3 space-y-2">{suite.setup_steps.map((step, index) => <div key={index} className="grid grid-cols-1 gap-2 rounded-md border border-slate-200 bg-slate-50 p-2 md:grid-cols-[170px_minmax(160px,1fr)_minmax(160px,1fr)_auto]"><p className="text-[10px] leading-relaxed text-slate-500 md:col-span-full">{setupStepHint(step.type)}</p><select value={step.type} onChange={(e) => updateSuiteStep(index, { type: e.target.value as SetupStep["type"] })} className="rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs"><option value="tap">Tap key</option><option value="enter_text">Nhập text</option><option value="expect_visible">Bắt buộc thấy key</option><option value="expect_absent">Bắt buộc ẩn key</option><option value="wait_for_visible">Chờ key xuất hiện</option></select><input value={step.key} onChange={(e) => updateSuiteStep(index, { key: e.target.value })} placeholder="action.add" className="rounded-md border border-slate-200 bg-white px-2 py-1.5 font-mono text-xs" />{step.type === "enter_text" ? <input value={step.value || ""} onChange={(e) => updateSuiteStep(index, { value: e.target.value })} placeholder="Giá trị nhập" className="rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs" /> : <div />}{step.type === "wait_for_visible" ? <input type="number" min={100} max={30000} value={step.timeout_ms || suite.step_timeout_ms} onChange={(e) => updateSuiteStep(index, { timeout_ms: Number(e.target.value) })} className="rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs" /> : <div /> }<button onClick={() => removeSuiteStep(index)} type="button" className="rounded-md p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600" title="Xóa bước"><Trash2 size={14} /></button></div>)}</div>}
           </div>
         </section>
+        )}
 
         <section className="card overflow-hidden">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3">
-            <div><p className="eyebrow">File testcase đang sinh</p><h2 className="mt-1 text-sm font-bold text-slate-800">exam_test.dart</h2><p className="mt-1 text-xs text-slate-500">Bấm Lưu Draft để sinh lại file từ cấu hình hiện tại. Tên hàm trực tiếp, đối số và output chuẩn sẽ xuất hiện trong file này.</p></div>
+            <div><p className="eyebrow">File testcase đang sinh</p><h2 className="mt-1 text-sm font-bold text-slate-800">exam_test.dart</h2><p className="mt-1 text-xs text-slate-500">{engineMode === "TODO_USER_V12" ? "Bản engine V9 cố định sẽ được ghép với skills_matrix theo các testcase đã chọn." : "Bấm Lưu Draft để sinh lại file từ cấu hình semantic hiện tại."}</p></div>
             <button type="button" onClick={openPreview} disabled={version === 0 || previewLoading} className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 disabled:opacity-50"><Eye size={14} /> Xem đủ 3 file</button>
           </div>
           {version === 0 ? <div className="p-6 text-center text-sm text-slate-400">Chưa có file. Hãy nhập mã đề, tên đề và bấm Lưu Draft.</div> : previewLoading ? <div className="flex justify-center p-8 text-slate-400"><Loader2 className="animate-spin" size={20} /></div> : <pre className="custom-scrollbar max-h-[520px] overflow-auto whitespace-pre bg-slate-900 p-4 text-[11px] leading-relaxed text-slate-100">{previewFiles.find((file) => file.name.endsWith("exam_test.dart"))?.content || "Không đọc được exam_test.dart. Hãy lưu lại Draft."}</pre>}
@@ -1073,11 +1281,11 @@ export default function TestcasesPage() {
           </section>
 
           {/* Khu vực 2: thư viện template */}
-          <section className="card min-w-0 overflow-hidden">
+          <section id="testcase-library" className="card min-w-0 scroll-mt-4 overflow-hidden">
             <div className="border-b border-slate-100 bg-slate-50/70 px-4 py-3">
               <div className="flex items-center justify-between gap-3">
-                <div><p className="eyebrow">Khu vực 2</p><h2 className="mt-1 text-sm font-bold text-slate-800">Thư viện testcase</h2><p className="mt-1 text-xs text-slate-500">Template có sẵn và template do giảng viên tự tạo.</p></div>
-                <div className="flex items-center gap-2"><span className="text-xs text-slate-400">{visibleTemplates.length} template</span><button type="button" onClick={openNewTemplate} className="flex items-center gap-1.5 rounded-lg bg-indigo-600 px-2.5 py-2 text-xs font-semibold text-white hover:bg-indigo-700"><Plus size={14} /> Tạo template mới</button></div>
+                <div><p className="eyebrow">Khu vực 2</p><h2 className="mt-1 text-sm font-bold text-slate-800">Thư viện testcase</h2><p className="mt-1 text-xs text-slate-500">{engineMode === "TODO_USER_V12" ? "48 tiêu chí riêng của khung template mẫu User CRUD V12." : "Thư viện testcase 3 tầng chấm theo Key."}</p></div>
+                <div className="flex items-center gap-2"><span className="text-xs text-slate-400">{visibleTemplates.length} template</span>{engineMode === "COMMON_V1" && <button type="button" onClick={openNewTemplate} className="flex items-center gap-1.5 rounded-lg bg-indigo-600 px-2.5 py-2 text-xs font-semibold text-white hover:bg-indigo-700"><Plus size={14} /> Tạo template mới</button>}</div>
               </div>
               <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Tìm theo tên, skill, layer..." className="mt-3 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" />
             </div>
@@ -1099,7 +1307,7 @@ export default function TestcasesPage() {
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-1.5">
                         <h3 className="text-sm font-semibold text-slate-800">{template.name}</h3>
-                        <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${template.custom ? "bg-amber-100 text-amber-700" : "bg-emerald-100 text-emerald-700"}`} title={template.custom ? `Tạo bởi ${template.created_by || "giảng viên"}` : ENGINE_LABEL[template.engine_type || ""] || template.engine_type}>{template.custom ? "Tự tạo" : "Dùng chung"}</span>
+                        <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${template.custom ? "bg-amber-100 text-amber-700" : "bg-emerald-100 text-emerald-700"}`} title={template.custom ? `Tạo bởi ${template.created_by || "giảng viên"}` : ENGINE_LABEL[template.engine_type || ""] || template.engine_type}>{template.custom ? "Tự tạo" : template.fixed_contract ? "Template mẫu" : "Chấm theo Key"}</span>
                         <span className="rounded bg-cyan-100 px-1.5 py-0.5 text-[10px] font-bold text-cyan-700">{TESTCASE_GROUP_LABEL[testcaseGroup(template)]}</span>
                         <span className="rounded bg-violet-100 px-1.5 py-0.5 text-[10px] font-bold text-violet-700">{LAYER_LABEL[template.layer] || template.layer}</span>
                         <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-500">{DIFF_LABEL[template.difficulty] || template.difficulty}</span>
@@ -1183,6 +1391,12 @@ export default function TestcasesPage() {
                   {editingId === item.instance_id && (
                     <div className="mt-3 space-y-3 border-t border-indigo-100 pt-3">
                       <div className="grid grid-cols-2 gap-2"><label className="text-xs text-slate-500">Độ khó<select value={item.difficulty} onChange={(e) => updateItem(item.instance_id, { difficulty: e.target.value })} className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs"><option value="basic">Cơ bản</option><option value="intermediate">Trung bình</option><option value="advanced">Nâng cao</option></select></label><label className="text-xs text-slate-500">Điểm<input type="number" min="0" step="0.5" value={item.weight} onChange={(e) => updateItem(item.instance_id, { weight: Number(e.target.value) })} className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs" /></label></div>
+                      {engineMode === "TODO_USER_V12" ? (
+                        <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-[11px] leading-relaxed text-emerald-800">
+                          <p className="font-bold">Testcase cố định: {item.execution_key || item.instance_id}</p>
+                          <p className="mt-1">Logic assert đã nằm trong engine V9. Cấu hình này chỉ cho phép bật/tắt, đổi độ khó, trọng số và mô tả rubric; không sinh Key, setup step hay grading adapter.</p>
+                        </div>
+                      ) : (<>
                       <div>
                         <div className="mb-2"><p className="text-xs font-semibold text-slate-700">Cấu hình runner</p><p className="mt-0.5 text-[10px] leading-relaxed text-slate-400">Mỗi trường được phân theo vai trò. Semantic key xác định widget trong bài sinh viên; dữ liệu setup chạy trước; điều kiện pass được chuyển thành assertion.</p></div>
                         {(() => { const contract = runnerContract(item, templateMap.get(item.template_id)); return <div className="mb-3 grid grid-cols-1 gap-2"><div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2"><p className="text-[10px] font-bold text-amber-800">1. Dữ liệu đầu vào</p><p className="mt-0.5 text-[10px] leading-relaxed text-amber-700">{contract.input}</p></div><div className="rounded-lg border border-cyan-200 bg-cyan-50 px-3 py-2"><p className="text-[10px] font-bold text-cyan-800">2. Đối tượng được tìm</p><p className="mt-0.5 text-[10px] leading-relaxed text-cyan-700">{contract.target}</p></div><div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2"><p className="text-[10px] font-bold text-emerald-800">3. Testcase pass khi</p><p className="mt-0.5 text-[10px] leading-relaxed text-emerald-700">{contract.pass}</p></div></div>; })()}
@@ -1191,6 +1405,7 @@ export default function TestcasesPage() {
                       <div className="border-t border-indigo-100 pt-3"><div className="flex items-center justify-between gap-2"><div><p className="text-xs font-semibold text-slate-600">Chuẩn bị dữ liệu và trạng thái</p><p className="text-[10px] leading-relaxed text-slate-400">“Thêm bước” không tạo thêm field cho runner. Key chỉ định widget; riêng bước Nhập text mới dùng Value làm dữ liệu đầu vào. Bước expect cũng có thể làm testcase fail.</p></div><button type="button" onClick={() => addItemSetupStep(item)} className="flex items-center gap-1 rounded-md border border-indigo-200 px-2 py-1 text-[10px] font-semibold text-indigo-600 hover:bg-indigo-50"><Plus size={12} /> Thêm bước</button></div>{(item.setup_steps || []).length > 0 && <div className="mt-2 space-y-2">{(item.setup_steps || []).map((step, index) => <div key={index} className="grid grid-cols-1 gap-2 rounded-md border border-indigo-100 bg-white p-2 md:grid-cols-[150px_minmax(140px,1fr)_minmax(130px,1fr)_auto]"><p className="text-[10px] leading-relaxed text-indigo-600 md:col-span-full">{setupStepHint(step.type)}</p><select value={step.type} onChange={(e) => updateItemSetupStep(item, index, { type: e.target.value as SetupStep["type"] })} className="rounded border border-slate-200 px-1.5 py-1 text-[10px]"><option value="tap">Tap key</option><option value="enter_text">Nhập text</option><option value="expect_visible">Bắt buộc thấy</option><option value="expect_absent">Bắt buộc ẩn</option><option value="wait_for_visible">Chờ xuất hiện</option></select><input value={step.key} onChange={(e) => updateItemSetupStep(item, index, { key: e.target.value })} placeholder="action.open" className="rounded border border-slate-200 px-1.5 py-1 font-mono text-[10px]" />{step.type === "enter_text" ? <input value={step.value || ""} onChange={(e) => updateItemSetupStep(item, index, { value: e.target.value })} placeholder="Giá trị" className="rounded border border-slate-200 px-1.5 py-1 text-[10px]" /> : <div />}{step.type === "wait_for_visible" ? <input type="number" min={100} max={30000} value={step.timeout_ms || suite.step_timeout_ms} onChange={(e) => updateItemSetupStep(item, index, { timeout_ms: Number(e.target.value) })} className="rounded border border-slate-200 px-1.5 py-1 text-[10px]" /> : <div /> }<button type="button" onClick={() => removeItemSetupStep(item, index)} className="rounded p-1 text-slate-400 hover:bg-rose-50 hover:text-rose-600" title="Xóa bước"><Trash2 size={12} /></button></div>)}</div>}</div>
                       <div className="overflow-hidden rounded-lg border border-slate-700 bg-slate-950"><div className="flex items-center justify-between border-b border-slate-700 px-3 py-2"><div><p className="text-[11px] font-bold text-slate-100">Code kiểm tra tương đương</p><p className="mt-0.5 text-[9px] text-slate-400">Chỉ đọc, cập nhật ngay khi sửa setup, semantic key, input hoặc expected.</p></div><span className="rounded bg-slate-800 px-2 py-1 font-mono text-[9px] text-cyan-300">{templateMap.get(item.template_id)?.runner}</span></div><pre className="custom-scrollbar max-h-80 overflow-auto whitespace-pre p-3 text-[10px] leading-relaxed text-slate-100">{testcaseCodePreview(item, templateMap.get(item.template_id))}</pre></div>
                       <p className="text-[10px] text-slate-400">Ô mô tả kết quả chỉ đi vào rubric và báo cáo. Các assertion trong code preview mới quyết định testcase pass/fail.</p>
+                      </>)}
                     </div>
                   )}
                 </div>

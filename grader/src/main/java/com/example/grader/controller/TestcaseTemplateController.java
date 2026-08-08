@@ -23,6 +23,11 @@ public class TestcaseTemplateController {
         return ResponseEntity.ok(templateService.listTemplates(category, skillCode, layer));
     }
 
+    @GetMapping("/packs")
+    public ResponseEntity<?> packs() {
+        return ResponseEntity.ok(templateService.listTemplatePacks());
+    }
+
     /** Tạo template tái sử dụng mới từ runner đã có trong common engine. */
     @PostMapping
     public ResponseEntity<?> create(

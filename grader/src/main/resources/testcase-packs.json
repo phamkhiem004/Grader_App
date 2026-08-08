@@ -1,0 +1,56 @@
+[
+  {
+    "pack_id": "TODO_USER_STARTER_V12",
+    "pack_version": "12.0",
+    "engine_type": "TODO_USER_V12",
+    "profile_id": "TODO_STARTER_V12",
+    "name": "Bộ testcase chấm theo khung template mẫu — User CRUD V12",
+    "description": "Pack chấm dành riêng cho đề User CRUD sử dụng đúng starter V12. Sinh viên giữ nguyên public contract và hoàn thành TODO; không dùng Widget Key hoặc grading adapter. Không dùng pack này cho đề khác contract.",
+    "starter_file": "PRM393_starter_template_v12_blank_ui_20260803.zip",
+    "testcase_count": 48,
+    "default_weight": 100,
+    "contract": [
+      "lib/models/user_model.dart",
+      "lib/database/database_service.dart",
+      "lib/repositories/user_repository.dart",
+      "lib/viewmodels/user_view_model.dart",
+      "lib/screens/user_list_screen.dart",
+      "lib/screens/user_detail_screen.dart",
+      "lib/main.dart"
+    ],
+    "scopes": [
+      {
+        "scope_id": "LOGIC",
+        "name": "Tầng Logic",
+        "description": "Contract, Model, SQLite, Repository, ViewModel và kiến trúc.",
+        "template_ids": [
+          "CONTRACT_MODEL_SYMBOLS", "CONTRACT_REPOSITORY_SYMBOLS", "CONTRACT_VIEWMODEL_PROVIDER_SYMBOLS", "CONTRACT_SCREEN_SYMBOLS",
+          "MODEL_GRANULAR_FIELDS", "MODEL_GRANULAR_COPYWITH", "MODEL_GRANULAR_MAPPING",
+          "REPOSITORY_GRANULAR_ADD_AUTO_ID", "REPOSITORY_GRANULAR_MAPPING", "REPOSITORY_GRANULAR_DUPLICATE_ROWS", "REPOSITORY_GRANULAR_UPDATE", "REPOSITORY_GRANULAR_DELETE", "SQLITE_REPOSITORY_TEMP_DATABASE_CRUD",
+          "VIEWMODEL_GRANULAR_LOAD_STATE", "VIEWMODEL_GRANULAR_ADD_AUTO_ID", "VIEWMODEL_GRANULAR_UPDATE_STATE", "VIEWMODEL_GRANULAR_DELETE_STATE",
+          "ARCH_MVVM", "ARCH_SQLITE", "ARCH_RIVERPOD_GENERATOR"
+        ]
+      },
+      {
+        "scope_id": "WIDGET",
+        "name": "Tầng Widget",
+        "description": "Form, validation, danh sách, responsive và kiểm tra hiển thị.",
+        "template_ids": [
+          "SCREEN_VALIDATE_EACH_FIELD", "SCREEN_FORM_CONTROLS", "SCREEN_GRANULAR_LIST_SINGLE_USER", "SCREEN_GRANULAR_LIST_MULTIPLE_USERS",
+          "SCREEN_GRANULAR_ADD_REPOSITORY", "SCREEN_GRANULAR_ADD_LIST_STATE", "SCREEN_GRANULAR_UPDATE_LOAD", "SCREEN_GRANULAR_UPDATE_REPOSITORY",
+          "SCREEN_GRANULAR_DELETE_DIALOG", "SCREEN_GRANULAR_DELETE_REPOSITORY", "SCREEN_GRANULAR_DETAIL_DATA", "SCREEN_GRANULAR_DETAIL_BACK",
+          "UI_RESPONSIVE_PORTRAIT", "UI_RESPONSIVE_LANDSCAPE", "UI_LAYOUT_OVERFLOW", "VISUAL_GOLDEN_PORTRAIT", "VISUAL_GOLDEN_LANDSCAPE"
+        ]
+      },
+      {
+        "scope_id": "BEHAVIOR",
+        "name": "Tầng Behavior",
+        "description": "Luồng khởi động, thêm, sửa, xóa, chi tiết và persistence.",
+        "template_ids": [
+          "UI_BOOT", "UI_CREATE_VALID", "UI_EDIT_LOAD", "UI_EDIT_USER", "UI_DELETE_DIALOG", "UI_DELETE_CONFIRM", "UI_DETAIL_OPEN", "UI_DETAIL_BACK",
+          "PERSIST_ADD_RELOAD", "PERSIST_EDIT_RELOAD", "PERSIST_DELETE_RELOAD"
+        ]
+      }
+    ]
+  }
+]

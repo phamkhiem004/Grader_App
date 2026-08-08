@@ -11,6 +11,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.lang.reflect.Field;
 import java.nio.charset.StandardCharsets;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import org.springframework.core.io.ClassPathResource;
 
@@ -153,6 +155,86 @@ class TestcaseTemplateSuiteTest {
         assertTrue(grader.contains("Blocked bởi lỗi khởi động chung"));
         assertTrue(grader.contains("event['result'] == 'success' && !skipped"));
         assertTrue(grader.contains("process.exitCode.timeout(timeout)"));
+    }
+
+    @Test
+    void shipsFixedTodoStarterV12AsASeparateExactIdEngine() throws Exception {
+        String examTest = new ClassPathResource("todo-user-v12-engine/exam_test.dart")
+                .getContentAsString(StandardCharsets.UTF_8);
+        String grader = new ClassPathResource("todo-user-v12-engine/grader.dart")
+                .getContentAsString(StandardCharsets.UTF_8);
+        List<Map<String, Object>> templates = new ObjectMapper().readValue(
+                new ClassPathResource("todo-user-v12-testcase-templates.json").getInputStream(),
+                new TypeReference<List<Map<String, Object>>>() {});
+
+        assertEquals(48, templates.size());
+        assertEquals(100.0, templates.stream()
+                .mapToDouble(row -> ((Number) row.get("weight_default")).doubleValue()).sum(), 0.0001);
+        assertTrue(templates.stream().allMatch(row -> "TODO_USER_V12".equals(row.get("engine_type"))));
+        assertTrue(templates.stream().allMatch(row -> row.get("template_id").equals(row.get("execution_key"))));
+        assertTrue(examTest.contains("import '../lib/main.dart' as student_app;"));
+        assertTrue(!examTest.contains("grading_adapter.dart"));
+        assertTrue(grader.contains("event['result'] == 'success' && !skipped"));
+    }
+
+    @Test
+    void fixedTodoMatrixUsesRunnerExecutionKeyInsteadOfUiInstanceId() {
+        Map<String, Object> item = new LinkedHashMap<>();
+        item.put("instance_id", "ignored_ui_id");
+        item.put("execution_key", "MODEL_GRANULAR_MAPPING");
+        item.put("template_id", "MODEL_GRANULAR_MAPPING");
+        item.put("skill_code", "DART_CLASSES_OOP");
+        item.put("layer", "MODEL");
+        item.put("name", "Mapping");
+        item.put("expected", "Maps correctly");
+        item.put("difficulty", "basic");
+        item.put("weight", 1.0);
+        item.put("enabled", true);
+
+        Map<String, Object> matrix = service.toSkillsMatrix(
+                List.of(item), "TODO_USER_V12", service.normalizeSuite(Map.of(
+                        "profile", "TODO_STARTER_V12",
+                        "strict_semantic_keys", false), null));
+
+        assertTrue(matrix.containsKey("MODEL_GRANULAR_MAPPING"));
+        assertTrue(!matrix.containsKey("ignored_ui_id"));
+        Map<?, ?> row = (Map<?, ?>) matrix.get("MODEL_GRANULAR_MAPPING");
+        assertEquals("MODEL", row.get("rubric"));
+        assertTrue(!row.containsKey("suite"));
+        assertTrue(!row.containsKey("parameters"));
+    }
+
+    @Test
+    void materializesFixedTodoEngineAndRejectsMixedEngines(@TempDir Path root) throws Exception {
+        service.materializeEngine(root, "TODO_USER_V12");
+
+        assertTrue(Files.exists(root.resolve("exam_test.dart")));
+        assertTrue(Files.exists(root.resolve("grader.dart")));
+        assertTrue(Files.readString(root.resolve("exam_test.dart"), StandardCharsets.UTF_8)
+                .contains("import '../lib/main.dart' as student_app;"));
+        assertEquals("TODO_USER_V12", service.engineType(List.of(
+                Map.of("engine_type", "TODO_USER_V12"))));
+        assertThrows(IllegalArgumentException.class, () -> service.engineType(List.of(
+                Map.of("engine_type", "TODO_USER_V12"),
+                Map.of("engine_type", "COMMON_V1"))));
+    }
+
+    @Test
+    void exposesCompleteTodoV12PackWithThreeScopesAndNoDuplicateIds() {
+        List<Map<String, Object>> packs = service.listTemplatePacks();
+        Map<String, Object> pack = packs.stream()
+                .filter(row -> "TODO_USER_STARTER_V12".equals(row.get("pack_id")))
+                .findFirst().orElseThrow();
+
+        assertEquals("TODO_USER_V12", pack.get("engine_type"));
+        assertEquals(48, pack.get("testcase_count"));
+        assertEquals(100.0, ((Number) pack.get("default_weight")).doubleValue(), 0.0001);
+        assertEquals(48, new java.util.LinkedHashSet<>((List<?>) pack.get("template_ids")).size());
+        List<?> scopes = (List<?>) pack.get("scopes");
+        assertEquals(3, scopes.size());
+        assertEquals(List.of(20, 17, 11), scopes.stream()
+                .map(scope -> ((Number) ((Map<?, ?>) scope).get("testcase_count")).intValue())
+                .toList());
     }
 
     @Test

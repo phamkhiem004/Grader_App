@@ -42,11 +42,14 @@ public class TestcaseTemplateService {
     private static final String TEMPLATE_CREATED_BY = "system";
     private static final String TEMPLATE_CREATED_AT = "2026-08-02T00:00:00Z";
     private static final String COMMON_ENGINE = "COMMON_V1";
+    /** Fixed-contract engine for the starter where students complete existing TODOs. */
+    private static final String TODO_USER_ENGINE = "TODO_USER_V12";
     private static final String CUSTOM_TEMPLATE_VERSION = "teacher-v1";
     private static final String CUSTOM_TEMPLATE_FILE = "custom-testcase-templates.json";
     private static final Pattern DART_IDENTIFIER = Pattern.compile("[A-Za-z_][A-Za-z0-9_]*");
     private static final Set<String> SUITE_PROFILES = Set.of(
-            "COMMON_UI", "FLUTTER_LAYERED", "PERSISTENCE", "REPOSITORY_SQLITE", "GOLDEN_RESPONSIVE");
+            "COMMON_UI", "FLUTTER_LAYERED", "PERSISTENCE", "REPOSITORY_SQLITE", "GOLDEN_RESPONSIVE",
+            "TODO_STARTER_V12");
     private static final Set<String> RESET_STRATEGIES = Set.of(
             "APP_RESTART", "FIXTURE_STEPS", "CLEAR_STORAGE", "PERSISTENCE_PHASE");
     private static final Set<String> SOURCE_CONTRACT_TYPES = Set.of(
@@ -228,9 +231,11 @@ public class TestcaseTemplateService {
     @PostConstruct
     public void loadTemplates() {
         templates.clear();
-        if (loadClasspathTemplates("common-testcase-templates.json", COMMON_ENGINE))
-            log.info("✅ Nạp {} testcase dùng chung từ common-testcase-templates.json", templates.size());
-        else log.error("Không nạp được thư viện testcase dùng chung.");
+        boolean commonLoaded = loadClasspathTemplates("common-testcase-templates.json", COMMON_ENGINE);
+        boolean todoLoaded = loadClasspathTemplates("todo-user-v12-testcase-templates.json", TODO_USER_ENGINE);
+        if (commonLoaded || todoLoaded)
+            log.info("Loaded {} testcase templates for common and fixed TODO engines", templates.size());
+        else log.error("Cannot load testcase template libraries.");
         loadCustomTemplates();
     }
 
@@ -403,6 +408,52 @@ public class TestcaseTemplateService {
         return out;
     }
 
+    /** Complete starter presets shown above the individual drag/drop testcase library. */
+    public List<Map<String, Object>> listTemplatePacks() {
+        ensureReferenceTemplatesLoaded();
+        try (InputStream in = new ClassPathResource("testcase-packs.json").getInputStream()) {
+            List<Map<String, Object>> packs = mapper.readValue(in,
+                    new TypeReference<List<Map<String, Object>>>() {});
+            for (Map<String, Object> pack : packs) {
+                List<String> allIds = new ArrayList<>();
+                List<Map<String, Object>> normalizedScopes = new ArrayList<>();
+                Object rawScopes = pack.get("scopes");
+                if (!(rawScopes instanceof List<?> scopes)) {
+                    throw new IllegalStateException("Pack has no scopes: " + pack.get("pack_id"));
+                }
+                for (Object rawScope : scopes) {
+                    Map<String, Object> scope = castMap(rawScope);
+                    Object rawIds = scope.get("template_ids");
+                    if (!(rawIds instanceof List<?> ids)) {
+                        throw new IllegalStateException("Pack scope has no template_ids: " + scope.get("scope_id"));
+                    }
+                    for (Object rawId : ids) {
+                        String id = text(rawId);
+                        Map<String, Object> template = templates.get(id);
+                        if (template == null) throw new IllegalStateException("Pack references missing template: " + id);
+                        if (!text(pack.get("engine_type"), "").equals(text(template.get("engine_type"), ""))) {
+                            throw new IllegalStateException("Pack mixes engines at template: " + id);
+                        }
+                        if (!allIds.add(id)) throw new IllegalStateException("Pack contains duplicate template: " + id);
+                    }
+                    scope.put("testcase_count", ids.size());
+                    normalizedScopes.add(scope);
+                }
+                pack.put("scopes", normalizedScopes);
+                pack.put("template_ids", allIds);
+                pack.put("testcase_count", allIds.size());
+                pack.put("default_weight", allIds.stream()
+                        .map(templates::get)
+                        .mapToDouble(template -> number(template.get("weight_default"), 0)).sum());
+            }
+            return packs;
+        } catch (IllegalStateException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IllegalStateException("Cannot load testcase packs: " + e.getMessage(), e);
+        }
+    }
+
     public Map<String, Object> getTemplate(String templateId) {
         ensureReferenceTemplatesLoaded();
         Map<String, Object> source = templates.get(templateId);
@@ -543,10 +594,15 @@ public class TestcaseTemplateService {
     }
 
     /** Chọn engine theo profile, không dùng grader gắn chặt với một đề cho testcase chung. */
-    private void materializeEngine(Path dir, String engineType) throws Exception {
+    void materializeEngine(Path dir, String engineType) throws Exception {
         if (COMMON_ENGINE.equals(engineType)) {
             copyClasspathEngine(dir, "common-testcase-engine/grader.dart", "grader.dart");
             copyClasspathEngine(dir, "common-testcase-engine/exam_test.dart", "exam_test.dart");
+        } else if (TODO_USER_ENGINE.equals(engineType)) {
+            copyClasspathEngine(dir, "todo-user-v12-engine/grader.dart", "grader.dart");
+            copyClasspathEngine(dir, "todo-user-v12-engine/exam_test.dart", "exam_test.dart");
+        } else {
+            throw new IllegalArgumentException("Unsupported testcase engine: " + engineType);
         }
     }
 
@@ -618,8 +674,11 @@ public class TestcaseTemplateService {
 
     /** Đảm bảo thư viện testcase dùng chung luôn có sẵn trước mỗi request. */
     private synchronized void ensureReferenceTemplatesLoaded() {
-        if (templates.isEmpty() && !loadClasspathTemplates("common-testcase-templates.json", COMMON_ENGINE))
-            log.error("Không nạp được thư viện testcase dùng chung.");
+        if (!templates.isEmpty()) return;
+        boolean commonLoaded = loadClasspathTemplates("common-testcase-templates.json", COMMON_ENGINE);
+        boolean todoLoaded = loadClasspathTemplates("todo-user-v12-testcase-templates.json", TODO_USER_ENGINE);
+        if (!commonLoaded && !todoLoaded) log.error("Cannot load testcase template libraries.");
+        loadCustomTemplates();
     }
 
     /** Chỉ cho phép tiếp tục đúng đề Draft/Publish được tạo bởi chức năng template này. */
@@ -912,7 +971,11 @@ public class TestcaseTemplateService {
                 throw new IllegalArgumentException("skill_code không còn hợp lệ trong syllabus: " + template.get("skill_code"));
 
             String instanceId = text(input.get("instance_id"));
-            if (instanceId == null || instanceId.isBlank())
+            if (TODO_USER_ENGINE.equals(templateEngine)) {
+                // The fixed V9 runner dispatches by these exact IDs. A fixed-contract
+                // case can occur only once and cannot be renamed by the client.
+                instanceId = text(template.get("execution_key"), templateId);
+            } else if (instanceId == null || instanceId.isBlank())
                 instanceId = examId + "_item_" + String.format("%02d", index);
             if (!SAFE_INSTANCE_ID.matcher(instanceId).matches())
                 throw new IllegalArgumentException("instance_id không hợp lệ: " + instanceId);
@@ -1048,13 +1111,20 @@ public class TestcaseTemplateService {
         return merged;
     }
 
-    private String engineType(List<Map<String, Object>> items) {
-        // Toàn bộ template được cung cấp cho giao diện đều chạy trên cùng engine semantic.
-        return COMMON_ENGINE;
+    String engineType(List<Map<String, Object>> items) {
+        Set<String> engines = new LinkedHashSet<>();
+        for (Map<String, Object> item : items) {
+            engines.add(text(item.get("engine_type"), COMMON_ENGINE));
+        }
+        if (engines.size() > 1) {
+            throw new IllegalArgumentException(
+                    "Khong duoc tron testcase starter TODO co dinh voi testcase semantic-key trong cung mot de.");
+        }
+        return engines.isEmpty() ? TODO_USER_ENGINE : engines.iterator().next();
     }
 
     private String profileId(String engineType) {
-        return "COMMON_SEMANTIC_V1";
+        return TODO_USER_ENGINE.equals(engineType) ? "TODO_STARTER_V12" : "COMMON_SEMANTIC_V1";
     }
 
     private void validateCommonParameters(String runner, Map<String, Object> params, String instanceId) {
@@ -1391,10 +1461,26 @@ public class TestcaseTemplateService {
                 matrix.put(groupId, commonGroupRow(groupId, children, suite));
                 continue;
             }
-            matrix.put(String.valueOf(item.get("instance_id")),
-                    commonRubricRow(item, suite));
+            if (TODO_USER_ENGINE.equals(engineType)) {
+                matrix.put(String.valueOf(item.get("execution_key")), fixedContractRubricRow(item));
+            } else {
+                matrix.put(String.valueOf(item.get("instance_id")), commonRubricRow(item, suite));
+            }
         }
         return matrix;
+    }
+
+    /** Preserve the exact metadata shape expected by the supplied fixed V9 runner. */
+    private Map<String, Object> fixedContractRubricRow(Map<String, Object> item) {
+        Map<String, Object> row = new LinkedHashMap<>();
+        Map<String, Object> template = templates.get(text(item.get("template_id")));
+        row.put("rubric", template == null ? item.get("layer") : template.get("rubric"));
+        row.put("skill_code", item.get("skill_code"));
+        row.put("name", item.get("name"));
+        row.put("expected", item.get("expected"));
+        row.put("difficulty", item.get("difficulty"));
+        row.put("weight", item.get("weight"));
+        return row;
     }
 
     /** Matrix của engine chung: runner đọc semantic key và parameters, không biết domain đề. */

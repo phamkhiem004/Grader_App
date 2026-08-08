@@ -12,26 +12,24 @@ Sổ theo dõi để không mất mạch giữa các phiên. **Đọc file này 
 
 ## Đang ở đâu — 2026-08-08
 
-**P0 → A2c xong.** `origin/main` = engine `COMMON_V1-2.7.0`, 69 test xanh, fixture **25 testcase /
-7 bài nộp**, **0 luật FAIL** trên cả 7 mẫu đã phát hành. Bảng tiến độ chi tiết ở mục *Tiến độ* dưới.
+**P0 → A2c → (c) xong.** Engine `COMMON_V1-2.7.0` **không đổi ở (c)** — (c) nằm ở khâu **soạn đề**,
+không phải khâu chấm, nên **không đề nào phải chấm lại**. **76 test xanh** (69 → 76), fixture **25
+testcase / 7 bài nộp**, **0 luật FAIL** trên **8** mẫu (thêm `latest-machine-expected.json`).
+Bảng tiến độ chi tiết ở mục *Tiến độ* dưới.
 
 ## Việc kế tiếp, theo thứ tự
 
-**1. (c) — dọn `expected` máy sinh.** Chưa làm. Đo được: **20/22 `expected_template` trong
-`common-testcase-templates.json` nhét semantic key thẳng vào `expected`** (`Bấm {actionKey} phải mở
-{dialogKey}…` → `Bấm action.delete.1 phải mở dialog.delete…`), 7/22 còn kèm từ vựng tiếng Anh. Giáo
-viên để trống ô `expected` là dính bản mặc định này. Phạm vi:
+**1. ~~(c) — dọn `expected` máy sinh.~~ ✅ XONG** — xem mục *(c)* dưới. Còn **hai chỗ mở** nó phơi
+ra, chưa đóng:
 
-| | |
-|---|---|
-| 1 | Viết lại 22 `expected_template` — tiếng Việt, mô tả hành vi, **không khoá, không jargon** |
-| 2 | Test cấm `{…Key}` và từ vựng Anh trong mọi `expected_template` |
-| 3 | Test chạy **đúng đường soạn đề thật** (`renderExpected` trên 22 template với tham số thật) + áp luật C3/C4 như `actual` |
-| 4 | Phát **một mẫu `expected` đi đường MÁY SINH** — phía NLP xin, xem `CHANGELOG_FOR_GRADER.md` 2026-08-10 |
-| 5 | `verify_result.py` quét `expected` phần máy sinh; SPEC ghi rõ phần giảng viên gõ chỉ bảo đảm nguyên văn |
-
-> Vì sao lỗi này sống lâu: **`exam/skills_matrix.json` của fixture là JSON gõ tay**, không đi qua
-> `TestcaseTemplateService` lần nào. Fixture đo **đường CHẤM**, chưa bao giờ đo **đường SOẠN ĐỀ**.
+- **(c-nợ-1) `group_id` mang HAI nghĩa.** Khâu soạn đề hiểu là *gom thành một testcase lớn* (UI:
+  *"N testcase nhỏ · một assert fail sẽ làm cả nhóm fail"*), còn fixture + cả 7 mẫu dùng nó làm
+  *nhãn rubric* trên 25 dòng / 9 nhóm. ⇒ **hình dạng đề trong mọi mẫu đã phát không phải hình dạng
+  khâu soạn đề sinh ra.** Chưa biết bên nào sai; **chưa sửa gì**, đã báo NLP vì họ gom nhận xét theo
+  `rubric`.
+- **(c-nợ-2) không có cờ phân biệt `expected` máy sinh với `expected` giảng viên gõ** trong
+  `result.json`. NLP không gỡ lưới theo mốc này được. Làm được ngay bằng `expected_source` lấy từ
+  `expected_custom` — nhưng là thêm trường vào hợp đồng nên **chờ NLP xin**.
 
 **2. P6 — `exam.requirements`.** Hình dạng **đã chốt với cả chủ đồ án lẫn phía NLP**, không phải bàn lại:
 
@@ -89,6 +87,7 @@ Bốn điều rút ra, **đừng suy lại từ đầu**:
 | 3 | "0 test thiếu `observation`" | vì fixture không có bài nào ném lỗi giữa runner (A2c) |
 | 4 | "cổng độ phủ của tôi có lỗ hổng" | **không có lỗ hổng** — cổng đã tồn tại từ P1, tôi soát nhầm class |
 | 5 | "`expected` sạch" | 25/25 `expected` của fixture **gõ tay**; đường máy sinh chưa đo lần nào |
+| 6 | "(c) đóng xong vùng mù khâu soạn đề" | chỉ đóng **một trường**; lần đo đầu tiên lộ ngay `group_id` mang hai nghĩa (c-nợ-1) |
 
 Kèm hai lần phát biểu sai về **code của phía NLP** mà không chạy thử, một lần còn kèm số dòng file.
 **Quy tắc rút ra: đo trước khi phát biểu, và nói rõ phạm vi đã đo.**
@@ -153,6 +152,7 @@ sinh viên.** Mọi tranh cãi thiết kế phân xử bằng nguyên tắc này
 | **A2** | Mở rộng fixture: 10 runner chưa chạy + 7 `kind` chưa từng phát | ✅ **Xong** 2026-08-07 | Fixture 13 → **24 testcase**, phủ **23/23 runner** và **13/13 `kind`**; bài nộp thứ 5 `sloppy`; tìm ra **khiếm khuyết chấm sai điểm thứ tư**; 7 `kind` lên Mức 1 |
 | **A2b** | Tám runner *chỉ từng đạt* phải chạy cả đường **HỎNG** | ✅ **Xong** 2026-08-07 | Fixture → **25 testcase**, bài nộp thứ 6 `unwired`; **22/22 runner đủ hai đường**; bít **hai lỗ hổng kênh quan sát**; `kind` thứ 14 `TYPE_MISMATCH`; **0 test `failed` thiếu `observation`**; điểm 5 bài cũ KHÔNG đổi |
 | **A2c** | Trả nợ hai lỗ hổng NLP phơi ra | ✅ **Xong** 2026-08-07 | Tìm ra ca **CHẨN ĐOÁN SAI LỆCH**; `kind` thứ 15 `ACTION_FAILED`; bài nộp thứ 7 `broken-action`; mã classifier chạy thật **0/9 → 3/9**; 0 luật FAIL trên 7 mẫu |
+| **(c)** | Dọn `expected` MÁY SINH — lần đầu đo **đường soạn đề** | ✅ **Xong** 2026-08-08 | 22/22 template sạch khoá + sạch enum Anh; 7 test mới (**76 xanh**); luật **F4** trong `verify_result.py`; mẫu thứ 8 `latest-machine-expected`; **0 FAIL trên 8 mẫu**; điểm KHÔNG đổi (không đụng engine) |
 | **P6** | `exam.requirements` | ⬜ | — |
 
 ### A2 — mở fixture, và cái giá của việc công bố năng lực chưa chạy
@@ -229,6 +229,30 @@ và đó là bằng chứng cụ thể cho việc `kind` **hẹp hơn** `error_c
 Hai lỗ hổng ban đầu cũng vá xong: lưới song ánh `kind`→`error_code` chỉ quét 7/12 (danh sách chép
 tay) → nay lấy từ chính bảng; và bất biến `actual_source == "observation"` là overclaim (xanh vì
 fixture né) → nay kiểm **nội dung** `actual` không chứa log của bộ chấm.
+
+### (c) — bộ đo đứng sai chỗ, không phải lưới thủng
+
+Suốt P0→A2c mọi phép đo đều đặt trên **đường CHẤM**. `expected` thì đi đường **SOẠN ĐỀ**, và
+`exam/skills_matrix.json` của fixture là **JSON gõ tay** — chưa đi qua `TestcaseTemplateService`
+lần nào. Nên 20/22 template nhét thẳng khoá vào `expected` mà **không cổng nào đỏ**, kể cả ba cổng
+độ phủ của A2/A2b: chúng canh runner và `kind`, tức canh khâu chấm.
+
+Ba thứ (c) để lại, xếp theo giá trị:
+
+1. **Từ điển là VŨ TRỤ GIÁ TRỊ, không phải bảng tra song song.** `enumUniverse(param, fallback)`
+   lấy tập giá trị hợp lệ của `targetType`/`comparison`/`fontWeight`/… **từ chính từ điển**. Thêm
+   giá trị mà quên nhãn ⇒ **không lưu được đề**, thay vì lưu êm rồi chữ Anh đi vào báo cáo gửi hàng
+   loạt. Chép tay danh sách vào test là đúng lỗi A2c đã mắc.
+2. **`renderExpected` có BẢN SONG SINH ở frontend** ([page.tsx:131](../frontend/app/teacher/testcases/page.tsx#L131)),
+   và **bản FE mới là bản được lưu** — backend chỉ dùng bản của nó khi FE gửi rỗng, lệch thì đánh
+   dấu `expected_custom: true`. Sửa một bên là câu máy sinh bị ghi nhận nhầm thành "giảng viên tự
+   gõ", im lặng. Cùng bẫy `student_safe_summary`. Khoá bằng test quét mã FE.
+3. **Thử phá từng chỗ, không tin màu xanh:** trả lại template cũ ⇒ 3 luật đỏ, in ra đúng câu NLP
+   báo (`Bấm action.delete.1 phải mở dialog.delete`); bỏ từ điển ở một lời gọi FE ⇒ đỏ; xoá một
+   nhãn ⇒ đỏ. Luật F4 cấy lại câu cũ vào mẫu ⇒ đỏ.
+
+**Phạm vi đã đo, đừng phát biểu rộng hơn:** chỉ trường `expected`. Phần còn lại của khâu soạn đề
+vẫn chưa có phép đo nào — và ngay lần đo đầu đã lộ (c-nợ-1: `group_id` hai nghĩa).
 
 ### Vì sao ĐÓNG P4b
 
@@ -307,6 +331,8 @@ vì chúng thành `not_run` nên C6 bỏ qua **đúng luật** thay vì bị tí
 | Việc | File |
 |---|---|
 | Sinh `skills_matrix.json` cho đề mới | `TestcaseTemplateService.commonRubricRow` / `commonGroupRow` |
+| **Dựng `expected` máy sinh** — HAI bản phải khớp | `TestcaseTemplateService.renderExpected` **và** `frontend/app/teacher/testcases/page.tsx` (bản FE là bản được lưu) |
+| Từ vựng tiếng Việt của `expected` (nguồn DUY NHẤT, và là vũ trụ giá trị enum) | `grader/src/main/resources/common-expected-vocabulary.json` |
 | **Kênh quan sát** (engine phát) | `exam_test.dart` — `_observe` + `_expectPresent` / `_expectGone` / `_expectNoLayoutError` / `_assertNumber` |
 | **Render tiếng Việt** + **bảng `kind` → `error_code`** (nguồn sự thật DUY NHẤT của cả hai) | `TestObservationRenderer` |
 | Nhãn hiển thị của `rubric` (P2b sẽ gửi) | `TestCaseTaxonomy.rubricOf` lấy `group_id`; nhãn nằm ở `group_name` |

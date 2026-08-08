@@ -267,9 +267,19 @@ class FixtureResultAssemblyTest {
     }
 
     // ── dựng lại luồng ghép, gọi THẬT các bước P1 đã đổi ───────────────────
-    @SuppressWarnings("unchecked")
     private Map<String, Object> assemble(Path graderOut, SyllabusService.Resolver resolver,
                                          String variant) throws Exception {
+        return assemble(graderOut, resolver, variant, FIXTURE.resolve("exam"));
+    }
+
+    /**
+     * {@code examDir} tách ra làm tham số để {@link MachineExpectedSampleTest} chạy được cùng
+     * chuỗi hàm này trên một skills_matrix khác — mẫu `expected` MÁY SINH. Chép chuỗi ra chỗ
+     * khác là lại vấp bẫy "harness thiếu một bước ⇒ luật nghiệm thu xanh giả".
+     */
+    @SuppressWarnings("unchecked")
+    static Map<String, Object> assemble(Path graderOut, SyllabusService.Resolver resolver,
+                                        String variant, Path examDir) throws Exception {
         JsonNode grader = MAPPER.readTree(Files.readString(graderOut, StandardCharsets.UTF_8));
 
         List<Map<String, Object>> tcs = new ArrayList<>();
@@ -277,7 +287,7 @@ class FixtureResultAssemblyTest {
 
         BatchGradingService batch = new BatchGradingService();
         Exam exam = new Exam();
-        exam.setTestcasePath(FIXTURE.resolve("exam").toAbsolutePath().toString());
+        exam.setTestcasePath(examDir.toAbsolutePath().toString());
 
         // ĐÚNG THỨ TỰ của assembleResultJson. Thiếu một bước là artifact không trung thực:
         // sanitizeTestCaseErrors mới là chỗ sinh `error` + `student_safe_summary`, nên bỏ nó
@@ -311,16 +321,16 @@ class FixtureResultAssemblyTest {
         return root;
     }
 
-    private Object invoke(Object target, String name, Class<?>[] types, Object... args) throws Exception {
+    private static Object invoke(Object target, String name, Class<?>[] types, Object... args) throws Exception {
         Method m = target.getClass().getDeclaredMethod(name, types);
         m.setAccessible(true);
         return m.invoke(target, args);
     }
 
     /** Dựng Resolver từ syllabus.json y như SyllabusService.seedOnStartup nạp vào DB. */
-    private SyllabusService.Resolver resolverFromSeedFile() throws Exception {
+    static SyllabusService.Resolver resolverFromSeedFile() throws Exception {
         JsonNode root;
-        try (var in = getClass().getResourceAsStream("/syllabus.json")) {
+        try (var in = FixtureResultAssemblyTest.class.getResourceAsStream("/syllabus.json")) {
             assertNotNull(in, "Không tìm thấy syllabus.json trên classpath");
             root = MAPPER.readTree(in);
         }

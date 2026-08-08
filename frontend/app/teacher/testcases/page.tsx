@@ -30,6 +30,8 @@ interface Template {
   weight_default: number;
   parameters_schema: JsonMap;
   expected_template: string;
+  /** backend gửi kèm: tên tham số → (giá trị enum → nhãn tiếng Việt), xem common-expected-vocabulary.json */
+  value_labels?: Record<string, Record<string, string>>;
 }
 
 interface TestcaseItem {
@@ -120,10 +122,18 @@ const SKILL_LABEL: Record<string, string> = {
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
-function renderExpected(template: string, params: JsonMap) {
-  return Object.entries(params).reduce(
-    (text, [key, value]) => text.replaceAll(`{${key}}`, String(value)), template,
-  );
+/**
+ * BẢN SONG SINH của TestcaseTemplateService.renderExpected (backend) — chuỗi hàm này dựng
+ * chính là chuỗi được POST lên và lưu vào đề, backend chỉ dùng bản của nó khi FE gửi rỗng.
+ * Nên lệch một chữ là bản máy sinh bị ghi nhận nhầm thành "giáo viên tự gõ" (expected_custom),
+ * im lặng. Sửa bên nào cũng phải sửa bên kia; từ vựng thì nằm ở value_labels do backend gửi.
+ */
+function renderExpected(template: string, params: JsonMap, labels?: Record<string, Record<string, string>>) {
+  return Object.entries(params).reduce((text, [key, value]) => {
+    const raw = String(value);
+    const label = labels?.[key]?.[raw.toLowerCase()] ?? raw;
+    return text.replaceAll(`{${key}}`, label);
+  }, template);
 }
 
 function cloneParams(template: Template): JsonMap {
@@ -335,7 +345,7 @@ export default function TestcasesPage() {
       order: items.length + 1,
       weight: Number(template.weight_default || 1),
       parameters: cloneParams(template),
-      expected: renderExpected(template.expected_template, cloneParams(template)),
+      expected: renderExpected(template.expected_template, cloneParams(template), template.value_labels),
       expected_custom: false,
     };
     setItems((current) => [...current, item]);
@@ -361,7 +371,7 @@ export default function TestcasesPage() {
       // Chỉ tự sinh lại expected khi giáo viên chưa nhập nội dung riêng.
       expected: item.expected_custom
         ? item.expected
-        : renderExpected(template.expected_template, parameters),
+        : renderExpected(template.expected_template, parameters, template.value_labels),
     });
   };
 
@@ -673,7 +683,7 @@ export default function TestcasesPage() {
                 {(selectedTemplate.runner || selectedTemplate.layer) && <p className="mt-2 text-[11px] text-emerald-700">Loại kiểm tra: {RUNNER_LABEL[selectedTemplate.runner || ""] || LAYER_LABEL[selectedTemplate.layer] || "Kiểm tra theo yêu cầu"}</p>}
                 <p className="mt-1 text-[11px] text-slate-500">Bộ testcase: {ENGINE_LABEL[selectedTemplate.engine_type || ""] || selectedTemplate.engine_type || "Không xác định"}</p>
                 <p className="mt-1 text-[11px] text-slate-500">Chủ đề: {SKILL_LABEL[selectedTemplate.skill_code] || selectedTemplate.skill_name || selectedTemplate.skill_code}</p>
-                <p className="mt-2 rounded-lg bg-white p-2 text-xs text-slate-600"><span className="font-semibold text-slate-700">Expected tự sinh:</span> {renderExpected(selectedTemplate.expected_template, selectedTemplate.parameters_schema)}</p>
+                <p className="mt-2 rounded-lg bg-white p-2 text-xs text-slate-600"><span className="font-semibold text-slate-700">Expected tự sinh:</span> {renderExpected(selectedTemplate.expected_template, selectedTemplate.parameters_schema, selectedTemplate.value_labels)}</p>
               </div>
             )}
           </section>

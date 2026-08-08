@@ -42,6 +42,9 @@ public class TestcaseTemplateService {
     private static final String COMMON_ENGINE = "COMMON_V1";
     private static final Pattern SAFE_INSTANCE_ID = Pattern.compile("[A-Za-z0-9_-]{1,60}");
     private static final Set<String> DIFFICULTIES = Set.of("basic", "intermediate", "advanced");
+    /** Bản lùi khi từ điển expected không nạp được — xem {@link #enumUniverse}. */
+    private static final Set<String> TARGET_TYPES = Set.of("any", "form", "image", "text", "input",
+            "button", "dialog", "icon", "checkbox", "switch", "dropdown", "padding", "container");
     /** Nhóm lọc hiển thị ở Khu vực 1; không thay thế category/skill của syllabus. */
     private static final Map<String, String> TESTCASE_GROUP_LABELS = Map.of(
             "LOGIC", "Testcase Logic",
@@ -194,6 +197,8 @@ public class TestcaseTemplateService {
 
     private final ObjectMapper mapper = new ObjectMapper();
     private final Map<String, Map<String, Object>> templates = new LinkedHashMap<>();
+    /** tên tham số → (giá trị enum chữ thường → nhãn tiếng Việt); nguồn: common-expected-vocabulary.json */
+    private final Map<String, Map<String, String>> valueLabels = new LinkedHashMap<>();
 
     @Autowired private ExamRepository examRepository;
     @Autowired private SyllabusService syllabusService;
@@ -202,9 +207,32 @@ public class TestcaseTemplateService {
     @PostConstruct
     public void loadTemplates() {
         templates.clear();
+        loadValueLabels();
         if (loadClasspathTemplates("common-testcase-templates.json", COMMON_ENGINE))
             log.info("✅ Nạp {} testcase dùng chung từ common-testcase-templates.json", templates.size());
         else log.error("Không nạp được thư viện testcase dùng chung.");
+    }
+
+    /**
+     * Từ điển giá trị của `expected` máy sinh — nạp một lần, dùng cho CẢ hai đầu render:
+     * backend ({@link #renderExpected}) và frontend (đi kèm mỗi template trong
+     * {@link #enrichTemplate}). Một nguồn, hai nơi tra — không có bản chép tay thứ hai.
+     */
+    private synchronized void loadValueLabels() {
+        valueLabels.clear();
+        try (InputStream in = new ClassPathResource("common-expected-vocabulary.json").getInputStream()) {
+            Map<String, Object> raw = mapper.readValue(in,
+                    new TypeReference<LinkedHashMap<String, Object>>() {});
+            raw.forEach((param, values) -> {
+                if (param.startsWith("_") || !(values instanceof Map<?, ?> map)) return;
+                Map<String, String> labels = new LinkedHashMap<>();
+                map.forEach((k, v) -> labels.put(String.valueOf(k).toLowerCase(), String.valueOf(v)));
+                valueLabels.put(param, labels);
+            });
+        } catch (Exception e) {
+            // Không chặn khởi động: thiếu từ điển thì `expected` xấu, còn ném lỗi thì cả app chết.
+            log.error("Không nạp được từ điển expected: {}", e.getMessage());
+        }
     }
 
     private boolean loadClasspathTemplates(String resourceName, String engineType) {
@@ -431,6 +459,7 @@ public class TestcaseTemplateService {
 
     /** Đảm bảo thư viện testcase dùng chung luôn có sẵn trước mỗi request. */
     private synchronized void ensureReferenceTemplatesLoaded() {
+        if (valueLabels.isEmpty()) loadValueLabels();
         if (templates.isEmpty() && !loadClasspathTemplates("common-testcase-templates.json", COMMON_ENGINE))
             log.error("Không nạp được thư viện testcase dùng chung.");
     }
@@ -620,8 +649,7 @@ public class TestcaseTemplateService {
             }
             case "RESPONSIVE_TARGET" -> {
                 validateResponsiveSizes(params, instanceId);
-                validateTarget(params, instanceId, Set.of("any", "form", "image", "text", "input",
-                        "button", "dialog", "icon", "checkbox", "switch", "dropdown", "padding", "container"));
+                validateTarget(params, instanceId, enumUniverse("targetType", TARGET_TYPES));
             }
             case "STATE_REACTIVE_FLOW" -> {
                 requireParameter(params, "initialKey", instanceId);
@@ -657,15 +685,14 @@ public class TestcaseTemplateService {
     }
 
     private void validateWidgetTypeVisible(Map<String, Object> params, String instanceId) {
-        validateTarget(params, instanceId, Set.of("any", "form", "image", "text", "input",
-                "button", "dialog", "icon", "checkbox", "switch", "dropdown", "padding", "container"));
+        validateTarget(params, instanceId, enumUniverse("targetType", TARGET_TYPES));
     }
 
     private void validateWidgetTextContent(Map<String, Object> params, String instanceId) {
         validateTarget(params, instanceId, Set.of("text"));
         requireParameter(params, "expectedText", instanceId);
         String matchMode = text(params.get("matchMode"), "equals").toLowerCase();
-        if (!Set.of("equals", "contains").contains(matchMode))
+        if (!enumUniverse("matchMode", Set.of("equals", "contains")).contains(matchMode))
             throw new IllegalArgumentException("matchMode không hợp lệ ở " + instanceId);
     }
 
@@ -733,11 +760,10 @@ public class TestcaseTemplateService {
     }
 
     private void validateWidgetSemanticsLabel(Map<String, Object> params, String instanceId) {
-        validateTarget(params, instanceId, Set.of("any", "form", "image", "text", "input", "button",
-                "dialog", "icon", "checkbox", "switch", "dropdown", "padding", "container"));
+        validateTarget(params, instanceId, enumUniverse("targetType", TARGET_TYPES));
         requireParameter(params, "expectedLabel", instanceId);
         String matchMode = text(params.get("matchMode"), "equals").toLowerCase();
-        if (!Set.of("equals", "contains").contains(matchMode))
+        if (!enumUniverse("matchMode", Set.of("equals", "contains")).contains(matchMode))
             throw new IllegalArgumentException("matchMode không hợp lệ ở " + instanceId);
     }
 
@@ -753,7 +779,7 @@ public class TestcaseTemplateService {
         validateTarget(params, instanceId, Set.of("any", "form", "image", "text", "input",
                 "button", "padding", "container"));
         String dimension = text(params.get("dimension"), "").toLowerCase();
-        if (!Set.of("width", "height").contains(dimension))
+        if (!enumUniverse("dimension", Set.of("width", "height")).contains(dimension))
             throw new IllegalArgumentException("dimension phải là width hoặc height ở " + instanceId);
         validateComparison(params, instanceId);
         requireNumber(params, "expected", instanceId, 0);
@@ -771,8 +797,8 @@ public class TestcaseTemplateService {
         requireNumber(params, "fontSize", instanceId, 0.01);
         requireNumber(params, "tolerance", instanceId, 0);
         String weight = text(params.get("fontWeight"), "").toLowerCase();
-        if (!Set.of("w100", "w200", "w300", "w400", "w500", "w600", "w700", "w800", "w900")
-                .contains(weight)) {
+        if (!enumUniverse("fontWeight", Set.of("w100", "w200", "w300", "w400", "w500", "w600",
+                "w700", "w800", "w900")).contains(weight)) {
             throw new IllegalArgumentException("fontWeight không hợp lệ ở " + instanceId);
         }
     }
@@ -781,7 +807,7 @@ public class TestcaseTemplateService {
         requireParameter(params, "fromKey", instanceId);
         requireParameter(params, "toKey", instanceId);
         String axis = text(params.get("axis"), "").toLowerCase();
-        if (!Set.of("horizontal", "vertical").contains(axis))
+        if (!enumUniverse("axis", Set.of("horizontal", "vertical")).contains(axis))
             throw new IllegalArgumentException("axis phải là horizontal hoặc vertical ở " + instanceId);
         validateOptionalTargetType(params, "fromType", instanceId);
         validateOptionalTargetType(params, "toType", instanceId);
@@ -799,16 +825,31 @@ public class TestcaseTemplateService {
 
     private void validateOptionalTargetType(Map<String, Object> params, String key, String instanceId) {
         String value = text(params.get(key), "").toLowerCase();
-        if (!value.isBlank() && !Set.of("any", "form", "image", "text", "input", "button",
-                "dialog", "icon", "checkbox", "switch", "dropdown", "padding", "container").contains(value)) {
+        if (!value.isBlank() && !enumUniverse("targetType", TARGET_TYPES).contains(value)) {
             throw new IllegalArgumentException(key + " không hợp lệ ở " + instanceId + ": " + value);
         }
     }
 
     private void validateComparison(Map<String, Object> params, String instanceId) {
         String comparison = text(params.get("comparison"), "equals").toLowerCase();
-        if (!Set.of("equals", "at_least", "at_most").contains(comparison))
+        if (!enumUniverse("comparison", Set.of("equals", "at_least", "at_most")).contains(comparison))
             throw new IllegalArgumentException("comparison không hợp lệ ở " + instanceId);
+    }
+
+    /**
+     * Vũ trụ giá trị của một tham số enum ĐI VÀO `expected` = đúng bộ khoá của từ điển.
+     *
+     * <p>Buộc hai thứ trùng nhau bằng cấu trúc, không bằng một danh sách chép tay trong test:
+     * thêm giá trị mới mà quên nhãn tiếng Việt thì giáo viên KHÔNG lưu được đề — thay vì đề lưu
+     * êm rồi chữ tiếng Anh của bộ chấm đi thẳng vào báo cáo gửi hàng loạt. Cùng bài học với lưới
+     * song ánh {@code kind → error_code}: lấy từ chính bảng, đừng chép tay.
+     *
+     * <p>{@code fallback} chỉ dùng khi từ điển không nạp được — lúc đó thà `expected` xấu còn hơn
+     * chặn giáo viên soạn đề.
+     */
+    private Set<String> enumUniverse(String param, Set<String> fallback) {
+        Map<String, String> labels = valueLabels.get(param);
+        return labels == null || labels.isEmpty() ? fallback : labels.keySet();
     }
 
     private void requireNumber(Map<String, Object> params, String key, String instanceId, double min) {
@@ -965,6 +1006,8 @@ public class TestcaseTemplateService {
 
     private Map<String, Object> enrichTemplate(Map<String, Object> source) {
         Map<String, Object> row = new LinkedHashMap<>(source);
+        // Gửi kèm từ điển để frontend render expected y hệt backend (xem renderExpected).
+        row.put("value_labels", valueLabels);
         row.putIfAbsent("created_by", TEMPLATE_CREATED_BY);
         row.putIfAbsent("created_at", TEMPLATE_CREATED_AT);
         Skill skill = findSkill(text(source.get("skill_code")));
@@ -1023,12 +1066,34 @@ public class TestcaseTemplateService {
         return Math.round(total * 100.0) / 100.0;
     }
 
-    private String renderExpected(String template, Map<String, Object> params) {
+    /**
+     * Dựng `expected` MÁY SINH — câu duy nhất nói cho người đọc biết đề đòi gì khi giáo viên để
+     * trống ô expected. Giá trị enum ({@code targetType}, {@code comparison}, {@code fontWeight}…)
+     * phải qua từ điển, nếu không thì tiếng Anh của bộ chấm đi thẳng vào báo cáo.
+     *
+     * <p>⚠️ Bản SONG SINH ở {@code frontend/app/teacher/testcases/page.tsx} — chuỗi FE gửi lên mới
+     * là chuỗi được lưu (xem chỗ dùng {@code expected_custom}), nên sửa một bên là vô hiệu:
+     * hai bên lệch thì bản máy sinh của FE bị ghi nhận nhầm thành "giáo viên tự gõ", im lặng.
+     *
+     * <p>Không có nhãn thì trả về giá trị thô — thà xấu còn hơn chặn giáo viên lưu đề;
+     * {@code TemplateExpectedTextTest} mới là chốt chặn, nó quét đủ enum của validator.
+     */
+    String renderExpected(String template, Map<String, Object> params) {
         String result = template == null ? "" : template;
         for (Map.Entry<String, Object> e : params.entrySet()) {
-            result = result.replace("{" + e.getKey() + "}", String.valueOf(e.getValue()));
+            result = result.replace("{" + e.getKey() + "}", label(e.getKey(), e.getValue()));
         }
         return result;
+    }
+
+    private String label(String param, Object value) {
+        String raw = String.valueOf(value);
+        Map<String, String> labels = valueLabels.get(param);
+        if (labels == null) return raw;
+        String hit = labels.get(raw.toLowerCase());
+        if (hit != null) return hit;
+        log.warn("Thiếu nhãn tiếng Việt cho {}={} — expected sẽ lộ giá trị thô", param, raw);
+        return raw;
     }
 
     @SuppressWarnings("unchecked")

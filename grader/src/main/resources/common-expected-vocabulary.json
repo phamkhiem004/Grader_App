@@ -1,0 +1,51 @@
+{
+  "_comment": "Từ điển giá trị cho expected_template. NGUỒN SỰ THẬT DUY NHẤT của phần tiếng Việt trong `expected` MÁY SINH — backend (TestcaseTemplateService.renderExpected) và frontend (teacher/testcases/page.tsx) cùng tra bảng này; frontend nhận nó kèm mỗi template nên không có bản chép tay thứ hai. Khoá ngoài = tên tham số, khoá trong = giá trị enum (chữ thường) mà validateCommonParameters cho phép. Thiếu một giá trị là giá trị tiếng Anh đi thẳng vào expected, nên TemplateExpectedTextTest quét đủ enum của validator.",
+
+  "targetType": {
+    "any": "thành phần giao diện",
+    "form": "biểu mẫu",
+    "image": "ảnh",
+    "text": "phần chữ",
+    "input": "ô nhập",
+    "button": "nút",
+    "dialog": "hộp thoại",
+    "icon": "biểu tượng",
+    "checkbox": "ô chọn",
+    "switch": "công tắc",
+    "dropdown": "danh sách chọn",
+    "padding": "vùng có khoảng đệm",
+    "container": "khung"
+  },
+  "dimension": {
+    "width": "chiều rộng",
+    "height": "chiều cao"
+  },
+  "comparison": {
+    "equals": "đúng bằng",
+    "at_least": "ít nhất",
+    "at_most": "nhiều nhất"
+  },
+  "matchMode": {
+    "equals": "đúng nguyên văn",
+    "contains": "có chứa"
+  },
+  "axis": {
+    "vertical": "chiều dọc",
+    "horizontal": "chiều ngang"
+  },
+  "fontWeight": {
+    "w100": "rất mảnh",
+    "w200": "mảnh",
+    "w300": "hơi mảnh",
+    "w400": "thường",
+    "w500": "hơi đậm",
+    "w600": "khá đậm",
+    "w700": "đậm",
+    "w800": "rất đậm",
+    "w900": "đậm nhất"
+  },
+  "expectedEnabled": {
+    "true": "dùng được",
+    "false": "không dùng được"
+  }
+}

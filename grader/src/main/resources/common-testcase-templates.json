@@ -12,7 +12,7 @@
     "difficulty": "basic",
     "weight_default": 1,
     "parameters_schema": {"rootKey": ""},
-    "expected_template": "Ứng dụng phải khởi động từ main() và không phát sinh exception."
+    "expected_template": "Ứng dụng phải mở lên được và hiển thị màn hình đầu tiên, không báo lỗi."
   },
   {
     "template_id": "COMMON_WIDGET_VISIBLE",
@@ -27,7 +27,7 @@
     "difficulty": "basic",
     "weight_default": 1,
     "parameters_schema": {"widgetKey": "screen.home"},
-    "expected_template": "Widget có key '{widgetKey}' phải được render."
+    "expected_template": "Sau khi ứng dụng khởi động, thành phần được kiểm phải hiển thị trên màn hình."
   },
   {
     "template_id": "COMMON_FORM_REQUIRED_FIELDS",
@@ -46,7 +46,7 @@
       "submitKey": "action.save",
       "errorKeys": "error.title,error.email"
     },
-    "expected_template": "Khi submit rỗng, các field {fieldKeys} phải hiển thị lỗi tương ứng."
+    "expected_template": "Bấm nút gửi biểu mẫu khi chưa nhập gì thì từng ô bắt buộc phải hiện thông báo lỗi tương ứng."
   },
   {
     "template_id": "COMMON_RESPONSIVE_NO_OVERFLOW",
@@ -66,7 +66,7 @@
       "landscapeWidth": 1024,
       "landscapeHeight": 768
     },
-    "expected_template": "Giao diện phải không có RenderFlex overflow ở portrait và landscape."
+    "expected_template": "Giao diện không được tràn khung ở cả khổ dọc {portraitWidth}×{portraitHeight} và khổ ngang {landscapeWidth}×{landscapeHeight}."
   },
   {
     "template_id": "COMMON_RESPONSIVE_TARGET",
@@ -88,7 +88,7 @@
       "targetKey": "screen.home",
       "targetType": "container"
     },
-    "expected_template": "Target {targetKey} phải tồn tại ở cả portrait và landscape, đồng thời app không được phát sinh lỗi layout."
+    "expected_template": "Ở cả khổ dọc {portraitWidth}×{portraitHeight} và khổ ngang {landscapeWidth}×{landscapeHeight}, {targetType} được kiểm phải còn hiển thị và giao diện không được tràn khung."
   },
   {
     "template_id": "COMMON_NAVIGATION",
@@ -108,7 +108,7 @@
       "backKey": "action.back",
       "homeKey": "screen.home"
     },
-    "expected_template": "Từ key {openKey} phải mở {destinationKey} và quay lại được {homeKey}."
+    "expected_template": "Bấm nút chuyển màn hình thì màn hình đích phải hiện ra; nếu có bước quay lại thì phải trở về được màn hình trước đó."
   },
   {
     "template_id": "COMMON_LIST_VISIBLE",
@@ -126,7 +126,7 @@
       "listKey": "list.items",
       "itemKeys": "item.1,item.2"
     },
-    "expected_template": "Danh sách {listKey} phải render các item {itemKeys}."
+    "expected_template": "Danh sách phải hiển thị và hiện đủ các mục mà đề yêu cầu."
   },
   {
     "template_id": "COMMON_BUTTON_ACTION",
@@ -144,7 +144,7 @@
       "buttonKey": "action.save",
       "resultKey": "message.success"
     },
-    "expected_template": "Bấm {buttonKey} phải tạo hoặc hiển thị {resultKey}."
+    "expected_template": "Bấm nút được kiểm thì kết quả tương ứng phải hiện ra trên màn hình."
   },
   {
     "template_id": "COMMON_WIDGET_DIMENSION",
@@ -166,7 +166,7 @@
       "comparison": "equals",
       "tolerance": 0.5
     },
-    "expected_template": "Widget {targetKey} (loại {targetType}) phải có {dimension} {comparison} {expected}px, sai số tối đa {tolerance}px."
+    "expected_template": "Trên màn hình, {targetType} được kiểm phải có {dimension} {comparison} {expected}px, sai lệch không quá {tolerance}px."
   },
   {
     "template_id": "COMMON_WIDGET_PADDING",
@@ -189,7 +189,7 @@
       "bottom": 12,
       "tolerance": 0.5
     },
-    "expected_template": "Widget {targetKey} phải có padding trái/phải {left}/{right}px và trên/dưới {top}/{bottom}px."
+    "expected_template": "Vùng được kiểm phải có khoảng đệm trái {left}px, phải {right}px, trên {top}px, dưới {bottom}px, sai lệch không quá {tolerance}px."
   },
   {
     "template_id": "COMMON_WIDGET_TEXT_STYLE",
@@ -210,7 +210,7 @@
       "fontWeight": "w700",
       "tolerance": 0.5
     },
-    "expected_template": "Text {targetKey} phải có fontSize {fontSize}px và fontWeight {fontWeight}."
+    "expected_template": "Phần chữ được kiểm phải có cỡ chữ {fontSize}px và nét chữ {fontWeight}."
   },
   {
     "template_id": "COMMON_WIDGET_GAP",
@@ -233,7 +233,7 @@
       "expectedGap": 12,
       "tolerance": 0.5
     },
-    "expected_template": "Khoảng cách {axis} từ {fromKey} đến {toKey} phải bằng {expectedGap}px, sai số tối đa {tolerance}px."
+    "expected_template": "Hai thành phần được kiểm phải cách nhau {expectedGap}px theo {axis}, sai lệch không quá {tolerance}px."
   },
   {
     "template_id": "COMMON_WIDGET_TYPE_VISIBLE",
@@ -251,7 +251,7 @@
       "targetKey": "screen.home",
       "targetType": "container"
     },
-    "expected_template": "Target {targetKey} phải tồn tại và có loại {targetType}."
+    "expected_template": "Thành phần được kiểm phải hiển thị trên màn hình và phải đúng là {targetType}."
   },
   {
     "template_id": "COMMON_WIDGET_TEXT_CONTENT",
@@ -271,7 +271,7 @@
       "expectedText": "Danh sách",
       "matchMode": "equals"
     },
-    "expected_template": "Text {targetKey} phải {matchMode} nội dung '{expectedText}'."
+    "expected_template": "Phần chữ được kiểm phải hiển thị nội dung {matchMode} \"{expectedText}\"."
   },
   {
     "template_id": "COMMON_WIDGET_ENABLED",
@@ -290,7 +290,7 @@
       "targetType": "button",
       "expectedEnabled": true
     },
-    "expected_template": "Control {targetKey} ({targetType}) phải có enabled={expectedEnabled}."
+    "expected_template": "Khi màn hình hiển thị, {targetType} được kiểm phải ở trạng thái {expectedEnabled}."
   },
   {
     "template_id": "COMMON_FORM_VALIDATE_FIELDS",
@@ -311,7 +311,7 @@
       "submitKey": "action.save",
       "errorKeys": "error.title,error.email"
     },
-    "expected_template": "Khi submit dữ liệu lỗi ({invalidValues}), từng field {fieldKeys} phải hiển thị lỗi tương ứng."
+    "expected_template": "Nhập dữ liệu sai rồi bấm nút gửi biểu mẫu thì từng ô sai phải hiện thông báo lỗi tương ứng."
   },
   {
     "template_id": "COMMON_LIST_ITEM_COUNT",
@@ -330,7 +330,7 @@
       "itemKeys": "item.1,item.2,item.3",
       "expectedCount": 3
     },
-    "expected_template": "List {listKey} phải render đúng {expectedCount} item từ các key {itemKeys}."
+    "expected_template": "Danh sách phải hiển thị và có đúng {expectedCount} mục."
   },
   {
     "template_id": "COMMON_DIALOG_FLOW",
@@ -351,7 +351,7 @@
       "resultKey": "screen.list",
       "absentKey": "dialog.delete"
     },
-    "expected_template": "Bấm {actionKey} phải mở {dialogKey}; chọn {decisionKey} phải cho kết quả đúng và xử lý {absentKey}."
+    "expected_template": "Bấm nút được kiểm thì hộp thoại xác nhận phải hiện ra; chọn phương án trong hộp thoại thì màn hình phải cho đúng kết quả của lựa chọn đó."
   },
   {
     "template_id": "COMMON_FORM_PREFILL",
@@ -371,7 +371,7 @@
       "fieldType": "input",
       "expectedValues": "Task cũ,user@example.com"
     },
-    "expected_template": "Sau khi bấm {editKey}, các field {fieldKeys} phải được prefill đúng giá trị."
+    "expected_template": "Bấm nút sửa thì các ô trong biểu mẫu phải điền sẵn đúng giá trị đang có: {expectedValues}."
   },
   {
     "template_id": "COMMON_FORM_SUBMIT",
@@ -393,7 +393,7 @@
       "resultKey": "message.success",
       "errorKeys": "error.title,error.email"
     },
-    "expected_template": "Submit {submitKey} với dữ liệu hợp lệ phải tạo {resultKey} và không hiển thị lỗi."
+    "expected_template": "Nhập dữ liệu hợp lệ ({values}) rồi bấm nút gửi biểu mẫu thì biểu mẫu phải được chấp nhận và không hiện thông báo lỗi nào."
   },
   {
     "template_id": "COMMON_WIDGET_SEMANTICS_LABEL",
@@ -413,7 +413,7 @@
       "expectedLabel": "Mở menu",
       "matchMode": "equals"
     },
-    "expected_template": "Target {targetKey} phải có semantics label {matchMode} '{expectedLabel}'."
+    "expected_template": "Để trình đọc màn hình dùng được, {targetType} được kiểm phải có nhãn trợ năng {matchMode} \"{expectedLabel}\"."
   },
   {
     "template_id": "COMMON_STATE_REACTIVE",
@@ -433,6 +433,6 @@
       "updatedKey": "state.loaded",
       "absentKey": "state.empty"
     },
-    "expected_template": "Sau khi bấm {actionKey}, state phải chuyển từ {initialKey} sang {updatedKey}."
+    "expected_template": "Trước thao tác, màn hình phải ở trạng thái ban đầu; bấm nút được kiểm thì màn hình phải chuyển sang trạng thái mới và trạng thái cũ không còn hiển thị."
   }
 ]

@@ -298,6 +298,8 @@ public class TestcaseTemplateService {
             List<Map<String, Object>> items = normalizeExistingItems(config.get("items"));
             config.put("items", items);
             config.put("total_weight", totalWeight(items));
+            // Yêu cầu của đề nằm trên bảng exam (không trong config JSON) — bù vào cho P6b đọc.
+            config.put("requirements", exam.getRequirements() == null ? "" : exam.getRequirements());
             return config;
         } catch (Exception e) {
             throw new IllegalStateException("Cấu hình testcase của đề bị hỏng: " + e.getMessage());
@@ -327,6 +329,12 @@ public class TestcaseTemplateService {
         String examName = firstText(body.get("exam_name"), body.get("examName"));
         if (isNew && (examName == null || examName.isBlank()))
             throw new IllegalArgumentException("Vui lòng nhập tên đề thi khi tạo đề mới");
+        // P6a — "Yêu cầu của đề": BẮT BUỘC với đề soạn qua template, mỗi dòng một yêu cầu,
+        // lưu Y NGUYÊN VĂN. Body không gửi thì giữ bản đã lưu (client cũ không xoá mất dữ liệu);
+        // cả hai cùng trống mới chặn. Trần đặt ở khâu NHẬP để giảng viên thấy ngay và tự sửa —
+        // cắt lúc kết xuất là phá "y nguyên văn".
+        String requirements = firstText(body.get("requirements"), exam.getRequirements());
+        validateRequirements(requirements);
         Map<String, Object> oldConfig = parseConfig(exam.getTestcaseConfigJson());
         Map<String, Map<String, Object>> oldById = indexItems(oldConfig.get("items"));
         List<Map<String, Object>> items = normalizeItems(examId, body.get("items"), oldById, teacherEmail);
@@ -385,6 +393,8 @@ public class TestcaseTemplateService {
             if (examName != null && !examName.isBlank()) exam.setExamName(examName.trim());
             String teacherNote = firstText(body.get("teacher_note"), body.get("teacherNote"));
             if (teacherNote != null) exam.setTeacherNote(teacherNote.trim());
+            // Cố ý KHÔNG trim: hợp đồng là y nguyên văn; tách dòng lúc kết xuất tự bỏ dòng trắng.
+            exam.setRequirements(requirements);
             exam.setTestcaseConfigJson(mapper.writeValueAsString(config));
             exam.setTestcaseVersion(version);
             exam.setTestcaseStatus(publish ? "PUBLISHED" : "DRAFT");
@@ -464,6 +474,31 @@ public class TestcaseTemplateService {
             log.error("Không nạp được thư viện testcase dùng chung.");
     }
 
+    /**
+     * Trần của "Yêu cầu của đề" — con số đã hứa với phía NLP ("sẽ báo con số khi làm", P6).
+     * Vì sao phải có trần: chuỗi này được chép NGUYÊN VĂN vào result_json của TỪNG bài chấm;
+     * một đợt 600–750 bài mà giảng viên dán cả đề 20 KB là ~15 MB lặp lại vô nghĩa.
+     * 4000 ký tự ≈ trên 10 lần bộ yêu cầu mẫu hai bên đã duyệt (6 dòng / 346 ký tự) — đủ rộng
+     * cho mọi đề thật, đủ hẹp để chặn dán nhầm cả đề bài.
+     */
+    static final int REQUIREMENTS_MAX_CHARS = 4000;
+    static final int REQUIREMENTS_MAX_LINES = 40;
+
+    /** Chặn ở khâu nhập với thông báo giảng viên tự sửa được — không cắt hộ, không sửa hộ. */
+    static void validateRequirements(String raw) {
+        if (raw == null || raw.isBlank())
+            throw new IllegalArgumentException(
+                    "Đề phải có 'Yêu cầu của đề' — mỗi dòng một yêu cầu, sinh viên sẽ đọc nguyên văn.");
+        if (raw.length() > REQUIREMENTS_MAX_CHARS)
+            throw new IllegalArgumentException("'Yêu cầu của đề' đang dài " + raw.length()
+                    + " ký tự, tối đa " + REQUIREMENTS_MAX_CHARS + ". Phần này được chép nguyên văn"
+                    + " vào kết quả của từng bài chấm — hãy ghi các yêu cầu chính, đừng dán cả đề bài.");
+        int lines = BatchGradingService.splitRequirements(raw).size();
+        if (lines > REQUIREMENTS_MAX_LINES)
+            throw new IllegalArgumentException("'Yêu cầu của đề' đang có " + lines
+                    + " dòng, tối đa " + REQUIREMENTS_MAX_LINES + " — mỗi dòng là một yêu cầu riêng.");
+    }
+
     /** Chỉ cho phép tiếp tục đúng đề Draft/Publish được tạo bởi chức năng template này. */
     private boolean isTemplateCreatedExam(Exam exam, String teacherEmail) {
         return exam.getTestcaseConfigJson() != null && !exam.getTestcaseConfigJson().isBlank()
@@ -474,6 +509,9 @@ public class TestcaseTemplateService {
                                          List<Map<String, Object>> items, boolean publish) {
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("exam_id", exam.getExamId());
+        // Trả nguyên văn để ô nhập của P6b prefill được; rỗng = đề chưa khai (không xảy ra
+        // với đề lưu từ P6a trở đi vì validateRequirements đã chặn).
+        out.put("requirements", exam.getRequirements() == null ? "" : exam.getRequirements());
         out.put("status", config.get("status"));
         out.put("version", config.get("version"));
         out.put("template_version", config.get("template_version"));

@@ -1,0 +1,6 @@
+Xây ứng dụng quản lý người dùng: xem danh sách, thêm, sửa, xoá người dùng.
+Biểu mẫu phải kiểm tra dữ liệu nhập: họ tên bắt buộc, email đúng định dạng; dữ liệu sai phải báo lỗi ngay dưới từng ô.
+Xoá người dùng phải có hộp thoại xác nhận trước khi xoá.
+Giao diện hiển thị đúng ở cả màn hình dọc và màn hình ngang, không bị tràn khung.
+Toàn bộ mã nguồn đặt trong thư mục lib/, không sửa các tệp kiểm thử.
+Tách phần giao diện và phần xử lý dữ liệu theo mô hình đã học trên lớp.

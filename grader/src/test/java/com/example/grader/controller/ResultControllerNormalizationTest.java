@@ -73,4 +73,36 @@ class ResultControllerNormalizationTest {
         assertFalse(out.contains("\"executed\""), "không được tự sinh executed cho dữ liệu cũ");
         assertFalse(out.contains("\"schema_version\""), "không được tự gắn schema_version cho dữ liệu cũ");
     }
+
+    /**
+     * P6a — `exam.requirements`: kết quả lưu trước P6 phải được BÙ `[]` lúc đọc ("đề trước
+     * P6"), còn giá trị đã có thì phải đi qua NGUYÊN VẸN — bù đè lên là phá "y nguyên văn".
+     */
+    @Test
+    void backfillsEmptyRequirementsButNeverTouchesExistingOnes() throws Exception {
+        ResultController controller = new ResultController();
+        Method normalize = ResultController.class.getDeclaredMethod("normalizeJsonString", String.class);
+        normalize.setAccessible(true);
+
+        String preP6 = """
+                {
+                  "exam": {"code": "PE11", "title": "Đề cũ", "total_score": 10},
+                  "test_cases": [{"test_id": "A", "status": "passed", "actual": "Đã đáp ứng yêu cầu"}]
+                }
+                """;
+        String out = (String) normalize.invoke(controller, preP6);
+        assertTrue(out.replace(" ", "").contains("\"requirements\":[]"),
+                "kết quả trước P6 phải được bù requirements rỗng: " + out);
+
+        String postP6 = """
+                {
+                  "exam": {"code": "PE12", "title": "Đề mới", "total_score": 10,
+                           "requirements": ["Xoá phải có  hộp thoại xác nhận."]},
+                  "test_cases": [{"test_id": "A", "status": "passed", "actual": "Đã đáp ứng yêu cầu"}]
+                }
+                """;
+        String kept = (String) normalize.invoke(controller, postP6);
+        assertTrue(kept.contains("Xoá phải có  hộp thoại xác nhận."),
+                "requirements đã có phải đi qua nguyên văn (kể cả hai khoảng trắng): " + kept);
+    }
 }

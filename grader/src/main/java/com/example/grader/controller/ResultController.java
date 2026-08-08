@@ -210,6 +210,14 @@ public class ResultController {
     /** Giữ schema JSON ổn định cho cả kết quả cũ chưa có expected/actual. */
     private JsonNode normalizeResultNode(JsonNode root) {
         if (!(root instanceof ObjectNode object)) return root;
+
+        // P6a: kết quả ĐÃ LƯU trước P6 không có exam.requirements — bù [] đúng nghĩa "đề trước
+        // P6". Phải bù ở đường đọc vì result_json cũ không migrate (bẫy "sửa một nơi là vô
+        // hiệu": đường ghi ở BatchGradingService.assembleResultJson).
+        if (object.get("exam") instanceof ObjectNode examNode && !examNode.has("requirements")) {
+            examNode.putArray("requirements");
+        }
+
         JsonNode rawCases = object.get("test_cases");
         if (!(rawCases instanceof ArrayNode cases)) return root;
 

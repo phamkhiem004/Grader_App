@@ -12,10 +12,10 @@ Sổ theo dõi để không mất mạch giữa các phiên. **Đọc file này 
 
 ## Đang ở đâu — 2026-08-08
 
-**P0 → A2c → (c) xong.** Engine `COMMON_V1-2.7.0` **không đổi ở (c)** — (c) nằm ở khâu **soạn đề**,
-không phải khâu chấm, nên **không đề nào phải chấm lại**. **76 test xanh** (69 → 76), fixture **25
-testcase / 7 bài nộp**, **0 luật FAIL** trên **8** mẫu (thêm `latest-machine-expected.json`).
-Bảng tiến độ chi tiết ở mục *Tiến độ* dưới.
+**P0 → A2c → (c) → P6a xong.** Engine `COMMON_V1-2.7.0` **không đổi từ A2c** — (c) và P6a đều
+nằm ngoài khâu chấm, **không đề nào phải chấm lại**. **85 test xanh** (69 → 85), fixture **25
+testcase / 7 bài nộp**, **0 luật FAIL** trên **8** mẫu — cả 8 nay mang `exam.requirements` thật.
+Việc còn lại DUY NHẤT của plan: **P6b** (một ô nhập FE). Bảng tiến độ chi tiết ở mục *Tiến độ* dưới.
 
 ## Việc kế tiếp, theo thứ tự
 
@@ -31,16 +31,21 @@ ra, chưa đóng:
   `result.json`. NLP không gỡ lưới theo mốc này được. Làm được ngay bằng `expected_source` lấy từ
   `expected_custom` — nhưng là thêm trường vào hợp đồng nên **chờ NLP xin**.
 
-**2. P6 — `exam.requirements`.** Hình dạng **đã chốt với cả chủ đồ án lẫn phía NLP**, không phải bàn lại:
+**2. ~~P6a~~ ✅ XONG 2026-08-08 → còn P6b.** Hình dạng đã thành dữ liệu thật (8/8 mẫu). Những gì
+P6a đã chốt bằng code:
 
-- **mảng chuỗi phẳng**, mỗi dòng giảng viên xuống dòng là một phần tử;
-- **y nguyên văn** — không cắt, không đánh số, không chuẩn hoá;
-- ở **`exam.requirements`**, giữ đúng thứ tự nhập; **không** `requirement_id`;
-- **bắt buộc, không rỗng** với đề tạo từ P6; đề cũ **bù `[]`** ⇒ `[]` chỉ có nghĩa *"đề trước P6"*;
-- để trên **bảng `exam`** (không phải `testcase-config.json`) — vì đề legacy không có file đó để bù;
-- **trần độ dài ở khâu NHẬP** (giảng viên thấy ngay), không cắt lúc kết xuất;
-- P6 tách hai nửa: **P6a** backend + hợp đồng (không chạm file FE nào) · **P6b** một ô nhập trong
-  `frontend/app/teacher/testcases/page.tsx`.
+- lưu **y nguyên văn** trên cột `exams.requirements` (LONGTEXT, NULL = đề trước P6/legacy);
+- tách dòng ở MỘT chỗ: `BatchGradingService.splitRequirements` — bỏ `\r` cuối dòng + dòng trắng,
+  còn lại nguyên văn ⇒ phần tử **không bao giờ rỗng/chứa xuống dòng** (luật **A11** khoá);
+- **trần NHẬP: 4000 ký tự · 40 dòng** (`TestcaseTemplateService.validateRequirements`) — con số đã
+  công bố với NLP, đổi là phải báo (test ghim);
+- đường đọc `ResultController.normalizeResultNode` **bù `[]`** cho kết quả lưu trước P6 (bẫy #1);
+- `getExamConfig`/`response` trả `requirements` nguyên văn để P6b prefill.
+
+**P6b — một ô nhập trong `frontend/app/teacher/testcases/page.tsx`.** ⚠️ Cho tới khi P6b xong,
+**FE hiện tại KHÔNG lưu được đề mới** (backend chặn vì thiếu requirements — hành vi ĐÚNG hợp đồng
+*"chưa nhập thì không tạo được đề"*). Làm P6b sớm; body gửi thêm field `requirements` (chuỗi
+nguyên văn từ textarea), đọc lại từ `GET .../testcases/exam/{examId}` field `requirements`.
 
 ## Luồng vận hành thật — chủ đồ án xác nhận 2026-08-08
 
@@ -153,7 +158,8 @@ sinh viên.** Mọi tranh cãi thiết kế phân xử bằng nguyên tắc này
 | **A2b** | Tám runner *chỉ từng đạt* phải chạy cả đường **HỎNG** | ✅ **Xong** 2026-08-07 | Fixture → **25 testcase**, bài nộp thứ 6 `unwired`; **22/22 runner đủ hai đường**; bít **hai lỗ hổng kênh quan sát**; `kind` thứ 14 `TYPE_MISMATCH`; **0 test `failed` thiếu `observation`**; điểm 5 bài cũ KHÔNG đổi |
 | **A2c** | Trả nợ hai lỗ hổng NLP phơi ra | ✅ **Xong** 2026-08-07 | Tìm ra ca **CHẨN ĐOÁN SAI LỆCH**; `kind` thứ 15 `ACTION_FAILED`; bài nộp thứ 7 `broken-action`; mã classifier chạy thật **0/9 → 3/9**; 0 luật FAIL trên 7 mẫu |
 | **(c)** | Dọn `expected` MÁY SINH — lần đầu đo **đường soạn đề** | ✅ **Xong** 2026-08-08 | 22/22 template sạch khoá + sạch enum Anh; 7 test mới (**76 xanh**); luật **F4** trong `verify_result.py`; mẫu thứ 8 `latest-machine-expected`; **0 FAIL trên 8 mẫu**; điểm KHÔNG đổi (không đụng engine) |
-| **P6** | `exam.requirements` | ⬜ | — |
+| **P6a** | `exam.requirements` — backend + hợp đồng + mẫu | ✅ **Xong** 2026-08-08 | 8/8 mẫu mang 6 yêu cầu thật (2 ca cố ý: đường dẫn trong đề · yêu cầu kiến trúc không kiểm được); trần 4000 ký tự/40 dòng; luật **A11** (thử phá 5 kiểu: 4 đỏ đúng, 1 xanh đúng); **85 test xanh**; SPEC có bảng field khối `exam`; engine KHÔNG đổi |
+| **P6b** | `exam.requirements` — ô nhập FE | ⬜ | ⚠️ tới lúc đó FE không lưu được đề MỚI (backend chặn thiếu requirements — đúng hợp đồng) |
 
 ### A2 — mở fixture, và cái giá của việc công bố năng lực chưa chạy
 

@@ -258,6 +258,29 @@ public class BatchGradingService {
         });
     }
 
+    /**
+     * Tách văn bản "Yêu cầu của đề" giảng viên gõ thành mảng {@code exam.requirements} —
+     * NGUỒN TÁCH DUY NHẤT, harness fixture cũng gọi đúng hàm này thay vì tự tách lại.
+     *
+     * <p>Mỗi dòng một phần tử, Y NGUYÊN VĂN: không trim nội dung trong dòng, không đánh số,
+     * không chuẩn hoá. Chỉ hai ngoại lệ, và cả hai không phải "sửa chữ giảng viên":
+     * bỏ dấu {@code \r} cuối dòng (vết CRLF của Windows, không phải nội dung) và bỏ dòng
+     * trắng — dòng trắng không phải một yêu cầu, giữ lại là phát hành phần tử rỗng vô nghĩa.
+     * Hệ quả hợp đồng: phần tử KHÔNG BAO GIỜ rỗng và KHÔNG BAO GIỜ chứa ký tự xuống dòng
+     * (luật A11 của ACCEPTANCE khoá đúng điều này).
+     *
+     * <p>{@code null}/rỗng ⇒ {@code []} — nghĩa duy nhất: "đề trước P6".
+     */
+    static List<String> splitRequirements(String raw) {
+        List<String> out = new ArrayList<>();
+        if (raw == null) return out;
+        for (String line : raw.split("\n", -1)) {
+            String cleaned = line.endsWith("\r") ? line.substring(0, line.length() - 1) : line;
+            if (!cleaned.isBlank()) out.add(cleaned);
+        }
+        return out;
+    }
+
     // ── Ghép JSON đầy đủ: student + exam + kết quả chấm ─
     private String assembleResultJson(GradingJob job, String graderJson) {
         try {
@@ -279,6 +302,9 @@ public class BatchGradingService {
             examNode.put("code", job.examId());
             examNode.put("title", title);
             examNode.put("total_score", 10);
+            // P6a: yêu cầu của đề, y nguyên văn giảng viên nhập. Đề trước P6/legacy phát [] —
+            // [] chỉ có nghĩa "đề trước P6", không bao giờ là "giảng viên cố ý để trống".
+            examNode.put("requirements", splitRequirements(exam == null ? null : exam.getRequirements()));
             root.put("exam", examNode);
 
             // grading_result: ưu tiên từ grader (mới); fallback dựng từ field cũ

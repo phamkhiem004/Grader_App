@@ -1,0 +1,44 @@
+{
+  "_comment": "NGỮ PHÁP KHOÁ CHẤM của engine chung COMMON_V1 — phía NLP xin (CHANGELOG_FOR_GRADER 2026-08-11 mục 5) để tầng FATAL của guard đứng trên hợp đồng thay vì trên chuỗi góp nhặt từ changelog. SINH TỪ PHÉP ĐO, không gõ tay: hợp nhất mọi giá trị tham số *Key/*Keys trong common-testcase-templates.json (bản mặc định giáo viên nhận) và exam/skills_matrix.json của fixture (25 testcase, kể cả con trong nhóm); engine chỉ chứa bản sao fallback của đúng các khoá đó. Grader pin bằng KeyGrammarContractTest — dẫn xuất lệch file này là test đỏ, changelog báo, thay vì lưới phía đọc thô đi âm thầm.",
+  "_scope": "CƯỠNG CHẾ Ở KHÂU NHẬP từ 2026-08-08 (chủ đồ án duyệt, NLP đồng thuận — xem CHANGELOG_FOR_NLP entry 2026-08-12 kết mốc): TestcaseTemplateService.validateKeyGrammar từ chối lưu/publish đề khi một tham số khoá không khớp key_pattern + namespace_pattern, thông báo lỗi liệt kê namespace hợp lệ. Phạm vi cưỡng chế: đề soạn qua template từ mốc này. Đề đã publish TRƯỚC mốc giữ nguyên khoá cũ trong skills_matrix đóng băng; đề LEGACY (grader giáo viên nộp) ngoài phạm vi — bên đọc vẫn phải giữ tầng đáng-ngờ cho dữ liệu cũ, tồn kho không tự đổi theo luồng.",
+  "version": 1,
+  "engine": "COMMON_V1",
+  "key_pattern": "^[a-z][a-z0-9-]*(\\.[a-z0-9-]+)+$",
+  "namespace_pattern": "^(action|box|dialog|error|field|icon|item|list|message|padding|screen|state|text)\\.",
+  "namespaces": [
+    "action",
+    "box",
+    "dialog",
+    "error",
+    "field",
+    "icon",
+    "item",
+    "list",
+    "message",
+    "padding",
+    "screen",
+    "state",
+    "text"
+  ],
+  "examples": {
+    "action": "action.delete.1",
+    "box": "box.avatar",
+    "dialog": "dialog.delete",
+    "error": "error.email",
+    "field": "field.name",
+    "icon": "icon.header",
+    "item": "item.1",
+    "list": "list.items",
+    "message": "message.success",
+    "padding": "padding.form",
+    "screen": "screen.home",
+    "state": "state.empty",
+    "text": "text.title"
+  },
+  "legacy_observed_namespaces": [
+    "validation"
+  ],
+  "_legacy_note": "validation.* KHÔNG có trong engine chung/template/fixture — đo 2026-08-08: 0 lần xuất hiện. Nó là từ vựng đời legacy (chuỗi 'validation.name' trong dữ liệu PE11 cũ). Bên đọc phục vụ cả dữ liệu ĐÃ LƯU nên cứ giữ nó trong tầng FATAL của mình; nhưng nó không thuộc ngữ pháp của đường soạn đề hiện hành và sẽ không quay lại từ đề mới.",
+  "_observation_note": "Đo trên cả 8 samples/latest-*.json: observation KHÔNG chứa khoá dạng chấm ở bất kỳ field nào — subject thuộc một bảng đóng. Khoá chỉ có thể rò qua chữ cho người đọc (expected/actual/name), đúng miền luật F4 quét.",
+  "enforced_since": "2026-08-08"
+}

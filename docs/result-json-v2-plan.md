@@ -22,7 +22,10 @@ Việc còn lại DUY NHẤT của plan: **P6b** (một ô nhập FE). Bảng ti
 **1. ~~(c) — dọn `expected` máy sinh.~~ ✅ XONG** — xem mục *(c)* dưới. Còn **hai chỗ mở** nó phơi
 ra, chưa đóng:
 
-- **(c-nợ-1) `group_id` mang HAI nghĩa — ✅ ĐO XONG 2026-08-08, chờ chủ đồ án duyệt đề xuất.**
+- **(c-nợ-1) — ✅ XONG TRỌN 2026-08-08** (đo → NLP ủng hộ → chủ đồ án duyệt → đã lên code cùng
+  mốc với cưỡng chế ngữ pháp khoá, xem hai dòng cuối bảng *Tiến độ*). Ghi chú lịch sử dưới đây
+  giữ nguyên làm bối cảnh:
+- *(lịch sử)* **`group_id` mang HAI nghĩa — ĐO XONG 2026-08-08, chờ chủ đồ án duyệt đề xuất.**
   Bốn phép đo độc lập chốt: hình fixture (25 độc lập / 9 rubric) **không sản xuất được** từ đường
   soạn đề — có `group_id` là bị gộp thành GROUP row (một test_case, all-or-nothing); không có thì
   rubric rơi về 3 mã thô LOGIC/WIDGET/BEHAVIOR mà SPEC 3.3 cấm coi là rubric. `validateGroups`
@@ -170,6 +173,8 @@ sinh viên.** Mọi tranh cãi thiết kế phân xử bằng nguyên tắc này
 | **P6a** | `exam.requirements` — backend + hợp đồng + mẫu | ✅ **Xong** 2026-08-08 | 8/8 mẫu mang 6 yêu cầu thật (2 ca cố ý: đường dẫn trong đề · yêu cầu kiến trúc không kiểm được); trần 4000 ký tự/40 dòng; luật **A11** (thử phá 5 kiểu: 4 đỏ đúng, 1 xanh đúng); **85 test xanh**; SPEC có bảng field khối `exam`; engine KHÔNG đổi |
 | **P6b** | `exam.requirements` — ô nhập FE | ✅ **Code xong** 2026-08-08 | `tsc` xanh; gửi nguyên văn không trim; gương 3 phép chặn + bộ đếm sống; ⚠️ **chưa chạy thật** — stack tắt, đo ở lần bật stack tới |
 | **NPK** | Ngữ pháp khoá — NLP xin sau P6a | ✅ **Xong** 2026-08-08 | `common-key-grammar.json`: **13 namespace** sinh từ phép đo (attested của NLP thiếu 8; `validation.` là legacy); pin bằng `KeyGrammarContractTest` — thử phá 2 chiều đều đỏ; **86 test xanh**; câu hỏi mở: có cưỡng chế ở khâu nhập không (chờ NLP + chủ đồ án) |
+| **GMODE** | Tách nhãn/gộp — giải (c-nợ-1), chủ đồ án duyệt | ✅ **Xong** 2026-08-08 | `group_mode` label/merge (thiếu = merge, dữ liệu cũ không đổi nghĩa); nhãn ≥1, gộp ≥2, cấm trộn; matrix chỉ gộp khi merge ⇒ hình fixture SẢN XUẤT ĐƯỢC; FE hai nút + hệ quả all-or-nothing ghi thẳng trên modal; **2 bất biến NLP xin đã pin — bất biến (ii) bắt ngay lệch thật: children TC_ADD_USER 4+8≠9, sửa 8→5, 8 mẫu không đổi một byte**; `result.json` không thêm field |
+| **NPK-CC** | Cưỡng chế ngữ pháp khoá ở khâu nhập — NLP nói CÓ, chủ đồ án duyệt | ✅ **Xong** 2026-08-08 | `validateKeyGrammar` chặn lúc lưu/publish, lỗi liệt kê 13 namespace; bản classpath pin BẰNG bản công bố (3 bản một nội dung, lệch là đỏ); `enforced_since: 2026-08-08`; 22 template qua cổng, `nut.luu`/`Action.delete`/`state.pathParameters` bị chặn; **95 test xanh**; ⚠️ UI mới chưa chạy thật (stack tắt — đo cùng lượt với P6b) |
 
 ### A2 — mở fixture, và cái giá của việc công bố năng lực chưa chạy
 

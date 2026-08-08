@@ -82,6 +82,29 @@ class KeyGrammarContractTest {
         }
     }
 
+    /**
+     * Bản CLASSPATH (runtime cưỡng chế đọc nó — server không được phụ thuộc repo hợp đồng có
+     * mặt trên máy) phải BẰNG bản công bố ở repo hợp đồng (phía NLP pin bản đó). Ba bản sao
+     * một nội dung là giá của việc chạy được ở ba nơi — test này là thứ giữ chúng không trôi.
+     */
+    @Test
+    void classpathCopyMatchesThePublishedGrammar() throws Exception {
+        assumeTrue(Files.exists(GRAMMAR), "Không có repo hợp đồng trên máy này — bỏ qua");
+        JsonNode published = MAPPER.readTree(Files.readString(GRAMMAR, StandardCharsets.UTF_8));
+        JsonNode classpath;
+        try (InputStream in = KeyGrammarContractTest.class
+                .getResourceAsStream("/common-key-grammar.json")) {
+            assertNotNull(in, "Thiếu common-key-grammar.json trên classpath — cưỡng chế đang tắt im lặng");
+            classpath = MAPPER.readTree(in);
+        }
+        for (String field : List.of("key_pattern", "namespace_pattern", "namespaces", "enforced_since")) {
+            assertEquals(published.path(field), classpath.path(field),
+                    "Bản classpath lệch bản công bố ở field '" + field
+                            + "' — NLP pin bản công bố, runtime đọc bản classpath, lệch là hai"
+                            + " thế giới cưỡng chế khác nhau");
+        }
+    }
+
     /** Hợp nhất khoá từ hai nguồn thật của đường soạn đề — đúng phép đo sinh ra file công bố. */
     private static Set<String> shippedKeys() throws Exception {
         Set<String> keys = new LinkedHashSet<>();

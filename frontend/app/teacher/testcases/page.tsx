@@ -52,6 +52,13 @@ interface TestcaseItem {
   expected_custom?: boolean;
   group_id?: string;
   group_name?: string;
+  /**
+   * Hai nghĩa của nhóm — (c-nợ-1), chủ đồ án duyệt 2026-08-08:
+   * "label" = NHÃN nhóm chức năng, không đụng điểm (nguồn rubric của result.json);
+   * "merge" = GỘP thành một testcase lớn, một phần fail là cả cụm fail.
+   * Thiếu field (config cũ) thì backend hiểu là "merge" — đừng đổi mặc định.
+   */
+  group_mode?: "label" | "merge";
   created_by?: string;
   created_at?: string;
 }
@@ -243,6 +250,7 @@ export default function TestcasesPage() {
   const [draggedItemId, setDraggedItemId] = useState<string | null>(null);
   const [selectedItemIds, setSelectedItemIds] = useState<string[]>([]);
   const [groupModalOpen, setGroupModalOpen] = useState(false);
+  const [groupModalMode, setGroupModalMode] = useState<"label" | "merge">("merge");
   const [groupDetailsOpen, setGroupDetailsOpen] = useState(false);
   const [clearAllModalOpen, setClearAllModalOpen] = useState(false);
   const [groupNameDraft, setGroupNameDraft] = useState("");
@@ -322,10 +330,11 @@ export default function TestcasesPage() {
   const supportsGrouping = activeEngine === "COMMON_V1";
   const totalWeight = items.reduce((sum, item) => item.enabled ? sum + Number(item.weight || 0) : sum, 0);
   const groupSummaries = useMemo(() => {
-    const map = new Map<string, { name: string; count: number; weight: number }>();
+    const map = new Map<string, { name: string; count: number; weight: number; mode: "label" | "merge" }>();
     items.forEach((item) => {
       if (!item.group_id) return;
-      const current = map.get(item.group_id) || { name: item.group_name || item.group_id, count: 0, weight: 0 };
+      const current = map.get(item.group_id)
+        || { name: item.group_name || item.group_id, count: 0, weight: 0, mode: item.group_mode ?? "merge" };
       current.count += 1;
       if (item.enabled) current.weight += Number(item.weight || 0);
       map.set(item.group_id, current);
@@ -408,21 +417,28 @@ export default function TestcasesPage() {
       : [...current, instanceId]);
   };
 
-  const openGroupModal = () => {
+  // "merge" = gộp thành testcase lớn (cần ≥2); "label" = gán nhãn nhóm chức năng (≥1, không đụng điểm).
+  const openGroupModal = (mode: "label" | "merge") => {
     const selected = items.filter((item) => selectedItemIds.includes(item.instance_id));
-    if (selected.length < 2) {
-      setMessage({ type: "error", text: "Hãy chọn ít nhất 2 testcase nhỏ để gộp thành một testcase lớn." });
+    const min = mode === "merge" ? 2 : 1;
+    if (selected.length < min) {
+      setMessage({ type: "error", text: mode === "merge"
+        ? "Hãy chọn ít nhất 2 testcase nhỏ để gộp thành một testcase lớn."
+        : "Hãy chọn ít nhất 1 testcase để gán nhóm chức năng." });
       return;
     }
     if (selected.some((item) => item.group_id)) {
-      setMessage({ type: "error", text: "Testcase đã thuộc một nhóm. Hãy tách nhóm cũ trước khi gộp lại." });
+      setMessage({ type: "error", text: "Testcase đã thuộc một nhóm. Hãy tách nhóm cũ trước." });
       return;
     }
     if (selected.some((item) => templateMap.get(item.template_id)?.engine_type !== "COMMON_V1")) {
-      setMessage({ type: "error", text: "Chỉ có thể gộp các testcase dùng chung trong cùng một nhóm." });
+      setMessage({ type: "error", text: "Chỉ nhóm được các testcase thuộc thư viện dùng chung." });
       return;
     }
-    const defaultName = `Nhóm kiểm tra ${String(items.filter((item) => item.group_id).length + 1).padStart(2, "0")}`;
+    const defaultName = mode === "merge"
+      ? `Nhóm kiểm tra ${String(items.filter((item) => item.group_id).length + 1).padStart(2, "0")}`
+      : "";
+    setGroupModalMode(mode);
     setGroupNameDraft(defaultName);
     setGroupModalError("");
     setGroupModalOpen(true);
@@ -431,12 +447,14 @@ export default function TestcasesPage() {
   const confirmGroup = () => {
     const selected = items.filter((item) => selectedItemIds.includes(item.instance_id));
     const groupName = groupNameDraft.trim();
-    if (selected.length < 2) {
-      setGroupModalError("Cần ít nhất 2 testcase nhỏ trong nhóm.");
+    if (selected.length < (groupModalMode === "merge" ? 2 : 1)) {
+      setGroupModalError(groupModalMode === "merge"
+        ? "Cần ít nhất 2 testcase nhỏ trong nhóm." : "Cần ít nhất 1 testcase.");
       return;
     }
     if (!groupName) {
-      setGroupModalError("Vui lòng nhập tên testcase lớn.");
+      setGroupModalError(groupModalMode === "merge"
+        ? "Vui lòng nhập tên testcase lớn." : "Vui lòng nhập tên nhóm chức năng (VD: Thêm người dùng).");
       return;
     }
     if (groupName.length > 120) {
@@ -444,19 +462,24 @@ export default function TestcasesPage() {
       return;
     }
     const usedGroupIds = new Set(items.map((item) => item.group_id).filter(Boolean));
+    // Nhãn dùng tiền tố khác nhóm gộp để nhìn group_id là biết nghĩa — group_id của nhãn chính
+    // là mã `rubric` trong result.json nên đặt tên có chủ đích.
+    const prefix = groupModalMode === "merge" ? "group" : "rubric";
     let groupNumber = 1;
-    let groupId = `${examId.trim() || "exam"}_group_${pad(groupNumber)}`;
+    let groupId = `${examId.trim() || "exam"}_${prefix}_${pad(groupNumber)}`;
     while (usedGroupIds.has(groupId)) {
       groupNumber += 1;
-      groupId = `${examId.trim() || "exam"}_group_${pad(groupNumber)}`;
+      groupId = `${examId.trim() || "exam"}_${prefix}_${pad(groupNumber)}`;
     }
     const selectedIds = new Set(selectedItemIds);
     setItems((current) => current.map((item) => selectedIds.has(item.instance_id)
-      ? { ...item, group_id: groupId, group_name: groupName }
+      ? { ...item, group_id: groupId, group_name: groupName, group_mode: groupModalMode }
       : item));
     setSelectedItemIds([]);
     setGroupModalOpen(false);
-    setMessage({ type: "ok", text: `Tạo nhóm testcase "${groupName}" thành công.` });
+    setMessage({ type: "ok", text: groupModalMode === "merge"
+      ? `Tạo testcase lớn "${groupName}" thành công — một phần fail là cả cụm fail.`
+      : `Đã gán nhóm chức năng "${groupName}" cho ${selected.length} testcase (không gộp điểm).` });
   };
 
   const ungroupItems = (groupId: string) => {
@@ -674,7 +697,7 @@ export default function TestcasesPage() {
               ))}
               {!loading && categories.length === 0 && <p className="p-4 text-center text-xs text-slate-400">Chưa có template.</p>}
             </div>
-            {supportsGrouping && groupSummaries.size > 0 && <div className="border-t border-slate-100 p-3"><div className="flex items-center justify-between gap-2"><p className="text-xs font-bold text-indigo-800">Các nhóm testcase</p><span className="rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-semibold text-indigo-600">{groupSummaries.size} nhóm</span></div><div className="mt-2 space-y-2">{Array.from(groupSummaries.entries()).map(([groupId, group]) => <div key={groupId} className="rounded-lg border border-indigo-100 bg-indigo-50/50 px-3 py-2"><div className="flex items-start justify-between gap-2"><div className="min-w-0"><p className="truncate text-xs font-bold text-slate-700">{group.name}</p><p className="mt-0.5 truncate font-mono text-[10px] text-slate-400">{groupId}</p></div><button onClick={() => deleteGroup(groupId)} className="flex shrink-0 items-center gap-1 rounded-lg px-1.5 py-1 text-[10px] font-semibold text-rose-600 hover:bg-rose-50" title="Xóa nhóm, giữ testcase con"><Trash2 size={12} /> Xóa</button></div><p className="mt-1 text-[10px] text-slate-500">{group.count} testcase con · {group.weight.toFixed(2)} điểm</p></div>)}</div></div>}
+            {supportsGrouping && groupSummaries.size > 0 && <div className="border-t border-slate-100 p-3"><div className="flex items-center justify-between gap-2"><p className="text-xs font-bold text-indigo-800">Các nhóm testcase</p><span className="rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-semibold text-indigo-600">{groupSummaries.size} nhóm</span></div><div className="mt-2 space-y-2">{Array.from(groupSummaries.entries()).map(([groupId, group]) => <div key={groupId} className="rounded-lg border border-indigo-100 bg-indigo-50/50 px-3 py-2"><div className="flex items-start justify-between gap-2"><div className="min-w-0"><p className="truncate text-xs font-bold text-slate-700">{group.name}</p><p className="mt-0.5 truncate font-mono text-[10px] text-slate-400">{groupId}</p></div><button onClick={() => deleteGroup(groupId)} className="flex shrink-0 items-center gap-1 rounded-lg px-1.5 py-1 text-[10px] font-semibold text-rose-600 hover:bg-rose-50" title="Xóa nhóm, giữ testcase con"><Trash2 size={12} /> Xóa</button></div><p className="mt-1 text-[10px] text-slate-500">{group.mode === "label" ? `${group.count} testcase · nhãn nhận xét, không gộp điểm` : `${group.count} testcase con · ${group.weight.toFixed(2)} điểm · fail cả cụm`}</p></div>)}</div></div>}
           </section>
 
           {/* Khu vực 2: thư viện template */}
@@ -740,7 +763,7 @@ export default function TestcasesPage() {
           {/* Khu vực 3: testcase instance của đề */}
           <section className="card min-w-0 overflow-hidden">
             <div className="border-b border-slate-100 bg-slate-50/70 px-4 py-3">
-              <div className="flex flex-wrap items-center justify-between gap-3"><div><p className="eyebrow">Khu vực 3</p><h2 className="mt-1 text-sm font-bold text-slate-800">Testcase trong đề</h2></div><div className="flex items-center gap-2"><span className="rounded-full bg-indigo-100 px-2.5 py-1 text-xs font-bold text-indigo-700">{items.length} mục</span>{supportsGrouping && selectedItemIds.length >= 2 && <button onClick={openGroupModal} className="rounded-lg bg-indigo-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700">Gộp thành testcase lớn</button>}{items.length > 0 && <button onClick={clearAllItems} className="flex items-center gap-1 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-100" title="Xóa toàn bộ testcase"><Trash2 size={13} /> Xóa tất cả</button>}</div></div>
+              <div className="flex flex-wrap items-center justify-between gap-3"><div><p className="eyebrow">Khu vực 3</p><h2 className="mt-1 text-sm font-bold text-slate-800">Testcase trong đề</h2></div><div className="flex items-center gap-2"><span className="rounded-full bg-indigo-100 px-2.5 py-1 text-xs font-bold text-indigo-700">{items.length} mục</span>{supportsGrouping && selectedItemIds.length >= 1 && <button onClick={() => openGroupModal("label")} className="rounded-lg border border-emerald-300 bg-emerald-50 px-2.5 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-100" title="Chỉ để phân nhóm nhận xét theo chức năng — điểm từng testcase giữ nguyên">Gán nhóm chức năng</button>}{supportsGrouping && selectedItemIds.length >= 2 && <button onClick={() => openGroupModal("merge")} className="rounded-lg bg-indigo-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700" title="Một phần fail là cả cụm fail — mất trọn điểm cụm">Gộp thành testcase lớn</button>}{items.length > 0 && <button onClick={clearAllItems} className="flex items-center gap-1 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-100" title="Xóa toàn bộ testcase"><Trash2 size={13} /> Xóa tất cả</button>}</div></div>
               <div className="mt-3 flex items-center justify-between text-xs"><span className="text-slate-500">Tổng trọng số</span><strong className="text-indigo-700">{totalWeight.toFixed(2)}</strong></div>
             </div>
             <div
@@ -766,7 +789,9 @@ export default function TestcasesPage() {
                   <div className="flex items-start gap-2">
                     <GripVertical size={16} className="mt-0.5 shrink-0 cursor-grab text-slate-300" />
                     <div className="min-w-0 flex-1">
-                      <div className="flex items-start justify-between gap-2"><div className="min-w-0"><p className="text-sm font-semibold text-slate-800">{item.name}</p>{item.group_id && <div className="mt-1.5 rounded-lg border border-indigo-100 bg-indigo-50/70 px-2.5 py-2 text-[10px] text-indigo-700"><p className="font-bold">Testcase lớn: {groupSummaries.get(item.group_id)?.name || item.group_name || item.group_id}</p><p className="mt-0.5">{groupSummaries.get(item.group_id)?.count || 0} testcase nhỏ · {Number(groupSummaries.get(item.group_id)?.weight || 0).toFixed(2)} điểm · một assert fail sẽ làm cả nhóm fail</p><p className="mt-0.5 font-mono text-indigo-400">{item.group_id}</p></div>}</div><span className="shrink-0 rounded bg-indigo-50 px-1.5 py-0.5 font-mono text-[10px] text-indigo-600">#{item.order}</span></div>
+                      <div className="flex items-start justify-between gap-2"><div className="min-w-0"><p className="text-sm font-semibold text-slate-800">{item.name}</p>{item.group_id && (item.group_mode === "label"
+                        ? <div className="mt-1.5 rounded-lg border border-emerald-100 bg-emerald-50/70 px-2.5 py-2 text-[10px] text-emerald-700"><p className="font-bold">Nhóm chức năng: {groupSummaries.get(item.group_id)?.name || item.group_name || item.group_id}</p><p className="mt-0.5">{groupSummaries.get(item.group_id)?.count || 0} testcase · không gộp điểm — nhãn để gom nhận xét</p><p className="mt-0.5 font-mono text-emerald-400">{item.group_id}</p></div>
+                        : <div className="mt-1.5 rounded-lg border border-indigo-100 bg-indigo-50/70 px-2.5 py-2 text-[10px] text-indigo-700"><p className="font-bold">Testcase lớn: {groupSummaries.get(item.group_id)?.name || item.group_name || item.group_id}</p><p className="mt-0.5">{groupSummaries.get(item.group_id)?.count || 0} testcase nhỏ · {Number(groupSummaries.get(item.group_id)?.weight || 0).toFixed(2)} điểm · một phần fail là mất trọn điểm cụm</p><p className="mt-0.5 font-mono text-indigo-400">{item.group_id}</p></div>)}</div><span className="shrink-0 rounded bg-indigo-50 px-1.5 py-0.5 font-mono text-[10px] text-indigo-600">#{item.order}</span></div>
                       <p className="mt-1 truncate font-mono text-[10px] text-slate-400">{item.instance_id}</p>
                       <div className="mt-2 flex flex-wrap items-center gap-1.5"><span className="rounded bg-violet-100 px-1.5 py-0.5 text-[10px] font-bold text-violet-700">{LAYER_LABEL[item.layer] || item.layer}</span><span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-500">{DIFF_LABEL[item.difficulty] || item.difficulty}</span><span className="text-[11px] font-semibold text-slate-500">{Number(item.weight).toFixed(2)} điểm</span></div>
                     </div>
@@ -804,13 +829,15 @@ export default function TestcasesPage() {
               <div className="fixed inset-0 z-[60] flex min-h-screen min-w-full items-center justify-center bg-slate-950/60 backdrop-blur-[2px]" role="dialog" aria-modal="true" aria-labelledby="group-modal-title" onClick={() => setGroupModalOpen(false)}>
                 <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
                   <div className="flex items-start justify-between gap-4">
-                    <div className="flex items-start gap-3"><div className="rounded-xl bg-indigo-100 p-2 text-indigo-600"><Layers size={20} /></div><div><h3 id="group-modal-title" className="text-base font-bold text-slate-800">Đặt tên nhóm testcase</h3><p className="mt-1 text-xs leading-relaxed text-slate-500">Nhóm sẽ chạy các testcase con cùng nhau và chỉ pass khi tất cả assert đều đạt.</p></div></div>
+                    <div className="flex items-start gap-3"><div className={`rounded-xl p-2 ${groupModalMode === "merge" ? "bg-indigo-100 text-indigo-600" : "bg-emerald-100 text-emerald-600"}`}><Layers size={20} /></div><div><h3 id="group-modal-title" className="text-base font-bold text-slate-800">{groupModalMode === "merge" ? "Đặt tên testcase lớn" : "Đặt tên nhóm chức năng"}</h3><p className="mt-1 text-xs leading-relaxed text-slate-500">{groupModalMode === "merge"
+                      ? "Cả cụm chạy cùng nhau và chỉ pass khi mọi phần đều đạt — một phần fail là sinh viên mất trọn điểm cụm, nhận xét cũng chỉ nói được cả cụm chưa đạt. Nếu chỉ cần phân nhóm nhận xét theo chức năng, hãy dùng “Gán nhóm chức năng”."
+                      : "Nhãn để hệ thống nhận xét gom theo chức năng (VD: “Thêm người dùng”). Không gộp điểm — từng testcase vẫn chấm và tính điểm riêng."}</p></div></div>
                     <button onClick={() => setGroupModalOpen(false)} className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600" aria-label="Đóng"><X size={17} /></button>
                   </div>
                   <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3"><div className="flex items-center justify-between gap-2"><p className="text-xs font-bold text-slate-700">Testcase con trong nhóm</p>{selectedGroupItems.length > 4 && <button onClick={() => { setGroupModalOpen(false); setGroupDetailsOpen(true); }} className="text-[11px] font-bold text-indigo-600 hover:text-indigo-800">Xem toàn bộ ({selectedGroupItems.length})</button>}</div><div className="mt-2 space-y-2">{selectedGroupItems.slice(0, 4).map((item) => { const template = templateMap.get(item.template_id); return <div key={item.instance_id} className="flex items-start justify-between gap-3 rounded-lg bg-white px-3 py-2"><div className="min-w-0"><p className="truncate text-xs font-semibold text-slate-700">{item.name}</p><p className="mt-0.5 truncate font-mono text-[10px] text-slate-400">{item.instance_id}</p></div><span className="shrink-0 rounded-md bg-indigo-50 px-1.5 py-1 text-[10px] font-semibold text-indigo-600">{RUNNER_LABEL[template?.runner || ""] || LAYER_LABEL[template?.layer || ""] || "Kiểm tra theo yêu cầu"}</span></div>; })}</div></div>
-                  <label className="mt-4 block text-xs font-semibold text-slate-600">Tên testcase lớn<input autoFocus value={groupNameDraft} onChange={(e) => { setGroupNameDraft(e.target.value); setGroupModalError(""); }} onKeyDown={(e) => { if (e.key === "Enter") confirmGroup(); }} placeholder="VD: Luồng tạo mới hợp lệ" className="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" /></label>
+                  <label className="mt-4 block text-xs font-semibold text-slate-600">{groupModalMode === "merge" ? "Tên testcase lớn" : "Tên nhóm chức năng"}<input autoFocus value={groupNameDraft} onChange={(e) => { setGroupNameDraft(e.target.value); setGroupModalError(""); }} onKeyDown={(e) => { if (e.key === "Enter") confirmGroup(); }} placeholder={groupModalMode === "merge" ? "VD: Luồng tạo mới hợp lệ" : "VD: Thêm người dùng"} className="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" /></label>
                   {groupModalError && <p className="mt-2 text-xs font-semibold text-rose-600">{groupModalError}</p>}
-                  <div className="mt-5 flex justify-end gap-2"><button onClick={() => setGroupModalOpen(false)} className="rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-50">Hủy</button><button onClick={confirmGroup} className="rounded-xl bg-indigo-600 px-3.5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700">Tạo nhóm</button></div>
+                  <div className="mt-5 flex justify-end gap-2"><button onClick={() => setGroupModalOpen(false)} className="rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-50">Hủy</button><button onClick={confirmGroup} className={`rounded-xl px-3.5 py-2.5 text-sm font-semibold text-white shadow-sm ${groupModalMode === "merge" ? "bg-indigo-600 hover:bg-indigo-700" : "bg-emerald-600 hover:bg-emerald-700"}`}>{groupModalMode === "merge" ? "Gộp thành testcase lớn" : "Gán nhãn"}</button></div>
                 </div>
               </div>
             )}

@@ -199,6 +199,10 @@ public class TestcaseTemplateService {
     private final Map<String, Map<String, Object>> templates = new LinkedHashMap<>();
     /** tên tham số → (giá trị enum chữ thường → nhãn tiếng Việt); nguồn: common-expected-vocabulary.json */
     private final Map<String, Map<String, String>> valueLabels = new LinkedHashMap<>();
+    /** Ngữ pháp khoá chấm — nguồn: common-key-grammar.json (bản classpath, pin BẰNG bản repo hợp đồng). */
+    private java.util.regex.Pattern keyPattern;
+    private java.util.regex.Pattern namespacePattern;
+    private final List<String> keyNamespaces = new ArrayList<>();
 
     @Autowired private ExamRepository examRepository;
     @Autowired private SyllabusService syllabusService;
@@ -208,6 +212,7 @@ public class TestcaseTemplateService {
     public void loadTemplates() {
         templates.clear();
         loadValueLabels();
+        loadKeyGrammar();
         if (loadClasspathTemplates("common-testcase-templates.json", COMMON_ENGINE))
             log.info("✅ Nạp {} testcase dùng chung từ common-testcase-templates.json", templates.size());
         else log.error("Không nạp được thư viện testcase dùng chung.");
@@ -470,6 +475,7 @@ public class TestcaseTemplateService {
     /** Đảm bảo thư viện testcase dùng chung luôn có sẵn trước mỗi request. */
     private synchronized void ensureReferenceTemplatesLoaded() {
         if (valueLabels.isEmpty()) loadValueLabels();
+        if (keyPattern == null) loadKeyGrammar();
         if (templates.isEmpty() && !loadClasspathTemplates("common-testcase-templates.json", COMMON_ENGINE))
             log.error("Không nạp được thư viện testcase dùng chung.");
     }
@@ -483,6 +489,50 @@ public class TestcaseTemplateService {
      */
     static final int REQUIREMENTS_MAX_CHARS = 4000;
     static final int REQUIREMENTS_MAX_LINES = 40;
+
+    /**
+     * Nạp ngữ pháp khoá từ classpath. Bản này được {@code KeyGrammarContractTest} pin BẰNG bản
+     * công bố ở repo hợp đồng (phía NLP xây tầng FATAL trên bản đó) — hai bản lệch là test đỏ.
+     */
+    private synchronized void loadKeyGrammar() {
+        try (InputStream in = new ClassPathResource("common-key-grammar.json").getInputStream()) {
+            Map<String, Object> raw = mapper.readValue(in,
+                    new TypeReference<LinkedHashMap<String, Object>>() {});
+            keyPattern = java.util.regex.Pattern.compile(String.valueOf(raw.get("key_pattern")));
+            namespacePattern = java.util.regex.Pattern.compile(String.valueOf(raw.get("namespace_pattern")));
+            keyNamespaces.clear();
+            if (raw.get("namespaces") instanceof List<?> list)
+                for (Object ns : list) keyNamespaces.add(String.valueOf(ns));
+        } catch (Exception e) {
+            // Không chặn khởi động: thiếu ngữ pháp thì bỏ cưỡng chế (khoá lạ đã có lưới
+            // đáng-ngờ phía đọc đỡ), còn ném lỗi thì giáo viên không soạn được đề nào.
+            log.error("Không nạp được ngữ pháp khoá: {}", e.getMessage());
+            keyPattern = null;
+            namespacePattern = null;
+        }
+    }
+
+    /**
+     * CƯỠNG CHẾ ngữ pháp khoá ở khâu NHẬP — chủ đồ án + NLP duyệt 2026-08-08 sau câu hỏi mở của
+     * ngữ pháp khoá. Vì sao chặn ở đây: khoá giáo viên tự đặt ngoài ngữ pháp là chuỗi đi tới
+     * sinh viên mà KHÔNG bên nào bảo đảm — bên đọc chỉ đỡ được bằng cờ không-fatal, tức phụ
+     * thuộc giảng viên có mở bài bị cờ ra xem. Chặn lúc nhập là chỗ duy nhất giáo viên thấy
+     * ngay và tự sửa được — cùng thiết kế với từ điển expected và trần requirements.
+     */
+    private void validateKeyGrammar(Map<String, Object> params, String instanceId) {
+        if (keyPattern == null || namespacePattern == null) return;   // ngữ pháp không nạp được
+        for (Map.Entry<String, Object> entry : params.entrySet()) {
+            if (!entry.getKey().matches(".*Keys?$")) continue;
+            for (String token : csv(entry.getValue())) {
+                if (keyPattern.matcher(token).matches() && namespacePattern.matcher(token).find())
+                    continue;
+                throw new IllegalArgumentException("Khoá '" + token + "' (" + entry.getKey()
+                        + ") ở " + instanceId + " không theo ngữ pháp khoá chấm. Khoá phải là"
+                        + " chữ thường dạng 'nhóm.tên' với nhóm thuộc: "
+                        + String.join(", ", keyNamespaces) + " — ví dụ action.save, field.email.");
+            }
+        }
+    }
 
     /** Chặn ở khâu nhập với thông báo giảng viên tự sửa được — không cắt hộ, không sửa hộ. */
     static void validateRequirements(String raw) {
@@ -557,6 +607,7 @@ public class TestcaseTemplateService {
             Map<String, Object> params = parameters(template, input.get("parameters"));
             if (COMMON_ENGINE.equals(templateEngine)) {
                 validateCommonParameters(text(template.get("runner"), ""), params, instanceId);
+                validateKeyGrammar(params, instanceId);
             }
             String difficulty = text(input.get("difficulty"));
             if (difficulty == null || difficulty.isBlank()) difficulty = text(template.get("difficulty"));
@@ -603,6 +654,15 @@ public class TestcaseTemplateService {
                 item.put("group_id", groupId);
                 String groupName = text(input.get("group_name"));
                 item.put("group_name", groupName == null || groupName.isBlank() ? groupId : groupName.trim());
+                // Hai nghĩa của nhóm — quyết định (c-nợ-1), chủ đồ án duyệt 2026-08-08:
+                //   "label" = NHÃN nhóm chức năng, metadata thuần, KHÔNG đụng điểm (nguồn rubric);
+                //   "merge" = GỘP thành một testcase lớn, all-or-nothing (nghĩa cũ).
+                // Config lưu trước quyết định này không có group_mode ⇒ mặc định "merge" để giữ
+                // đúng nghĩa dữ liệu đã ghi — đừng đổi mặc định, đổi là dữ liệu cũ đổi nghĩa ngầm.
+                String groupMode = text(input.get("group_mode"), "merge").toLowerCase();
+                if (!Set.of("label", "merge").contains(groupMode))
+                    throw new IllegalArgumentException("group_mode phải là label hoặc merge ở " + instanceId);
+                item.put("group_mode", groupMode);
             }
             item.put("created_by", previous != null && previous.get("created_by") != null
                     ? previous.get("created_by") : teacherEmail);
@@ -614,9 +674,14 @@ public class TestcaseTemplateService {
         return out;
     }
 
-    /** Mỗi group phải có từ hai testcase con và chỉ gom các testcase common. */
-    private void validateGroups(List<Map<String, Object>> items) {
+    /**
+     * Nhóm "merge" phải có từ hai testcase con (gộp một mình là vô nghĩa); nhóm "label" chỉ cần
+     * một (nhãn chức năng gắn cho một testcase là hợp lệ — fixture có ba nhóm như vậy). Mọi
+     * thành viên một group_id phải cùng mode — nửa gộp nửa nhãn thì matrix không quyết được.
+     */
+    void validateGroups(List<Map<String, Object>> items) {
         Map<String, Integer> counts = new LinkedHashMap<>();
+        Map<String, String> modes = new LinkedHashMap<>();
         Set<String> itemIds = new LinkedHashSet<>();
         for (Map<String, Object> item : items) itemIds.add(text(item.get("instance_id")));
         for (Map<String, Object> item : items) {
@@ -624,10 +689,15 @@ public class TestcaseTemplateService {
             if (groupId == null || groupId.isBlank()) continue;
             if (groupId.equals(item.get("instance_id")) || itemIds.contains(groupId))
                 throw new IllegalArgumentException("group_id không được trùng instance_id: " + groupId);
+            String mode = text(item.get("group_mode"), "merge");
+            String seen = modes.putIfAbsent(groupId, mode);
+            if (seen != null && !seen.equals(mode))
+                throw new IllegalArgumentException("Nhóm " + groupId
+                        + " có testcase vừa label vừa merge — mỗi nhóm chỉ một nghĩa.");
             counts.put(groupId, counts.getOrDefault(groupId, 0) + 1);
         }
         for (Map.Entry<String, Integer> entry : counts.entrySet()) {
-            if (entry.getValue() < 2)
+            if ("merge".equals(modes.get(entry.getKey())) && entry.getValue() < 2)
                 throw new IllegalArgumentException("Nhóm testcase " + entry.getKey() + " phải có ít nhất 2 testcase con.");
         }
     }
@@ -919,7 +989,7 @@ public class TestcaseTemplateService {
         }
     }
 
-    private Map<String, Object> toSkillsMatrix(List<Map<String, Object>> items, String engineType) {
+    Map<String, Object> toSkillsMatrix(List<Map<String, Object>> items, String engineType) {
         Map<String, Object> matrix = new LinkedHashMap<>();
         Set<String> emittedGroups = new LinkedHashSet<>();
         for (Map<String, Object> item : items) {
@@ -927,7 +997,11 @@ public class TestcaseTemplateService {
             // đưa vào matrix đang Publish vì grader cũ chưa hiểu cờ enabled.
             if (!bool(item.get("enabled"), true)) continue;
             String groupId = text(item.get("group_id"));
-            if (COMMON_ENGINE.equals(engineType) && groupId != null && !groupId.isBlank()) {
+            // CHỈ mode "merge" mới gộp. Nhóm "label" đi tiếp xuống nhánh row độc lập —
+            // commonRubricRow đã chép group_id/group_name vào row, nên rubric/rubric_label
+            // tự đúng (rubricOf đọc group_id trước). Đây chính là hình 24 row của fixture.
+            boolean merge = "merge".equals(text(item.get("group_mode"), "merge"));
+            if (COMMON_ENGINE.equals(engineType) && merge && groupId != null && !groupId.isBlank()) {
                 if (!emittedGroups.add(groupId)) continue;
                 List<Map<String, Object>> children = items.stream()
                         .filter(child -> bool(child.get("enabled"), true)

@@ -276,6 +276,18 @@ Ba thứ (c) để lại, xếp theo giá trị:
 **Phạm vi đã đo, đừng phát biểu rộng hơn:** chỉ trường `expected`. Phần còn lại của khâu soạn đề
 vẫn chưa có phép đo nào — và ngay lần đo đầu đã lộ (c-nợ-1: `group_id` hai nghĩa).
 
+### `validateGroups` — CỐ Ý không có trần số con (chốt 2026-08-08)
+
+Tôi từng đề xuất thêm trần (vd ≤4 con) vì dự báo `expected` của cụm gộp dài tuyến tính theo số
+con và sẽ vượt cap 320 ký tự của phía NLP. **Đề xuất SAI, đã rút.** Phía NLP đo ngân sách token
+thật (gọi model, đọc `prompt_eval_count`): còn dư ~3.904 token ≈ 11.360 ký tự, cụm 8 con xấu nhất
+chiếm **11%** — không cần cắt gì. Chỗ vỡ thật nằm ở khối của họ chưa có trần TỔNG, không phải ở
+độ dài mỗi câu.
+
+Bài học, cùng hình với lỗi đã lặp: **tôi dự báo trên repo của người khác mà không chạy đo**, rồi
+suýt lấy tự do của giáo viên để chữa một hằng số nằm bên kia. Phiên sau đừng "tối ưu" lại chỗ này:
+trần số con là **cố ý không có**.
+
 ### Vì sao ĐÓNG P4b
 
 Không phải vì khó — **P4 đã giải trọn nhu cầu**. Engine chung chỉ có **một** cửa chặn (`_boot()`),

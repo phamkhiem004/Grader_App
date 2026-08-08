@@ -165,6 +165,7 @@ sinh viên.** Mọi tranh cãi thiết kế phân xử bằng nguyên tắc này
 | **(c)** | Dọn `expected` MÁY SINH — lần đầu đo **đường soạn đề** | ✅ **Xong** 2026-08-08 | 22/22 template sạch khoá + sạch enum Anh; 7 test mới (**76 xanh**); luật **F4** trong `verify_result.py`; mẫu thứ 8 `latest-machine-expected`; **0 FAIL trên 8 mẫu**; điểm KHÔNG đổi (không đụng engine) |
 | **P6a** | `exam.requirements` — backend + hợp đồng + mẫu | ✅ **Xong** 2026-08-08 | 8/8 mẫu mang 6 yêu cầu thật (2 ca cố ý: đường dẫn trong đề · yêu cầu kiến trúc không kiểm được); trần 4000 ký tự/40 dòng; luật **A11** (thử phá 5 kiểu: 4 đỏ đúng, 1 xanh đúng); **85 test xanh**; SPEC có bảng field khối `exam`; engine KHÔNG đổi |
 | **P6b** | `exam.requirements` — ô nhập FE | ✅ **Code xong** 2026-08-08 | `tsc` xanh; gửi nguyên văn không trim; gương 3 phép chặn + bộ đếm sống; ⚠️ **chưa chạy thật** — stack tắt, đo ở lần bật stack tới |
+| **NPK** | Ngữ pháp khoá — NLP xin sau P6a | ✅ **Xong** 2026-08-08 | `common-key-grammar.json`: **13 namespace** sinh từ phép đo (attested của NLP thiếu 8; `validation.` là legacy); pin bằng `KeyGrammarContractTest` — thử phá 2 chiều đều đỏ; **86 test xanh**; câu hỏi mở: có cưỡng chế ở khâu nhập không (chờ NLP + chủ đồ án) |
 
 ### A2 — mở fixture, và cái giá của việc công bố năng lực chưa chạy
 

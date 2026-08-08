@@ -751,6 +751,10 @@ public class TestcaseTemplateService {
             case "BUTTON_ACTION" -> {
                 requireParameter(params, "buttonKey", instanceId);
                 requireParameter(params, "resultKey", instanceId);
+                // targetType ở runner này chỉ đặt TÊN GỌI của kết quả trong câu báo về
+                // (engine đưa vào `subject`, không assert loại). Vẫn phải kiểm giá trị:
+                // chuỗi lạ thì engine im lặng rơi về "thành phần" — sai mà không ai biết.
+                validateOptionalTargetType(params, "targetType", instanceId);
             }
             case "RESPONSIVE_NO_OVERFLOW" -> {
                 validateResponsiveSizes(params, instanceId);

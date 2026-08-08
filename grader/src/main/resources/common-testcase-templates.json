@@ -11,7 +11,9 @@
     "description": "Dùng khi đề yêu cầu app mở được từ main(). Runner khởi động app, chờ giao diện ổn định và xác nhận không có exception; rootKey là tùy chọn nếu cần kiểm tra thêm vùng gốc.",
     "difficulty": "basic",
     "weight_default": 1,
-    "parameters_schema": {"rootKey": ""},
+    "parameters_schema": {
+      "rootKey": ""
+    },
     "expected_template": "Ứng dụng phải mở lên được và hiển thị màn hình đầu tiên, không báo lỗi."
   },
   {
@@ -23,10 +25,13 @@
     "skill_code": "UI_SCAFFOLD_APPBAR",
     "layer": "SCREEN",
     "name": "Widget semantic key tồn tại",
-    "description": "Xác nhận widget gắn ValueKey đang xuất hiện sau khi app khởi động. Testcase không kiểm tra class/model; có thể thêm targetType để xác nhận key đang gắn đúng loại widget.",
+    "description": "Xác nhận widget gắn ValueKey đang xuất hiện sau khi app khởi động. Testcase không kiểm tra class/model. Để targetType = any thì chỉ kiểm widget có tồn tại; chọn một loại cụ thể thì kiểm thêm key đang gắn đúng loại widget đó.",
     "difficulty": "basic",
     "weight_default": 1,
-    "parameters_schema": {"widgetKey": "screen.home"},
+    "parameters_schema": {
+      "widgetKey": "screen.home",
+      "targetType": "any"
+    },
     "expected_template": "Sau khi ứng dụng khởi động, thành phần được kiểm phải hiển thị trên màn hình."
   },
   {
@@ -137,12 +142,13 @@
     "skill_code": "UI_BUTTONS_SELECTION",
     "layer": "BLACKBOX",
     "name": "Button thực hiện action",
-    "description": "Bấm buttonKey, chờ giao diện cập nhật và xác nhận resultKey xuất hiện. Dùng cho kết quả như thông báo thành công, item mới, màn hình chi tiết hoặc trạng thái sau thao tác.",
+    "description": "Bấm buttonKey, chờ giao diện cập nhật và xác nhận resultKey xuất hiện. Dùng cho kết quả như thông báo thành công, item mới, màn hình chi tiết hoặc trạng thái sau thao tác. targetType mô tả loại của KẾT QUẢ (resultKey), không phải của nút — nó chỉ đổi cách gọi tên trong câu báo về, không kiểm loại.",
     "difficulty": "intermediate",
     "weight_default": 2,
     "parameters_schema": {
       "buttonKey": "action.save",
-      "resultKey": "message.success"
+      "resultKey": "message.success",
+      "targetType": "any"
     },
     "expected_template": "Bấm nút được kiểm thì kết quả tương ứng phải hiện ra trên màn hình."
   },

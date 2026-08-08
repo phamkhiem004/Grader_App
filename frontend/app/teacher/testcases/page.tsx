@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import SidebarLayout from "@/components/layout/SidebarLayout";
 import { API_BASE } from "@/lib/config";
@@ -251,6 +251,8 @@ export default function TestcasesPage() {
   const [selectedItemIds, setSelectedItemIds] = useState<string[]>([]);
   const [groupModalOpen, setGroupModalOpen] = useState(false);
   const [groupModalMode, setGroupModalMode] = useState<"label" | "merge">("merge");
+  /** Bộ đếm TIẾN cho instance_id — xem addTemplate; ref chứ không phải state để tăng ngay trong tick. */
+  const nextItemNumber = useRef(1);
   const [groupDetailsOpen, setGroupDetailsOpen] = useState(false);
   const [clearAllModalOpen, setClearAllModalOpen] = useState(false);
   const [groupNameDraft, setGroupNameDraft] = useState("");
@@ -349,9 +351,14 @@ export default function TestcasesPage() {
   const addTemplate = (templateId: string) => {
     const template = templateMap.get(templateId);
     if (!template) return;
+    // Số thứ tự lấy từ ref ĐẾM TIẾN, không lấy từ items.length: hai lần thêm trong cùng một tick
+    // đọc chung một snapshot `items` cũ ⇒ trùng instance_id. Trùng id là hỏng nặng và IM LẶNG —
+    // React key trùng, tick một ô thì cả hai cùng tick, sửa/xoá một cái là trúng cả hai; giáo
+    // viên chỉ biết lúc bấm Lưu (backend chặn: "Trùng instance_id", pin ở FixtureIsProducibleTest).
     const usedIds = new Set(items.map((item) => item.instance_id));
-    let nextNumber = items.length + 1;
+    let nextNumber = Math.max(nextItemNumber.current, items.length + 1);
     while (usedIds.has(`${examId.trim() || "exam"}_item_${pad(nextNumber)}`)) nextNumber += 1;
+    nextItemNumber.current = nextNumber + 1;
     const item: TestcaseItem = {
       instance_id: `${examId.trim() || "exam"}_item_${pad(nextNumber)}`,
       template_id: template.template_id,
@@ -363,13 +370,13 @@ export default function TestcasesPage() {
       description: template.description,
       difficulty: template.difficulty,
       enabled: true,
-      order: items.length + 1,
+      order: 0,   // đánh lại trong updater theo `current` — xem ngay dưới
       weight: Number(template.weight_default || 1),
       parameters: cloneParams(template),
       expected: renderExpected(template.expected_template, cloneParams(template), template.value_labels),
       expected_custom: false,
     };
-    setItems((current) => [...current, item]);
+    setItems((current) => [...current, { ...item, order: current.length + 1 }]);
     setEditingId(item.instance_id);
     setSelectedTemplateId(template.template_id);
     setMessage(null);
@@ -435,8 +442,11 @@ export default function TestcasesPage() {
       setMessage({ type: "error", text: "Chỉ nhóm được các testcase thuộc thư viện dùng chung." });
       return;
     }
+    // Đếm số NHÓM đã có, không đếm số ITEM có nhóm — 3 testcase trong 1 nhóm từng cho ra
+    // tên mặc định "Nhóm kiểm tra 04".
+    const soNhomDaCo = new Set(items.map((item) => item.group_id).filter(Boolean)).size;
     const defaultName = mode === "merge"
-      ? `Nhóm kiểm tra ${String(items.filter((item) => item.group_id).length + 1).padStart(2, "0")}`
+      ? `Nhóm kiểm tra ${String(soNhomDaCo + 1).padStart(2, "0")}`
       : "";
     setGroupModalMode(mode);
     setGroupNameDraft(defaultName);
@@ -461,20 +471,23 @@ export default function TestcasesPage() {
       setGroupModalError("Tên nhóm không được vượt quá 120 ký tự.");
       return;
     }
-    const usedGroupIds = new Set(items.map((item) => item.group_id).filter(Boolean));
     // Nhãn dùng tiền tố khác nhóm gộp để nhìn group_id là biết nghĩa — group_id của nhãn chính
     // là mã `rubric` trong result.json nên đặt tên có chủ đích.
     const prefix = groupModalMode === "merge" ? "group" : "rubric";
-    let groupNumber = 1;
-    let groupId = `${examId.trim() || "exam"}_${prefix}_${pad(groupNumber)}`;
-    while (usedGroupIds.has(groupId)) {
-      groupNumber += 1;
-      groupId = `${examId.trim() || "exam"}_${prefix}_${pad(groupNumber)}`;
-    }
     const selectedIds = new Set(selectedItemIds);
-    setItems((current) => current.map((item) => selectedIds.has(item.instance_id)
-      ? { ...item, group_id: groupId, group_name: groupName, group_mode: groupModalMode }
-      : item));
+    // Dựng groupId BÊN TRONG updater, từ `current` — cùng lý do với instance_id ở addTemplate.
+    setItems((current) => {
+      const usedGroupIds = new Set(current.map((item) => item.group_id).filter(Boolean));
+      let groupNumber = 1;
+      let groupId = `${examId.trim() || "exam"}_${prefix}_${pad(groupNumber)}`;
+      while (usedGroupIds.has(groupId)) {
+        groupNumber += 1;
+        groupId = `${examId.trim() || "exam"}_${prefix}_${pad(groupNumber)}`;
+      }
+      return current.map((item) => selectedIds.has(item.instance_id)
+        ? { ...item, group_id: groupId, group_name: groupName, group_mode: groupModalMode }
+        : item);
+    });
     setSelectedItemIds([]);
     setGroupModalOpen(false);
     setMessage({ type: "ok", text: groupModalMode === "merge"

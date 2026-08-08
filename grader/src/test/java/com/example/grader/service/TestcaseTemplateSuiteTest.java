@@ -13,12 +13,15 @@ import java.lang.reflect.Field;
 import java.nio.charset.StandardCharsets;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.example.grader.entity.Skill;
 
 import org.springframework.core.io.ClassPathResource;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class TestcaseTemplateSuiteTest {
 
@@ -32,11 +35,15 @@ class TestcaseTemplateSuiteTest {
                 "fixture_name", "one_existing_todo",
                 "ready_key", "screen.home.ready",
                 "required_keys", List.of("screen.home", "list.items"),
+                "template_contract", Map.of(
+                        "modelPath", "lib/models/person.dart",
+                        "modelClass", "Person"),
                 "setup_steps", List.of(Map.of("type", "tap", "key", "action.add"))), null);
 
         assertEquals("Todo CRUD", suite.get("name"));
         assertEquals(true, suite.get("strict_semantic_keys"));
         assertEquals(List.of("screen.home", "list.items"), suite.get("required_keys"));
+        assertEquals("Person", ((Map<?, ?>) suite.get("template_contract")).get("modelClass"));
         assertEquals("tap", ((List<?>) suite.get("setup_steps")).get(0) instanceof Map<?, ?> step
                 ? step.get("type") : null);
     }
@@ -158,6 +165,133 @@ class TestcaseTemplateSuiteTest {
     }
 
     @Test
+    void shipsReusableTemplateContractBlueprintsWithoutKeysOrAdapter() throws Exception {
+        String examTest = new ClassPathResource("template-contract-engine/exam_test.dart")
+                .getContentAsString(StandardCharsets.UTF_8);
+        String grader = new ClassPathResource("template-contract-engine/grader.dart")
+                .getContentAsString(StandardCharsets.UTF_8);
+        List<Map<String, Object>> templates = new ObjectMapper().readValue(
+                new ClassPathResource("template-contract-testcase-templates.json").getInputStream(),
+                new TypeReference<List<Map<String, Object>>>() {});
+
+        assertEquals(11, templates.size());
+        assertEquals(11, templates.stream().map(row -> row.get("template_id")).distinct().count());
+        assertTrue(templates.stream().allMatch(row -> "TEMPLATE_CONTRACT_V1".equals(row.get("engine_type"))));
+        assertTrue(templates.stream().noneMatch(row -> Boolean.TRUE.equals(row.get("fixed_contract"))));
+        assertTrue(examTest.contains("Future<void> _checkTemplateModelFields"));
+        assertTrue(examTest.contains("Future<void> _checkTemplateFormAction"));
+        assertTrue(examTest.contains("labelText, decoration.hintText"));
+        assertTrue(!examTest.contains("grading_adapter.dart"));
+        assertTrue(grader.contains("TEMPLATE_CONTRACT_V1-1.0.1"));
+        assertTrue(grader.contains("await runCases(readOnly, 1)"));
+        assertTrue(grader.contains("'TEMPLATE_FORM_ACTION'"));
+        assertTrue(grader.contains("event['result'] == 'success' && !skipped"));
+    }
+
+    @Test
+    void validatesPerExamTemplateContractParameters() {
+        Map<String, Object> model = new LinkedHashMap<>(Map.of(
+                "sourcePath", "lib/models/person.dart",
+                "className", "Person",
+                "fields", "uid:String,firstName:String,lastName:String"));
+        service.validateTemplateContractParameters("TEMPLATE_MODEL_FIELDS", model, "MODEL_01");
+
+        assertThrows(IllegalArgumentException.class, () -> service.validateTemplateContractParameters(
+                "TEMPLATE_MODEL_FIELDS", new LinkedHashMap<>(Map.of(
+                        "sourcePath", "../person.dart",
+                        "className", "Person",
+                        "fields", "uid:String")), "MODEL_BAD"));
+        assertThrows(IllegalArgumentException.class, () -> service.validateTemplateContractParameters(
+                "TEMPLATE_FORM_ACTION", new LinkedHashMap<>(Map.of(
+                        "fieldLabels", "uid,first name,last name",
+                        "inputValues", "SV01,An",
+                        "actionLabel", "Add",
+                        "expectedTexts", "SV01")), "FORM_BAD"));
+    }
+
+    @Test
+    void templateContractMatrixKeepsEachExamParameters() {
+        Map<String, Object> item = new LinkedHashMap<>();
+        item.put("instance_id", "PERSON_FORM_ADD");
+        item.put("runner", "TEMPLATE_FORM_ACTION");
+        item.put("skill_code", "STATE_SETSTATE_STATEFUL");
+        item.put("layer", "BLACKBOX");
+        item.put("testcase_group", "BEHAVIOR");
+        item.put("name", "Add person");
+        item.put("description", "Add by starter labels");
+        item.put("expected", "Person appears");
+        item.put("difficulty", "intermediate");
+        item.put("weight", 2.5);
+        item.put("enabled", true);
+        item.put("parameters", Map.of(
+                "fieldLabels", "uid,first name,last name",
+                "inputValues", "SV01,An,Nguyen",
+                "actionLabel", "Add",
+                "expectedTexts", "SV01,An,Nguyen"));
+        item.put("setup_steps", List.of());
+        Map<String, Object> suite = service.normalizeSuite(Map.of(
+                "profile", "TEMPLATE_CONTRACT_V1",
+                "strict_semantic_keys", false), null);
+
+        Map<?, ?> row = (Map<?, ?>) service.toSkillsMatrix(
+                List.of(item), "TEMPLATE_CONTRACT_V1", suite).get("PERSON_FORM_ADD");
+        assertEquals("TEMPLATE_FORM_ACTION", row.get("runner"));
+        assertEquals("uid,first name,last name", ((Map<?, ?>) row.get("parameters")).get("fieldLabels"));
+        assertEquals("TEMPLATE_CONTRACT_V1", ((Map<?, ?>) row.get("suite")).get("profile"));
+    }
+
+    @Test
+    void materializesReusableTemplateContractEngine(@TempDir Path root) throws Exception {
+        service.materializeEngine(root, "TEMPLATE_CONTRACT_V1");
+
+        assertTrue(Files.readString(root.resolve("exam_test.dart"), StandardCharsets.UTF_8)
+                .contains("_checkTemplateRepositoryMethods"));
+        assertTrue(Files.readString(root.resolve("grader.dart"), StandardCharsets.UTF_8)
+                .contains("TEMPLATE_CONTRACT_V1-1.0.1"));
+    }
+
+    @Test
+    void createsAndReloadsCustomTemplateContractBlueprint(@TempDir Path root) throws Exception {
+        SyllabusService syllabus = mock(SyllabusService.class);
+        Skill skill = new Skill();
+        skill.setCode("DART_CLASSES_OOP");
+        skill.setName("Dart classes");
+        skill.setCategoryCode("DART");
+        when(syllabus.skills()).thenReturn(List.of(skill));
+        when(syllabus.categories()).thenReturn(List.of());
+        setField(service, "syllabusService", syllabus);
+        setField(service, "examsDirectory", root.toString());
+        service.loadTemplates();
+
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("template_id", "CUSTOM_PERSON_FIELDS");
+        body.put("engine_type", "TEMPLATE_CONTRACT_V1");
+        body.put("runner", "TEMPLATE_MODEL_FIELDS");
+        body.put("skill_code", "DART_CLASSES_OOP");
+        body.put("layer", "MODEL");
+        body.put("testcase_group", "LOGIC");
+        body.put("name", "Person fields");
+        body.put("description", "Reusable model field check");
+        body.put("difficulty", "basic");
+        body.put("weight_default", 1);
+        body.put("parameters_schema", Map.of(
+                "sourcePath", "lib/models/person.dart",
+                "className", "Person",
+                "fields", "uid:String,firstName:String,lastName:String"));
+        body.put("expected_template", "Person has configured fields");
+        Map<String, Object> created = service.createTemplate(body, "teacher@fpt.edu.vn");
+
+        assertEquals("TEMPLATE_CONTRACT_V1", created.get("engine_type"));
+        TestcaseTemplateService reloaded = new TestcaseTemplateService();
+        setField(reloaded, "syllabusService", syllabus);
+        setField(reloaded, "examsDirectory", root.toString());
+        reloaded.loadTemplates();
+        assertTrue(reloaded.listTemplates(null, null, null).stream().anyMatch(
+                row -> "CUSTOM_PERSON_FIELDS".equals(row.get("template_id"))
+                        && "TEMPLATE_CONTRACT_V1".equals(row.get("engine_type"))));
+    }
+
+    @Test
     void shipsFixedTodoStarterV12AsASeparateExactIdEngine() throws Exception {
         String examTest = new ClassPathResource("todo-user-v12-engine/exam_test.dart")
                 .getContentAsString(StandardCharsets.UTF_8);
@@ -270,6 +404,12 @@ class TestcaseTemplateSuiteTest {
         assertTrue(draft.startsWith(root.resolve("PE_01").resolve("testcase-drafts")));
         assertTrue(published.startsWith(root.resolve("PE_01").resolve("testcase-versions")));
         assertTrue(!draft.equals(published));
+    }
+
+    private static void setField(Object target, String name, Object value) throws Exception {
+        Field field = target.getClass().getDeclaredField(name);
+        field.setAccessible(true);
+        field.set(target, value);
     }
 
     @Test

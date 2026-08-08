@@ -55,7 +55,7 @@ public class TestcaseTemplateService {
     private static final Pattern SEMANTIC_KEY = Pattern.compile("[a-z][a-z0-9_-]*(?:\\.[a-z0-9_-]+)+");
     private static final Set<String> DIFFICULTIES = Set.of("basic", "intermediate", "advanced");
     private static final Set<String> LAYERS = Set.of(
-            "CONTRACT", "MODEL", "REPOSITORY", "VIEWMODEL", "SCREEN", "BLACKBOX", "RESPONSIVE");
+            "CONTRACT", "UNIT", "MODEL", "REPOSITORY", "VIEWMODEL", "SCREEN", "BLACKBOX", "RESPONSIVE");
     private static final Set<String> SUPPORTED_COMMON_RUNNERS = Set.of(
             "APP_BOOT", "WIDGET_VISIBLE", "FORM_REQUIRED_FIELDS", "RESPONSIVE_NO_OVERFLOW",
             "RESPONSIVE_TARGET", "NAVIGATION", "LIST_VISIBLE", "BUTTON_ACTION", "WIDGET_DIMENSION",
@@ -75,7 +75,7 @@ public class TestcaseTemplateService {
             "DIALOG_FLOW", "FORM_PREFILL", "FORM_SUBMIT");
     private static final Set<String> LOGIC_RUNNERS = Set.of(
             "FORM_REQUIRED_FIELDS", "FORM_VALIDATE_FIELDS", "LIST_ITEM_COUNT",
-            "STATE_REACTIVE_FLOW");
+            "STATE_REACTIVE_FLOW", "DIRECT_FUNCTION");
     /** Tên thân thiện hiển thị cho giáo viên; template_id vẫn giữ nguyên để grader nhận diện. */
     private static final Map<String, String> FRIENDLY_TEMPLATE_NAMES = Map.ofEntries(
             Map.entry("COMMON_APP_BOOT", "Mở ứng dụng không bị lỗi"),
@@ -311,6 +311,13 @@ public class TestcaseTemplateService {
         if (!(body.get("parameters_schema") instanceof Map<?, ?>))
             throw new IllegalArgumentException("parameters_schema phải là một JSON object");
         Map<String, Object> schema = normalizeTemplateParameters(castMap(body.get("parameters_schema")), id);
+        Set<String> allowedParameters = referenceParameterKeys(runner);
+        for (String parameter : schema.keySet()) {
+            if (!allowedParameters.contains(parameter)) {
+                throw new IllegalArgumentException("Tham số " + parameter
+                        + " không được runner " + runner + " sử dụng.");
+            }
+        }
         validateCommonParameters(runner, schema, id);
 
         Instant now = Instant.now();
@@ -329,6 +336,16 @@ public class TestcaseTemplateService {
             throw new IllegalStateException("Không lưu được template custom: " + e.getMessage(), e);
         }
         return enrichTemplate(row);
+    }
+
+    private Set<String> referenceParameterKeys(String runner) {
+        for (Map<String, Object> template : templates.values()) {
+            if (runner.equals(text(template.get("runner"), "").toUpperCase())
+                    && !bool(template.get("custom"), false)) {
+                return new LinkedHashSet<>(map(template.get("parameters_schema")).keySet());
+            }
+        }
+        return Set.of();
     }
 
     private Map<String, Object> normalizeTemplateParameters(Map<String, Object> input, String templateId) {
@@ -429,8 +446,8 @@ public class TestcaseTemplateService {
         return save(examId, body, teacherEmail, true);
     }
 
-    private Map<String, Object> save(String rawExamId, Map<String, Object> body,
-                                     String teacherEmail, boolean publish) {
+    private synchronized Map<String, Object> save(String rawExamId, Map<String, Object> body,
+                                                  String teacherEmail, boolean publish) {
         ensureReferenceTemplatesLoaded();
         String examId = ExamService.safeId(rawExamId, "đề");
         if (body == null) throw new IllegalArgumentException("Thiếu cấu hình testcase");
@@ -447,7 +464,9 @@ public class TestcaseTemplateService {
         Map<String, Object> oldConfig = parseConfig(exam.getTestcaseConfigJson());
         Map<String, Map<String, Object>> oldById = indexItems(oldConfig.get("items"));
         List<Map<String, Object>> items = normalizeItems(examId, body.get("items"), oldById, teacherEmail);
+        if (publish) validatePublishable(items);
         Map<String, Object> suite = normalizeSuite(body.get("suite"), oldConfig.get("suite"));
+        if (publish) validateSuiteCapabilities(suite);
         String engineType = engineType(items);
 
         int currentVersion = exam.getTestcaseVersion() == null ? 0 : exam.getTestcaseVersion();
@@ -484,21 +503,26 @@ public class TestcaseTemplateService {
             // Bộ mới chỉ chứa rubric trong skills_matrix hiện tại, không ghép lại dữ liệu cũ.
             Map<String, Object> publishedMatrix = generatedMatrix;
 
-            // Draft cũng materialize thành bộ code để giáo viên tải xuống kiểm tra ngay;
-            // chỉ Publish mới chuyển ExamStatus sang READY để cho phép chấm.
-            if (publish) examService.snapshotCurrentTestcase(examId);
-            Path dir = examService.testcaseDirectoryForConfiguration(examId);
+            // Mỗi bản dựng nằm ở thư mục bất biến riêng. Worker chỉ nhìn testcasePath đã
+            // Publish, vì vậy lưu Draft không thể ghi đè bộ đang chấm.
+            Path dir = examService.testcaseBuildDirectory(examId, version, publish);
             Files.createDirectories(dir);
             materializeEngine(dir, engineType);
             if (COMMON_ENGINE.equals(engineType)) materializeDirectFunctionRunner(dir, items);
+            config.put("materialized_path", dir.toAbsolutePath().normalize().toString());
             Files.writeString(dir.resolve("skills_matrix.json"), mapper.writerWithDefaultPrettyPrinter()
                     .writeValueAsString(publishedMatrix), StandardCharsets.UTF_8);
             Files.writeString(dir.resolve("testcase-config.json"), mapper.writerWithDefaultPrettyPrinter()
                     .writeValueAsString(config), StandardCharsets.UTF_8);
-            exam.setTestcasePath(dir.toAbsolutePath().normalize().toString());
             boolean engineReady = Files.exists(dir.resolve("exam_test.dart"))
                     && Files.exists(dir.resolve("grader.dart"));
-            exam.setStatus(publish && engineReady ? ExamStatus.READY : ExamStatus.BUILDING);
+            if (publish) {
+                examService.snapshotCurrentTestcase(examId);
+                exam.setTestcasePath(dir.toAbsolutePath().normalize().toString());
+                exam.setStatus(engineReady ? ExamStatus.READY : ExamStatus.BUILDING);
+            } else if (isNew || exam.getStatus() == null) {
+                exam.setStatus(ExamStatus.BUILDING);
+            }
 
             exam.setExamId(examId);
             if (isNew || exam.getCreatedBy() == null || exam.getCreatedBy().isBlank()) exam.setCreatedBy(teacherEmail);
@@ -541,15 +565,28 @@ public class TestcaseTemplateService {
     String renderDirectFunctionRunner(String source, List<Map<String, Object>> directItems) {
         StringBuilder imports = new StringBuilder();
         StringBuilder dispatch = new StringBuilder();
-        int index = 0;
+        Map<String, String> aliasByPath = new LinkedHashMap<>();
+        Map<String, Integer> arityByTarget = new LinkedHashMap<>();
         for (Map<String, Object> item : directItems) {
             Map<String, Object> params = map(item.get("parameters"));
             String functionPath = text(params.get("functionPath"), "");
             String functionName = text(params.get("functionName"), "");
-            String alias = "direct_" + index++;
             int argumentCount = directArgumentCount(params.get("argumentsJson"));
-            imports.append("import '../").append(functionPath).append("' as ").append(alias).append(";\n");
-            dispatch.append("    case '").append(functionPath).append("::").append(functionName).append("':\n")
+            String target = functionPath + "::" + functionName;
+            Integer previousArity = arityByTarget.putIfAbsent(target, argumentCount);
+            if (previousArity != null) {
+                if (previousArity != argumentCount) {
+                    throw new IllegalArgumentException("Cùng một hàm DIRECT_FUNCTION phải dùng cùng số đối số: " + target);
+                }
+                continue;
+            }
+            String alias = aliasByPath.get(functionPath);
+            if (alias == null) {
+                alias = "direct_" + aliasByPath.size();
+                aliasByPath.put(functionPath, alias);
+                imports.append("import '../").append(functionPath).append("' as ").append(alias).append(";\n");
+            }
+            dispatch.append("    case '").append(target).append("':\n")
                     .append("      return ").append(alias).append('.').append(functionName).append('(');
             for (int argument = 0; argument < argumentCount; argument++) {
                 if (argument > 0) dispatch.append(", ");
@@ -603,14 +640,44 @@ public class TestcaseTemplateService {
         out.put("suite", config.get("suite"));
         out.put("items", items);
         out.put("total_weight", totalWeight(items));
-        boolean engineReady = exam.getTestcasePath() != null
-                && Files.exists(Path.of(exam.getTestcasePath()).resolve("exam_test.dart"))
-                && Files.exists(Path.of(exam.getTestcasePath()).resolve("grader.dart"));
+        String materializedPath = text(config.get("materialized_path"));
+        boolean engineReady = materializedPath != null && !materializedPath.isBlank()
+                && Files.exists(Path.of(materializedPath).resolve("exam_test.dart"))
+                && Files.exists(Path.of(materializedPath).resolve("grader.dart"));
         out.put("engine_ready", engineReady);
         if (publish && !engineReady) {
             out.put("warning", "Đã Publish cấu hình, nhưng đề chưa có exam_test.dart và grader.dart để chạy chấm.");
         }
         return out;
+    }
+
+    /** Chặn đề READY nhưng không có tiêu chí chấm hoặc không có điểm hữu hiệu. */
+    void validatePublishable(List<Map<String, Object>> items) {
+        long enabled = items.stream().filter(item -> bool(item.get("enabled"), true)).count();
+        if (enabled == 0) {
+            throw new IllegalArgumentException("Không thể Publish bộ testcase rỗng hoặc đã tắt toàn bộ testcase.");
+        }
+        if (totalWeight(items) <= 0) {
+            throw new IllegalArgumentException("Tổng trọng số testcase phải lớn hơn 0 trước khi Publish.");
+        }
+    }
+
+    /** Không cho Publish tùy chọn chỉ mới có form cấu hình nhưng engine chưa thực thi. */
+    void validateSuiteCapabilities(Map<String, Object> suite) {
+        Map<String, Object> persistence = map(suite.get("persistence"));
+        if (bool(persistence.get("enabled"), false)) {
+            throw new IllegalArgumentException("Persistence sau reload chưa có runner thực thi; "
+                    + "hãy tắt tùy chọn này hoặc dùng DIRECT_FUNCTION qua grading adapter.");
+        }
+        Map<String, Object> golden = map(suite.get("golden"));
+        if (bool(golden.get("enabled"), false)) {
+            throw new IllegalArgumentException("Golden image chưa có runner thực thi nên chưa thể Publish.");
+        }
+        String reset = text(suite.get("reset_strategy"), "APP_RESTART");
+        if (!Set.of("APP_RESTART", "FIXTURE_STEPS").contains(reset)) {
+            throw new IllegalArgumentException("Reset strategy " + reset
+                    + " chưa được common engine thực thi.");
+        }
     }
 
     /**
@@ -829,6 +896,7 @@ public class TestcaseTemplateService {
                                                        Map<String, Map<String, Object>> oldById,
                                                        String teacherEmail) {
         if (!(rawItems instanceof List<?> list)) throw new IllegalArgumentException("items phải là một mảng testcase");
+        if (list.size() > 200) throw new IllegalArgumentException("Một đề không được vượt quá 200 testcase.");
         List<Map<String, Object>> out = new ArrayList<>();
         Set<String> ids = new LinkedHashSet<>();
         int index = 1;
@@ -852,6 +920,13 @@ public class TestcaseTemplateService {
 
             Map<String, Object> params = parameters(template, input.get("parameters"));
             if (COMMON_ENGINE.equals(templateEngine)) {
+                Set<String> allowed = referenceParameterKeys(text(template.get("runner"), "").toUpperCase());
+                for (String parameter : params.keySet()) {
+                    if (!allowed.contains(parameter)) {
+                        throw new IllegalArgumentException("Tham số " + parameter
+                                + " không được runner sử dụng ở " + instanceId);
+                    }
+                }
                 validateCommonParameters(text(template.get("runner"), ""), params, instanceId);
             }
             String difficulty = text(input.get("difficulty"));
@@ -860,7 +935,8 @@ public class TestcaseTemplateService {
                 throw new IllegalArgumentException("difficulty không hợp lệ ở " + instanceId);
             difficulty = difficulty.toLowerCase();
             double weight = number(input.get("weight"), number(template.get("weight_default"), 1));
-            if (!Double.isFinite(weight) || weight < 0) throw new IllegalArgumentException("weight không hợp lệ ở " + instanceId);
+            if (!Double.isFinite(weight) || weight < 0 || weight > 100)
+                throw new IllegalArgumentException("weight phải nằm trong khoảng 0-100 ở " + instanceId);
 
             Map<String, Object> previous = oldById.get(instanceId);
             Map<String, Object> item = new LinkedHashMap<>();
@@ -884,6 +960,8 @@ public class TestcaseTemplateService {
                     "testcase " + instanceId, 15));
             String generatedExpected = renderExpected(text(template.get("expected_template")), params);
             String configuredExpected = text(input.get("expected"));
+            if (configuredExpected != null && configuredExpected.length() > 2000)
+                throw new IllegalArgumentException("expected không được vượt quá 2000 ký tự ở " + instanceId);
             boolean expectedCustom = bool(input.get("expected_custom"), false)
                     || (configuredExpected != null && !configuredExpected.equals(generatedExpected));
             // Expected nhập từ UI là metadata hiển thị trong skills_matrix và result_json;
@@ -899,8 +977,9 @@ public class TestcaseTemplateService {
                 if (!SAFE_INSTANCE_ID.matcher(groupId).matches())
                     throw new IllegalArgumentException("group_id không hợp lệ ở " + instanceId);
                 item.put("group_id", groupId);
-                String groupName = text(input.get("group_name"));
-                item.put("group_name", groupName == null || groupName.isBlank() ? groupId : groupName.trim());
+                String groupName = limitedText(input.get("group_name"), groupId, 120,
+                        "group_name ở " + instanceId);
+                item.put("group_name", groupName.isBlank() ? groupId : groupName);
             }
             item.put("created_by", previous != null && previous.get("created_by") != null
                     ? previous.get("created_by") : teacherEmail);
@@ -914,7 +993,7 @@ public class TestcaseTemplateService {
 
     /** Mỗi group phải có từ hai testcase con và chỉ gom các testcase common. */
     private void validateGroups(List<Map<String, Object>> items) {
-        Map<String, Integer> counts = new LinkedHashMap<>();
+        Map<String, List<Map<String, Object>>> groups = new LinkedHashMap<>();
         Set<String> itemIds = new LinkedHashSet<>();
         for (Map<String, Object> item : items) itemIds.add(text(item.get("instance_id")));
         for (Map<String, Object> item : items) {
@@ -922,11 +1001,32 @@ public class TestcaseTemplateService {
             if (groupId == null || groupId.isBlank()) continue;
             if (groupId.equals(item.get("instance_id")) || itemIds.contains(groupId))
                 throw new IllegalArgumentException("group_id không được trùng instance_id: " + groupId);
-            counts.put(groupId, counts.getOrDefault(groupId, 0) + 1);
+            if (bool(item.get("enabled"), true)) {
+                groups.computeIfAbsent(groupId, ignored -> new ArrayList<>()).add(item);
+            }
         }
-        for (Map.Entry<String, Integer> entry : counts.entrySet()) {
-            if (entry.getValue() < 2)
+        for (Map.Entry<String, List<Map<String, Object>>> entry : groups.entrySet()) {
+            List<Map<String, Object>> children = entry.getValue();
+            if (children.size() < 2)
                 throw new IllegalArgumentException("Nhóm testcase " + entry.getKey() + " phải có ít nhất 2 testcase con.");
+            requireSameGroupMetadata(entry.getKey(), children, "skill_code");
+            requireSameGroupMetadata(entry.getKey(), children, "layer");
+            requireSameGroupMetadata(entry.getKey(), children, "testcase_group");
+            boolean hasDirect = children.stream().anyMatch(child -> "DIRECT_FUNCTION".equals(child.get("runner")));
+            boolean hasUi = children.stream().anyMatch(child -> !"DIRECT_FUNCTION".equals(child.get("runner")));
+            if (hasDirect && hasUi) {
+                throw new IllegalArgumentException("Nhóm testcase " + entry.getKey()
+                        + " không được trộn DIRECT_FUNCTION với testcase khởi động UI.");
+            }
+        }
+    }
+
+    private void requireSameGroupMetadata(String groupId, List<Map<String, Object>> children, String field) {
+        Set<String> values = new LinkedHashSet<>();
+        for (Map<String, Object> child : children) values.add(text(child.get(field), ""));
+        if (values.size() > 1) {
+            throw new IllegalArgumentException("Nhóm testcase " + groupId
+                    + " phải dùng cùng " + field + " để không làm sai rubric/taxonomy.");
         }
     }
 
@@ -1011,6 +1111,19 @@ public class TestcaseTemplateService {
             case "APP_BOOT" -> { /* rootKey có thể để trống nếu app không công bố root key. */ }
             default -> throw new IllegalArgumentException("Common runner không tồn tại: " + runner);
         }
+        validateSemanticParameters(params, instanceId);
+    }
+
+    /** Mọi tham số có hậu tố Key/Keys đều phải tuân theo contract ValueKey công khai. */
+    private void validateSemanticParameters(Map<String, Object> params, String instanceId) {
+        for (Map.Entry<String, Object> entry : params.entrySet()) {
+            String name = entry.getKey();
+            if (!(name.endsWith("Key") || name.endsWith("Keys"))) continue;
+            String raw = text(entry.getValue(), "").trim();
+            if (raw.isBlank()) continue;
+            List<String> values = name.endsWith("Keys") ? csv(raw) : List.of(raw);
+            for (String value : values) requiredSemanticKey(value, name + " ở " + instanceId);
+        }
     }
 
     private void validateDirectFunction(Map<String, Object> params, String instanceId) {
@@ -1038,7 +1151,33 @@ public class TestcaseTemplateService {
         String matchMode = text(params.get("matchMode"), "equals").toLowerCase();
         if (!Set.of("equals", "contains").contains(matchMode))
             throw new IllegalArgumentException("matchMode khong hop le o " + instanceId);
-        requireParameter(params, "expectedValue", instanceId);
+        validateDirectExpected(params.get("expectedValue"), expectedType, instanceId);
+    }
+
+    private void validateDirectExpected(Object raw, String expectedType, String instanceId) {
+        String value = text(raw, "").trim();
+        try {
+            switch (expectedType) {
+                case "bool" -> {
+                    if (!Set.of("true", "false").contains(value.toLowerCase())) {
+                        throw new IllegalArgumentException("expectedValue phải là true hoặc false");
+                    }
+                }
+                case "int" -> Integer.parseInt(value);
+                case "double" -> Double.parseDouble(value);
+                case "json" -> mapper.readValue(value, Object.class);
+                case "string" -> {
+                    if (raw == null) throw new IllegalArgumentException("expectedValue không được để trống");
+                }
+                case "null" -> { /* expectedValue không được dùng. */ }
+                default -> throw new IllegalArgumentException("expectedType không hợp lệ");
+            }
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException(e.getMessage() + " ở " + instanceId);
+        } catch (Exception e) {
+            throw new IllegalArgumentException("expectedValue không đúng kiểu " + expectedType
+                    + " ở " + instanceId + ": " + e.getMessage());
+        }
     }
 
     private void validateResponsiveSizes(Map<String, Object> params, String instanceId) {
@@ -1264,6 +1403,7 @@ public class TestcaseTemplateService {
         row.put("instance_id", item.get("instance_id"));
         row.put("runner", item.get("runner"));
         row.put("skill_code", item.get("skill_code"));
+        row.put("layer", item.get("layer"));
         row.put("testcase_group", item.get("testcase_group"));
         row.put("name", item.get("name"));
         row.put("description", item.get("description"));
@@ -1303,6 +1443,10 @@ public class TestcaseTemplateService {
         row.put("weight", totalWeight);
         row.put("skill_code", skillCodes.isEmpty() ? "UI_SCAFFOLD_APPBAR" : skillCodes.iterator().next());
         row.put("skill_codes", new ArrayList<>(skillCodes));
+        if (!children.isEmpty()) {
+            row.put("layer", children.get(0).get("layer"));
+            row.put("testcase_group", children.get(0).get("testcase_group"));
+        }
         row.put("children", childRows);
         row.put("suite", suite);
         return row;

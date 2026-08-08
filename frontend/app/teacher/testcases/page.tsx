@@ -452,7 +452,7 @@ export default function TestcasesPage() {
   const [clearAllModalOpen, setClearAllModalOpen] = useState(false);
   const [groupNameDraft, setGroupNameDraft] = useState("");
   const [groupModalError, setGroupModalError] = useState("");
-  const [examIdCheck, setExamIdCheck] = useState<"idle" | "checking" | "available" | "exists" | "error">("idle");
+  const [examIdCheck, setExamIdCheck] = useState<"idle" | "checking" | "available" | "editable" | "exists" | "error">("idle");
   const [newTemplateOpen, setNewTemplateOpen] = useState(false);
   const [newTemplateSaving, setNewTemplateSaving] = useState(false);
   const [newTemplateError, setNewTemplateError] = useState("");
@@ -481,11 +481,44 @@ export default function TestcasesPage() {
     const controller = new AbortController();
     setExamIdCheck("checking");
     const timer = window.setTimeout(() => {
-      fetch(`${API_BASE}/exam-setup/status/${encodeURIComponent(normalized)}`, { signal: controller.signal })
-        .then((response) => {
-          if (response.status === 404) setExamIdCheck("available");
-          else if (response.ok) setExamIdCheck("exists");
-          else setExamIdCheck("error");
+      const headers = { Authorization: `Bearer ${getToken() ?? ""}` };
+      fetch(`${API_BASE}/exam-setup/status/${encodeURIComponent(normalized)}`, { signal: controller.signal, headers })
+        .then(async (response) => {
+          if (response.status === 404) {
+            setExamIdCheck("available");
+            return;
+          }
+          if (!response.ok) {
+            setExamIdCheck("error");
+            return;
+          }
+          const exam = await response.json().catch(() => ({}));
+          const configResponse = await fetch(
+            `${API_BASE}/exam-setup/${encodeURIComponent(normalized)}/testcases`,
+            { signal: controller.signal, headers },
+          );
+          const config = configResponse.ok ? await configResponse.json().catch(() => ({})) : {};
+          if (configResponse.ok && config.created_by && Array.isArray(config.items)) {
+            setExamName(String(exam.examName || normalized));
+            setTeacherNote(String(exam.teacherNote || ""));
+            setItems(config.items as TestcaseItem[]);
+            if (config.suite && typeof config.suite === "object") {
+              const loaded = config.suite as Partial<SuiteConfig>;
+              setSuite({
+                ...emptySuite(),
+                ...loaded,
+                required_keys: Array.isArray(loaded.required_keys)
+                  ? loaded.required_keys.join(", ")
+                  : String(loaded.required_keys || ""),
+                setup_steps: Array.isArray(loaded.setup_steps) ? loaded.setup_steps : [],
+              });
+            }
+            setStatus(String(config.status || "DRAFT"));
+            setVersion(Number(config.version || 0));
+            setExamIdCheck("editable");
+          } else {
+            setExamIdCheck("exists");
+          }
         })
         .catch((error: unknown) => {
           if (error instanceof DOMException && error.name === "AbortError") return;
@@ -540,7 +573,6 @@ export default function TestcasesPage() {
   }), [templates, selectedCategory, search]);
 
   const selectedTemplate = templates.find((t) => t.template_id === selectedTemplateId) || null;
-  const editingItem = items.find((item) => item.instance_id === editingId) || null;
   const templateMap = useMemo(() => new Map(templates.map((t) => [t.template_id, t])), [templates]);
   const activeEngine = items.length ? templateMap.get(items[0].template_id)?.engine_type : undefined;
   const supportsGrouping = activeEngine === "COMMON_V1";
@@ -749,6 +781,17 @@ export default function TestcasesPage() {
       setMessage({ type: "error", text: "Chỉ có thể gộp các testcase dùng chung trong cùng một nhóm." });
       return;
     }
+    if (new Set(selected.map((item) => item.skill_code)).size > 1
+      || new Set(selected.map((item) => item.layer)).size > 1
+      || new Set(selected.map((item) => item.testcase_group)).size > 1) {
+      setMessage({ type: "error", text: "Các testcase trong một nhóm phải cùng skill, layer và loại kiểm tra để không làm sai rubric." });
+      return;
+    }
+    const selectedRunners = selected.map((item) => templateMap.get(item.template_id)?.runner || "");
+    if (selectedRunners.includes("DIRECT_FUNCTION") && selectedRunners.some((runner) => runner !== "DIRECT_FUNCTION")) {
+      setMessage({ type: "error", text: "Không được trộn DIRECT_FUNCTION với testcase khởi động UI trong cùng nhóm." });
+      return;
+    }
     const defaultName = `Nhóm kiểm tra ${String(items.filter((item) => item.group_id).length + 1).padStart(2, "0")}`;
     setGroupNameDraft(defaultName);
     setGroupModalError("");
@@ -821,7 +864,7 @@ export default function TestcasesPage() {
       setMessage({ type: "error", text: "Vui lòng nhập mã đề mới trước khi lưu." });
       return;
     }
-    if (examIdCheck !== "available") {
+    if (examIdCheck !== "available" && examIdCheck !== "editable") {
       setMessage({ type: "error", text: examIdCheck === "exists"
         ? "Mã đề đã tồn tại. Vui lòng nhập một mã đề mới."
         : "Vui lòng chờ kiểm tra mã đề hoàn tất." });
@@ -842,6 +885,7 @@ export default function TestcasesPage() {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Không lưu được cấu hình testcase");
       setStatus(data.status || (kind === "publish" ? "PUBLISHED" : "DRAFT"));
+      setExamIdCheck("editable");
       setVersion(Number(data.version ?? version));
       if (data.suite && typeof data.suite === "object") {
         const loadedSuite = data.suite as Partial<SuiteConfig>;
@@ -905,6 +949,7 @@ export default function TestcasesPage() {
             />
             {examIdCheck === "checking" && <p className="mt-1.5 text-[11px] text-slate-400">Đang kiểm tra mã đề…</p>}
             {examIdCheck === "available" && <p className="mt-1.5 text-[11px] font-semibold text-emerald-600">Mã đề chưa tồn tại, có thể tạo.</p>}
+            {examIdCheck === "editable" && <p className="mt-1.5 text-[11px] font-semibold text-indigo-600">Đã tải cấu hình hiện tại; bạn có thể tiếp tục sửa Draft hoặc Publish phiên bản mới.</p>}
             {examIdCheck === "exists" && <p className="mt-1.5 text-[11px] font-semibold text-rose-600">Mã đề đã tồn tại, hãy chọn mã khác.</p>}
             {examIdCheck === "error" && <p className="mt-1.5 text-[11px] font-semibold text-amber-600">Không kiểm tra được mã đề. Vui lòng thử lại.</p>}
           </div>
@@ -939,10 +984,10 @@ export default function TestcasesPage() {
             <button onClick={openPreview} disabled={version === 0 || !!saving} className="flex items-center gap-2 rounded-lg border border-cyan-200 bg-cyan-50 px-3.5 py-2.5 text-sm font-semibold text-cyan-700 hover:bg-cyan-100 disabled:cursor-not-allowed disabled:opacity-50">
               <Eye size={16} /> Xem file sinh
             </button>
-            <button onClick={() => save("draft")} disabled={!!saving || examIdCheck !== "available" || !examName.trim()} className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3.5 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50">
+            <button onClick={() => save("draft")} disabled={!!saving || !["available", "editable"].includes(examIdCheck) || !examName.trim()} className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3.5 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50">
               {saving === "draft" ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />} Lưu Draft
             </button>
-            <button onClick={() => save("publish")} disabled={!!saving || examIdCheck !== "available" || !examName.trim()} className="flex items-center gap-2 rounded-lg bg-indigo-600 px-3.5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50">
+            <button onClick={() => save("publish")} disabled={!!saving || !["available", "editable"].includes(examIdCheck) || !examName.trim()} className="flex items-center gap-2 rounded-lg bg-indigo-600 px-3.5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50">
               {saving === "publish" ? <Loader2 size={16} className="animate-spin" /> : <UploadCloud size={16} />} Publish snapshot
             </button>
           </div>
@@ -972,14 +1017,14 @@ export default function TestcasesPage() {
           </div>
           <div className="border-t border-slate-100 px-4 py-3">
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-              <label className="text-xs font-semibold text-slate-600">Profile<select value={suite.profile} onChange={(e) => updateSuite({ profile: e.target.value as SuiteConfig["profile"] })} className="mt-1.5 w-full rounded-md border border-slate-200 bg-white px-2.5 py-2 text-xs font-normal"><option value="COMMON_UI">Common UI</option><option value="FLUTTER_LAYERED">Flutter layered</option><option value="PERSISTENCE">Persistence</option><option value="REPOSITORY_SQLITE">Repository + SQLite</option><option value="GOLDEN_RESPONSIVE">Golden responsive</option></select></label>
-              <label className="text-xs font-semibold text-slate-600">Reset strategy<select value={suite.reset_strategy} onChange={(e) => updateSuite({ reset_strategy: e.target.value as SuiteConfig["reset_strategy"] })} className="mt-1.5 w-full rounded-md border border-slate-200 bg-white px-2.5 py-2 text-xs font-normal"><option value="APP_RESTART">App restart</option><option value="FIXTURE_STEPS">Fixture steps</option><option value="CLEAR_STORAGE">Clear storage contract</option><option value="PERSISTENCE_PHASE">Persistence phase</option></select></label>
+                  <label className="text-xs font-semibold text-slate-600">Profile<select value={suite.profile} onChange={(e) => updateSuite({ profile: e.target.value as SuiteConfig["profile"] })} className="mt-1.5 w-full rounded-md border border-slate-200 bg-white px-2.5 py-2 text-xs font-normal"><option value="COMMON_UI">Common UI</option><option value="FLUTTER_LAYERED">Flutter layered</option><option value="PERSISTENCE" disabled>Persistence (chưa có runner)</option><option value="REPOSITORY_SQLITE" disabled>Repository + SQLite (dùng grading adapter/DIRECT_FUNCTION)</option><option value="GOLDEN_RESPONSIVE" disabled>Golden responsive (chưa có runner)</option></select></label>
+                  <label className="text-xs font-semibold text-slate-600">Reset strategy<select value={suite.reset_strategy} onChange={(e) => updateSuite({ reset_strategy: e.target.value as SuiteConfig["reset_strategy"] })} className="mt-1.5 w-full rounded-md border border-slate-200 bg-white px-2.5 py-2 text-xs font-normal"><option value="APP_RESTART">App restart</option><option value="FIXTURE_STEPS">Fixture steps</option><option value="CLEAR_STORAGE" disabled>Clear storage (chưa hỗ trợ)</option><option value="PERSISTENCE_PHASE" disabled>Persistence phase (chưa hỗ trợ)</option></select></label>
             </div>
             <div className="mt-4 flex items-center justify-between gap-2"><div><p className="text-xs font-bold text-slate-700">Source contracts</p><p className="text-[10px] text-slate-400">Dùng path trong lib/ và tên Dart identifier chính xác.</p></div><button onClick={addSourceContract} type="button" className="flex items-center gap-1 rounded-md border border-indigo-200 px-2.5 py-1.5 text-xs font-semibold text-indigo-600 hover:bg-indigo-50"><Plus size={13} /> Thêm contract</button></div>
             {suite.source_contracts.length === 0 ? <p className="mt-3 rounded-md border border-dashed border-slate-200 p-3 text-xs text-slate-400">Chưa khai báo symbol bắt buộc.</p> : <div className="mt-3 space-y-2">{suite.source_contracts.map((contract, index) => <div key={index} className="grid grid-cols-1 gap-2 rounded-md border border-slate-200 bg-slate-50 p-2 md:grid-cols-[150px_minmax(180px,1fr)_minmax(180px,1fr)_auto]"><select value={contract.type} onChange={(e) => updateSourceContract(index, { type: e.target.value as SourceContractType })} className="rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs"><option value="model">Model</option><option value="repository">Repository</option><option value="provider">Provider</option><option value="screen">Screen</option><option value="helper">Helper</option><option value="service">Service</option></select><input value={contract.path} onChange={(e) => updateSourceContract(index, { path: e.target.value })} placeholder="lib/models/user.dart" className="rounded-md border border-slate-200 bg-white px-2 py-1.5 font-mono text-xs" /><input value={contract.symbols} onChange={(e) => updateSourceContract(index, { symbols: e.target.value })} placeholder="User, UserStatus" className="rounded-md border border-slate-200 bg-white px-2 py-1.5 font-mono text-xs" /><button type="button" onClick={() => removeSourceContract(index)} className="rounded-md p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600" title="Xóa contract"><Trash2 size={14} /></button></div>)}</div>}
             <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
-              <div className="rounded-md border border-slate-200 p-3"><label className="flex items-center gap-2 text-xs font-semibold text-slate-600"><input type="checkbox" checked={suite.persistence.enabled} onChange={(e) => updateSuite({ persistence: { ...suite.persistence, enabled: e.target.checked } })} /> Persistence sau reload</label><div className="mt-2 grid grid-cols-2 gap-2"><select value={suite.persistence.storage_kind} onChange={(e) => updateSuite({ persistence: { ...suite.persistence, storage_kind: e.target.value as PersistenceConfig["storage_kind"] } })} className="rounded-md border border-slate-200 px-2 py-1.5 text-xs"><option value="none">Chưa chọn storage</option><option value="sqlite">SQLite</option><option value="api">API</option><option value="shared_preferences">SharedPreferences</option></select><input value={suite.persistence.reload_key} onChange={(e) => updateSuite({ persistence: { ...suite.persistence, reload_key: e.target.value } })} placeholder="action.reload" className="rounded-md border border-slate-200 px-2 py-1.5 font-mono text-xs" /></div><textarea value={suite.persistence.notes} onChange={(e) => updateSuite({ persistence: { ...suite.persistence, notes: e.target.value } })} placeholder="Dữ liệu phải còn hoặc biến mất sau reload" rows={2} className="mt-2 w-full resize-y rounded-md border border-slate-200 px-2 py-1.5 text-xs" /></div>
-              <div className="rounded-md border border-slate-200 p-3"><label className="flex items-center gap-2 text-xs font-semibold text-slate-600"><input type="checkbox" checked={suite.golden.enabled} onChange={(e) => updateSuite({ golden: { ...suite.golden, enabled: e.target.checked } })} /> Golden image</label><div className="mt-2 grid grid-cols-1 gap-2"><input value={suite.golden.portrait_asset} onChange={(e) => updateSuite({ golden: { ...suite.golden, portrait_asset: e.target.value } })} placeholder="goldens/home_portrait.png" className="rounded-md border border-slate-200 px-2 py-1.5 font-mono text-xs" /><input value={suite.golden.landscape_asset} onChange={(e) => updateSuite({ golden: { ...suite.golden, landscape_asset: e.target.value } })} placeholder="goldens/home_landscape.png" className="rounded-md border border-slate-200 px-2 py-1.5 font-mono text-xs" /><label className="text-[11px] text-slate-500">Ngưỡng sai khác<input type="number" min={0} max={1} step={0.001} value={suite.golden.threshold} onChange={(e) => updateSuite({ golden: { ...suite.golden, threshold: Number(e.target.value) } })} className="mt-1 w-full rounded-md border border-slate-200 px-2 py-1.5 text-xs" /></label></div></div>
+                  <div className="rounded-md border border-slate-200 bg-slate-50 p-3 opacity-70"><label className="flex items-center gap-2 text-xs font-semibold text-slate-600"><input type="checkbox" checked={suite.persistence.enabled} disabled={!suite.persistence.enabled} onChange={() => updateSuite({ persistence: { ...suite.persistence, enabled: false } })} /> Persistence sau reload · chưa có runner</label><p className="mt-2 text-[10px] leading-relaxed text-slate-500">Hiện hãy chấm Repository/SQLite qua grading adapter và DIRECT_FUNCTION. Nếu đề cũ đang bật, bỏ dấu tích trước khi Publish.</p></div>
+                  <div className="rounded-md border border-slate-200 bg-slate-50 p-3 opacity-70"><label className="flex items-center gap-2 text-xs font-semibold text-slate-600"><input type="checkbox" checked={suite.golden.enabled} disabled={!suite.golden.enabled} onChange={() => updateSuite({ golden: { ...suite.golden, enabled: false } })} /> Golden image · chưa có runner</label><p className="mt-2 text-[10px] leading-relaxed text-slate-500">Nếu cấu hình cũ đang bật, bỏ dấu tích; chức năng chỉ được bật lại khi engine có phép so sánh golden thật.</p></div>
             </div>
             <div className="mt-4 flex flex-wrap items-center justify-between gap-2"><div><p className="text-xs font-bold text-slate-700">Setup UI dùng chung</p><p className="mt-0.5 text-[10px] text-slate-400">Whitelist: tap, nhập text, chờ/kiểm tra key. Không chạy Dart code tùy ý.</p></div><button onClick={addSuiteStep} type="button" className="flex items-center gap-1 rounded-md bg-indigo-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700"><Plus size={13} /> Thêm bước</button></div>
             {suite.setup_steps.length === 0 ? <p className="mt-3 rounded-md border border-dashed border-slate-200 p-3 text-xs text-slate-400">Chưa có setup chung. Fixture phải ở đúng trạng thái sau khi app khởi động.</p> : <div className="mt-3 space-y-2">{suite.setup_steps.map((step, index) => <div key={index} className="grid grid-cols-1 gap-2 rounded-md border border-slate-200 bg-slate-50 p-2 md:grid-cols-[170px_minmax(160px,1fr)_minmax(160px,1fr)_auto]"><p className="text-[10px] leading-relaxed text-slate-500 md:col-span-full">{setupStepHint(step.type)}</p><select value={step.type} onChange={(e) => updateSuiteStep(index, { type: e.target.value as SetupStep["type"] })} className="rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs"><option value="tap">Tap key</option><option value="enter_text">Nhập text</option><option value="expect_visible">Bắt buộc thấy key</option><option value="expect_absent">Bắt buộc ẩn key</option><option value="wait_for_visible">Chờ key xuất hiện</option></select><input value={step.key} onChange={(e) => updateSuiteStep(index, { key: e.target.value })} placeholder="action.add" className="rounded-md border border-slate-200 bg-white px-2 py-1.5 font-mono text-xs" />{step.type === "enter_text" ? <input value={step.value || ""} onChange={(e) => updateSuiteStep(index, { value: e.target.value })} placeholder="Giá trị nhập" className="rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs" /> : <div />}{step.type === "wait_for_visible" ? <input type="number" min={100} max={30000} value={step.timeout_ms || suite.step_timeout_ms} onChange={(e) => updateSuiteStep(index, { timeout_ms: Number(e.target.value) })} className="rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs" /> : <div /> }<button onClick={() => removeSuiteStep(index)} type="button" className="rounded-md p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600" title="Xóa bước"><Trash2 size={14} /></button></div>)}</div>}
@@ -1167,7 +1212,7 @@ export default function TestcasesPage() {
             {newTemplateOpen && (
               <div className="fixed inset-0 z-[90] flex min-h-screen min-w-full items-center justify-center bg-slate-950/60 p-4" role="dialog" aria-modal="true" onClick={() => !newTemplateSaving && setNewTemplateOpen(false)}>
                 <div className="max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
-                  <div className="flex items-start justify-between gap-4"><div><p className="eyebrow">Thư viện template</p><h2 className="mt-1 text-lg font-bold text-slate-800">Tạo testcase template mới</h2><p className="mt-1 max-w-2xl text-xs leading-relaxed text-slate-500">Bạn đang tạo một khung tái sử dụng. Chỉ chọn runner đã có trong engine; muốn có loại kiểm tra mới như SQLite, Riverpod wiring hoặc golden image thì cần bổ sung runner ở backend trước.</p></div><button type="button" onClick={() => setNewTemplateOpen(false)} className="rounded-lg p-1 text-slate-400 hover:bg-slate-100" aria-label="Đóng"><X size={18} /></button></div>
+                  <div className="flex items-start justify-between gap-4"><div><p className="eyebrow">Thư viện template</p><h2 className="mt-1 text-lg font-bold text-slate-800">Tạo testcase template mới</h2><p className="mt-1 max-w-2xl text-xs leading-relaxed text-slate-500">Bạn đang tạo một khung tái sử dụng từ runner đã có. Logic Repository/SQLite có thể nối qua template grading adapter; persistence qua reload hoặc golden image chỉ được bật khi có runner thực thi tương ứng.</p></div><button type="button" onClick={() => setNewTemplateOpen(false)} className="rounded-lg p-1 text-slate-400 hover:bg-slate-100" aria-label="Đóng"><X size={18} /></button></div>
                   <div className="mt-5 grid grid-cols-1 gap-3 md:grid-cols-2">
                     <label className="text-xs font-semibold text-slate-600">Mã template <span className="font-normal text-slate-400">(để trống để tự sinh)</span><input value={newTemplate.template_id} onChange={(e) => setNewTemplate((v) => ({ ...v, template_id: e.target.value.toUpperCase().replace(/[^A-Z0-9_-]/g, "") }))} placeholder="CUSTOM_EMAIL_INVALID" className="mt-1.5 w-full rounded-md border border-slate-200 px-2.5 py-2 font-mono text-xs" /></label>
                     <label className="text-xs font-semibold text-slate-600">Tên template<input value={newTemplate.name} onChange={(e) => setNewTemplate((v) => ({ ...v, name: e.target.value }))} placeholder="Kiểm tra email không hợp lệ" className="mt-1.5 w-full rounded-md border border-slate-200 px-2.5 py-2 text-xs" /></label>

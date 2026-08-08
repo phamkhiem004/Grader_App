@@ -203,15 +203,7 @@ public class ExamService {
     public List<Map<String, String>> readExamTestcaseFiles(String examId) {
         safeId(examId, "đề");
         List<Map<String, String>> out = new ArrayList<>();
-        Path dir = null;
-        Exam exam = examRepository.findByExamId(examId).orElse(null);
-        if (exam != null && exam.getTestcasePath() != null && !exam.getTestcasePath().isBlank()
-                && Files.exists(Path.of(exam.getTestcasePath()))) {
-            dir = Path.of(exam.getTestcasePath());
-        } else {
-            Path disk = examsRoot().resolve(examId).resolve("testcase");
-            if (Files.exists(disk)) dir = disk;
-        }
+        Path dir = previewTestcaseDirOf(examId);
         if (dir == null) return out;
 
         final Path base = dir;
@@ -265,6 +257,41 @@ public class ExamService {
         safeId(examId, "đề");
         Path existing = testcaseDirOf(examId);
         return existing != null ? existing : examsRoot().resolve(examId).resolve("testcase");
+    }
+
+    /**
+     * Mỗi lần dựng template ghi vào một thư mục bất biến mới. Draft không được chạm vào
+     * testcasePath đang dùng để chấm; Publish chỉ đổi con trỏ DB sau khi dựng đủ file.
+     */
+    public Path testcaseBuildDirectory(String examId, int version, boolean publish) {
+        safeId(examId, "đề");
+        String folder = publish ? "testcase-versions" : "testcase-drafts";
+        String build = "v" + version + "-" + Instant.now().toEpochMilli()
+                + "-" + Long.toUnsignedString(System.nanoTime(), 36);
+        return examsRoot().resolve(examId).resolve(folder).resolve(build)
+                .toAbsolutePath().normalize();
+    }
+
+    /** Draft mới nhất dùng cho màn hình preview/tải xuống, không dùng cho worker chấm. */
+    private Path previewTestcaseDirOf(String examId) {
+        Exam exam = examRepository.findByExamId(examId).orElse(null);
+        if (exam != null && exam.getTestcaseConfigJson() != null
+                && !exam.getTestcaseConfigJson().isBlank()) {
+            try {
+                String raw = mapper.readTree(exam.getTestcaseConfigJson())
+                        .path("materialized_path").asText("");
+                if (!raw.isBlank()) {
+                    Path candidate = Path.of(raw).toAbsolutePath().normalize();
+                    Path examRoot = examsRoot().resolve(examId).toAbsolutePath().normalize();
+                    if (candidate.startsWith(examRoot) && Files.isDirectory(candidate)) {
+                        return candidate;
+                    }
+                }
+            } catch (Exception e) {
+                log.warn("Không đọc được đường dẫn preview testcase của {}: {}", examId, e.getMessage());
+            }
+        }
+        return testcaseDirOf(examId);
     }
 
     /** Sao chép snapshot testcase hiện tại trước khi Publish để đề cũ vẫn đối chiếu được. */
@@ -355,7 +382,7 @@ public class ExamService {
     /** ZIP 3 file testcase (exam_test.dart + grader.dart + skills_matrix.json) để tải về / upload lại; null nếu thiếu. */
     public byte[] zipTestcase(String examId) throws Exception {
         safeId(examId, "đề");
-        Path dir = testcaseDirOf(examId);
+        Path dir = previewTestcaseDirOf(examId);
         if (dir == null) return null;
         Map<String, String> files = new LinkedHashMap<>();
         for (String f : List.of("exam_test.dart", "grader.dart", "skills_matrix.json")) {

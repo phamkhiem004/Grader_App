@@ -16,14 +16,44 @@ Map<String, dynamic> _activeSuite = <String, dynamic>{};
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   final matrix = _loadMatrix();
+  final mode = Platform.environment['GRADER_CASE_MODE'] ?? 'all';
+
+  if (mode == 'preflight') {
+    final candidates = matrix.entries.where(
+      (entry) => !_isDirectMetadata(_asMap(entry.value)),
+    );
+    if (candidates.isNotEmpty) {
+      final metadata = _asMap(candidates.first.value);
+      testWidgets('_GRADER_PREFLIGHT', (tester) async {
+        _activeCase = metadata;
+        _activeSuite = _asMap(metadata['suite']);
+        await _checkSourceContracts();
+        await _boot(tester);
+      });
+    }
+    return;
+  }
 
   for (final entry in matrix.entries) {
     final testId = entry.key;
     final metadata = _asMap(entry.value);
+    if (mode == 'direct' && !_isDirectMetadata(metadata)) continue;
+    if (mode == 'case' && Platform.environment['GRADER_CASE_ID'] != testId) {
+      continue;
+    }
     testWidgets(testId, (tester) async {
       await _runCase(tester, testId, metadata);
     });
   }
+}
+
+bool _isDirectMetadata(Map<String, dynamic> metadata) {
+  if ((metadata['runner'] ?? '').toString() == 'DIRECT_FUNCTION') return true;
+  if ((metadata['runner'] ?? '').toString() != 'GROUP') return false;
+  final children = _asList(metadata['children']);
+  return children.isNotEmpty && children.every(
+    (child) => (_asMap(child)['runner'] ?? '').toString() == 'DIRECT_FUNCTION',
+  );
 }
 
 Future<void> _runCase(
@@ -97,7 +127,7 @@ Future<void> _runCase(
       }
       final submitKey = _text(parameters, 'submitKey');
       expect(_byKey(submitKey), findsOneWidget, reason: 'Thiếu submit key: $submitKey');
-      await tester.tap(_byKey(submitKey));
+      await _tap(tester, _byKey(submitKey), submitKey);
       await _settle(tester);
       for (final key in _csv(parameters, 'errorKeys')) {
         expect(_byKey(key), findsOneWidget, reason: 'Thiếu error key: $key');
@@ -125,13 +155,13 @@ Future<void> _runCase(
       await _boot(tester);
       final openKey = _text(parameters, 'openKey');
       final destinationKey = _text(parameters, 'destinationKey');
-      await tester.tap(_byKey(openKey));
+      await _tap(tester, _byKey(openKey), openKey);
       await _settle(tester);
       expect(_byKey(destinationKey), findsOneWidget);
       final backKey = _text(parameters, 'backKey');
       final homeKey = _text(parameters, 'homeKey');
       if (backKey.isNotEmpty && homeKey.isNotEmpty) {
-        await tester.tap(_byKey(backKey));
+        await _tap(tester, _byKey(backKey), backKey);
         await _settle(tester);
         expect(_byKey(homeKey), findsOneWidget);
       }
@@ -139,16 +169,19 @@ Future<void> _runCase(
     case 'LIST_VISIBLE':
       await _boot(tester);
       final listKey = _text(parameters, 'listKey');
-      expect(_byKey(listKey), findsOneWidget);
+      final listFinder = _byKey(listKey);
+      expect(listFinder, findsOneWidget);
       for (final key in _csv(parameters, 'itemKeys')) {
-        expect(_byKey(key), findsOneWidget, reason: 'Thiếu item semantic key: $key');
+        final itemFinder = _exactByKey(key);
+        await _revealLazyItem(tester, listFinder, itemFinder);
+        expect(itemFinder, findsOneWidget, reason: 'Thiếu item semantic key: $key');
       }
       return;
     case 'BUTTON_ACTION':
       await _boot(tester);
       final buttonKey = _text(parameters, 'buttonKey');
       final resultKey = _text(parameters, 'resultKey');
-      await tester.tap(_byKey(buttonKey));
+      await _tap(tester, _byKey(buttonKey), buttonKey);
       await _settle(tester);
       expect(_byKey(resultKey), findsOneWidget);
       return;
@@ -269,21 +302,29 @@ Future<void> _checkStateReactiveFlow(
   final absentKey = _text(parameters, 'absentKey');
   expect(_byKey(initialKey), findsOneWidget,
       reason: 'Thiếu state ban đầu: $initialKey');
-  await tester.tap(_byKey(actionKey));
+  await _tap(tester, _byKey(actionKey), actionKey);
   await _settle(tester);
   expect(_byKey(updatedKey), findsOneWidget,
       reason: 'State không cập nhật sau action $actionKey: $updatedKey');
   if (absentKey.isNotEmpty) {
-    expect(_byKey(absentKey), findsNothing,
+    expect(_goneByKey(absentKey), findsNothing,
         reason: 'State cũ vẫn còn sau action $actionKey: $absentKey');
   }
 }
 
 Future<void> _boot(WidgetTester tester) async {
-  // Mỗi testcase tự khởi động lại app rồi áp dụng fixture/setup UI chung.
+  // Dispose the previous widget tree; unknown static singletons are not
+  // pretended to be reset because the common engine cannot inspect them safely.
+  await tester.pumpWidget(const SizedBox.shrink());
+  await tester.pump();
   await tester.runAsync(() async {
-    student_app.main();
-    await Future<void>.delayed(const Duration(milliseconds: 500));
+    await Future<void>.sync(student_app.main).timeout(
+      const Duration(seconds: 8),
+      onTimeout: () => throw TestFailure(
+        'student_app.main() did not complete within 8 seconds.',
+      ),
+    );
+    await Future<void>.delayed(const Duration(milliseconds: 50));
   });
   await tester.pump();
   expect(tester.takeException(), isNull);
@@ -312,7 +353,7 @@ Future<void> _runSetupSteps(WidgetTester tester, List<dynamic> rawSteps, String 
     switch (type) {
       case 'tap':
         expect(_byKey(key), findsOneWidget, reason: 'Setup $owner #$index thiếu key: $key');
-        await tester.tap(_byKey(key));
+        await _tap(tester, _byKey(key), key);
         await _settle(tester);
         break;
       case 'enter_text':
@@ -349,11 +390,57 @@ Future<void> _waitForVisible(WidgetTester tester, String key, int timeoutMs) asy
   expect(_byKey(key), findsOneWidget, reason: 'Không xuất hiện semantic key sau khi chờ: $key');
 }
 
+Future<void> _revealLazyItem(
+  WidgetTester tester,
+  Finder listFinder,
+  Finder itemFinder,
+) async {
+  if (itemFinder.evaluate().isNotEmpty) return;
+  final scrollable = find.descendant(
+    of: listFinder,
+    matching: find.byType(Scrollable, skipOffstage: false),
+  );
+  if (scrollable.evaluate().isEmpty) return;
+  try {
+    await tester.scrollUntilVisible(
+      itemFinder,
+      240,
+      scrollable: scrollable.first,
+      maxScrolls: 60,
+    );
+    await _settle(tester);
+  } catch (_) {
+    // Assertion bên gọi sẽ báo đúng key không tìm thấy thay vì lỗi scroll chung chung.
+  }
+}
+
+Finder _goneByKey(String key) =>
+    find.byKey(ValueKey<String>(key), skipOffstage: false);
+
+Finder _exactByKey(String key) =>
+    find.byKey(ValueKey<String>(key), skipOffstage: false);
+
+Future<void> _tap(WidgetTester tester, Finder finder, String key) async {
+  expect(finder, findsOneWidget, reason: 'Missing action semantic key: $key');
+  try {
+    await tester.tap(finder, warnIfMissed: false);
+  } catch (error, stack) {
+    _failIfActionThrew(key, error, stack);
+  }
+}
+
+Never _failIfActionThrew(String key, Object error, StackTrace stack) {
+  fail('Action $key threw an exception: $error\n$stack');
+}
+
 Future<void> _settle(WidgetTester tester) async {
-  // Chờ có giới hạn để animation/loading nền không khóa cả batch chấm.
-  await tester.runAsync(() async {
-    await Future<void>.delayed(const Duration(milliseconds: 300));
-  });
+  // Advance fake time and the real event loop so animations and overlays settle.
+  for (var frame = 0; frame < 6; frame++) {
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 1)),
+    );
+  }
   await tester.pump();
 }
 
@@ -509,7 +596,7 @@ Future<void> _checkFormValidateFields(
     await tester.enterText(fieldFinder, _decodeInput(values[i]));
   }
   final submitKey = _requiredText(parameters, 'submitKey');
-  await tester.tap(_byKey(submitKey));
+  await _tap(tester, _byKey(submitKey), submitKey);
   await _settle(tester);
   for (final errorKey in errors) {
     expect(_byKey(errorKey), findsOneWidget,
@@ -529,7 +616,11 @@ Future<void> _checkListItemCount(
   if (itemKeys.isEmpty) fail('Thiếu itemKeys khi kiểm tra list.');
   var count = 0;
   for (final itemKey in itemKeys) {
-    count += find.descendant(of: listFinder, matching: _byKey(itemKey)).evaluate().length;
+    final itemFinder = _exactByKey(itemKey);
+    await _revealLazyItem(tester, listFinder, itemFinder);
+    if (find.descendant(of: listFinder, matching: itemFinder).evaluate().isNotEmpty) {
+      count++;
+    }
   }
   expect(count, _number(parameters, 'expectedCount', double.nan).toInt(),
       reason: 'Số item trong $listKey không đúng');
@@ -541,7 +632,7 @@ Future<void> _checkFormPrefill(
 ) async {
   await _boot(tester);
   final editKey = _requiredText(parameters, 'editKey');
-  await tester.tap(_byKey(editKey));
+  await _tap(tester, _byKey(editKey), editKey);
   await _settle(tester);
   final fields = _csv(parameters, 'fieldKeys');
   final expectedValues = _csv(parameters, 'expectedValues');
@@ -577,12 +668,13 @@ Future<void> _checkFormSubmit(
     _assertTargetType(tester, fieldFinder, fields[i], fieldType);
     await tester.enterText(fieldFinder, _decodeInput(values[i]));
   }
-  await tester.tap(_byKey(_requiredText(parameters, 'submitKey')));
+  final submitKey = _requiredText(parameters, 'submitKey');
+  await _tap(tester, _byKey(submitKey), submitKey);
   await _settle(tester);
   final resultKey = _text(parameters, 'resultKey');
   if (resultKey.isNotEmpty) expect(_byKey(resultKey), findsOneWidget);
   for (final errorKey in _csv(parameters, 'errorKeys')) {
-    expect(_byKey(errorKey), findsNothing,
+    expect(_goneByKey(errorKey), findsNothing,
         reason: 'Dữ liệu hợp lệ nhưng vẫn còn error key: $errorKey');
   }
 }
@@ -593,7 +685,7 @@ Future<void> _checkDialogFlow(
 ) async {
   await _boot(tester);
   final actionKey = _requiredText(parameters, 'actionKey');
-  await tester.tap(_byKey(actionKey));
+  await _tap(tester, _byKey(actionKey), actionKey);
   await _settle(tester);
 
   final dialogKey = _requiredText(parameters, 'dialogKey');
@@ -602,7 +694,7 @@ Future<void> _checkDialogFlow(
   _assertTargetType(tester, dialogFinder, dialogKey, 'dialog');
 
   final decisionKey = _requiredText(parameters, 'decisionKey');
-  await tester.tap(_byKey(decisionKey));
+  await _tap(tester, _byKey(decisionKey), decisionKey);
   await _settle(tester);
   final resultKey = _text(parameters, 'resultKey');
   if (resultKey.isNotEmpty) expect(_byKey(resultKey), findsOneWidget);
@@ -615,20 +707,23 @@ Future<void> _checkWidgetSemanticsLabel(
   Map<String, dynamic> parameters,
 ) async {
   final semantics = tester.ensureSemantics();
-  addTearDown(semantics.dispose);
-  await _boot(tester);
-  final key = _requiredText(parameters, 'targetKey');
-  final targetType = _text(parameters, 'targetType', 'any');
-  final finder = _byKey(key);
-  expect(finder, findsOneWidget, reason: 'Không tìm thấy target key: $key');
-  _assertTargetType(tester, finder, key, targetType);
-  final actual = tester.getSemantics(finder).label;
-  final expected = _requiredText(parameters, 'expectedLabel');
-  final matchMode = _text(parameters, 'matchMode', 'equals').toLowerCase();
-  if (matchMode == 'contains') {
-    expect(actual, contains(expected), reason: 'Semantics label của $key không chứa expectedLabel');
-  } else {
-    expect(actual, expected, reason: 'Semantics label của $key không đúng');
+  try {
+    await _boot(tester);
+    final key = _requiredText(parameters, 'targetKey');
+    final targetType = _text(parameters, 'targetType', 'any');
+    final finder = _byKey(key);
+    expect(finder, findsOneWidget, reason: 'Missing target key: $key');
+    _assertTargetType(tester, finder, key, targetType);
+    final actual = tester.getSemantics(finder).label;
+    final expected = _requiredText(parameters, 'expectedLabel');
+    final matchMode = _text(parameters, 'matchMode', 'equals').toLowerCase();
+    if (matchMode == 'contains') {
+      expect(actual, contains(expected), reason: 'Semantics label does not contain expectedLabel.');
+    } else {
+      expect(actual, expected, reason: 'Semantics label does not match expectedLabel.');
+    }
+  } finally {
+    semantics.dispose();
   }
 }
 
@@ -919,23 +1014,43 @@ Finder _buttonWithText(RegExp pattern) {
 }
 
 Finder _validationErrorFor(String key) {
-  final all = find.byWidgetPredicate(
-    (widget) => widget is Text && RegExp(
-      r'required|minimum|min|invalid|bắt buộc|tối thiểu|không hợp lệ|lỗi',
-      caseSensitive: false,
-    ).hasMatch(widget.data ?? ''),
+  final fieldName = key
+      .replaceFirst(RegExp(r'^error[._-]?'), '')
+      .replaceAll(RegExp(r'^(title|name|full_name)$'), 'fullName');
+  final candidates = <String>[
+    'field.$fieldName',
+    'field.${fieldName.replaceAll('_', '-')}',
+  ];
+  Finder? field;
+  for (final candidate in candidates) {
+    final finder = _exactByKey(candidate);
+    if (finder.evaluate().isNotEmpty) {
+      field = finder;
+      break;
+    }
+  }
+  if (field == null) return _notFound();
+  final errorWidgets = find.byWidgetPredicate(
+    (widget) {
+      if (widget is InputDecorator) {
+        return widget.decoration.errorText?.trim().isNotEmpty == true;
+      }
+      if (widget is Text) {
+        return RegExp(
+          r'required|minimum|min|invalid|error',
+          caseSensitive: false,
+        ).hasMatch(widget.data ?? '');
+      }
+      return false;
+    },
     skipOffstage: false,
   );
-  final email = key.toLowerCase().contains('email');
-  final specific = find.byWidgetPredicate(
-    (widget) => widget is Text && (email
-        ? RegExp(r'email|e-mail|định dạng', caseSensitive: false)
-            .hasMatch(widget.data ?? '')
-        : RegExp(r'name|họ|tên|full', caseSensitive: false)
-            .hasMatch(widget.data ?? '')),
-    skipOffstage: false,
+  final scoped = find.descendant(
+    of: field,
+    matching: errorWidgets,
+    matchRoot: true,
   );
-  return specific.evaluate().isNotEmpty ? specific.first : all;
+  return scoped.evaluate().isNotEmpty ? scoped.first : _notFound();
 }
 
 Finder _notFound() => find.byWidgetPredicate((_) => false);

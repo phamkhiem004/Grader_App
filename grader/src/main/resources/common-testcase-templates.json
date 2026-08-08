@@ -442,7 +442,7 @@
     "profile_id": "COMMON_SEMANTIC_V1",
     "runner": "DIRECT_FUNCTION",
     "skill_code": "DART_CLASSES_OOP",
-    "layer": "CONTRACT",
+    "layer": "UNIT",
     "name": "Gọi trực tiếp hàm Dart theo tên cấu hình",
     "description": "Import file lib đã khai báo, gọi top-level function theo đúng tên, truyền arguments JSON và so sánh giá trị trả về. Đổi functionName sẽ đổi hàm được gọi trong exam_test.dart sinh ra.",
     "difficulty": "advanced",
@@ -456,5 +456,27 @@
       "matchMode": "equals"
     },
     "expected_template": "Hàm {functionName} trong {functionPath} phải trả về {expectedValue}."
+  },
+  {
+    "template_id": "COMMON_GRADING_ADAPTER_CALL",
+    "template_version": "common-v1",
+    "engine_type": "COMMON_V1",
+    "profile_id": "COMMON_SEMANTIC_V1",
+    "runner": "DIRECT_FUNCTION",
+    "skill_code": "DART_CLASSES_OOP",
+    "layer": "REPOSITORY",
+    "name": "Gọi logic qua grading adapter",
+    "description": "Gọi top-level function runGradingCase(action, payload) trong grading_adapter.dart. Giảng viên thay action, payload và expected để tái sử dụng cùng contract cho load/add/update/delete mà không ép tên Repository hoặc Model nội bộ của sinh viên.",
+    "difficulty": "advanced",
+    "weight_default": 2,
+    "parameters_schema": {
+      "functionPath": "lib/grading/grading_adapter.dart",
+      "functionName": "runGradingCase",
+      "argumentsJson": "[\"load\",{}]",
+      "expectedType": "json",
+      "expectedValue": "[]",
+      "matchMode": "equals"
+    },
+    "expected_template": "grading_adapter xử lý action trong argumentsJson và trả về JSON đúng contract."
   }
 ]

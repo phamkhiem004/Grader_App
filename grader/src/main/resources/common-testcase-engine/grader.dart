@@ -1,25 +1,95 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+const kEngineVersion = 'COMMON_V1-2.8.0';
+
 Future<void> main() async {
   final matrix = _loadMatrix();
-  final process = await Process.run(
-    Platform.isWindows ? 'flutter.bat' : 'flutter',
-    <String>['test', '--no-pub', '--reporter=json', 'test/exam_test.dart'],
-    runInShell: false,
-  );
+  final directIds = matrix.entries
+      .where((entry) => _isDirectMetadata(_asMap(entry.value)))
+      .map((entry) => entry.key)
+      .toSet();
+  final bootIds = matrix.keys.where((id) => !directIds.contains(id)).toSet();
+  final runs = <String, Map<String, dynamic>>{};
 
-  stdout.write(process.stdout);
-  stderr.write(process.stderr);
+  var preflightPassed = bootIds.isEmpty;
+  String? preflightFailure;
+  if (bootIds.isNotEmpty) {
+    final preflight = await _runFlutter('preflight', const Duration(seconds: 20));
+    stdout.write(preflight.stdoutText);
+    stderr.write(preflight.stderrText);
+    final preflightRuns = _parseReporter(preflight.stdoutText);
+    preflightPassed = preflightRuns['_GRADER_PREFLIGHT']?['passed'] == true;
+    if (!preflightPassed) {
+      preflightFailure = preflightRuns['_GRADER_PREFLIGHT']?['message']?.toString()
+          ?? _processError(preflight);
+      for (final id in bootIds) {
+        runs[id] = <String, dynamic>{
+          'passed': false,
+          'blocked': true,
+          'message': 'Blocked bởi lỗi khởi động chung: $preflightFailure',
+        };
+      }
+    }
+  }
 
-  final runs = _parseReporter(process.stdout.toString());
+  if (directIds.isNotEmpty) {
+    // Logic thuần vẫn được chấm khi UI/DB của app không khởi động được.
+    final direct = await _runFlutter('direct', const Duration(seconds: 30));
+    stdout.write(direct.stdoutText);
+    stderr.write(direct.stderrText);
+    final parsed = _parseReporter(direct.stdoutText);
+    for (final id in directIds) {
+      runs[id] = parsed[id] ?? <String, dynamic>{
+        'passed': false,
+        'message': _processError(direct),
+      };
+    }
+  }
+
+  if (preflightPassed && bootIds.isNotEmpty) {
+    Future<void> runCases(List<String> pending, int concurrency) async {
+      var cursor = 0;
+      Future<void> worker() async {
+        while (cursor < pending.length) {
+          final id = pending[cursor++];
+          final result = await _runFlutter(
+            'case',
+            const Duration(seconds: 15),
+            caseId: id,
+          );
+          stdout.write(result.stdoutText);
+          stderr.write(result.stderrText);
+          final parsed = _parseReporter(result.stdoutText);
+          runs[id] = parsed[id] ?? <String, dynamic>{
+            'passed': false,
+            'message': _processError(result),
+          };
+        }
+      }
+      await Future.wait(List<Future<void>>.generate(concurrency, (_) => worker()));
+    }
+
+    // Test chỉ đọc có thể chạy ba process song song. Test có khả năng ghi state/DB
+    // chạy tuần tự để tránh SQLite lock, nhưng vẫn được tách process chống rò singleton.
+    final readOnly = bootIds.where((id) =>
+        !_isStatefulMetadata(_asMap(matrix[id]))).toList(growable: false);
+    final stateful = bootIds.where((id) =>
+        _isStatefulMetadata(_asMap(matrix[id]))).toList(growable: false);
+    await runCases(readOnly, 3);
+    await runCases(stateful, 1);
+  }
+
   final output = <String, dynamic>{
-    'mode': 'common_semantic_key_v1',
+    'mode': kEngineVersion,
+    'engine_version': kEngineVersion,
     'test_cases': <Map<String, dynamic>>[],
   };
   final cases = output['test_cases'] as List<Map<String, dynamic>>;
 
   var passed = 0;
+  var blockedCount = 0;
   var earned = 0.0;
   var total = 0.0;
   for (final entry in matrix.entries) {
@@ -28,6 +98,8 @@ Future<void> main() async {
     final weight = _number(metadata, 'weight', 1);
     final result = runs[id];
     final ok = result?['passed'] == true;
+    final blocked = result?['blocked'] == true;
+    if (blocked) blockedCount++;
     if (ok) {
       passed++;
       earned += weight;
@@ -36,25 +108,28 @@ Future<void> main() async {
     cases.add(<String, dynamic>{
       'test_id': id,
       'name': metadata['name'] ?? id,
-      'status': ok ? 'passed' : 'failed',
+      'status': ok ? 'passed' : (blocked ? 'blocked' : 'failed'),
       'score': ok ? weight : 0,
       'max_score': weight,
       'difficulty': metadata['difficulty'] ?? 'basic',
       'skill_code': metadata['skill_code'] ?? 'N/A',
       'expected': metadata['expected']?.toString() ?? id,
-      'actual': ok ? 'Đã đáp ứng yêu cầu' : (result?['message'] ?? _processError(process)),
+      'actual': ok ? 'Đã đáp ứng yêu cầu' : (result?['message'] ?? 'Test không tạo được kết quả.'),
     });
   }
 
   final score = total == 0 ? 0.0 : earned / total * 10;
   output['diem'] = _round(score);
   output['soTestPass'] = passed;
-  output['soTestFail'] = cases.length - passed;
+  output['soTestFail'] = cases.length - passed - blockedCount;
+  output['soTestBlocked'] = blockedCount;
   output['tongSoTest'] = cases.length;
   output['chiTiet'] = cases
       .map((item) => <String, dynamic>{
             'name': item['test_id'],
-            'status': item['status'] == 'passed' ? 'PASS' : 'FAILED',
+            'status': item['status'] == 'passed'
+                ? 'PASS'
+                : (item['status'] == 'blocked' ? 'BLOCKED' : 'FAILED'),
             'message': item['actual'],
           })
       .toList();
@@ -63,13 +138,94 @@ Future<void> main() async {
     'earned_weight': earned,
     'total_weight': total,
     'passed_tests': passed,
-    'failed_tests': cases.length - passed,
+    'failed_tests': cases.length - passed - blockedCount,
+    'blocked_tests': blockedCount,
     'total_tests': cases.length,
   };
 
   stdout.writeln('--- GRADE_RESULT_START ---');
   stdout.writeln(jsonEncode(output));
   stdout.writeln('--- GRADE_RESULT_END ---');
+}
+
+bool _isDirectMetadata(Map<String, dynamic> metadata) {
+  if ((metadata['runner'] ?? '').toString() == 'DIRECT_FUNCTION') return true;
+  if ((metadata['runner'] ?? '').toString() != 'GROUP') return false;
+  final children = metadata['children'];
+  if (children is! List || children.isEmpty) return false;
+  return children.every((child) =>
+      (_asMap(child)['runner'] ?? '').toString() == 'DIRECT_FUNCTION');
+}
+
+bool _isStatefulMetadata(Map<String, dynamic> metadata) {
+  const stateful = <String>{
+    'BUTTON_ACTION',
+    'DIALOG_FLOW',
+    'FORM_SUBMIT',
+    'STATE_REACTIVE_FLOW',
+  };
+  final runner = (metadata['runner'] ?? '').toString();
+  if (stateful.contains(runner)) return true;
+  if (runner != 'GROUP') return false;
+  final children = metadata['children'];
+  return children is List && children.any(
+    (child) => _isStatefulMetadata(_asMap(child)),
+  );
+}
+
+class _CommandResult {
+  final int exitCode;
+  final String stdoutText;
+  final String stderrText;
+  final bool timedOut;
+
+  const _CommandResult(
+    this.exitCode,
+    this.stdoutText,
+    this.stderrText,
+    this.timedOut,
+  );
+}
+
+Future<_CommandResult> _runFlutter(
+  String mode,
+  Duration timeout, {
+  String? caseId,
+}) async {
+  final process = await Process.start(
+    Platform.isWindows ? 'flutter.bat' : 'flutter',
+    <String>['test', '--no-pub', '--reporter=json', 'test/exam_test.dart'],
+    runInShell: false,
+    environment: <String, String>{
+      ...Platform.environment,
+      'GRADER_CASE_MODE': mode,
+      if (caseId != null) 'GRADER_CASE_ID': caseId,
+    },
+  );
+  final out = StringBuffer();
+  final err = StringBuffer();
+  final outDone = process.stdout.transform(utf8.decoder).listen(out.write).asFuture<void>();
+  final errDone = process.stderr.transform(utf8.decoder).listen(err.write).asFuture<void>();
+  var timedOut = false;
+  var exitCode = -1;
+  try {
+    exitCode = await process.exitCode.timeout(timeout);
+  } on TimeoutException {
+    timedOut = true;
+    process.kill();
+    try {
+      exitCode = await process.exitCode.timeout(const Duration(seconds: 3));
+    } on TimeoutException {
+      exitCode = -1;
+    }
+  }
+  try {
+    await Future.wait(<Future<void>>[outDone, errDone])
+        .timeout(const Duration(seconds: 3));
+  } on TimeoutException {
+    // Đã có đủ log để trả kết quả; không giữ grader vì stream con chưa đóng.
+  }
+  return _CommandResult(exitCode, out.toString(), err.toString(), timedOut);
 }
 
 Map<String, dynamic> _loadMatrix() {
@@ -118,22 +274,27 @@ Map<String, Map<String, dynamic>> _parseReporter(String output) {
       final id = (event['testID'] as num?)?.toInt();
       final name = id == null ? null : namesById[id];
       if (name == null) continue;
-      final ok = event['result'] == 'success' || event['skipped'] == true;
+      final skipped = event['skipped'] == true;
+      final ok = event['result'] == 'success' && !skipped;
       runs[name] = <String, dynamic>{
         'passed': ok,
+        'blocked': skipped,
         'message': ok
             ? 'Đã đáp ứng yêu cầu'
-            : (errorsById[id]?.where((value) => value.isNotEmpty).join('\n') ?? 'Test thất bại.'),
+            : skipped
+                ? 'Test bị skip nên không được cộng điểm.'
+                : (errorsById[id]?.where((value) => value.isNotEmpty).join('\n') ?? 'Test thất bại.'),
       };
     }
   }
   return runs;
 }
 
-String _processError(ProcessResult process) {
-  final stderrText = process.stderr.toString().trim();
+String _processError(_CommandResult process) {
+  if (process.timedOut) return 'Flutter test vượt quá thời gian cho phép và đã bị dừng.';
+  final stderrText = process.stderrText.trim();
   if (stderrText.isNotEmpty) return stderrText;
-  final stdoutText = process.stdout.toString().trim();
+  final stdoutText = process.stdoutText.trim();
   return stdoutText.isEmpty ? 'Test không tạo được kết quả.' : stdoutText;
 }
 

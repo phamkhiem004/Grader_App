@@ -1,6 +1,7 @@
 package com.example.grader.service;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -9,9 +10,13 @@ import java.util.Map;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.lang.reflect.Field;
+import java.nio.charset.StandardCharsets;
+
+import org.springframework.core.io.ClassPathResource;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class TestcaseTemplateSuiteTest {
 
@@ -62,6 +67,7 @@ class TestcaseTemplateSuiteTest {
         item.put("template_id", "COMMON_DIRECT_FUNCTION");
         item.put("runner", "DIRECT_FUNCTION");
         item.put("skill_code", "DART_CLASSES_OOP");
+        item.put("layer", "UNIT");
         item.put("testcase_group", "LOGIC");
         item.put("name", "Direct function");
         item.put("description", "Direct function");
@@ -78,6 +84,7 @@ class TestcaseTemplateSuiteTest {
         item.put("setup_steps", List.of());
         Map<?, ?> matrixRow = (Map<?, ?>) service.toSkillsMatrix(List.of(item), "COMMON_V1", suite).get("EXAM_item_01");
         assertEquals("DIRECT_FUNCTION", matrixRow.get("runner"));
+        assertEquals("UNIT", matrixRow.get("layer"));
         assertEquals("isValidEmail", ((Map<?, ?>) matrixRow.get("parameters")).get("functionName"));
     }
 
@@ -100,6 +107,87 @@ class TestcaseTemplateSuiteTest {
         assertEquals(true, source.contains("case 'lib/utils/validator.dart::isValidEmail':"));
         assertEquals(true, source.contains("return direct_0.isValidEmail(arguments[0]);"));
         assertEquals(false, source.contains("Function.apply"));
+    }
+
+    @Test
+    void reusesOneDispatcherWhenFunctionHasManyInputCases() {
+        Map<String, Object> first = Map.of("runner", "DIRECT_FUNCTION", "parameters", Map.of(
+                "functionPath", "lib/grading/grading_adapter.dart",
+                "functionName", "runGradingCase",
+                "argumentsJson", "[\"load\",{}]"));
+        Map<String, Object> second = Map.of("runner", "DIRECT_FUNCTION", "parameters", Map.of(
+                "functionPath", "lib/grading/grading_adapter.dart",
+                "functionName", "runGradingCase",
+                "argumentsJson", "[\"add\",{\"name\":\"A\"}]"));
+
+        String source = service.renderDirectFunctionRunner(
+                "// __DIRECT_FUNCTION_IMPORTS__\nswitch (target) {\n    // __DIRECT_FUNCTION_CASES__\n}",
+                List.of(first, second));
+
+        assertEquals(1, count(source, "case 'lib/grading/grading_adapter.dart::runGradingCase':"));
+        assertEquals(1, count(source, "import '../lib/grading/grading_adapter.dart'"));
+    }
+
+    private int count(String source, String value) {
+        return (source.length() - source.replace(value, "").length()) / value.length();
+    }
+
+    @Test
+    void keepsFairGradingFixesWhenMergingCommonEngine() throws Exception {
+        String examTest = new ClassPathResource("common-testcase-engine/exam_test.dart")
+                .getContentAsString(StandardCharsets.UTF_8);
+        String grader = new ClassPathResource("common-testcase-engine/grader.dart")
+                .getContentAsString(StandardCharsets.UTF_8);
+
+        assertTrue(examTest.contains("Finder _goneByKey("),
+                "Không được dùng finder fallback khi kiểm tra widget đã biến mất");
+        assertTrue(examTest.contains("Future<void> _tap("));
+        assertTrue(examTest.contains("Never _failIfActionThrew("));
+        assertTrue(examTest.contains("finally {\n    semantics.dispose();"),
+                "SemanticsHandle phải dispose ngay trong finally");
+        assertTrue(grader.contains("COMMON_V1-2.8.0"),
+                "Không được hạ version engine khi xử lý merge conflict");
+        assertTrue(examTest.contains("GRADER_CASE_MODE"));
+        assertTrue(examTest.contains("_GRADER_PREFLIGHT"));
+        assertTrue(examTest.contains("_revealLazyItem"));
+        assertTrue(grader.contains("Blocked bởi lỗi khởi động chung"));
+        assertTrue(grader.contains("event['result'] == 'success' && !skipped"));
+        assertTrue(grader.contains("process.exitCode.timeout(timeout)"));
+    }
+
+    @Test
+    void rejectsEmptyZeroWeightAndUnsupportedSuiteBeforePublish() {
+        assertThrows(IllegalArgumentException.class,
+                () -> service.validatePublishable(List.of()));
+
+        Map<String, Object> zeroWeight = new LinkedHashMap<>();
+        zeroWeight.put("enabled", true);
+        zeroWeight.put("weight", 0);
+        assertThrows(IllegalArgumentException.class,
+                () -> service.validatePublishable(List.of(zeroWeight)));
+
+        Map<String, Object> suite = service.normalizeSuite(Map.of(
+                "persistence", Map.of("enabled", true, "storage_kind", "sqlite")), null);
+        assertThrows(IllegalArgumentException.class,
+                () -> service.validateSuiteCapabilities(suite));
+    }
+
+    @Test
+    void separatesDraftAndPublishedBuildDirectories(@TempDir Path root) throws Exception {
+        ExamService examService = new ExamService();
+        Field examsDir = ExamService.class.getDeclaredField("examsDir");
+        examsDir.setAccessible(true);
+        examsDir.set(examService, root.toString());
+        Field templateDir = ExamService.class.getDeclaredField("templateDir");
+        templateDir.setAccessible(true);
+        templateDir.set(examService, root.resolve("grader-base").toString());
+
+        Path draft = examService.testcaseBuildDirectory("PE_01", 3, false);
+        Path published = examService.testcaseBuildDirectory("PE_01", 3, true);
+
+        assertTrue(draft.startsWith(root.resolve("PE_01").resolve("testcase-drafts")));
+        assertTrue(published.startsWith(root.resolve("PE_01").resolve("testcase-versions")));
+        assertTrue(!draft.equals(published));
     }
 
     @Test

@@ -122,6 +122,16 @@ const SKILL_LABEL: Record<string, string> = {
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
+// P6b — gương của TestcaseTemplateService.REQUIREMENTS_MAX_*: backend mới là nơi chặn thật,
+// FE chỉ báo sớm để giáo viên tự sửa ngay lúc gõ. Đổi số là đổi CẢ HAI nơi (test backend ghim).
+const REQUIREMENTS_MAX_CHARS = 4000;
+const REQUIREMENTS_MAX_LINES = 40;
+
+/** Đếm YÊU CẦU đúng cách backend đếm (BatchGradingService.splitRequirements): dòng trắng không tính. */
+function countRequirementLines(text: string) {
+  return text.split(/\r?\n/).filter((line) => line.trim().length > 0).length;
+}
+
 /**
  * BẢN SONG SINH của TestcaseTemplateService.renderExpected (backend) — chuỗi hàm này dựng
  * chính là chuỗi được POST lên và lưu vào đề, backend chỉ dùng bản của nó khi FE gửi rỗng.
@@ -217,6 +227,8 @@ export default function TestcasesPage() {
   const [examId, setExamId] = useState("");
   const [examName, setExamName] = useState("");
   const [teacherNote, setTeacherNote] = useState("");
+  // Giữ NGUYÊN VĂN — không trim, không chuẩn hoá; backend lưu đúng chuỗi này (hợp đồng P6).
+  const [requirements, setRequirements] = useState("");
   const [items, setItems] = useState<TestcaseItem[]>([]);
   const [status, setStatus] = useState("");
   const [version, setVersion] = useState(0);
@@ -492,13 +504,28 @@ export default function TestcasesPage() {
       setMessage({ type: "error", text: "Vui lòng nhập tên đề thi trước khi lưu." });
       return;
     }
+    // Gương ba phép chặn của backend (validateRequirements) để giáo viên sửa ngay không mất
+    // một vòng request; backend vẫn là nơi chặn thật.
+    if (!requirements.trim()) {
+      setMessage({ type: "error", text: "Đề phải có 'Yêu cầu của đề' — mỗi dòng một yêu cầu, sinh viên sẽ đọc nguyên văn." });
+      return;
+    }
+    if (requirements.length > REQUIREMENTS_MAX_CHARS) {
+      setMessage({ type: "error", text: `'Yêu cầu của đề' đang dài ${requirements.length} ký tự, tối đa ${REQUIREMENTS_MAX_CHARS}. Phần này được chép nguyên văn vào kết quả của từng bài chấm — hãy ghi các yêu cầu chính, đừng dán cả đề bài.` });
+      return;
+    }
+    if (countRequirementLines(requirements) > REQUIREMENTS_MAX_LINES) {
+      setMessage({ type: "error", text: `'Yêu cầu của đề' đang có ${countRequirementLines(requirements)} dòng, tối đa ${REQUIREMENTS_MAX_LINES} — mỗi dòng là một yêu cầu riêng.` });
+      return;
+    }
     setSaving(kind);
     setMessage(null);
     try {
       const res = await fetch(`${API_BASE}/exam-setup/${encodeURIComponent(examId.trim())}/testcases/${kind}`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` },
-        body: JSON.stringify({ exam_name: examName.trim(), teacher_note: teacherNote.trim(), items }),
+        // requirements cố ý KHÔNG trim — hợp đồng là y nguyên văn từng dòng giảng viên gõ.
+        body: JSON.stringify({ exam_name: examName.trim(), teacher_note: teacherNote.trim(), requirements, items }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Không lưu được cấu hình testcase");
@@ -586,13 +613,35 @@ export default function TestcasesPage() {
             <button onClick={downloadTestcase} disabled={!examId.trim() || !items.length || !!saving} className="flex items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3.5 py-2.5 text-sm font-semibold text-indigo-700 hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-50">
               <Download size={16} /> Tải ZIP code
             </button>
-            <button onClick={() => save("draft")} disabled={!!saving || examIdCheck !== "available" || !examName.trim()} className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3.5 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50">
+            <button onClick={() => save("draft")} disabled={!!saving || examIdCheck !== "available" || !examName.trim() || !requirements.trim()} className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3.5 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50">
               {saving === "draft" ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />} Lưu Draft
             </button>
-            <button onClick={() => save("publish")} disabled={!!saving || examIdCheck !== "available" || !examName.trim()} className="flex items-center gap-2 rounded-lg bg-indigo-600 px-3.5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50">
+            <button onClick={() => save("publish")} disabled={!!saving || examIdCheck !== "available" || !examName.trim() || !requirements.trim()} className="flex items-center gap-2 rounded-lg bg-indigo-600 px-3.5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50">
               {saving === "publish" ? <Loader2 size={16} className="animate-spin" /> : <UploadCloud size={16} />} Publish snapshot
             </button>
           </div>
+        </div>
+
+        <div>
+          <div className="mb-1.5 flex items-baseline justify-between">
+            <label htmlFor="exam-requirements" className="block text-xs font-bold uppercase tracking-wider text-slate-500">
+              Yêu cầu của đề <span className="rounded bg-rose-50 px-1.5 py-0.5 text-[10px] font-bold normal-case text-rose-600">bắt buộc</span>
+            </label>
+            <span className={`text-[11px] ${requirements.length > REQUIREMENTS_MAX_CHARS || countRequirementLines(requirements) > REQUIREMENTS_MAX_LINES ? "font-bold text-rose-600" : "text-slate-400"}`}>
+              {requirements.length}/{REQUIREMENTS_MAX_CHARS} ký tự · {countRequirementLines(requirements)}/{REQUIREMENTS_MAX_LINES} yêu cầu
+            </span>
+          </div>
+          <textarea
+            id="exam-requirements"
+            value={requirements}
+            onChange={(e) => setRequirements(e.target.value)}
+            rows={4}
+            placeholder={"Mỗi dòng một yêu cầu, ví dụ:\nXây ứng dụng quản lý công việc: xem danh sách, thêm, sửa, xoá.\nBiểu mẫu phải báo lỗi khi bỏ trống tiêu đề.\nGiao diện không vỡ ở màn hình dọc và ngang."}
+            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm leading-relaxed outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+          />
+          <p className="mt-1 text-[11px] text-slate-400">
+            Sinh viên đọc <span className="font-semibold text-slate-500">nguyên văn từng dòng</span> trong kết quả chấm — hệ thống không sửa, không cắt chữ của bạn. Dòng trống không tính là yêu cầu.
+          </p>
         </div>
 
         {message && (

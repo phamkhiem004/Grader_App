@@ -42,10 +42,15 @@ P6a đã chốt bằng code:
 - đường đọc `ResultController.normalizeResultNode` **bù `[]`** cho kết quả lưu trước P6 (bẫy #1);
 - `getExamConfig`/`response` trả `requirements` nguyên văn để P6b prefill.
 
-**P6b — một ô nhập trong `frontend/app/teacher/testcases/page.tsx`.** ⚠️ Cho tới khi P6b xong,
-**FE hiện tại KHÔNG lưu được đề mới** (backend chặn vì thiếu requirements — hành vi ĐÚNG hợp đồng
-*"chưa nhập thì không tạo được đề"*). Làm P6b sớm; body gửi thêm field `requirements` (chuỗi
-nguyên văn từ textarea), đọc lại từ `GET .../testcases/exam/{examId}` field `requirements`.
+**P6b — ✅ code xong 2026-08-08, ⚠️ CHƯA chạy thật trên stack.** Textarea "Yêu cầu của đề" trong
+`frontend/app/teacher/testcases/page.tsx`: gửi `requirements` **nguyên văn không trim**; gương ba
+phép chặn của backend (4000 ký tự / 40 dòng / bắt buộc) + bộ đếm sống `x/4000 ký tự · y/40 yêu
+cầu` (đếm dòng đúng cách backend đếm — dòng trắng không tính); hai nút lưu gạt khi trống. Trang
+này là luồng TẠO MỚI (mã đề phải chưa tồn tại) nên không có prefill; backend vẫn trả
+`requirements` trong `getExamConfig` cho luồng sửa sau này. `tsc` xanh.
+**Phạm vi chưa đo** (stack đang tắt, guard `/auth/me` chặn cả việc render trang): giao diện chạy
+thật + vòng POST → DB. Lần đầu bật stack: vào *Tạo testcase*, thấy ô "Yêu cầu của đề", lưu thử
+một đề — đó là phép đo còn thiếu.
 
 ## Luồng vận hành thật — chủ đồ án xác nhận 2026-08-08
 
@@ -159,7 +164,7 @@ sinh viên.** Mọi tranh cãi thiết kế phân xử bằng nguyên tắc này
 | **A2c** | Trả nợ hai lỗ hổng NLP phơi ra | ✅ **Xong** 2026-08-07 | Tìm ra ca **CHẨN ĐOÁN SAI LỆCH**; `kind` thứ 15 `ACTION_FAILED`; bài nộp thứ 7 `broken-action`; mã classifier chạy thật **0/9 → 3/9**; 0 luật FAIL trên 7 mẫu |
 | **(c)** | Dọn `expected` MÁY SINH — lần đầu đo **đường soạn đề** | ✅ **Xong** 2026-08-08 | 22/22 template sạch khoá + sạch enum Anh; 7 test mới (**76 xanh**); luật **F4** trong `verify_result.py`; mẫu thứ 8 `latest-machine-expected`; **0 FAIL trên 8 mẫu**; điểm KHÔNG đổi (không đụng engine) |
 | **P6a** | `exam.requirements` — backend + hợp đồng + mẫu | ✅ **Xong** 2026-08-08 | 8/8 mẫu mang 6 yêu cầu thật (2 ca cố ý: đường dẫn trong đề · yêu cầu kiến trúc không kiểm được); trần 4000 ký tự/40 dòng; luật **A11** (thử phá 5 kiểu: 4 đỏ đúng, 1 xanh đúng); **85 test xanh**; SPEC có bảng field khối `exam`; engine KHÔNG đổi |
-| **P6b** | `exam.requirements` — ô nhập FE | ⬜ | ⚠️ tới lúc đó FE không lưu được đề MỚI (backend chặn thiếu requirements — đúng hợp đồng) |
+| **P6b** | `exam.requirements` — ô nhập FE | ✅ **Code xong** 2026-08-08 | `tsc` xanh; gửi nguyên văn không trim; gương 3 phép chặn + bộ đếm sống; ⚠️ **chưa chạy thật** — stack tắt, đo ở lần bật stack tới |
 
 ### A2 — mở fixture, và cái giá của việc công bố năng lực chưa chạy
 

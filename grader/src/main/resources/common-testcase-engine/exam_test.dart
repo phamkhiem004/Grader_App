@@ -16,11 +16,23 @@ void main() {
   for (final entry in matrix.entries) {
     final testId = entry.key;
     final metadata = _asMap(entry.value);
+    // Testcase code tay được sinh thành testWidgets riêng, nhưng vẫn đăng ký ĐÚNG VỊ TRÍ
+    // trong đề: một testcase chuẩn bị dữ liệu đặt đầu danh sách phải chạy trước phần sau.
+    if (_text(metadata, 'runner') == 'CUSTOM_CODE') {
+      _registerCustomTestcase(testId);
+      continue;
+    }
     testWidgets(testId, (tester) async {
       await _runCase(tester, testId, metadata);
     });
   }
 }
+
+// ─────────────────── CUSTOM_TESTCASES_BEGIN ───────────────────
+// Vùng này do backend sinh lại mỗi lần lưu cấu hình testcase (phần "Tự viết code"
+// của giáo viên). Sửa tay ở đây sẽ bị ghi đè ở lần lưu kế tiếp.
+void _registerCustomTestcase(String testId) {}
+// ──────────────────── CUSTOM_TESTCASES_END ────────────────────
 
 Future<void> _runCase(
   WidgetTester tester,
@@ -84,6 +96,10 @@ Future<void> _runCase(
     case 'GROUP':
       await _checkGroup(tester, testId, metadata);
       return;
+    case 'CUSTOM_CODE':
+      // Không bao giờ chạy tới đây: testcase code tay được đăng ký riêng ở
+      // _registerCustomTestcases. Nếu rơi vào đây nghĩa là file sinh ra bị lệch.
+      fail('Testcase code tay $testId chưa được sinh vào exam_test.dart.');
     case 'FORM_REQUIRED_FIELDS':
       await _boot(tester);
       for (final key in _csv(parameters, 'fieldKeys')) {
@@ -707,6 +723,9 @@ Future<void> _checkWidgetSemanticsLabel(
   WidgetTester tester,
   Map<String, dynamic> parameters,
 ) async {
+  // flutter_test kiểm tra SemanticsHandle còn sống NGAY khi thân test kết thúc, tức
+  // TRƯỚC khi tearDown chạy. Dùng addTearDown(semantics.dispose) sẽ khiến testcase
+  // luôn fail "A SemanticsHandle was active at the end of the test" dù bài làm đúng.
   // PHẢI trả handle trong `finally`, KHÔNG dùng addTearDown: flutter_test kiểm
   // "còn SemanticsHandle nào đang mở?" NGAY KHI thân test kết thúc, trước khi các
   // addTearDown chạy. Dùng addTearDown thì runner này KHÔNG BAO GIỜ ĐẠT ĐƯỢC — sinh
@@ -718,11 +737,14 @@ Future<void> _checkWidgetSemanticsLabel(
     final key = _requiredText(parameters, 'targetKey');
     final targetType = _text(parameters, 'targetType', 'any');
     final finder = _byKey(key);
+    expect(finder, findsOneWidget, reason: 'Không tìm thấy target key: $key');
     _expectPresent(finder, _subject(parameters), 'Không tìm thấy target key: $key');
     _assertTargetType(tester, finder, key, targetType);
     final actual = tester.getSemantics(finder).label;
     final expected = _requiredText(parameters, 'expectedLabel');
     final matchMode = _text(parameters, 'matchMode', 'equals').toLowerCase();
+    if (matchMode == 'contains') {
+      expect(actual, contains(expected), reason: 'Semantics label của $key không chứa expectedLabel');
     // Nhãn trợ năng là chữ trình đọc màn hình đọc lên cho người dùng — được phép in.
     final labelOk = matchMode == 'contains' ? actual.contains(expected) : actual == expected;
     if (!labelOk) {
@@ -962,6 +984,19 @@ Finder _byKey(String key) {
   final exact = find.byKey(ValueKey<String>(key), skipOffstage: false);
   if (exact.evaluate().isNotEmpty) return exact;
 
+  // Hợp đồng bài làm (Khu vực 0) quyết định cách dò khi bài không gắn ValueKey.
+  // Không có hợp đồng thì giữ nguyên heuristic cũ để đề cũ chấm lại vẫn ra đúng.
+  final rule = _contractRule(key);
+  if (_contractRequiresKeys() && !_ruleFlag(rule, 'allow_fallback')) return _notFound();
+  if (rule != null) {
+    final strategy = _text(rule, 'strategy', 'auto');
+    if (strategy == 'key_only') return _notFound();
+    if (strategy != 'auto') {
+      final finder = _contractFinder(rule);
+      if (finder != null) return finder;
+    }
+  }
+
   // Public contract của starter không ép ValueKey. Khi không có key, dùng
   // fallback theo vai trò hiển thị để template vẫn đánh giá được hành vi.
   switch (key) {
@@ -1038,10 +1073,11 @@ Finder _byKey(String key) {
 }
 
 Finder _textFormFieldAt(int index) {
-  final fields = find.byWidgetPredicate(
-    (widget) => widget is TextFormField || widget is TextField,
-    skipOffstage: false,
-  );
+  // TextFormField DỰNG một TextField con, nên predicate "is TextFormField || is TextField"
+  // đếm mỗi ô nhập hai lần → field.email (index 1) lại trỏ vào chính ô đầu tiên.
+  // Chỉ đếm TextField: bài dùng TextFormField vẫn khớp qua TextField con, và mọi thao tác
+  // (enterText, đọc EditableText, targetType='input') đều chạy đúng trên widget này.
+  final fields = find.byType(TextField, skipOffstage: false);
   return fields.evaluate().length > index ? fields.at(index) : _notFound();
 }
 
@@ -1077,6 +1113,28 @@ Finder _buttonWithText(RegExp pattern) {
 /// điểm theo chiều CHO ĐIỂM OAN, ngược với lỗi `_byKey` nhưng cùng một nguồn: fallback
 /// đoán theo chữ hiển thị.
 Finder _validationErrorFor(String key) {
+  // Chỉ chấp nhận Text TRÔNG NHƯ thông báo lỗi. Trước đây nhánh "specific" chỉ khớp
+  // tên field nên nhãn ô nhập ("Full Name", "Email") cũng bị tính là lỗi validation
+  // → FORM_REQUIRED_FIELDS/FORM_VALIDATE_FIELDS pass giả dù bài không validate gì.
+  final errorPattern = RegExp(
+    r'required|minimum|at least|invalid|must|cannot|empty|not valid'
+    r'|bắt buộc|tối thiểu|không hợp lệ|không được|vui lòng|hãy nhập|sai định dạng|lỗi',
+    caseSensitive: false,
+  );
+  bool isError(Widget widget) =>
+      widget is Text && errorPattern.hasMatch(widget.data ?? '');
+
+  final all = find.byWidgetPredicate(isError, skipOffstage: false);
+  final email = key.toLowerCase().contains('email');
+  final fieldPattern = email
+      ? RegExp(r'email|e-mail|định dạng', caseSensitive: false)
+      : RegExp(r'name|họ|tên|full', caseSensitive: false);
+  // Lỗi của đúng field: vừa là thông báo lỗi, vừa nhắc tới tên field.
+  final specific = find.byWidgetPredicate(
+    (widget) => isError(widget) && fieldPattern.hasMatch((widget as Text).data ?? ''),
+    skipOffstage: false,
+  );
+  return specific.evaluate().isNotEmpty ? specific.first : all;
   const errorWording = r'required|minimum|min|invalid|bắt buộc|tối thiểu|không hợp lệ|lỗi';
   final fieldWording = key.toLowerCase().contains('email')
       ? r'email|e-mail|định dạng'
@@ -1096,6 +1154,190 @@ Finder _validationErrorFor(String key) {
 }
 
 Finder _notFound() => find.byWidgetPredicate((_) => false);
+
+// ─────────────────────── HỢP ĐỒNG BÀI LÀM (Khu vực 0) ───────────────────────
+// Giáo viên khai mỗi semantic key được dò thế nào khi bài không gắn ValueKey.
+// Trước đây cách dò bị hardcode trong _byKey nên bài dùng GridView/Card/nút icon
+// (đúng đề nhưng khác giả định) bị chấm trượt oan.
+
+Map<String, dynamic>? _contractCache;
+
+Map<String, dynamic> _contract() {
+  if (_contractCache != null) return _contractCache!;
+  for (final path in <String>['test/contract.json', 'contract.json']) {
+    final file = File(path);
+    if (!file.existsSync()) continue;
+    final value = jsonDecode(file.readAsStringSync());
+    if (value is Map) return _contractCache = _asMap(value);
+  }
+  return _contractCache = <String, dynamic>{};
+}
+
+/// Đề bắt buộc sinh viên gắn ValueKey: bỏ hết cách dò thay thế, thiếu key là trượt.
+bool _contractRequiresKeys() => _contract()['require_keys'] == true;
+
+bool _ruleFlag(Map<String, dynamic>? rule, String key) =>
+    rule != null && rule[key] == true;
+
+Map<String, dynamic>? _contractRule(String key) {
+  final keys = _contract()['keys'];
+  if (keys is List) {
+    for (final raw in keys) {
+      final rule = _asMap(raw);
+      if (_text(rule, 'key') == key) return rule;
+    }
+  } else if (keys is Map && keys[key] != null) {
+    return _asMap(keys[key]);
+  }
+  return null;
+}
+
+Finder? _contractFinder(Map<String, dynamic> rule) {
+  final strategy = _text(rule, 'strategy');
+  final value = _text(rule, 'value');
+  final index = _number(rule, 'index', 0).toInt();
+  switch (strategy) {
+    case 'widget_type':
+      return _pickAt(_byTypeName(value), index);
+    case 'icon':
+      return _pickAt(_buttonOrSelf(_iconFinder(value)), index);
+    case 'tooltip':
+      return _pickAt(_buttonOrSelf(find.byTooltip(value, skipOffstage: false)), index);
+    case 'text':
+      return _pickAt(_textLike(value), index);
+    case 'button_text':
+      return _pickAt(_buttonOrSelf(_textLike(value)), index);
+    case 'type_with_text':
+      return _pickAt(
+        find.ancestor(
+          of: _textLike(_text(rule, 'text')),
+          matching: _byTypeName(value),
+          matchRoot: true,
+        ),
+        index,
+      );
+    default:
+      return null;
+  }
+}
+
+Finder _pickAt(Finder finder, int index) {
+  // Thiếu phần tử thứ index thì phải BÁO KHÔNG TÌM THẤY. Nếu tự lùi về phần tử 0,
+  // "item.1" sẽ trỏ vào chính card của form và testcase pass giả khi danh sách rỗng.
+  final count = finder.evaluate().length;
+  if (index < 0 || index >= count) return _notFound();
+  return finder.at(index);
+}
+
+/// Khớp theo TÊN class để giáo viên gõ được 'SliverGrid', 'Card', 'InkWell'...
+/// mà engine không cần map cứng từng loại widget.
+Finder _byTypeName(String name) {
+  final wanted = name.trim();
+  if (wanted.isEmpty) return _notFound();
+  return find.byWidgetPredicate((widget) {
+    final actual = widget.runtimeType.toString();
+    final base = actual.contains('<') ? actual.substring(0, actual.indexOf('<')) : actual;
+    return base == wanted;
+  }, skipOffstage: false);
+}
+
+/// Text đúng nội dung; bọc trong /.../ để dùng biểu thức chính quy.
+Finder _textLike(String value) {
+  final trimmed = value.trim();
+  if (trimmed.isEmpty) return _notFound();
+  final isRegex = trimmed.length > 2 && trimmed.startsWith('/') && trimmed.endsWith('/');
+  final pattern = isRegex
+      ? RegExp(trimmed.substring(1, trimmed.length - 1), caseSensitive: false)
+      : RegExp('^${RegExp.escape(trimmed)}\$', caseSensitive: false);
+  return find.byWidgetPredicate(
+    (widget) => widget is Text && pattern.hasMatch((widget.data ?? '').trim()),
+    skipOffstage: false,
+  );
+}
+
+/// Nhóm icon theo Ý NGHĨA: chọn "Sửa (bút)" là khớp mọi biến thể edit/mode_edit/create,
+/// vì đề chỉ yêu cầu "icon bút" chứ không chỉ định đúng một hằng Icons nào.
+const Map<String, List<IconData>> _iconGroups = <String, List<IconData>>{
+  'edit': <IconData>[
+    Icons.edit, Icons.edit_outlined, Icons.edit_note, Icons.mode_edit,
+    Icons.mode_edit_outlined, Icons.create, Icons.create_outlined,
+    Icons.drive_file_rename_outline,
+  ],
+  'delete': <IconData>[
+    Icons.delete, Icons.delete_outline, Icons.delete_forever, Icons.delete_rounded,
+    Icons.remove_circle, Icons.remove_circle_outline,
+  ],
+  'add': <IconData>[
+    Icons.add, Icons.add_circle, Icons.add_circle_outline, Icons.add_box,
+    Icons.add_box_outlined, Icons.playlist_add,
+  ],
+  'save': <IconData>[
+    Icons.save, Icons.save_outlined, Icons.save_alt, Icons.check,
+    Icons.check_circle, Icons.check_circle_outline, Icons.done,
+  ],
+  'back': <IconData>[
+    Icons.arrow_back, Icons.arrow_back_ios, Icons.arrow_back_ios_new,
+    Icons.chevron_left, Icons.keyboard_arrow_left,
+  ],
+  'forward': <IconData>[
+    Icons.arrow_forward, Icons.arrow_forward_ios, Icons.chevron_right,
+    Icons.open_in_new, Icons.visibility, Icons.visibility_outlined,
+  ],
+  'close': <IconData>[Icons.close, Icons.cancel, Icons.cancel_outlined, Icons.clear],
+  'search': <IconData>[Icons.search, Icons.manage_search],
+  'person': <IconData>[
+    Icons.person, Icons.person_outline, Icons.person_outlined,
+    Icons.account_circle, Icons.account_circle_outlined,
+  ],
+  'email': <IconData>[
+    Icons.email, Icons.email_outlined, Icons.mail, Icons.mail_outline,
+    Icons.alternate_email,
+  ],
+  'image': <IconData>[
+    Icons.image, Icons.image_outlined, Icons.photo, Icons.photo_outlined,
+    Icons.add_photo_alternate, Icons.add_photo_alternate_outlined, Icons.camera_alt,
+  ],
+  'menu': <IconData>[Icons.menu, Icons.menu_open, Icons.more_vert, Icons.more_horiz],
+};
+
+Finder _iconFinder(String value) {
+  final name = value.trim();
+  final group = _iconGroups[name];
+  final codePoint = group == null ? int.tryParse(name) : null;
+  if (group == null && codePoint == null) return _notFound();
+  return find.byWidgetPredicate((widget) {
+    if (widget is! Icon) return false;
+    final icon = widget.icon;
+    if (icon == null) return false;
+    if (codePoint != null) return icon.codePoint == codePoint;
+    return group!.any((candidate) =>
+        candidate.codePoint == icon.codePoint && candidate.fontFamily == icon.fontFamily);
+  }, skipOffstage: false);
+}
+
+/// Nút bọc ngoài (nếu có) để targetType='button' và tap() đều đúng đối tượng.
+Finder _buttonOrSelf(Finder inner) {
+  if (inner.evaluate().isEmpty) return inner;
+  // Nút thật phải được ưu tiên: mỗi button Material tự dựng một InkWell BÊN TRONG nó,
+  // nên lấy ancestor gần nhất sẽ ra InkWell chứ không phải FilledButton/IconButton.
+  for (final matcher in <bool Function(Widget)>[_isRealButton, _isTappable]) {
+    final found = find.ancestor(
+      of: inner,
+      matching: find.byWidgetPredicate(matcher, skipOffstage: false),
+      matchRoot: true,
+    );
+    if (found.evaluate().isNotEmpty) return found;
+  }
+  return inner;
+}
+
+bool _isRealButton(Widget widget) =>
+    widget is ButtonStyleButton ||
+    widget is IconButton ||
+    widget is FloatingActionButton ||
+    widget is RawMaterialButton;
+
+bool _isTappable(Widget widget) => widget is InkWell || widget is GestureDetector;
 
 Map<String, dynamic> _loadMatrix() {
   for (final path in <String>['test/skills_matrix.json', 'skills_matrix.json']) {

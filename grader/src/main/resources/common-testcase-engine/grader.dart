@@ -39,7 +39,15 @@ Future<void> main() async {
   final matrix = _loadMatrix();
   final process = await Process.run(
     Platform.isWindows ? 'flutter.bat' : 'flutter',
-    <String>['test', '--no-pub', '--reporter=json', 'test/exam_test.dart'],
+    // GRADER_MODE để starter tự khởi tạo storage cho môi trường test (vd sqflite ffi);
+    // bài không dùng cờ này thì define thừa cũng vô hại.
+    <String>[
+      'test',
+      '--no-pub',
+      '--dart-define=GRADER_MODE=true',
+      '--reporter=json',
+      'test/exam_test.dart',
+    ],
     runInShell: false,
   );
 

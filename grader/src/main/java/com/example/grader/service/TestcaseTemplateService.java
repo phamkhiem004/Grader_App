@@ -457,6 +457,49 @@ public class TestcaseTemplateService {
         }
     }
 
+    /**
+     * Nâng engine dùng chung trong thư mục testcase của đề lên bản MỚI NHẤT trên classpath.
+     *
+     * <p>Cần có vì {@link #materializeEngine} chép engine ĐÓNG BĂNG vào {@code exams/<đề>/} lúc
+     * publish, còn lúc chấm lại thì {@code BatchGradingService.resolveTestcasePath} lại ưu tiên
+     * đúng thư mục đó. Hệ quả: sửa engine trong {@code resources} KHÔNG tới được đề đã publish,
+     * bản sửa im lặng không có hiệu lực.
+     *
+     * <p>Chỉ áp cho đề {@code COMMON_V1}. Đề legacy giữ nguyên grader/testcase giáo viên đã nộp —
+     * ghi đè là phá đề của họ.
+     *
+     * @return true nếu đã ghi lại engine
+     */
+    public boolean refreshCommonEngine(String examId) throws Exception {
+        return refreshCommonEngine(examRepository.findByExamId(examId).orElse(null));
+    }
+
+    boolean refreshCommonEngine(Exam exam) throws Exception {
+        if (exam == null) return false;
+        String path = exam.getTestcasePath();
+        if (path == null || path.isBlank()) return false;
+        if (!COMMON_ENGINE.equals(configEngineType(exam))) return false;
+        Path dir = Path.of(path);
+        if (!Files.isDirectory(dir)) return false;
+        materializeEngine(dir, COMMON_ENGINE);
+        log.info("Đã nâng engine dùng chung của đề {} lên bản mới nhất", exam.getExamId());
+        return true;
+    }
+
+    /** engine_type đã lưu trong testcase-config; null với đề legacy (upload ZIP, không có config). */
+    private String configEngineType(Exam exam) {
+        String json = exam.getTestcaseConfigJson();
+        if (json == null || json.isBlank()) return null;
+        try {
+            Map<String, Object> config = mapper.readValue(json,
+                    new TypeReference<LinkedHashMap<String, Object>>() {});
+            return text(config.get("engine_type"));
+        } catch (Exception e) {
+            log.warn("Không đọc được engine_type của đề {}: {}", exam.getExamId(), e.getMessage());
+            return null;
+        }
+    }
+
     /** Chọn engine theo profile, không dùng grader gắn chặt với một đề cho testcase chung. */
     private void materializeEngine(Path dir, String engineType, List<Map<String, Object>> items) throws Exception {
         if (!COMMON_ENGINE.equals(engineType)) return;
@@ -1520,6 +1563,15 @@ public class TestcaseTemplateService {
         row.put("runner", item.get("runner"));
         row.put("skill_code", item.get("skill_code"));
         row.put("testcase_group", item.get("testcase_group"));
+        // group_id/group_name phải ĐI THEO vào matrix, không chỉ nằm trong config: khâu chấm chỉ
+        // đọc matrix, nên thiếu chúng là mất nhãn hiển thị của nhóm chức năng.
+        row.put("group_id", item.get("group_id"));
+        row.put("group_name", item.get("group_name"));
+        // Nhãn của result.json v2. Ghi thẳng vào matrix để khâu chấm chỉ việc đọc,
+        // và để giáo viên thấy được testcase thuộc tầng/nhóm chức năng nào.
+        row.put("rubric", TestCaseTaxonomy.rubricOf(item));
+        row.put("rubric_label", TestCaseTaxonomy.rubricLabelOf(item));
+        row.put("layer", TestCaseTaxonomy.layerOf(item, text(item.get("instance_id"))));
         row.put("name", item.get("name"));
         row.put("description", item.get("description"));
         row.put("expected", item.get("expected"));
@@ -1549,13 +1601,20 @@ public class TestcaseTemplateService {
         row.put("instance_id", groupId);
         row.put("runner", "GROUP");
         row.put("group_id", groupId);
+        row.put("group_name", groupName);
         row.put("name", groupName);
-        row.put("expected", "Tất cả " + children.size() + " assert trong nhóm phải đạt.");
+        row.put("expected", null);   // giữ chỗ; dựng ở cuối hàm vì cần children
         row.put("difficulty", difficulty);
         row.put("weight", totalWeight);
         row.put("skill_code", skillCodes.isEmpty() ? "UI_SCAFFOLD_APPBAR" : skillCodes.iterator().next());
         row.put("skill_codes", new ArrayList<>(skillCodes));
         row.put("children", childRows);
+        // Ba field dưới đây đều DẪN XUẤT từ các testcase con nên phải dựng sau `children`:
+        // expected là yêu cầu của các con ghép lại, layer là tầng CAO NHẤT trong các con.
+        row.put("expected", TestCaseTaxonomy.groupExpected(row));
+        row.put("rubric", TestCaseTaxonomy.rubricOf(row));
+        row.put("rubric_label", TestCaseTaxonomy.rubricLabelOf(row));
+        row.put("layer", TestCaseTaxonomy.layerOf(row, groupId));
         return row;
     }
 

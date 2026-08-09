@@ -149,6 +149,8 @@ public class SyllabusService {
                 cat.setCompetencyLabel(c.path("competency_label").asText(null));
                 cat.setDescription(c.path("description").asText(null));
                 cat.setDisplayOrder(c.path("order").asInt(0));
+                // Chưa khai chapter thì để null; SkillCategory.resolveChapter() suy từ order.
+                if (c.hasNonNull("chapter")) cat.setChapter(c.path("chapter").asInt());
                 categoryRepo.save(cat);
                 nc++;
             }
@@ -243,6 +245,7 @@ public class SyllabusService {
         m.put("competency_label", c.getCompetencyLabel());
         m.put("description", c.getDescription());
         m.put("display_order", c.getDisplayOrder());
+        m.put("chapter", c.resolveChapter());
         m.put("weak_threshold", c.getWeakThreshold());
         m.put("good_threshold", c.getGoodThreshold());
         m.put("active", c.getActive());
@@ -285,6 +288,7 @@ public class SyllabusService {
         if (body.containsKey("competency_label")) c.setCompetencyLabel(str(body.get("competency_label")));
         if (body.containsKey("description"))      c.setDescription(str(body.get("description")));
         if (body.containsKey("display_order"))    c.setDisplayOrder(toInt(body.get("display_order"), c.getDisplayOrder()));
+        if (body.containsKey("chapter"))          c.setChapter(toInt(body.get("chapter"), c.getChapter()));
         if (body.containsKey("weak_threshold"))   c.setWeakThreshold(toDouble(body.get("weak_threshold"), c.getWeakThreshold()));
         if (body.containsKey("good_threshold"))   c.setGoodThreshold(toDouble(body.get("good_threshold"), c.getGoodThreshold()));
         if (body.containsKey("active"))           c.setActive(toBool(body.get("active"), true));

@@ -3,6 +3,13 @@
 Hướng dẫn cho Claude Code khi làm việc trong repo này. Đọc kỹ phần **Gotchas** — nhiều thứ
 khác với mặc định và đã từng gây lỗi thật.
 
+> 🚩 **ĐANG CÓ VIỆC DỞ DANG — đọc [`docs/result-json-v2-plan.md`](docs/result-json-v2-plan.md)
+> trước khi làm bất cứ gì liên quan tới `result.json`, engine chấm, hay bộ fixture.**
+> Mục **"BẮT ĐẦU TỪ ĐÂY"** ở đầu file đó nói: đang ở đâu · việc kế tiếp · quyết định đã chốt ·
+> luật làm việc · và bài học đã lặp 5 lần. Có **phía thứ hai** (bot NLP,
+> `D:\AGS-PRM393\prm393-feedback-bot`) ăn output của repo này — trao đổi hai chiều qua
+> `D:\AGS-PRM393\SPEC_grader_result_json\CHANGELOG_FOR_{NLP,GRADER}.md`.
+
 ## Repo này là MỘT gói hoàn chỉnh
 ```
 Grader_App/                  ← repo duy nhất (clone 1 cái là đủ)
@@ -32,7 +39,7 @@ Trang "Lịch sử" → GET /api/exam/{examId}/results
 - `result_json` dựng ở `BatchGradingService.assembleResultJson`. Endpoint đọc: `ResultController`.
 
 ## Gotchas (đã gây lỗi thật — đừng lặp lại)
-1. **Hai phiên bản Jackson cùng classpath.** Services dùng `com.fasterxml.jackson` (Jackson 2); vài controller dùng `tools.jackson` (Jackson 3, mặc định Spring Boot 4). Khi thêm code, theo file xung quanh. `SyllabusService`/`BatchGradingService` = Jackson 2.
+1. **Hai phiên bản Jackson cùng classpath.** `com.fasterxml.jackson` (Jackson 2) và `tools.jackson` (Jackson 3, mặc định Spring Boot 4) đều có. **Chia theo TỪNG FILE, không theo tầng** — luôn kiểm import của chính file đang sửa: `SyllabusService` = Jackson 2, còn `BatchGradingService` = **Jackson 3** (`TypeReference` ở `tools.jackson.core.type`).
 2. **skill_code phải có trong syllabus (bảng `skill`).** Upload testcase validate nghiêm (`ExamService.validateSkillCodes` ném lỗi) để giữ taxonomy sạch.
 3. **Cần Docker bật + image `grading-base:latest`** để chấm. Build ảnh: `grader-base/build-base.ps1` (lâu, Flutter SDK).
 4. **POST `/api/**` cần token** (AuthFilter), trừ `/api/auth/*`. GET đa phần mở. FE gửi `Authorization: Bearer <token>` (xem `lib/auth.js`).

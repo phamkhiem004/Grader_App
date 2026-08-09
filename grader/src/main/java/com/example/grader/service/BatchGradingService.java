@@ -14,6 +14,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
+import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -57,6 +58,10 @@ public class BatchGradingService {
     @Autowired private ExamRepository examRepo;
     @Autowired private SyllabusService    syllabusService;
     @Autowired private CompetencyService  competencyService;
+    @Autowired private TestcaseTemplateService templateService;
+
+    /** Bản hợp đồng `result.json` mà backend này phát hành — xem SPEC_grader_result_json/. */
+    private static final String SCHEMA_VERSION = "2";
 
     private final ObjectMapper mapper = new ObjectMapper();
     /** Bộ phân loại lỗi testcase (log thô → code/actual/message) — bao quát nhiều loại lỗi Dart/Flutter. */
@@ -261,6 +266,9 @@ public class BatchGradingService {
             String title = (exam != null && exam.getExamName() != null) ? exam.getExamName() : job.examId();
 
             Map<String, Object> root = new LinkedHashMap<>();
+            // Đặt ĐẦU TIÊN: bên đọc biết ngay đang xử lý hợp đồng bản nào. Dữ liệu chấm trước
+            // P4 không có khoá này — vắng mặt chính là dấu hiệu "bản 1", đừng bơm ngược vào.
+            root.put("schema_version", SCHEMA_VERSION);
 
             Map<String, Object> student = new LinkedHashMap<>();
             student.put("id", job.studentId());
@@ -274,18 +282,20 @@ public class BatchGradingService {
             root.put("exam", examNode);
 
             // grading_result: ưu tiên từ grader (mới); fallback dựng từ field cũ
+            Map<String, Object> gradingResult;
             if (g.has("grading_result")) {
-                root.put("grading_result", mapper.convertValue(g.get("grading_result"), Object.class));
+                gradingResult = mapper.convertValue(g.get("grading_result"),
+                        new TypeReference<LinkedHashMap<String, Object>>() {});
             } else {
                 int pass  = g.path("soTestPass").asInt(0);
                 int total = g.path("tongSoTest").asInt(0);
-                Map<String, Object> gr = new LinkedHashMap<>();
-                gr.put("score", g.path("diem").asDouble(0));
-                gr.put("passed_tests", pass);
-                gr.put("failed_tests", total - pass);
-                gr.put("total_tests", total);
-                root.put("grading_result", gr);
+                gradingResult = new LinkedHashMap<>();
+                gradingResult.put("score", g.path("diem").asDouble(0));
+                gradingResult.put("passed_tests", pass);
+                gradingResult.put("failed_tests", total - pass);
+                gradingResult.put("total_tests", total);
             }
+            root.put("grading_result", gradingResult);
 
             // test_cases: ưu tiên từ grader (mới, có skill/expected/actual); fallback từ chiTiet
             List<Map<String, Object>> testCases = new ArrayList<>();
@@ -301,7 +311,11 @@ public class BatchGradingService {
                 }
             }
             // Bổ sung skill_code/difficulty từ skills_matrix.json của đề (nguồn sự thật) cho mỗi testcase
-            enrichTestCases(testCases, exam);
+            Map<String, Object> matrix = loadSkillsMatrix(exam);
+            enrichTestCases(testCases, matrix);
+
+            // Nhãn phân loại của result.json v2 — xem TestCaseTaxonomy.
+            annotateTaxonomy(testCases, matrix);
 
             // Chuẩn hóa schema kết quả: chỉ dùng expected; expect chỉ được đọc để tương thích dữ liệu cũ.
             normalizeExpectedFields(testCases);
@@ -311,18 +325,30 @@ public class BatchGradingService {
             // error.message là chẩn đoán kỹ thuật; student_safe_summary là hướng dẫn riêng cho SV.
             sanitizeTestCaseErrors(testCases);
 
+            // Đặt trước khối try để giữ thứ tự khoá test_cases → competency_assessment. Đây là
+            // CÙNG tham chiếu list, nên các bước sửa bên dưới vẫn phản ánh vào JSON.
+            if (!testCases.isEmpty()) root.put("test_cases", testCases);
+
             // Gắn nhãn KIẾN THỨC (skill_name/category/category_label) + ĐỘ KHÓ cho từng testcase,
             // rồi tính NĂNG LỰC theo category — dùng chung 1 resolver.
+            String annotationError = null;
             try {
                 SyllabusService.Resolver resolver = syllabusService.resolver();
                 competencyService.annotateTestCases(testCases, resolver);
-                if (!testCases.isEmpty()) root.put("test_cases", testCases);
                 List<Map<String, Object>> comp = competencyService.assess(testCases, resolver);
                 if (!comp.isEmpty()) root.put("competency_assessment", comp);
             } catch (Exception ce) {
-                if (!testCases.isEmpty()) root.put("test_cases", testCases);
+                // Khối trên ngã thì bài này bị SUY GIẢM. Phải nói ra, nếu không nó trông y hệt
+                // một bài bình thường và bên đọc sẽ nhận xét như thể mọi nhãn đều đầy đủ.
+                annotationError = ce.getClass().getSimpleName()
+                        + (ce.getMessage() == null ? "" : ": " + TestErrorClassifier.shorten(ce.getMessage(), 160));
                 log.warn("Tính competency/annotate lỗi cho {}: {}", job.studentId(), ce.getMessage());
             }
+
+            // SAU khối try: khoá hợp đồng phải có mặt kể cả khi khối trên đã ngã.
+            guaranteeContractKeys(testCases);
+            gradingResult.putIfAbsent("not_run_tests", countStatus(testCases, "not_run"));
+            gradingResult.put("annotation_error", annotationError);
 
             if (g.has("analyze_result"))
                 root.put("analyze_result", mapper.convertValue(g.get("analyze_result"), Object.class));
@@ -347,32 +373,109 @@ public class BatchGradingService {
         return out;
     }
 
+    /** Đọc skills_matrix.json của đề; null khi đề chưa có file (bài cũ, đề đã xoá testcase...). */
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> loadSkillsMatrix(Exam exam) {
+        if (exam == null || exam.getTestcasePath() == null) return null;
+        try {
+            Path f = Path.of(exam.getTestcasePath()).resolve("skills_matrix.json");
+            if (!Files.exists(f)) return null;
+            return mapper.convertValue(
+                    mapper.readTree(Files.readString(f, java.nio.charset.StandardCharsets.UTF_8)), Map.class);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
+     * Gắn `rubric` (nhóm chức năng) và `layer` (tầng kiểm thử) cho từng testcase.
+     * <p>Chạy CẢ KHI không có matrix, vì layer của đề legacy vẫn suy được từ tiền tố test_id.
+     * Luôn ĐẶT khoá kể cả giá trị null để bên đọc không phải đoán schema.
+     */
+    @SuppressWarnings("unchecked")
+    private void annotateTaxonomy(List<Map<String, Object>> tcs, Map<String, Object> matrix) {
+        for (Map<String, Object> tc : tcs) {
+            String testId = String.valueOf(tc.get("test_id"));
+            Object raw = matrix == null ? null : matrix.get(testId);
+            Map<String, Object> row = raw instanceof Map<?, ?> m ? (Map<String, Object>) m : null;
+            if (isBlank(tc.get("rubric"))) tc.put("rubric", TestCaseTaxonomy.rubricOf(row));
+            if (isBlank(tc.get("layer")))  tc.put("layer",  TestCaseTaxonomy.layerOf(row, testId));
+            // Nhãn hiển thị của rubric. Đặt khoá kể cả khi null — bên đọc hiểu "khoá vắng mặt =
+            // dữ liệu cũ, được phép tự suy", nên thiếu khoá trên dữ liệu MỚI sẽ đẩy họ đi đoán.
+            if (isBlank(tc.get("rubric_label")))
+                tc.put("rubric_label", TestCaseTaxonomy.rubricLabelOf(row));
+        }
+    }
+
+    private boolean isBlank(Object value) {
+        return value == null || String.valueOf(value).isBlank();
+    }
+
+    /** Nhãn kiến thức do CompetencyService gắn — cả khối biến mất nếu resolver ném lỗi. */
+    private static final List<String> KNOWLEDGE_KEYS =
+            List.of("chapter", "category", "category_label", "skill_name", "difficulty_label");
+
+    /**
+     * Bảo đảm mọi khoá của hợp đồng CÓ MẶT ở từng testcase, kể cả khi giá trị là null.
+     *
+     * <p>Chạy SAU khối gắn nhãn kiến thức, vì khối đó nằm trong try/catch: `syllabusService`
+     * ném lỗi là mất sạch `chapter`/`category`/`skill_name`/`difficulty_label`. Bên đọc hiểu
+     * *"khoá vắng mặt = dữ liệu cũ, được phép tự suy"*, nên thiếu khoá trên dữ liệu MỚI sẽ đẩy
+     * họ quay lại đoán — đúng thứ hai bên đã thống nhất bỏ.
+     *
+     * <p>Ở đây chỉ ĐẶT KHOÁ, không bịa giá trị.
+     */
+    private void guaranteeContractKeys(List<Map<String, Object>> tcs) {
+        for (Map<String, Object> tc : tcs) {
+            String status = String.valueOf(tc.getOrDefault("status", "")).toLowerCase();
+            boolean notRun = "not_run".equals(status);
+            // Dẫn xuất từ status. Engine chung đã gửi sẵn; đề legacy thì suy tại đây.
+            if (!(tc.get("executed") instanceof Boolean)) tc.put("executed", !notRun);
+            // not_run vẫn tính vào total_weight nhưng điểm phải là 0 (SPEC mục 4).
+            if (notRun) tc.put("score", 0);
+            // Mã lỗi PHẲNG cho máy đọc. Đọc `error.code` của grader ĐỀ LEGACY (grader riêng của
+            // giáo viên vẫn có thể gửi object error) trước khi bỏ object đó đi.
+            if (tc.get("error_code") == null) {
+                Object error = tc.get("error");
+                tc.put("error_code", error instanceof Map<?, ?> m ? m.get("code") : null);
+            }
+            // P2b — GỠ HẲN hai trường. Phải gỡ ở đây, sau khi đã rút `error_code` ra: grader của
+            // đề legacy vẫn gửi chúng, và bỏ sót là hợp đồng nói một đằng dữ liệu một nẻo.
+            tc.remove("error");
+            tc.remove("student_safe_summary");
+            // Hoãn tới P4b, luôn null — nhưng khoá phải có mặt (SPEC mục 4).
+            tc.putIfAbsent("blocked_by", null);
+            for (String key : KNOWLEDGE_KEYS) tc.putIfAbsent(key, null);
+        }
+    }
+
+    private int countStatus(List<Map<String, Object>> tcs, String status) {
+        int n = 0;
+        for (Map<String, Object> tc : tcs) {
+            if (status.equals(String.valueOf(tc.get("status")).toLowerCase())) n++;
+        }
+        return n;
+    }
+
     /**
      * Bổ sung skill_code / difficulty / skill (tên hiển thị) cho mỗi testcase, đọc từ
      * skills_matrix.json của đề. Chỉ điền khi testcase CHƯA có (không ghi đè dữ liệu grader).
      */
-    @SuppressWarnings("unchecked")
-    private void enrichTestCases(List<Map<String, Object>> tcs, Exam exam) {
-        if (tcs.isEmpty() || exam == null || exam.getTestcasePath() == null) return;
-        Map<String, Object> matrix;
-        try {
-            Path f = Path.of(exam.getTestcasePath()).resolve("skills_matrix.json");
-            if (!Files.exists(f)) return;
-            matrix = mapper.convertValue(
-                    mapper.readTree(Files.readString(f, java.nio.charset.StandardCharsets.UTF_8)), Map.class);
-        } catch (Exception e) {
-            return;
-        }
+    private void enrichTestCases(List<Map<String, Object>> tcs, Map<String, Object> matrix) {
+        if (tcs.isEmpty() || matrix == null) return;
         for (Map<String, Object> tc : tcs) {
             Object meta = matrix.get(String.valueOf(tc.get("test_id")));
             if (meta instanceof Map<?, ?> m) {
                 putIfAbsent(tc, "skill_code", m.get("skill_code"));
                 putIfAbsent(tc, "difficulty", m.get("difficulty"));
                 putIfAbsent(tc, "skill",      m.get("skill"));
-                Object configuredExpected = m.get("expected");
+                // Expected trong rubric là nội dung giáo viên đã cấu hình, nên là nguồn
+                // sự thật cuối cùng khi dựng result_json kể cả grader trả metadata cũ.
+                // Riêng testcase GROUP: đề publish TRƯỚC bản sửa còn giữ câu tự sinh đếm số
+                // assert, phải dựng lại tại đây — xem TestCaseTaxonomy.groupExpected.
+                Object configuredExpected = TestCaseTaxonomy.groupExpected(m);
+                if (configuredExpected == null) configuredExpected = m.get("expected");
                 if (configuredExpected != null && !String.valueOf(configuredExpected).isBlank()) {
-                    // Expected trong rubric là nội dung giáo viên đã cấu hình, nên là nguồn
-                    // sự thật cuối cùng khi dựng result_json kể cả grader trả metadata cũ.
                     tc.put("expected", configuredExpected);
                 }
             }
@@ -397,101 +500,85 @@ public class BatchGradingService {
     }
 
     // ════════════════════════════════════════════════════════════════════════════
-    //  CHUẨN HOÁ LỖI TESTCASE: log thô flutter test → actual + error{code,message}
-    //  + student_safe_summary (lời giải thích/hướng xử lý an toàn cho sinh viên)
+    //  CHUẨN HOÁ LỖI TESTCASE: log thô flutter test → `actual` + `error_code`
     // ════════════════════════════════════════════════════════════════════════════
 
     /**
      * Với mỗi testcase FAIL, biến `actual` (log THÔ của flutter test — Expected/Actual rồi stack
      * trace dài, "EXCEPTION CAUGHT BY...", cây widget → trông như "log backend") thành:
-     *   - `actual`      = KẾT QUẢ THỰC TẾ gọn (giá trị/để so với `expected` của rubric), vd "1".
-     *   - `error.code`  = loại lỗi (VALUE_MISMATCH | WIDGET_NOT_FOUND | EXCEPTION_THROWN | ASSERTION_FAILED).
-     *   - `error.message` = chẩn đoán kỹ thuật ngắn (reason/matcher/exception type).
-     *   - `student_safe_summary` = hướng xử lý an toàn cho sinh viên; không sao chép error.message.
-     * Nhờ vậy các trường bổ sung nhau, không trùng nhau, GV đọc rõ.
+     *   - `actual`     = ĐIỀU QUAN SÁT ĐƯỢC, tiếng Việt (P5 — ưu tiên kênh quan sát có cấu trúc).
+     *   - `error_code` = loại lỗi cho máy đọc, **chỉ mã, không kèm câu diễn giải**.
+     *
+     * <p><b>P2b đã gỡ `error{code,message}` và `student_safe_summary`.</b> Lý do gỡ, ghi lại kẻo
+     * có người thấy tiện mà thêm lại: cả hai đều là câu <b>TRA BẢNG THEO MÃ LỖI</b>, không phải
+     * điều quan sát được — mọi exception đều nhận cùng một câu khuyên *"kiểm tra null/ép kiểu/
+     * parse"* dù lỗi thật là timeout hay thiếu widget. Bên đọc chuyển tiếp nguyên văn cho sinh
+     * viên ⇒ thông tin SAI. Từ P3 `error.message` còn lộ cả semantic key nội bộ.
+     *
+     * <p>Thay thế: `expected` (yêu cầu của đề) + `actual` (điều quan sát được) đã đủ, và
+     * `error_code` giữ lại phần duy nhất có giá trị — mã cho máy gom nhóm.
      */
     private void sanitizeTestCaseErrors(List<Map<String, Object>> tcs) {
         for (Map<String, Object> tc : tcs) {
             String status = String.valueOf(tc.getOrDefault("status", "")).toLowerCase();
-            if (!status.contains("fail")) continue;                 // chỉ xử lý câu fail
+            // not_run cũng cần diễn đạt lý do chưa chạy, nhưng KHÔNG phân loại lỗi.
+            if (!status.contains("fail")) {
+                renderObservation(tc);
+                continue;
+            }
             Object rawObj = tc.get("actual");
             if (rawObj == null || String.valueOf(rawObj).isBlank()) rawObj = tc.get("error_log");
             String raw = rawObj == null ? "" : String.valueOf(rawObj);
-            if (raw.isBlank()) {
-                // Bài cũ có thể không lưu log; vẫn trả field để client không phải đoán schema.
-                ensureStudentSafeSummary(tc);
-                continue;
-            }
-            applyStructuredError(tc, raw);
+            if (!raw.isBlank()) applyStructuredError(tc, raw);
+            // SAU CÙNG: quan sát có cấu trúc ghi đè `actual` do bóc log. Thứ tự này bắt buộc —
+            // classifier cần đọc LOG THÔ để ra `error_code` đúng, nên không được thay `actual`
+            // trước nó; còn câu cho sinh viên đọc thì quan sát luôn tốt hơn bản đoán từ chữ.
+            renderObservation(tc);
         }
     }
 
     /**
-     * Chuẩn hoá 1 lỗi: nhờ {@link TestErrorClassifier} phân loại log thô → { code, actual, message }
-     * rồi gắn vào testcase. Mọi logic phân loại nằm tập trung trong classifier (dễ mở rộng loại lỗi).
+     * P5 — `actual` dựng từ KÊNH QUAN SÁT CÓ CẤU TRÚC của engine, thay cho việc bóc log tiếng Anh.
+     *
+     * <p>Chạy SAU {@link #applyStructuredError} vì classifier cần đọc LOG THÔ ở `actual` để ra
+     * `error_code` đúng. Nhưng câu cho SINH VIÊN đọc thì quan sát luôn thắng: runner tự khai
+     * *"tôi kiểm gì, tôi thấy gì"*, còn bóc log là đoán ngược từ chữ tiếng Anh.
+     *
+     * <p>Đánh dấu `actual_source` để đo được còn bao nhiêu runner chưa chuyển sang kênh này.
+     */
+    private void renderObservation(Map<String, Object> tc) {
+        Object raw = tc.get("observation");
+        if (!(raw instanceof Map<?, ?> observation)) return;
+        // A1 — `error_code` cũng suy từ quan sát, GHI ĐÈ giá trị classifier vừa bóc từ log. Cùng lý
+        // do như `actual`: runner tự khai điều nó khẳng định, còn bóc log là đoán ngược từ chữ.
+        // null (kind lạ, hoặc NOT_RUN_*) thì GIỮ giá trị cũ — mã sai tệ hơn không có mã.
+        String code = TestObservationRenderer.errorCodeOf(observation);
+        if (code != null) tc.put("error_code", code);
+
+        String rendered = TestObservationRenderer.render(
+                String.valueOf(tc.getOrDefault("name", "")), observation);
+        if (rendered == null || rendered.isBlank()) return;
+        tc.put("actual", rendered);
+        tc.put("actual_source", "observation");
+    }
+
+    /**
+     * Phân loại log thô → `error_code` + `actual` chống rỗng.
+     *
+     * <p>Classifier vẫn còn việc sau P5: nó là nguồn `error_code` duy nhất cho ca **không có
+     * quan sát** (exception runtime giữa runner, chưa đi qua chỗ bọc assert), và ở đó nó giữ được
+     * độ mịn mà `observation.kind` không mang được (`NULL_ERROR`, `TYPE_ERROR`, `TIMEOUT`…).
+     *
+     * <p>Chỉ lấy `code`; `message` bị bỏ ở P2b vì nó là câu tra bảng, không phải quan sát.
      */
     private void applyStructuredError(Map<String, Object> tc, String raw) {
         TestErrorClassifier.Result res = errorClassifier.classify(raw);
         String actual = res.actual();
         if (actual != null && !actual.isBlank()) tc.put("actual", actual);
-        else tc.put("actual", "Không có giá trị actual — testcase dừng do exception");
-        Map<String, Object> err = new LinkedHashMap<>();
-        err.put("code", res.code());
-        String technicalMessage = TestErrorClassifier.shorten(res.message(), 240);
-        if (technicalMessage.isBlank()) technicalMessage = "Testcase không đạt và không có chẩn đoán kỹ thuật.";
-        err.put("message", technicalMessage);
-        tc.put("error", err);
-        tc.put("student_safe_summary", studentSafeSummary(res));
-    }
-
-    /**
-     * Tạo hướng dẫn riêng cho sinh viên. Không lấy nguyên error.message để tránh JSON hiển thị
-     * hai field giống hệt nhau.
-     */
-    private String studentSafeSummary(TestErrorClassifier.Result res) {
-        return studentSafeSummaryForCode(res.code());
-    }
-
-    private String studentSafeSummaryForCode(String code) {
-        return switch (code == null ? "" : code) {
-            case "VALUE_MISMATCH" -> "Đối chiếu actual với expected của testcase và sửa giá trị/logic tương ứng.";
-            case "WIDGET_NOT_FOUND" -> "Kiểm tra widget, text, key hoặc semantics mà đề yêu cầu; bảo đảm widget được render trong viewport.";
-            case "WIDGET_UNEXPECTED" -> "Loại bỏ widget/nhãn xuất hiện ngoài yêu cầu hoặc sửa điều kiện render.";
-            case "WIDGET_COUNT" -> "Kiểm tra số lượng widget thực tế và dữ liệu đầu vào của danh sách.";
-            case "LAYOUT_OVERFLOW" -> "Sửa bố cục bằng cách giới hạn kích thước hoặc cho phép cuộn ở viewport đang được kiểm tra.";
-            case "TIMEOUT" -> "Kiểm tra loading/animation và các thao tác async để chúng luôn kết thúc.";
-            case "NULL_ERROR" -> "Khởi tạo dữ liệu bắt buộc và xử lý null trước khi truy cập thuộc tính/field.";
-            case "TYPE_ERROR" -> "Kiểm tra kiểu dữ liệu và các phép ép kiểu trong luồng testcase.";
-            case "RANGE_ERROR" -> "Kiểm tra index và điều kiện danh sách rỗng trước khi truy cập phần tử.";
-            case "NO_SUCH_METHOD" -> "Kiểm tra tên hàm/thuộc tính và bảo đảm API được định nghĩa đúng trong lib/.";
-            case "FORMAT_ERROR" -> "Kiểm tra dữ liệu đầu vào trước khi parse hoặc chuyển đổi định dạng.";
-            case "STATE_ERROR" -> "Kiểm tra luồng cập nhật state/list và tránh thay đổi dữ liệu khi đang duyệt.";
-            case "BUILD_ERROR" -> "Kiểm tra tham số bắt buộc và lỗi trong build method của widget.";
-            case "COMPILE_ERROR" -> "Kiểm tra import, tên package và dependency trước khi chạy testcase.";
-            case "EXCEPTION_THROWN" -> "Testcase dừng do exception; kiểm tra log runtime và sửa lỗi trong luồng được yêu cầu.";
-            default -> "Đối chiếu yêu cầu testcase với cách triển khai và sửa phần chưa đáp ứng.";
-        };
-    }
-
-    /** Đảm bảo dữ liệu chấm cũ vẫn có field student_safe_summary. */
-    private void ensureStudentSafeSummary(Map<String, Object> tc) {
-        Object current = tc.get("student_safe_summary");
-        Object errorObj = tc.get("error");
-        String errorMessage = "";
-        String errorCode = "";
-        if (errorObj instanceof Map<?, ?> errorMap) {
-            Object message = errorMap.get("message");
-            if (message != null) errorMessage = String.valueOf(message).strip();
-            Object code = errorMap.get("code");
-            if (code != null) errorCode = String.valueOf(code).strip();
-        }
-        if (current != null && !String.valueOf(current).isBlank()
-                && !String.valueOf(current).strip().equals(errorMessage)) {
-            tc.put("student_safe_summary",
-                    TestErrorClassifier.shorten(String.valueOf(current), 240));
-            return;
-        }
-        tc.put("student_safe_summary", studentSafeSummaryForCode(errorCode));
+        // Không tách được gì từ log thì nói đúng chừng đó. Câu cũ ("dừng do exception") NÓI SAI
+        // nguyên nhân với bài không biên dịch được — ở đó chẳng có exception nào.
+        else tc.put("actual", "Không thu được kết quả quan sát cho testcase này");
+        tc.put("error_code", res.code());
     }
 
     /** Giới hạn độ dài log lỗi để không phình DB / không tràn cột. */
@@ -864,6 +951,13 @@ public class BatchGradingService {
         List<String> ids = resultRepo.findSubmitStudentIds(examId);
         if (ids.isEmpty())
             throw new IllegalArgumentException("Đề " + examId + " chưa có bài nộp nào để chấm lại.");
+        // Nâng engine lên bản mới nhất TRƯỚC khi chấm lại — engine bị chép đóng băng vào thư mục
+        // testcase lúc publish nên không nâng thì bản sửa engine vô hiệu với đề đã publish.
+        //
+        // CHỈ nâng ở đây, KHÔNG nâng khi chấm lại lẻ: ở đây cả đề được chấm lại bằng CÙNG một
+        // engine nên vẫn công bằng; nâng lúc chấm lại một bài thì trong cùng đề sẽ có bài chấm
+        // bằng engine mới, bài chấm bằng engine cũ.
+        templateService.refreshCommonEngine(examId);
         return regradeStudents(examId, ids, createdBy);
     }
 

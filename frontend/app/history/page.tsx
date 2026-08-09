@@ -15,14 +15,15 @@ import {
 } from "lucide-react";
 
 interface ExamOption { examId: string; examName: string; }
-interface TestError { code?: string; message?: string; }
 interface TestCaseItem {
-  test_id?: string; name?: string; status?: string; weight?: number;
+  test_id?: string; name?: string; status?: string; executed?: boolean; weight?: number;
   skill_code?: string; skill_name?: string; category_label?: string;
   difficulty?: string; skill?: string;
   expected?: string; actual?: string; error_log?: string;
-  student_safe_summary?: string;
-  error?: TestError;
+  // `actual_source === "observation"` = `actual` đã là câu tiếng Việt sạch, hiển thị thẳng.
+  // Vắng cờ = dữ liệu chấm trước P5, `actual` có thể còn là log thô → phải parse.
+  actual_source?: string;
+  error_code?: string;
 }
 
 const DIFF_BADGE: Record<string, string> = {
@@ -59,6 +60,14 @@ const ERR_BADGE: Record<string, string> = {
   WIDGET_NOT_FOUND: "bg-amber-100 text-amber-700",
   WIDGET_UNEXPECTED: "bg-amber-100 text-amber-700",
   WIDGET_COUNT: "bg-amber-100 text-amber-700",
+  // Năm mã của đường quan sát (A1 + A2b) — tách riêng vì cách sửa khác nhau, không dồn chung.
+  SIZE_MISMATCH: "bg-rose-100 text-rose-700",
+  TEXT_STYLE_MISMATCH: "bg-rose-100 text-rose-700",
+  SEMANTICS_MISMATCH: "bg-amber-100 text-amber-700",
+  ENABLED_MISMATCH: "bg-amber-100 text-amber-700",
+  // Cùng màu hổ phách với nhóm "thành phần chưa đúng", KHÔNG cùng màu WIDGET_NOT_FOUND để
+  // giáo viên nhìn badge là phân biệt được "thiếu hẳn" với "có nhưng sai loại".
+  WIDGET_TYPE_MISMATCH: "bg-yellow-100 text-yellow-800",
   LAYOUT_OVERFLOW: "bg-orange-100 text-orange-700",
   TIMEOUT: "bg-orange-100 text-orange-700",
   NULL_ERROR: "bg-red-100 text-red-700",
@@ -74,28 +83,31 @@ const ERR_BADGE: Record<string, string> = {
 
 /**
  * Khối ĐỎ chi tiết lỗi 1 testcase fail.
- * Ưu tiên `error` có cấu trúc { code, message } (backend mới đã làm sạch); nếu không có thì fallback
- * parse log THÔ của flutter test (bài cũ): tách Expected/Actual/lý do, diễn giải exception widget.
+ *
+ * Chọn nhánh theo **CỜ ĐỜI DỮ LIỆU** `actual_source`, không theo sự có mặt của field nào:
+ *  - `"observation"` → `actual` đã là câu tiếng Việt do engine quan sát được, in thẳng.
+ *  - vắng cờ → dữ liệu chấm trước P5, `actual` có thể còn là log thô của flutter test → parse.
+ *
+ * Nhánh parse log CỐ Ý GIỮ LẠI: kết quả cũ trong DB không được migrate nên còn đó vĩnh viễn.
+ * Gỡ nó "vì format mới đã sạch" là làm trang Lịch sử của bài cũ hiện log thô ra cho giáo viên.
+ *
+ * P2b đã bỏ `error.message` và `student_safe_summary` — hai câu tra bảng theo mã lỗi, không phải
+ * điều quan sát được. Chỉ còn `error_code` làm nhãn phân loại.
  */
-function FailureDetail({ requirement, actual, error, studentSafeSummary }:
-  { requirement?: string; actual?: string; error?: TestError; studentSafeSummary?: string }) {
-  // Đường mới: Mong đợi (rubric) · Thực tế (giá trị) · Lỗi [code] + lý do — không còn stack trace.
-  if (error && (error.code || error.message)) {
+function FailureDetail({ requirement, actual, errorCode, actualSource }:
+  { requirement?: string; actual?: string; errorCode?: string; actualSource?: string }) {
+  if (actualSource === "observation") {
     return (
       <div className="mt-1 space-y-0.5 pl-3.5 text-[11px] text-rose-500">
-        {requirement && <p><span className="font-semibold">Mong đợi:</span> <span className="font-mono">{requirement}</span></p>}
-        {actual && <p><span className="font-semibold">Thực tế:</span> <span className="font-mono">{actual}</span></p>}
-        <p className="flex flex-wrap items-baseline gap-1.5">
-          <span className="font-semibold">Lỗi:</span>
-          {error.code && (
-            <span className={`rounded px-1.5 py-0.5 font-mono text-[10px] font-semibold ${ERR_BADGE[error.code] || "bg-slate-100 text-slate-600"}`}>
-              {error.code}
+        {requirement && <p><span className="font-semibold">Đề yêu cầu:</span> {requirement}</p>}
+        {actual && <p><span className="font-semibold">Quan sát được:</span> {actual}</p>}
+        {errorCode && (
+          <p className="flex flex-wrap items-baseline gap-1.5">
+            <span className="font-semibold">Loại lỗi:</span>
+            <span className={`rounded px-1.5 py-0.5 font-mono text-[10px] font-semibold ${ERR_BADGE[errorCode] || "bg-slate-100 text-slate-600"}`}>
+              {errorCode}
             </span>
-          )}
-          {error.message && <span>{error.message}</span>}
-        </p>
-        {studentSafeSummary && (
-          <p><span className="font-semibold">Gợi ý:</span> {studentSafeSummary}</p>
+          </p>
         )}
       </div>
     );
@@ -778,7 +790,12 @@ export default function HistoryPage() {
                       <p className="text-sm font-bold text-slate-700">Chi tiết testcase</p>
                       <div className="space-y-1.5">
                         {detail.test_cases.map((tc, i) => {
-                          const passed = (tc.status || "").toLowerCase() === "passed";
+                          const status = (tc.status || "").toLowerCase();
+                          const passed = status === "passed";
+                          // not_run = CHƯA CÓ CƠ HỘI CHẠY, không phải làm sai. Tô cùng màu đỏ
+                          // với testcase hỏng thật sẽ khiến GV đọc thành "sai 12 chỗ khác nhau"
+                          // trong khi chỉ có MỘT nguyên nhân gốc.
+                          const notRun = status === "not_run";
                           return (
                             <div
                               key={tc.test_id || i}
@@ -786,11 +803,16 @@ export default function HistoryPage() {
                             >
                               <div className="flex items-center gap-2">
                                 <span
-                                  className={`h-1.5 w-1.5 shrink-0 rounded-full ${passed ? "bg-emerald-500" : "bg-rose-500"}`}
+                                  className={`h-1.5 w-1.5 shrink-0 rounded-full ${passed ? "bg-emerald-500" : notRun ? "bg-slate-300" : "bg-rose-500"}`}
                                 />
                                 <span className="min-w-0 flex-1 truncate text-xs font-medium text-slate-700">
                                   {tc.name || tc.test_id}
                                 </span>
+                                {notRun && (
+                                  <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-500">
+                                    Chưa chạy
+                                  </span>
+                                )}
                                 {(tc.skill_name || tc.skill_code) && (
                                   <span
                                     className="shrink-0 rounded bg-indigo-50 px-1.5 py-0.5 text-[10px] font-medium text-indigo-600"
@@ -812,12 +834,12 @@ export default function HistoryPage() {
                                   {tc.skill_code}
                                 </p>
                               )}
-                              {!passed && (tc.error || tc.expected || tc.actual || tc.error_log || tc.student_safe_summary) && (
+                              {!passed && (tc.expected || tc.actual || tc.error_log || tc.error_code) && (
                                 <FailureDetail
                                   requirement={tc.expected}
                                   actual={tc.actual || tc.error_log}
-                                  error={tc.error}
-                                  studentSafeSummary={tc.student_safe_summary}
+                                  errorCode={tc.error_code}
+                                  actualSource={tc.actual_source}
                                 />
                               )}
                             </div>

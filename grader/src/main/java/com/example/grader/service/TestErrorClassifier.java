@@ -118,16 +118,28 @@ public final class TestErrorClassifier {
                 p -> new Result("WIDGET_NOT_FOUND", "Không tìm thấy widget/nhãn nào khớp",
                         p.messageOr("Thiếu hoặc sai widget/nhãn UI mà đề yêu cầu."))));
 
-        // ── Exception CHUNG (sau khi đã thử các loại cụ thể) ──
+        // ── `Actual:` là ĐỐI TƯỢNG LỖI Dart, không phải giá trị vô hướng ──
+        // Sinh ra bởi `expect(tester.takeException(), isNull)`: log thô là dump tiếng Anh kèm
+        // tên field private của bài. Chỉ giữ LOẠI lỗi cho giáo viên, `actual` nói điều quan
+        // sát được. Phải đứng trước luật so-giá-trị, nếu không dump sẽ chảy nguyên vào actual.
+        c.add(rule(p -> errorObjectType(p) != null,
+                p -> new Result("EXCEPTION_THROWN",
+                        "Ứng dụng ném lỗi khi chạy nên chưa dựng được nội dung để kiểm",
+                        "Exception ném ra trong lúc test chạy: " + errorObjectType(p) + ".")));
+
+        // ── So khớp giá trị (scalar) ──
+        // PHẢI đứng trước luật exception chung: một assertion không đạt trong flutter_test
+        // luôn là TestFailure, nên khối dump luôn chứa "exception caught by". Xếp exception
+        // lên trước thì mọi lỗi so-giá-trị đều bị gắn sai mã EXCEPTION_THROWN.
+        c.add(rule(p -> p.expectedVal != null && p.actualVal != null,
+                p -> new Result("VALUE_MISMATCH", cleanValue(p.actualVal),
+                        p.messageOr("Giá trị trả về không đúng yêu cầu."))));
+
+        // ── Exception CHUNG: phương án cuối, khi không tách được kỳ vọng/thực tế ──
         c.add(rule(p -> p.has("exception caught") || p.has("was thrown")
                      || p.has("see exception logs above") || p.has("unhandled exception"),
                 p -> new Result("EXCEPTION_THROWN", excActual(p),
                         "Code ném lỗi khi chạy — kiểm tra null/ép kiểu/parse/logic trong lib/.")));
-
-        // ── So khớp giá trị (scalar) ──
-        c.add(rule(p -> p.expectedVal != null && p.actualVal != null,
-                p -> new Result("VALUE_MISMATCH", cleanValue(p.actualVal),
-                        p.messageOr("Giá trị trả về không đúng yêu cầu."))));
 
         return c;
     }
@@ -190,6 +202,17 @@ public final class TestErrorClassifier {
         return e.contains("no matching") || e.contains("zero") || e.contains("nothing");
     }
 
+    /** `Actual:` mở đầu bằng tên một lớp lỗi Dart, vd `LateError:<LateInitializationError…>`. */
+    private static final Pattern ERROR_OBJECT =
+            Pattern.compile("^([A-Za-z_][A-Za-z0-9_]*(?:Error|Exception|Failure))\\b");
+
+    /** Loại lỗi Dart ở đầu `Actual:`; null nếu đó là giá trị vô hướng bình thường. */
+    private static String errorObjectType(Parsed p) {
+        if (p.actualVal == null) return null;
+        Matcher m = ERROR_OBJECT.matcher(p.actualVal.strip());
+        return m.find() ? m.group(1) : null;
+    }
+
     /** Số widget thực tế Finder tìm thấy (-1 nếu không xác định). */
     private static int foundCount(Parsed p) {
         String a = p.actualVal;
@@ -229,9 +252,20 @@ public final class TestErrorClassifier {
             if (t.toLowerCase().matches("the following .*was thrown.*")) return t;
         for (String t : lines) {                           // 3) bỏ metadata còn sót từ log cũ
             String tl = t.toLowerCase();
-            if (!tl.startsWith("the test description was") && !tl.startsWith("test description:")) return t;
+            if (tl.startsWith("the test description was") || tl.startsWith("test description:")) continue;
+            if (isInformative(t)) return t;
         }
         return "";                                         // không có actual/exception detail đáng tin cậy
+    }
+
+    /**
+     * Khối dump của flutter_test có dòng bị ngắt giữa câu và dòng gạch chân dấu mũ, nên
+     * mảnh vụn kiểu {@code "initialized.>"} hay {@code "^"} vẫn lọt vào reasonLines. Chúng
+     * KHÔNG mang thông tin: thà trả câu chung còn hơn ghi rác vào `actual` cho sinh viên đọc.
+     */
+    private static boolean isInformative(String line) {
+        String t = line.strip();
+        return t.split("\\s+").length >= 3 && t.matches(".*\\p{L}{3,}.*");
     }
 
     /** Bỏ ngoặc nhọn của giá trị matcher: "&lt;1&gt;" → "1". */

@@ -3,6 +3,62 @@
 Testcase chung không import model, repository hoặc tên màn hình nội bộ của bài sinh viên.
 Testcase chỉ tìm các semantic key mà starter/đề bài công bố.
 
+## Khu vực 0 — Cấu hình bài làm (hợp đồng)
+
+Trước khi tạo testcase, giáo viên khai **mỗi semantic key được nhận diện thế nào** nếu bài
+nộp không gắn `ValueKey`. Đây là bước quan trọng nhất về độ chính xác: engine từng dò cứng
+(list = `ListView`, item = `ListTile`, nút = nút có chữ) nên bài dùng `SliverGrid`/`Card`/nút
+chỉ có icon — vẫn đúng đề — bị chấm trượt oan.
+
+Hợp đồng lưu trong `testcase_config_json` (khóa `contract`) và được materialize thành
+`contract.json` (engine đọc lúc chấm) + `contract.md` (yêu cầu dán vào đề + đoạn
+`ExamKeys` phát cho sinh viên).
+
+```json
+{
+  "require_keys": false,
+  "keys": [
+    {"key": "list.items", "label": "Danh sách", "strategy": "widget_type", "value": "SliverGrid", "index": 0},
+    {"key": "action.item.edit", "label": "Nút sửa", "strategy": "icon", "value": "edit", "index": 0}
+  ]
+}
+```
+
+Các cách dò (`strategy`) — khớp `_contractFinder` trong `exam_test.dart`:
+
+| strategy | Ý nghĩa | Cần `value` |
+|---|---|---|
+| `auto` | Dò theo quy tắc mặc định (heuristic sẵn có của engine) | không |
+| `key_only` | Không dò thay thế — thiếu `ValueKey` là không tìm thấy | không |
+| `widget_type` | Theo tên class widget (`SliverGrid`, `Card`, `TextField`…) | có |
+| `icon` | Theo **nhóm** icon (`edit`, `delete`, `add`, `save`, `back`, `forward`, `close`, `search`, `person`, `email`, `image`, `menu`) | có |
+| `tooltip` | Theo tooltip của nút | có |
+| `text` | Theo nội dung chữ | có |
+| `button_text` | Nút chứa chữ đó | có |
+| `type_with_text` | Widget loại X có chứa chữ Y (cần thêm `text`) | có |
+
+Ghi chú:
+
+- `value` khớp đúng chuỗi, hoặc bọc trong `/…/` để dùng biểu thức chính quy (không phân biệt hoa thường).
+- `index` chọn phần tử thứ mấy khi nhiều widget cùng khớp (0 = đầu tiên). Thiếu phần tử thứ
+  `index` thì coi như **không tìm thấy** — không tự lùi về phần tử đầu, tránh pass giả.
+- `icon`/`tooltip`/`button_text` tự lấy **nút bọc ngoài** nếu có, nên `targetType=button` và
+  `tap()` đều trúng đúng đối tượng. Nút Material tự dựng `InkWell` bên trong nên engine ưu tiên
+  `ElevatedButton`/`IconButton`/… trước, chỉ dùng `InkWell` khi không có nút thật.
+- `require_keys=true` thì bỏ toàn bộ fallback; muốn miễn trừ vài key thì đặt
+  `allow_fallback: true` ở đúng key đó.
+- Đề không có hợp đồng vẫn chấm như cũ, nên đề cũ không bị ảnh hưởng.
+
+### File `ExamKeys` trong starter là TÙY CHỌN
+
+Engine chỉ so **chuỗi bên trong key** (`find.byKey(ValueKey<String>(key))`). Sinh viên viết
+thẳng `const ValueKey('field.email')` trong widget là đủ; tên class, tên biến, cách chia
+widget và loại widget hoàn toàn tự do. `const Key('x')` tương đương `ValueKey<String>('x')`
+nên cũng khớp — nhưng `ObjectKey`, `GlobalKey` hay key ghép chuỗi động thì không.
+
+File `exam_keys.dart` sinh ra ở màn "Xem hợp đồng" chỉ để sinh viên khỏi gõ sai chính tả
+tên key (sai một ký tự là mất điểm dù chức năng làm đúng). Không phát cũng không sao.
+
 ## Key cần có trong starter
 
 ```dart
@@ -122,6 +178,77 @@ Với yêu cầu “margin”, nên kiểm tra khoảng cách render giữa hai 
 `WIDGET_GAP` thay vì phụ thuộc vào việc sinh viên dùng `Container.margin` hay
 `Padding`. Như vậy testcase kiểm tra kết quả layout, không ép một cách cài đặt
 duy nhất.
+
+## Quản lý thư viện testcase (Khu vực 2)
+
+Thư viện gốc nằm ở `grader/src/main/resources/common-testcase-templates.json`. Giáo viên
+thêm/sửa/ẩn template ngay trên trang tạo testcase; phần khác biệt lưu ở bảng
+`testcase_template`, file gốc không bị ghi đè:
+
+| Thao tác | Kết quả |
+|---|---|
+| Thêm | Dòng mới `origin=CUSTOM` |
+| Sửa template gốc | Dòng `origin=OVERRIDE` chồng lên bản classpath |
+| Xóa | `hidden=true` — ẩn khỏi Khu vực 2, **không** xóa cứng |
+| Khôi phục | Template gốc: xóa dòng DB → về đúng bản classpath. Template tự thêm: bỏ ẩn |
+
+Không xóa cứng vì `testcase_config_json` của mỗi đề chỉ lưu `template_id`; mất template
+là đề cũ không mở/lưu lại được. `listTemplates` lọc mục ẩn, còn `getTemplate` và
+`normalizeItems` vẫn resolve được.
+
+Form thêm/sửa dựng theo `GET /api/testcase-templates/runners` (xem
+`TestcaseRunnerCatalog`): mỗi runner khai nhãn tiếng Việt, layer mặc định và danh sách
+tham số kèm `type` (`semantic_key`, `semantic_keys`, `values`, `enum`, `number`, `bool`).
+Tham số mặc định phải qua đúng `validateCommonParameters` dùng khi lưu đề, nên không tạo
+được template hỏng. `TestcaseRunnerCatalogTest` chốt danh mục này khớp với switch trong
+`exam_test.dart`.
+
+## Testcase tự viết code (CUSTOM_CODE)
+
+Khi yêu cầu của đề không diễn đạt được bằng runner có sẵn, giáo viên gõ code Dart ngay
+trong khu vực "Tự viết code". Mục sinh ra có `template_id = CUSTOM_CODE`,
+`runner = CUSTOM_CODE`, `layer = CUSTOM`, `parameters` rỗng và code nằm ở `custom_code`.
+
+Giáo viên chỉ viết **phần thân** test; hệ thống tự bọc:
+
+```dart
+testWidgets('PE01_custom_01', (tester) async {
+  // phần thân do giáo viên viết
+});
+```
+
+Tên test luôn bằng `instance_id` nên `grader.dart` vẫn map được kết quả về đúng dòng
+rubric, giống hệt testcase dựng từ template.
+
+Code được chèn vào vùng đánh dấu trong `exam_test.dart`:
+
+```dart
+// ─────────────────── CUSTOM_TESTCASES_BEGIN ───────────────────
+void _registerCustomTestcases() { ... }
+// ──────────────────── CUSTOM_TESTCASES_END ────────────────────
+```
+
+Vùng này bị **sinh lại toàn bộ** mỗi lần lưu cấu hình testcase — sửa tay trong file sẽ
+mất. Mục bị tắt (`enabled = false`) không vào `skills_matrix.json` lẫn file sinh ra.
+Trong `exam_test.dart`, vòng lặp theo matrix bỏ qua entry `CUSTOM_CODE` để tên test
+không bị đăng ký hai lần.
+
+Ràng buộc với đoạn code (kiểm tra tĩnh mỗi lần lưu):
+
+- Không viết `import` / `export` / `part` / `library`, `main()`, `testWidgets(`,
+  `group(`, `setUp*(`, `tearDown*(` — những thứ này đã có sẵn ở file bao ngoài.
+- Đã import sẵn `material.dart`, `flutter_test.dart`, `rendering.dart`, `dart:io`.
+- Ngoặc `{} () []` và chuỗi phải cân bằng (bộ kiểm tra hiểu chuỗi raw, chuỗi ba nháy và
+  interpolation `${...}`), tối đa 20.000 ký tự.
+- `skill_code` vẫn phải tồn tại trong syllabus như mọi testcase khác.
+
+Helper dùng lại được từ engine: `_boot(tester)`, `_settle(tester)`, `_byKey('field.email')`,
+`_textFormFieldAt(i)`, `_listTileAt(i)`, `_buttonWithText(regexp)`, `_validationErrorFor(key)`.
+
+Khi **Publish**, toàn bộ đoạn code tay được ghép thành một file rồi parse bằng
+`dart format --output=none` trong ảnh `grading-base:latest` (một lần gọi Docker cho cả đề);
+sai cú pháp thì chặn publish và báo đúng testcase + số dòng. Nếu máy chưa bật Docker,
+hệ thống chỉ cảnh báo chứ không chặn — lúc đó lỗi cú pháp sẽ lộ ra khi chấm.
 
 ## Gộp testcase thành một testcase lớn
 

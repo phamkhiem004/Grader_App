@@ -869,6 +869,32 @@ public class ExamService {
         return process.waitFor();
     }
 
+    /**
+     * Kiểm tra CÚ PHÁP một file Dart bằng `dart format` trong ảnh nền (chỉ parse, không cần
+     * pub get nên nhanh và không phụ thuộc bài sinh viên). Nội dung đẩy qua stdin để khỏi
+     * mount thư mục tạm trên Windows.
+     *
+     * @return null nếu parse được; thông báo lỗi của Dart nếu sai cú pháp.
+     * @throws IllegalStateException khi không dùng được Docker — caller phải phân biệt
+     *         "chưa kiểm tra được" với "code sai".
+     */
+    public String checkDartSyntax(String dartSource) {
+        if (!dockerImageExists(baseImage))
+            throw new IllegalStateException("chưa có ảnh nền " + baseImage + " hoặc Docker chưa chạy");
+        StringBuilder out = new StringBuilder();
+        try {
+            int exit = runDockerWithStdin(List.of(
+                    "docker", "run", "--rm", "-i", "--entrypoint", "bash", baseImage,
+                    "-c", "cat > /tmp/syntax_check.dart && dart format --output=none /tmp/syntax_check.dart"),
+                    dartSource, out);
+            if (exit == 0) return null;
+            String log = out.toString().trim();
+            return log.isEmpty() ? "Dart báo lỗi cú pháp (exit " + exit + ")." : log;
+        } catch (Exception e) {
+            throw new IllegalStateException("không chạy được Docker: " + e.getMessage(), e);
+        }
+    }
+
     private String tail(String s) {
         String[] arr = s.split("\n");
         int from = Math.max(0, arr.length - 40);

@@ -86,9 +86,23 @@ public final class TestCaseTaxonomy {
             new String[]{"VISUAL_", "visual"},
             new String[]{"UI_", "integration"});
 
+    /**
+     * Runner của testcase giáo viên TỰ VIẾT CODE. Cố ý để NGOÀI {@link #RUNNER_LAYER} vì bảng đó
+     * còn là danh sách năng lực của engine chung mà fixture phải phủ đủ — testcase code tay do
+     * giáo viên viết, fixture không thể có sẵn.
+     *
+     * <p>Tầng {@code widget}: thân test được bọc bằng {@code testWidgets(...)} và cấm
+     * {@code group/setUp}, nên về cấu trúc nó luôn chạy ở tầng widget.
+     */
+    private static final String CUSTOM_RUNNER = "CUSTOM_CODE";
+    private static final String CUSTOM_RUNNER_LAYER = "widget";
+
     /** Layer của một runner đơn lẻ; {@code null} nếu runner lạ hoặc là GROUP. */
     public static String layerForRunner(String runner) {
-        return runner == null ? null : RUNNER_LAYER.get(runner.trim().toUpperCase());
+        if (runner == null) return null;
+        String key = runner.trim().toUpperCase();
+        if (CUSTOM_RUNNER.equals(key)) return CUSTOM_RUNNER_LAYER;
+        return RUNNER_LAYER.get(key);
     }
 
     /**

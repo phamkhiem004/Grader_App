@@ -4,7 +4,9 @@ import com.example.grader.entity.Exam;
 import com.example.grader.entity.ExamStatus;
 import com.example.grader.entity.Skill;
 import com.example.grader.entity.SkillCategory;
+import com.example.grader.entity.TestcaseTemplate;
 import com.example.grader.repository.ExamRepository;
+import com.example.grader.repository.TestcaseTemplateRepository;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
@@ -18,12 +20,15 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
@@ -41,7 +46,29 @@ public class TestcaseTemplateService {
     private static final String TEMPLATE_CREATED_AT = "2026-08-02T00:00:00Z";
     private static final String COMMON_ENGINE = "COMMON_V1";
     private static final Pattern SAFE_INSTANCE_ID = Pattern.compile("[A-Za-z0-9_-]{1,60}");
+    private static final Pattern TEMPLATE_ID_PATTERN = Pattern.compile("[A-Z0-9_]{3,80}");
     private static final Set<String> DIFFICULTIES = Set.of("basic", "intermediate", "advanced");
+    private static final Set<String> TEMPLATE_LAYERS = Set.of("SCREEN", "BLACKBOX", "RESPONSIVE");
+
+    // ── Testcase "tự viết code": giáo viên gõ thân testWidgets, hệ thống bọc và chèn vào engine ──
+    /** template_id quy ước cho testcase code tay; không nằm trong thư viện template dùng chung. */
+    public static final String CUSTOM_TEMPLATE_ID = "CUSTOM_CODE";
+    private static final String CUSTOM_RUNNER = "CUSTOM_CODE";
+    private static final String CUSTOM_LAYER = "CUSTOM";
+    private static final int CUSTOM_CODE_MAX_CHARS = 20000;
+    /** Khai báo chỉ hợp lệ ở cấp file — nếu nằm trong thân test sẽ làm hỏng cả exam_test.dart. */
+    private static final List<Map.Entry<Pattern, String>> CUSTOM_CODE_BANNED = List.of(
+            Map.entry(Pattern.compile("(?m)^\\s*(import|export|part|library)\\s"),
+                    "không được khai báo import/export/part/library trong thân testcase "
+                            + "(engine đã import sẵn material, flutter_test và app của sinh viên)"),
+            Map.entry(Pattern.compile("(?m)^\\s*(void\\s+)?main\\s*\\("),
+                    "không được định nghĩa hàm main()"),
+            Map.entry(Pattern.compile("(?<![A-Za-z0-9_$])testWidgets\\s*\\("),
+                    "chỉ cần viết phần THÂN test; hệ thống tự bọc testWidgets('<mã testcase>', ...) bên ngoài"),
+            Map.entry(Pattern.compile("(?<![A-Za-z0-9_$])(group|setUp|setUpAll|tearDown|tearDownAll)\\s*\\("),
+                    "không dùng được group/setUp/tearDown bên trong một test (dùng addTearDown nếu cần dọn dẹp)"));
+    private static final String CUSTOM_BEGIN_MARK = "CUSTOM_TESTCASES_BEGIN";
+    private static final String CUSTOM_END_MARK = "CUSTOM_TESTCASES_END";
     /** Nhóm lọc hiển thị ở Khu vực 1; không thay thế category/skill của syllabus. */
     private static final Map<String, String> TESTCASE_GROUP_LABELS = Map.of(
             "LOGIC", "Testcase Logic",
@@ -193,18 +220,61 @@ public class TestcaseTemplateService {
     );
 
     private final ObjectMapper mapper = new ObjectMapper();
+    /** Thư viện hiệu lực = template gốc + bản sửa đè + template giáo viên tự thêm. */
     private final Map<String, Map<String, Object>> templates = new LinkedHashMap<>();
+    /** Bản gốc từ classpath, giữ nguyên để "Khôi phục mặc định" quay về được. */
+    private final Map<String, Map<String, Object>> builtinTemplates = new LinkedHashMap<>();
+    /** Template bị ẩn khỏi Khu vực 2 nhưng vẫn resolve được cho đề cũ. */
+    private final Set<String> hiddenTemplateIds = new LinkedHashSet<>();
 
     @Autowired private ExamRepository examRepository;
     @Autowired private SyllabusService syllabusService;
     @Autowired private ExamService examService;
+    @Autowired private TestcaseTemplateRepository templateRepository;
 
     @PostConstruct
     public void loadTemplates() {
         templates.clear();
+        builtinTemplates.clear();
+        hiddenTemplateIds.clear();
         if (loadClasspathTemplates("common-testcase-templates.json", COMMON_ENGINE))
             log.info("✅ Nạp {} testcase dùng chung từ common-testcase-templates.json", templates.size());
         else log.error("Không nạp được thư viện testcase dùng chung.");
+        builtinTemplates.putAll(templates);
+        applyStoredTemplates();
+    }
+
+    /**
+     * Chồng bản sửa/bổ sung trong DB lên thư viện gốc. Lỗi ở đây chỉ ghi log: mất kết nối DB
+     * không được làm sập cả chức năng tạo testcase, chỉ là tạm thời thiếu template tự thêm.
+     */
+    private void applyStoredTemplates() {
+        try {
+            for (TestcaseTemplate stored : templateRepository.findAllByOrderByCreatedAtAsc()) {
+                Map<String, Object> row = readTemplatePayload(stored);
+                if (row == null) continue;
+                templates.put(stored.getTemplateId(), row);
+                if (stored.isHidden()) hiddenTemplateIds.add(stored.getTemplateId());
+            }
+        } catch (Exception e) {
+            log.warn("Không đọc được template testcase trong DB: {}", e.getMessage());
+        }
+    }
+
+    private Map<String, Object> readTemplatePayload(TestcaseTemplate stored) {
+        try {
+            Map<String, Object> row = mapper.readValue(stored.getPayloadJson(),
+                    new TypeReference<LinkedHashMap<String, Object>>() {});
+            row.put("template_id", stored.getTemplateId());
+            row.put("origin", stored.getOrigin());
+            row.put("created_by", text(stored.getCreatedBy(), TEMPLATE_CREATED_BY));
+            row.put("created_at", stored.getCreatedAt() == null
+                    ? TEMPLATE_CREATED_AT : stored.getCreatedAt().toString());
+            return row;
+        } catch (Exception e) {
+            log.warn("Template {} trong DB bị hỏng, bỏ qua: {}", stored.getTemplateId(), e.getMessage());
+            return null;
+        }
     }
 
     private boolean loadClasspathTemplates(String resourceName, String engineType) {
@@ -228,10 +298,17 @@ public class TestcaseTemplateService {
 
     /** Danh sách template kèm skill/category để frontend dựng 3 khu vực kéo-thả. */
     public List<Map<String, Object>> listTemplates(String category, String skillCode, String layer) {
+        return listTemplates(category, skillCode, layer, false);
+    }
+
+    /** {@code includeHidden} dùng cho màn "thùng rác" để khôi phục template đã ẩn. */
+    public List<Map<String, Object>> listTemplates(String category, String skillCode, String layer,
+                                                   boolean includeHidden) {
         ensureReferenceTemplatesLoaded();
         List<Map<String, Object>> out = new ArrayList<>();
         for (Map<String, Object> source : templates.values()) {
             Map<String, Object> row = enrichTemplate(source);
+            if (!includeHidden && Boolean.TRUE.equals(row.get("hidden"))) continue;
             if (category != null && !category.isBlank()
                     && !category.equalsIgnoreCase(text(row.get("category")))) continue;
             if (skillCode != null && !skillCode.isBlank()
@@ -303,6 +380,10 @@ public class TestcaseTemplateService {
         Map<String, Map<String, Object>> oldById = indexItems(oldConfig.get("items"));
         List<Map<String, Object>> items = normalizeItems(examId, body.get("items"), oldById, teacherEmail);
         String engineType = engineType(items);
+        // Hợp đồng bài làm (Khu vực 0): giữ bản cũ nếu request không gửi kèm, để lưu Draft
+        // từ màn hình khác không vô tình xóa mất cấu hình nhận diện của đề.
+        Map<String, Object> contract = TestcaseContractSupport.normalize(
+                body.containsKey("contract") ? body.get("contract") : oldConfig.get("contract"));
 
         int currentVersion = exam.getTestcaseVersion() == null ? 0 : exam.getTestcaseVersion();
         // Draft cũng là một bản cấu hình materialize được, nên không dùng version 0 sau lần lưu đầu.
@@ -326,6 +407,7 @@ public class TestcaseTemplateService {
         config.put("updated_at", now.toString());
         if (publish) config.put("published_at", now.toString());
         else if (oldConfig.get("published_at") != null) config.put("published_at", oldConfig.get("published_at"));
+        config.put("contract", contract);
         config.put("items", items);
 
         try {
@@ -337,12 +419,17 @@ public class TestcaseTemplateService {
             // Bộ mới chỉ chứa rubric trong skills_matrix hiện tại, không ghép lại dữ liệu cũ.
             Map<String, Object> publishedMatrix = generatedMatrix;
 
+            // Publish là bản đem đi chấm: một đoạn code tay sai cú pháp làm hỏng cả
+            // exam_test.dart → cả lớp 0 điểm, nên bắt buộc parse thật trước khi ghi file.
+            String syntaxWarning = publish ? verifyCustomCodeBeforePublish(items) : null;
+
             // Draft cũng materialize thành bộ code để giáo viên tải xuống kiểm tra ngay;
             // chỉ Publish mới chuyển ExamStatus sang READY để cho phép chấm.
             if (publish) examService.snapshotCurrentTestcase(examId);
             Path dir = examService.testcaseDirectoryForConfiguration(examId);
             Files.createDirectories(dir);
-            materializeEngine(dir, engineType);
+            materializeEngine(dir, engineType, items);
+            materializeContract(dir, contract);
             Files.writeString(dir.resolve("skills_matrix.json"), mapper.writerWithDefaultPrettyPrinter()
                     .writeValueAsString(publishedMatrix), StandardCharsets.UTF_8);
             Files.writeString(dir.resolve("testcase-config.json"), mapper.writerWithDefaultPrettyPrinter()
@@ -362,7 +449,7 @@ public class TestcaseTemplateService {
             exam.setTestcaseStatus(publish ? "PUBLISHED" : "DRAFT");
             if (publish) exam.setTestcasePublishedAt(now);
             examRepository.save(exam);
-            return response(exam, config, items, publish);
+            return response(exam, config, items, publish, syntaxWarning);
         } catch (IllegalArgumentException e) {
             throw e;
         } catch (Exception e) {
@@ -371,11 +458,48 @@ public class TestcaseTemplateService {
     }
 
     /** Chọn engine theo profile, không dùng grader gắn chặt với một đề cho testcase chung. */
-    private void materializeEngine(Path dir, String engineType) throws Exception {
-        if (COMMON_ENGINE.equals(engineType)) {
-            copyClasspathEngine(dir, "common-testcase-engine/grader.dart", "grader.dart");
-            copyClasspathEngine(dir, "common-testcase-engine/exam_test.dart", "exam_test.dart");
+    private void materializeEngine(Path dir, String engineType, List<Map<String, Object>> items) throws Exception {
+        if (!COMMON_ENGINE.equals(engineType)) return;
+        copyClasspathEngine(dir, "common-testcase-engine/grader.dart", "grader.dart");
+        String engine = readClasspathEngine("common-testcase-engine/exam_test.dart");
+        Files.writeString(dir.resolve("exam_test.dart"),
+                injectCustomTestcases(engine, enabledCustomItems(items)), StandardCharsets.UTF_8);
+    }
+
+    /**
+     * Ghi hợp đồng ra cạnh engine: contract.json cho engine đọc lúc chấm, contract.md cho
+     * giáo viên dán vào đề. Hợp đồng rỗng thì XÓA file cũ, nếu không đề đã gỡ hợp đồng vẫn
+     * bị chấm theo bản cũ còn sót lại trong thư mục.
+     */
+    private void materializeContract(Path dir, Map<String, Object> contract) throws Exception {
+        Path json = dir.resolve("contract.json");
+        Path doc = dir.resolve("contract.md");
+        if (TestcaseContractSupport.isEmpty(contract)) {
+            Files.deleteIfExists(json);
+            Files.deleteIfExists(doc);
+            return;
         }
+        Files.writeString(json, mapper.writerWithDefaultPrettyPrinter().writeValueAsString(contract),
+                StandardCharsets.UTF_8);
+        Files.writeString(doc, TestcaseContractSupport.renderRequirements(contract)
+                + "\n## Đoạn code phát cho sinh viên\n\n```dart\n"
+                + TestcaseContractSupport.renderStarterDart(contract) + "```\n",
+                StandardCharsets.UTF_8);
+    }
+
+    /** Danh mục cách dò + bộ key gợi ý để frontend dựng Khu vực 0. */
+    public Map<String, Object> contractCatalog() {
+        return TestcaseContractSupport.catalog();
+    }
+
+    /** Xem trước hai thứ giáo viên cần: yêu cầu dán vào đề và code phát cho sinh viên. */
+    public Map<String, Object> contractPreview(Object rawContract) {
+        Map<String, Object> contract = TestcaseContractSupport.normalize(rawContract);
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("contract", contract);
+        out.put("requirements_text", TestcaseContractSupport.renderRequirements(contract));
+        out.put("starter_dart", TestcaseContractSupport.renderStarterDart(contract));
+        return out;
     }
 
     private void copyClasspathEngine(Path dir, String resourceName, String targetName) throws Exception {
@@ -384,6 +508,65 @@ public class TestcaseTemplateService {
         try (InputStream in = resource.getInputStream()) {
             Files.copy(in, dir.resolve(targetName), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
         }
+    }
+
+    private String readClasspathEngine(String resourceName) throws Exception {
+        ClassPathResource resource = new ClassPathResource(resourceName);
+        if (!resource.exists()) throw new IllegalStateException("Thiếu engine testcase: " + resourceName);
+        try (InputStream in = resource.getInputStream()) {
+            return new String(in.readAllBytes(), StandardCharsets.UTF_8);
+        }
+    }
+
+    /** Testcase code tay đang bật — đúng những mục sẽ có mặt trong skills_matrix. */
+    private List<Map<String, Object>> enabledCustomItems(List<Map<String, Object>> items) {
+        return items.stream()
+                .filter(item -> CUSTOM_RUNNER.equals(text(item.get("runner"))))
+                .filter(item -> bool(item.get("enabled"), true))
+                .toList();
+    }
+
+    /**
+     * Thay vùng CUSTOM_TESTCASES của engine bằng các testWidgets sinh từ code giáo viên.
+     * Tên test = instance_id (đã lọc theo {@link #SAFE_INSTANCE_ID}) nên khớp đúng key rubric
+     * mà grader.dart dùng để tra điểm.
+     */
+    private String injectCustomTestcases(String engine, List<Map<String, Object>> customItems) {
+        int begin = engine.indexOf(CUSTOM_BEGIN_MARK);
+        int end = engine.indexOf(CUSTOM_END_MARK);
+        if (begin < 0 || end < 0 || end < begin)
+            throw new IllegalStateException("Engine testcase thiếu vùng " + CUSTOM_BEGIN_MARK + ".");
+        int from = engine.lastIndexOf('\n', begin) + 1;
+        int to = engine.indexOf('\n', end);
+        if (to < 0) to = engine.length() - 1;
+
+        StringBuilder block = new StringBuilder();
+        block.append("// ─────────────────── ").append(CUSTOM_BEGIN_MARK).append(" ───────────────────\n");
+        block.append("// Sinh tự động từ các testcase \"Tự viết code\" của đề. Sửa tay ở đây sẽ bị ghi đè.\n");
+        block.append("void _registerCustomTestcase(String testId) {");
+        if (customItems.isEmpty()) block.append("}\n");
+        else {
+            block.append("\n  switch (testId) {\n");
+            for (Map<String, Object> item : customItems) {
+                block.append("    // ").append(singleLine(text(item.get("name"), ""))).append('\n');
+                block.append("    case '").append(item.get("instance_id")).append("':\n");
+                block.append("      testWidgets('").append(item.get("instance_id")).append("', (tester) async {\n");
+                for (String line : normalizeNewlines(text(item.get("custom_code"), "")).split("\n", -1)) {
+                    if (line.isBlank()) block.append('\n');
+                    else block.append("        ").append(line.stripTrailing()).append('\n');
+                }
+                block.append("      });\n");
+                block.append("      return;\n");
+            }
+            block.append("  }\n}\n");
+        }
+        block.append("// ──────────────────── ").append(CUSTOM_END_MARK).append(" ────────────────────");
+        return engine.substring(0, from) + block + engine.substring(to);
+    }
+
+    /** Tên testcase nằm trong comment một dòng nên không được chứa xuống dòng. */
+    private String singleLine(String value) {
+        return value.replace('\r', ' ').replace('\n', ' ').trim();
     }
 
     /** Đảm bảo thư viện testcase dùng chung luôn có sẵn trước mỗi request. */
@@ -399,7 +582,8 @@ public class TestcaseTemplateService {
     }
 
     private Map<String, Object> response(Exam exam, Map<String, Object> config,
-                                         List<Map<String, Object>> items, boolean publish) {
+                                         List<Map<String, Object>> items, boolean publish,
+                                         String syntaxWarning) {
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("exam_id", exam.getExamId());
         out.put("status", config.get("status"));
@@ -415,6 +599,8 @@ public class TestcaseTemplateService {
         out.put("engine_ready", engineReady);
         if (publish && !engineReady) {
             out.put("warning", "Đã Publish cấu hình, nhưng đề chưa có exam_test.dart và grader.dart để chạy chấm.");
+        } else if (syntaxWarning != null) {
+            out.put("warning", syntaxWarning);
         }
         return out;
     }
@@ -430,6 +616,10 @@ public class TestcaseTemplateService {
             if (!(raw instanceof Map<?, ?>)) throw new IllegalArgumentException("Mỗi testcase phải là object");
             Map<String, Object> input = castMap(raw);
             String templateId = text(input.get("template_id"));
+            if (isCustomItem(input)) {
+                out.add(normalizeCustomItem(examId, input, index++, ids, oldById, teacherEmail));
+                continue;
+            }
             Map<String, Object> template = templates.get(templateId);
             if (template == null) throw new IllegalArgumentException("Template không tồn tại: " + templateId);
             String templateEngine = text(template.get("engine_type"), COMMON_ENGINE);
@@ -520,6 +710,509 @@ public class TestcaseTemplateService {
             if (entry.getValue() < 2)
                 throw new IllegalArgumentException("Nhóm testcase " + entry.getKey() + " phải có ít nhất 2 testcase con.");
         }
+    }
+
+    // ════════════════════════════════════════════════════════════════════════════
+    //  QUẢN LÝ THƯ VIỆN TESTCASE (KHU VỰC 2)
+    //  Giáo viên thêm template mới, sửa template có sẵn và ẩn template không dùng.
+    //  Bản gốc trong classpath không bị ghi đè: DB chỉ lưu phần khác biệt.
+    // ════════════════════════════════════════════════════════════════════════════
+
+    /** Danh mục runner + mô tả tham số để frontend dựng form thêm/sửa testcase. */
+    public Map<String, Object> runnerCatalog() {
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("runners", TestcaseRunnerCatalog.runners());
+        out.put("semantic_keys", TestcaseRunnerCatalog.SEMANTIC_KEYS);
+        out.put("target_types", TestcaseRunnerCatalog.TARGET_TYPES);
+        out.put("layers", List.of("SCREEN", "BLACKBOX", "RESPONSIVE"));
+        out.put("difficulties", List.of("basic", "intermediate", "advanced"));
+        out.put("testcase_groups", TESTCASE_GROUP_LABELS);
+        return out;
+    }
+
+    public Map<String, Object> createTemplate(Map<String, Object> body, String teacherEmail) {
+        ensureReferenceTemplatesLoaded();
+        String templateId = text(body == null ? null : body.get("template_id"));
+        if (templateId == null || templateId.isBlank())
+            throw new IllegalArgumentException("Vui lòng nhập mã testcase (template_id).");
+        templateId = templateId.trim().toUpperCase();
+        if (!TEMPLATE_ID_PATTERN.matcher(templateId).matches())
+            throw new IllegalArgumentException("Mã testcase chỉ gồm chữ, số và _ (3-80 ký tự): " + templateId);
+        if (templates.containsKey(templateId))
+            throw new IllegalArgumentException("Mã testcase đã tồn tại: " + templateId);
+        if (CUSTOM_TEMPLATE_ID.equals(templateId))
+            throw new IllegalArgumentException(CUSTOM_TEMPLATE_ID + " là mã dành riêng cho testcase tự viết code.");
+
+        Map<String, Object> row = buildTemplateRow(templateId, body, null);
+        TestcaseTemplate stored = new TestcaseTemplate();
+        stored.setTemplateId(templateId);
+        stored.setOrigin("CUSTOM");
+        stored.setCreatedBy(teacherEmail);
+        stored.setUpdatedBy(teacherEmail);
+        stored.setPayloadJson(writeJson(row));
+        templateRepository.save(stored);
+        loadTemplates();
+        return getTemplate(templateId);
+    }
+
+    public Map<String, Object> updateTemplate(String rawId, Map<String, Object> body, String teacherEmail) {
+        ensureReferenceTemplatesLoaded();
+        String templateId = rawId == null ? "" : rawId.trim();
+        Map<String, Object> current = templates.get(templateId);
+        if (current == null) throw new IllegalArgumentException("Không tìm thấy testcase template: " + templateId);
+
+        Map<String, Object> row = buildTemplateRow(templateId, body, current);
+        TestcaseTemplate stored = templateRepository.findById(templateId).orElseGet(() -> {
+            // Sửa template gốc lần đầu: tạo bản đè, file classpath vẫn nguyên vẹn.
+            TestcaseTemplate fresh = new TestcaseTemplate();
+            fresh.setTemplateId(templateId);
+            fresh.setOrigin(builtinTemplates.containsKey(templateId) ? "OVERRIDE" : "CUSTOM");
+            fresh.setCreatedBy(teacherEmail);
+            return fresh;
+        });
+        stored.setPayloadJson(writeJson(row));
+        stored.setUpdatedBy(teacherEmail);
+        templateRepository.save(stored);
+        loadTemplates();
+        return getTemplate(templateId);
+    }
+
+    /**
+     * "Xóa" testcase khỏi Khu vực 2 = ẩn đi, KHÔNG xóa cứng. Đề đã lưu chỉ giữ template_id;
+     * xóa hẳn sẽ làm những đề đó không mở/lưu lại được nữa.
+     */
+    public Map<String, Object> hideTemplate(String rawId, String teacherEmail) {
+        ensureReferenceTemplatesLoaded();
+        String templateId = rawId == null ? "" : rawId.trim();
+        Map<String, Object> current = templates.get(templateId);
+        if (current == null) throw new IllegalArgumentException("Không tìm thấy testcase template: " + templateId);
+
+        TestcaseTemplate stored = templateRepository.findById(templateId).orElseGet(() -> {
+            TestcaseTemplate fresh = new TestcaseTemplate();
+            fresh.setTemplateId(templateId);
+            fresh.setOrigin(builtinTemplates.containsKey(templateId) ? "OVERRIDE" : "CUSTOM");
+            fresh.setCreatedBy(teacherEmail);
+            fresh.setPayloadJson(writeJson(current));
+            return fresh;
+        });
+        stored.setHidden(true);
+        stored.setUpdatedBy(teacherEmail);
+        templateRepository.save(stored);
+        loadTemplates();
+
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("template_id", templateId);
+        out.put("hidden", true);
+        out.put("usage", countUsage(templateId));
+        out.put("message", "Đã ẩn khỏi thư viện. Các đề đang dùng testcase này vẫn chấm bình thường.");
+        return out;
+    }
+
+    /** Bỏ ẩn, và với template gốc thì trả luôn nội dung về đúng bản trong classpath. */
+    public Map<String, Object> restoreTemplate(String rawId, String teacherEmail) {
+        ensureReferenceTemplatesLoaded();
+        String templateId = rawId == null ? "" : rawId.trim();
+        TestcaseTemplate stored = templateRepository.findById(templateId).orElse(null);
+        if (stored == null) {
+            if (!templates.containsKey(templateId))
+                throw new IllegalArgumentException("Không tìm thấy testcase template: " + templateId);
+            return getTemplate(templateId);
+        }
+        if (builtinTemplates.containsKey(templateId)) {
+            templateRepository.delete(stored);   // quay về đúng bản gốc
+        } else {
+            stored.setHidden(false);
+            stored.setUpdatedBy(teacherEmail);
+            templateRepository.save(stored);
+        }
+        loadTemplates();
+        return getTemplate(templateId);
+    }
+
+    /** Số đề đang dùng template — hiển thị cảnh báo trước khi ẩn. */
+    private int countUsage(String templateId) {
+        try {
+            String needle = "\"template_id\":\"" + templateId + "\"";
+            return (int) examRepository.findAll().stream()
+                    .map(Exam::getTestcaseConfigJson)
+                    .filter(json -> json != null && json.replace(" ", "").contains(needle))
+                    .count();
+        } catch (Exception e) {
+            log.warn("Không đếm được số đề dùng template {}: {}", templateId, e.getMessage());
+            return 0;
+        }
+    }
+
+    /**
+     * Dựng và kiểm tra một template trước khi lưu. Tham số mặc định phải qua đúng bộ
+     * validate dùng khi lưu đề, nếu không giáo viên sẽ chỉ thấy lỗi lúc kéo vào Khu vực 3.
+     */
+    private Map<String, Object> buildTemplateRow(String templateId, Map<String, Object> body,
+                                                 Map<String, Object> current) {
+        if (body == null) throw new IllegalArgumentException("Thiếu nội dung testcase");
+        Map<String, Object> base = current == null ? new LinkedHashMap<>() : new LinkedHashMap<>(current);
+
+        String runner = text(body.get("runner"), text(base.get("runner")));
+        Map<String, Object> catalog = runnerDefinition(runner);
+        if (catalog == null)
+            throw new IllegalArgumentException("Runner không tồn tại trong engine: " + runner);
+
+        String name = text(body.get("name"), text(base.get("name")));
+        if (name == null || name.isBlank()) throw new IllegalArgumentException("Vui lòng nhập tên testcase.");
+        if (name.length() > 200) throw new IllegalArgumentException("Tên testcase quá dài (tối đa 200 ký tự).");
+
+        String skillCode = text(body.get("skill_code"), text(base.get("skill_code")));
+        Skill skill = findSkill(skillCode);
+        if (skill == null || Boolean.TRUE.equals(skill.getDeprecated()))
+            throw new IllegalArgumentException("Chủ đề (skill_code) không có trong syllabus: " + skillCode);
+
+        String layer = text(body.get("layer"), text(base.get("layer"),
+                text(catalog.get("layer_default"), "SCREEN"))).toUpperCase();
+        if (!TEMPLATE_LAYERS.contains(layer))
+            throw new IllegalArgumentException("layer không hợp lệ: " + layer);
+
+        String difficulty = text(body.get("difficulty"), text(base.get("difficulty"), "basic")).toLowerCase();
+        if (!DIFFICULTIES.contains(difficulty))
+            throw new IllegalArgumentException("difficulty không hợp lệ: " + difficulty);
+
+        double weight = number(body.get("weight_default"), number(base.get("weight_default"), 1));
+        if (!Double.isFinite(weight) || weight < 0)
+            throw new IllegalArgumentException("Điểm mặc định không hợp lệ.");
+
+        Map<String, Object> schema = map(catalog.get("parameters_schema"));
+        Map<String, Object> supplied = body.get("parameters_schema") instanceof Map<?, ?>
+                ? castMap(body.get("parameters_schema")) : map(base.get("parameters_schema"));
+        for (String suppliedKey : supplied.keySet()) {
+            if (!schema.containsKey(suppliedKey))
+                throw new IllegalArgumentException("Runner " + runner + " không có tham số: " + suppliedKey);
+        }
+        Map<String, Object> parameters = new LinkedHashMap<>(schema);
+        parameters.putAll(supplied);
+        validateCommonParameters(runner, parameters, templateId);
+
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("template_id", templateId);
+        row.put("template_version", text(base.get("template_version"), "custom-tpl-v1"));
+        row.put("engine_type", COMMON_ENGINE);
+        row.put("profile_id", "COMMON_SEMANTIC_V1");
+        row.put("runner", runner);
+        row.put("skill_code", skill.getCode());
+        row.put("layer", layer);
+        row.put("name", name.trim());
+        row.put("description", text(body.get("description"),
+                text(base.get("description"), text(catalog.get("description"), ""))));
+        row.put("difficulty", difficulty);
+        row.put("weight_default", weight);
+        row.put("parameters_schema", parameters);
+        String expected = text(body.get("expected_template"), text(base.get("expected_template")));
+        row.put("expected_template", expected == null || expected.isBlank()
+                ? defaultExpectedTemplate(catalog, parameters) : expected.trim());
+        String group = text(body.get("testcase_group"), text(base.get("testcase_group"),
+                testcaseGroup(runner, layer))).toUpperCase();
+        row.put("testcase_group", TESTCASE_GROUP_LABELS.containsKey(group)
+                ? group : testcaseGroup(runner, layer));
+        return row;
+    }
+
+    /** Expected mặc định liệt kê tham số để giáo viên thấy ngay testcase kiểm tra cái gì. */
+    private String defaultExpectedTemplate(Map<String, Object> catalog, Map<String, Object> parameters) {
+        StringBuilder out = new StringBuilder(text(catalog.get("label"), "Testcase"));
+        List<String> parts = new ArrayList<>();
+        for (String key : parameters.keySet()) parts.add(key + "={" + key + "}");
+        if (!parts.isEmpty()) out.append(" — ").append(String.join(", ", parts));
+        return out.append('.').toString();
+    }
+
+    private Map<String, Object> runnerDefinition(String runner) {
+        if (runner == null || runner.isBlank()) return null;
+        for (Map<String, Object> row : TestcaseRunnerCatalog.runners()) {
+            if (runner.equals(row.get("runner"))) return row;
+        }
+        return null;
+    }
+
+    private String writeJson(Map<String, Object> row) {
+        try {
+            return mapper.writeValueAsString(row);
+        } catch (Exception e) {
+            throw new IllegalStateException("Không lưu được testcase template: " + e.getMessage(), e);
+        }
+    }
+
+    // ════════════════════════════════════════════════════════════════════════════
+    //  TESTCASE TỰ VIẾT CODE
+    //  Dùng khi yêu cầu của đề không diễn đạt được bằng runner dữ liệu ở thư viện chung.
+    //  Giáo viên chỉ gõ THÂN test; hệ thống bọc testWidgets('<instance_id>', ...) rồi chèn
+    //  vào vùng CUSTOM_TESTCASES của engine, nên tên test luôn khớp key trong skills_matrix.
+    // ════════════════════════════════════════════════════════════════════════════
+
+    private boolean isCustomItem(Map<String, Object> input) {
+        return CUSTOM_TEMPLATE_ID.equals(text(input.get("template_id")))
+                || CUSTOM_RUNNER.equals(text(input.get("runner")));
+    }
+
+    private Map<String, Object> normalizeCustomItem(String examId, Map<String, Object> input, int order,
+                                                    Set<String> ids, Map<String, Map<String, Object>> oldById,
+                                                    String teacherEmail) {
+        String instanceId = text(input.get("instance_id"));
+        if (instanceId == null || instanceId.isBlank())
+            instanceId = examId + "_custom_" + String.format("%02d", order);
+        if (!SAFE_INSTANCE_ID.matcher(instanceId).matches())
+            throw new IllegalArgumentException("instance_id không hợp lệ: " + instanceId);
+        if (!ids.add(instanceId)) throw new IllegalArgumentException("Trùng instance_id: " + instanceId);
+
+        String name = text(input.get("name"));
+        if (name == null || name.isBlank())
+            throw new IllegalArgumentException("Testcase tự viết " + instanceId + " chưa có tên.");
+        if (name.length() > 200)
+            throw new IllegalArgumentException("Tên testcase " + instanceId + " quá dài (tối đa 200 ký tự).");
+
+        String skillCode = text(input.get("skill_code"));
+        Skill skill = findSkill(skillCode);
+        if (skill == null || Boolean.TRUE.equals(skill.getDeprecated()))
+            throw new IllegalArgumentException("Chủ đề (skill_code) của testcase tự viết " + instanceId
+                    + " không có trong syllabus: " + skillCode);
+
+        String difficulty = text(input.get("difficulty"), "basic").toLowerCase();
+        if (!DIFFICULTIES.contains(difficulty))
+            throw new IllegalArgumentException("difficulty không hợp lệ ở " + instanceId);
+        double weight = number(input.get("weight"), 1);
+        if (!Double.isFinite(weight) || weight < 0)
+            throw new IllegalArgumentException("weight không hợp lệ ở " + instanceId);
+        String group = text(input.get("testcase_group"), "LOGIC").toUpperCase();
+        if (!TESTCASE_GROUP_LABELS.containsKey(group)) group = "LOGIC";
+        if (text(input.get("group_id")) != null && !text(input.get("group_id")).isBlank())
+            throw new IllegalArgumentException("Testcase tự viết không gộp được vào testcase lớn: " + instanceId);
+
+        String code = normalizeNewlines(text(input.get("custom_code")));
+        validateCustomCode(code, "Testcase \"" + name + "\"");
+
+        Map<String, Object> previous = oldById.get(instanceId);
+        Map<String, Object> item = new LinkedHashMap<>();
+        item.put("instance_id", instanceId);
+        item.put("template_id", CUSTOM_TEMPLATE_ID);
+        item.put("template_version", "custom-v1");
+        item.put("engine_type", COMMON_ENGINE);
+        item.put("runner", CUSTOM_RUNNER);
+        item.put("skill_code", skill.getCode());
+        item.put("layer", CUSTOM_LAYER);
+        item.put("testcase_group", group);
+        item.put("name", name.trim());
+        item.put("description", text(input.get("description"), "Testcase do giáo viên tự viết code."));
+        item.put("difficulty", difficulty);
+        item.put("enabled", bool(input.get("enabled"), true));
+        item.put("order", order);
+        item.put("weight", weight);
+        item.put("parameters", new LinkedHashMap<String, Object>());
+        item.put("expected", text(input.get("expected"), "Đoạn kiểm tra tự viết phải chạy qua toàn bộ assert."));
+        item.put("expected_custom", true);
+        item.put("execution_key", instanceId);
+        item.put("custom_code", code);
+        item.put("created_by", previous != null && previous.get("created_by") != null
+                ? previous.get("created_by") : teacherEmail);
+        item.put("created_at", previous != null && previous.get("created_at") != null
+                ? previous.get("created_at") : Instant.now().toString());
+        return item;
+    }
+
+    /**
+     * Kiểm tra tĩnh đoạn code giáo viên gõ TRƯỚC khi ghép vào exam_test.dart. Một đoạn hỏng
+     * làm cả file test không biên dịch được → toàn bộ lớp bị 0 điểm, nên chặn sớm ở đây.
+     * Ném {@link IllegalArgumentException} kèm mô tả tiếng Việt nếu có vấn đề.
+     */
+    public void validateCustomCode(String code, String label) {
+        if (code == null || code.isBlank())
+            throw new IllegalArgumentException(label + " chưa có nội dung code.");
+        if (code.length() > CUSTOM_CODE_MAX_CHARS)
+            throw new IllegalArgumentException(label + " quá dài (tối đa "
+                    + CUSTOM_CODE_MAX_CHARS + " ký tự).");
+        for (Map.Entry<Pattern, String> rule : CUSTOM_CODE_BANNED) {
+            if (rule.getKey().matcher(code).find())
+                throw new IllegalArgumentException(label + ": " + rule.getValue() + ".");
+        }
+        String problem = delimiterProblem(code);
+        if (problem != null)
+            throw new IllegalArgumentException(label + ": " + problem + ".");
+    }
+
+    /**
+     * Dò ngoặc/chuỗi/chú thích chưa đóng — lỗi hay gặp nhất khi gõ code trên trình duyệt.
+     * Quét một lượt với ngăn xếp ngữ cảnh nên hiểu được chuỗi lồng trong interpolation
+     * (vd {@code '${map['k']}'}), raw string và chuỗi ba nháy. Trả null nếu không có vấn đề.
+     */
+    private String delimiterProblem(String code) {
+        Deque<char[]> stack = new ArrayDeque<>();   // [ký tự mở, 1 nếu chuỗi ba nháy, 1 nếu raw]
+        int i = 0;
+        int length = code.length();
+        while (i < length) {
+            char[] top = stack.peek();
+            char c = code.charAt(i);
+            boolean inString = top != null && (top[0] == '\'' || top[0] == '"');
+            if (inString) {
+                boolean raw = top[2] == 1;
+                if (!raw && c == '\\') { i += 2; continue; }
+                if (!raw && c == '$' && i + 1 < length && code.charAt(i + 1) == '{') {
+                    stack.push(new char[]{'{', 0, 0});   // interpolation: quay lại chế độ code
+                    i += 2;
+                    continue;
+                }
+                if (c == top[0]) {
+                    if (top[1] == 0) { stack.pop(); i++; continue; }
+                    if (i + 2 < length && code.charAt(i + 1) == c && code.charAt(i + 2) == c) {
+                        stack.pop();
+                        i += 3;
+                        continue;
+                    }
+                }
+                if (top[1] == 0 && c == '\n')
+                    return "chuỗi ký tự chưa đóng ở dòng " + lineOf(code, i);
+                i++;
+                continue;
+            }
+            if (c == '/' && i + 1 < length && code.charAt(i + 1) == '/') {
+                while (i < length && code.charAt(i) != '\n') i++;
+                continue;
+            }
+            if (c == '/' && i + 1 < length && code.charAt(i + 1) == '*') {
+                int end = code.indexOf("*/", i + 2);
+                if (end < 0) return "chú thích /* */ chưa đóng ở dòng " + lineOf(code, i);
+                i = end + 2;
+                continue;
+            }
+            boolean raw = c == 'r' && i + 1 < length
+                    && (code.charAt(i + 1) == '\'' || code.charAt(i + 1) == '"');
+            if (raw || c == '\'' || c == '"') {
+                int quoteAt = raw ? i + 1 : i;
+                char quote = code.charAt(quoteAt);
+                boolean triple = quoteAt + 2 < length
+                        && code.charAt(quoteAt + 1) == quote && code.charAt(quoteAt + 2) == quote;
+                stack.push(new char[]{quote, (char) (triple ? 1 : 0), (char) (raw ? 1 : 0)});
+                i = quoteAt + (triple ? 3 : 1);
+                continue;
+            }
+            if (c == '(' || c == '[' || c == '{') {
+                stack.push(new char[]{c, 0, 0});
+                i++;
+                continue;
+            }
+            if (c == ')' || c == ']' || c == '}') {
+                char open = c == ')' ? '(' : c == ']' ? '[' : '{';
+                if (top == null || top[0] != open)
+                    return "thừa dấu '" + c + "' ở dòng " + lineOf(code, i);
+                stack.pop();
+                i++;
+                continue;
+            }
+            i++;
+        }
+        char[] pending = stack.peek();
+        if (pending == null) return null;
+        return (pending[0] == '\'' || pending[0] == '"')
+                ? "còn chuỗi ký tự chưa đóng"
+                : "thiếu dấu đóng cho '" + pending[0] + "'";
+    }
+
+    private int lineOf(String code, int index) {
+        int line = 1;
+        for (int i = 0; i < index && i < code.length(); i++) if (code.charAt(i) == '\n') line++;
+        return line;
+    }
+
+    private String normalizeNewlines(String value) {
+        return value == null ? null : value.replace("\r\n", "\n").replace('\r', '\n');
+    }
+
+    /**
+     * Parse THẬT code tay bằng `dart format` trong ảnh nền trước khi Publish. Gộp mọi đoạn vào
+     * một file để chỉ tốn một lần chạy Docker, rồi ánh xạ dòng lỗi ngược về đúng testcase.
+     * Trả về cảnh báo (không chặn) khi máy chưa dùng được Docker; ném lỗi khi code sai cú pháp.
+     */
+    private String verifyCustomCodeBeforePublish(List<Map<String, Object>> items) {
+        List<Map<String, Object>> customs = enabledCustomItems(items);
+        if (customs.isEmpty()) return null;
+
+        StringBuilder source = new StringBuilder();
+        List<int[]> ranges = new ArrayList<>();   // [dòng đầu, dòng cuối, vị trí trong customs]
+        int line = 1;
+        for (int i = 0; i < customs.size(); i++) {
+            source.append("void _custom").append(i).append("(dynamic tester) async {\n");
+            line++;
+            int first = line;
+            for (String codeLine : normalizeNewlines(text(customs.get(i).get("custom_code"), "")).split("\n", -1)) {
+                source.append(codeLine).append('\n');
+                line++;
+            }
+            ranges.add(new int[]{first, line - 1, i});
+            source.append("}\n");
+            line++;
+        }
+
+        String problem;
+        try {
+            problem = examService.checkDartSyntax(source.toString());
+        } catch (IllegalStateException e) {
+            return "Đã Publish nhưng CHƯA kiểm tra được cú pháp code tay (" + e.getMessage()
+                    + "). Hãy tải ZIP code và chạy thử trước khi chấm thật.";
+        }
+        if (problem == null) return null;
+        throw new IllegalArgumentException("Code testcase tự viết sai cú pháp — "
+                + describeSyntaxProblem(problem, ranges, customs));
+    }
+
+    private String describeSyntaxProblem(String problem, List<int[]> ranges,
+                                         List<Map<String, Object>> customs) {
+        Matcher matcher = Pattern.compile("line (\\d+), column (\\d+) of [^:]+:\\s*(.*)").matcher(problem);
+        if (matcher.find()) {
+            int reported = Integer.parseInt(matcher.group(1));
+            for (int[] range : ranges) {
+                if (reported < range[0] || reported > range[1]) continue;
+                Map<String, Object> item = customs.get(range[2]);
+                return "testcase \"" + text(item.get("name"), text(item.get("instance_id"))) + "\", dòng "
+                        + (reported - range[0] + 1) + ": " + matcher.group(3).trim();
+            }
+        }
+        return problem;
+    }
+
+    /**
+     * Kiểm tra một đoạn code tay theo yêu cầu của giáo viên (nút "Kiểm tra cú pháp" trên UI).
+     * Luôn chạy kiểm tra tĩnh; nếu có Docker thì parse thêm bằng Dart để bắt lỗi cú pháp thật.
+     */
+    public Map<String, Object> checkCustomCode(String rawCode) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        String code = normalizeNewlines(rawCode);
+        try {
+            validateCustomCode(code, "Đoạn code");
+        } catch (IllegalArgumentException e) {
+            out.put("ok", false);
+            out.put("checked_by", "static");
+            out.put("message", e.getMessage());
+            return out;
+        }
+        try {
+            String problem = examService.checkDartSyntax(
+                    "void _customCheck(dynamic tester) async {\n" + code + "\n}\n");
+            out.put("ok", problem == null);
+            out.put("checked_by", "dart");
+            out.put("message", problem == null
+                    ? "Cú pháp Dart hợp lệ. Lỗi về tên biến/hàm chỉ lộ ra khi chấm thật."
+                    : shiftReportedLine(problem));
+        } catch (IllegalStateException e) {
+            out.put("ok", true);
+            out.put("checked_by", "static");
+            out.put("message", "Ngoặc và chuỗi đã cân đối. Chưa parse được bằng Dart: " + e.getMessage());
+        }
+        return out;
+    }
+
+    /** Wrapper thêm đúng 1 dòng phía trên nên dòng Dart báo phải trừ 1 mới khớp editor. */
+    private String shiftReportedLine(String problem) {
+        Matcher matcher = Pattern.compile("line (\\d+), column (\\d+) of [^:]+:\\s*(.*)").matcher(problem);
+        if (matcher.find()) {
+            int line = Math.max(1, Integer.parseInt(matcher.group(1)) - 1);
+            return "Dòng " + line + ", cột " + matcher.group(2) + ": " + matcher.group(3).trim();
+        }
+        return problem;
     }
 
     private List<Map<String, Object>> normalizeExistingItems(Object raw) {
@@ -921,6 +1614,13 @@ public class TestcaseTemplateService {
                 testcaseGroup(source.get("runner"), source.get("layer")));
         row.put("testcase_group", group);
         row.put("testcase_group_label", TESTCASE_GROUP_LABELS.getOrDefault(group, "Testcase Logic"));
+        String templateId = text(source.get("template_id"), "");
+        row.put("origin", text(source.get("origin"),
+                builtinTemplates.containsKey(templateId) ? "BUILTIN" : "CUSTOM"));
+        row.put("hidden", hiddenTemplateIds.contains(templateId));
+        // Template gốc luôn khôi phục được về bản trong classpath; template tự thêm thì không.
+        row.put("restorable", builtinTemplates.containsKey(templateId)
+                && !"BUILTIN".equals(row.get("origin")));
         return row;
     }
 

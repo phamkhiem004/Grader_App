@@ -81,6 +81,28 @@ Bốn điều rút ra, **đừng suy lại từ đầu**:
    suy đoán ⇒ cấm. Ba trạng thái: `passed` → "Đã đáp ứng yêu cầu"; `failed` → điều quan sát được;
    `not_run` → **vì sao chưa quan sát được gì**.
 
+## ⛔ PHẠM VI — chủ đồ án chốt 2026-08-08, đọc trước khi định sửa bất cứ gì
+
+**Grader là sản phẩm của NHÓM KHÁC.** Họ đang sắp xếp lại workflow tạo đề / tạo testcase phía giảng
+viên. Việc của phiên này **chỉ là chất lượng `result.json`** để bot NLP sinh nhận xét tốt hơn.
+
+| Được sửa trực tiếp | KHÔNG được tự sửa |
+|---|---|
+| Nội dung & hình dạng `result.json` | Giao diện soạn đề / quản lý đề |
+| `verify_result.py` · `ACCEPTANCE.md` · `SPEC_result_json.md` | Đường tạo đề, nhập/xuất đề |
+| `samples/` · hai file CHANGELOG | Phân quyền, tài khoản, gửi mail |
+| Kênh quan sát của engine (thứ sinh ra `actual`) · `TestObservationRenderer` | Bất cứ thứ gì chỉ *truy ra được* từ chất lượng result.json |
+
+> **Luật:** khi chất lượng `result.json` đòi một thay đổi ở khâu soạn đề/quản lý đề —
+> **ĐẶC TẢ VÀ BÀN GIAO, không tự thi công.** Bản bàn giao đầu tiên:
+> [`docs/HOP_DONG_KHAU_SOAN_DE.md`](HOP_DONG_KHAU_SOAN_DE.md).
+
+**Tự soát: đã vượt ranh 4 chỗ** (đều đã commit, đã liệt kê trong bản bàn giao để nhóm kia quyết giữ
+hay gỡ) — ô nhập requirements trên UI (`eff5c6f`), `group_mode` hai nút + modal (`f133595`), cưỡng
+chế ngữ pháp khoá lúc lưu đề (`f133595`, **đổi hành vi: đề dùng khoá lạ nay không lưu được**), và
+sửa race `instance_id` phía FE (`6f3d5dc`). Lý do vượt: mỗi cái đều *truy ra được* từ chất lượng
+`result.json` — nhưng "truy ra được" **không đồng nghĩa** "đến lượt mình làm".
+
 ## Luật làm việc (chủ đồ án đặt, giữ nguyên)
 
 - ⛔ **Không code khi chưa được cho phép.** Xin phép theo từng mốc.

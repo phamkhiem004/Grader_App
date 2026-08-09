@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-const kEngineVersion = 'COMMON_V1-2.8.0';
+const kEngineVersion = 'COMMON_V1-2.9.0';
 
 Future<void> main() async {
   final matrix = _loadMatrix();

@@ -13,10 +13,14 @@ import '../lib/main.dart' as student_app;
 
 Map<String, dynamic> _activeCase = <String, dynamic>{};
 Map<String, dynamic> _activeSuite = <String, dynamic>{};
+Map<String, dynamic> _sharedSuite = <String, dynamic>{};
 
-void main() {
+/// Entry point nguồn của template-contract engine.
+/// Backend đổi tên hàm này thành main() khi bundle ra exam_test.dart độc lập.
+void runTemplateContractExam() {
   TestWidgetsFlutterBinding.ensureInitialized();
   final matrix = _loadMatrix();
+  _sharedSuite = _findSharedSuite(matrix);
   final mode = Platform.environment['GRADER_CASE_MODE'] ?? 'all';
 
   if (mode == 'preflight') {
@@ -27,7 +31,7 @@ void main() {
       final metadata = _asMap(candidates.first.value);
       testWidgets('_GRADER_PREFLIGHT', (tester) async {
         _activeCase = metadata;
-        _activeSuite = _asMap(metadata['suite']);
+        _activeSuite = _suiteFor(metadata);
         await _checkSourceContracts();
         await _boot(tester);
       });
@@ -35,17 +39,23 @@ void main() {
     return;
   }
 
-  for (final entry in matrix.entries) {
-    final testId = entry.key;
-    final metadata = _asMap(entry.value);
-    if (mode == 'direct' && !_isDirectMetadata(metadata)) continue;
-    if (mode == 'case' && Platform.environment['GRADER_CASE_ID'] != testId) {
-      continue;
-    }
-    testWidgets(testId, (tester) async {
-      await _runCase(tester, testId, metadata);
-    });
+  // __CASE_REGISTRATIONS__
+}
+
+void _registerSelectedCase(
+  Map<String, dynamic> matrix,
+  String mode,
+  String testId,
+) {
+  final metadata = _asMap(matrix[testId]);
+  if (metadata.isEmpty) return;
+  if (mode == 'direct' && !_isDirectMetadata(metadata)) return;
+  if (mode == 'case' && Platform.environment['GRADER_CASE_ID'] != testId) {
+    return;
   }
+  testWidgets(testId, (tester) async {
+    await _runCase(tester, testId, metadata);
+  });
 }
 
 bool _isDirectMetadata(Map<String, dynamic> metadata) {
@@ -71,7 +81,7 @@ Future<void> _runCase(
   Map<String, dynamic> metadata,
 ) async {
   _activeCase = metadata;
-  _activeSuite = _asMap(metadata['suite']);
+  _activeSuite = _suiteFor(metadata);
   await _checkSourceContracts();
   final runner = (metadata['runner'] ?? '').toString();
   final parameters = _asMap(metadata['parameters']);
@@ -80,8 +90,14 @@ Future<void> _runCase(
     case 'TEMPLATE_SOURCE_SYMBOLS':
       await _checkTemplateSourceSymbols(parameters);
       return;
+    case 'TEMPLATE_SOURCE_TERMS':
+      await _checkTemplateSourceTerms(parameters);
+      return;
     case 'TEMPLATE_MODEL_FIELDS':
       await _checkTemplateModelFields(parameters);
+      return;
+    case 'TEMPLATE_MODEL_COPY_WITH':
+      await _checkTemplateModelCopyWith(parameters);
       return;
     case 'TEMPLATE_MODEL_MAPPING':
       await _checkTemplateModelMapping(parameters);
@@ -101,6 +117,12 @@ Future<void> _runCase(
     case 'TEMPLATE_FORM_ACTION':
       await _checkTemplateFormAction(tester, parameters);
       return;
+    case 'TEMPLATE_FORM_VALIDATION':
+      await _checkTemplateFormValidation(tester, parameters);
+      return;
+    case 'TEMPLATE_UI_WORKFLOW':
+      await _checkTemplateUiWorkflow(tester, parameters);
+      return;
     case 'TEMPLATE_TEXT_VISIBLE':
       await _checkTemplateTextVisible(tester, parameters);
       return;
@@ -108,10 +130,7 @@ Future<void> _runCase(
       await _checkDirectFunction(parameters);
       return;
     case 'APP_BOOT':
-      await _boot(tester);
-      final rootKey = _text(parameters, 'rootKey');
-      if (rootKey.isNotEmpty) expect(_byKey(rootKey), findsOneWidget);
-      expect(tester.takeException(), isNull);
+      await _checkTemplateAppBoot(tester, parameters);
       return;
     case 'WIDGET_VISIBLE':
       await _boot(tester);
@@ -162,13 +181,19 @@ Future<void> _runCase(
       return;
     case 'FORM_REQUIRED_FIELDS':
       await _boot(tester);
-      for (final key in _csv(parameters, 'fieldKeys')) {
-        expect(
-          _byKey(key),
-          findsOneWidget,
-          reason: 'Thiếu field semantic key: $key',
-        );
+      final fields = _csv(parameters, 'fieldKeys');
+      final errors = _csv(parameters, 'errorKeys');
+      if (fields.isEmpty || errors.isEmpty) {
+        fail('fieldKeys và errorKeys không được để trống.');
       }
+      final fieldType = _text(parameters, 'fieldType', 'input');
+      for (final key in fields) {
+        final field = _byKey(key);
+        expect(field, findsOneWidget, reason: 'Thiếu field semantic key: $key');
+        _assertTargetType(tester, field, key, fieldType);
+        await tester.enterText(field, '');
+      }
+      final beforeErrors = [for (final key in errors) _visibleKeyCount(key)];
       final submitKey = _text(parameters, 'submitKey');
       expect(
         _byKey(submitKey),
@@ -177,8 +202,23 @@ Future<void> _runCase(
       );
       await _tap(tester, _byKey(submitKey), submitKey);
       await _settle(tester);
-      for (final key in _csv(parameters, 'errorKeys')) {
-        expect(_byKey(key), findsOneWidget, reason: 'Thiếu error key: $key');
+      for (var index = 0; index < errors.length; index++) {
+        final key = errors[index];
+        final after = _visibleKeyCount(key);
+        if (_bool(parameters, 'requireNewErrors', true)) {
+          _expectNewSemanticKey(
+            key,
+            beforeErrors[index],
+            after,
+            'Submit rỗng không tạo đúng một lỗi mới: $key',
+          );
+        } else {
+          expect(
+            after,
+            greaterThanOrEqualTo(1),
+            reason: 'Thiếu error key: $key',
+          );
+        }
       }
       return;
     case 'RESPONSIVE_NO_OVERFLOW':
@@ -203,15 +243,37 @@ Future<void> _runCase(
       await _boot(tester);
       final openKey = _text(parameters, 'openKey');
       final destinationKey = _text(parameters, 'destinationKey');
+      final destinationBefore = _visibleKeyCount(destinationKey);
       await _tap(tester, _byKey(openKey), openKey);
       await _settle(tester);
-      expect(_byKey(destinationKey), findsOneWidget);
+      final destinationAfter = _visibleKeyCount(destinationKey);
+      if (_bool(parameters, 'requireNewDestination', true)) {
+        _expectNewSemanticKey(
+          destinationKey,
+          destinationBefore,
+          destinationAfter,
+          'Bấm $openKey không mở đúng một màn hình mới $destinationKey',
+        );
+      } else {
+        expect(destinationAfter, greaterThanOrEqualTo(1));
+      }
       final backKey = _text(parameters, 'backKey');
       final homeKey = _text(parameters, 'homeKey');
       if (backKey.isNotEmpty && homeKey.isNotEmpty) {
         await _tap(tester, _byKey(backKey), backKey);
         await _settle(tester);
-        expect(_byKey(homeKey), findsOneWidget);
+        expect(
+          _isKeyOnCurrentRoute(homeKey),
+          isTrue,
+          reason: 'Bấm $backKey không quay lại route chứa $homeKey',
+        );
+        if (_bool(parameters, 'hideDestinationAfterBack', true)) {
+          expect(
+            _isKeyOnCurrentRoute(destinationKey),
+            isFalse,
+            reason: '$destinationKey vẫn là route hiện tại sau khi quay lại',
+          );
+        }
       }
       return;
     case 'LIST_VISIBLE':
@@ -223,9 +285,13 @@ Future<void> _runCase(
         final itemFinder = _exactByKey(key);
         await _revealLazyItem(tester, listFinder, itemFinder);
         expect(
-          itemFinder,
+          find.descendant(
+            of: listFinder,
+            matching: itemFinder,
+            matchRoot: true,
+          ),
           findsOneWidget,
-          reason: 'Thiếu item semantic key: $key',
+          reason: 'Item $key không nằm trong list $listKey',
         );
       }
       return;
@@ -233,13 +299,37 @@ Future<void> _runCase(
       await _boot(tester);
       final buttonKey = _text(parameters, 'buttonKey');
       final resultKey = _text(parameters, 'resultKey');
+      final resultBefore = _visibleKeyCount(resultKey);
       await _tap(tester, _byKey(buttonKey), buttonKey);
       await _settle(tester);
-      expect(_byKey(resultKey), findsOneWidget);
+      final resultAfter = _visibleKeyCount(resultKey);
+      if (_bool(parameters, 'requireNewResult', true)) {
+        _expectNewSemanticKey(
+          resultKey,
+          resultBefore,
+          resultAfter,
+          'Bấm $buttonKey không tạo đúng một $resultKey mới',
+        );
+      } else {
+        expect(resultAfter, greaterThanOrEqualTo(1));
+      }
       return;
     default:
       fail('Testcase $testId chưa có common runner: $runner');
   }
+}
+
+Map<String, dynamic> _findSharedSuite(Map<String, dynamic> matrix) {
+  for (final value in matrix.values) {
+    final suite = _asMap(_asMap(value)['suite']);
+    if (suite.isNotEmpty) return suite;
+  }
+  return <String, dynamic>{};
+}
+
+Map<String, dynamic> _suiteFor(Map<String, dynamic> metadata) {
+  final ownSuite = _asMap(metadata['suite']);
+  return ownSuite.isNotEmpty ? ownSuite : _sharedSuite;
 }
 
 Future<void> _checkDirectFunction(Map<String, dynamic> parameters) async {
@@ -371,22 +461,102 @@ String _classBody(String source, String className, String path) {
   fail('Class $className trong $path không đóng ngoặc đúng.');
 }
 
+String _methodBody(String source, String methodName, String ownerDescription) {
+  final signature = RegExp(
+    '\\b${RegExp.escape(methodName)}\\s*\\([^;{}]*\\)\\s*'
+    r'(?:asyncs*)?(?:{|=>)',
+    multiLine: true,
+  ).firstMatch(source);
+  expect(
+    signature,
+    isNotNull,
+    reason: '$ownerDescription thiếu khai báo method $methodName',
+  );
+  final matched = signature!.group(0)!;
+  if (matched.trimRight().endsWith('=>')) {
+    final arrow = signature.end - 2;
+    final semicolon = source.indexOf(';', signature.end);
+    if (semicolon < 0)
+      fail('Method $methodName không kết thúc biểu thức đúng.');
+    return source.substring(arrow + 2, semicolon);
+  }
+  final start = source.indexOf('{', signature.start);
+  var depth = 0;
+  for (var index = start; index < source.length; index++) {
+    if (source[index] == '{') depth++;
+    if (source[index] == '}') {
+      depth--;
+      if (depth == 0) return source.substring(start + 1, index);
+    }
+  }
+  fail('Method $methodName trong $ownerDescription không đóng ngoặc đúng.');
+}
+
+bool _hasMethodDeclaration(String source, String methodName) {
+  return RegExp(
+    '\\b${RegExp.escape(methodName)}\\s*\\([^;{}]*\\)\\s*'
+    r'(?:asyncs*)?(?:{|=>|;)',
+    multiLine: true,
+  ).hasMatch(source);
+}
+
 Future<void> _checkTemplateSourceSymbols(
   Map<String, dynamic> parameters,
 ) async {
   final source = _templateSource(parameters);
   final path = _requiredText(parameters, 'sourcePath');
-  for (final symbol in _csv(parameters, 'symbols')) {
+  final symbols = _csv(parameters, 'symbols');
+  final types = _csv(parameters, 'symbolTypes');
+  if (types.isNotEmpty && types.length != symbols.length) {
+    fail('symbolTypes phải để trống hoặc có cùng số phần tử với symbols.');
+  }
+  for (var index = 0; index < symbols.length; index++) {
+    final symbol = symbols[index];
+    final type = types.isEmpty ? 'auto' : types[index].toLowerCase();
     final escaped = RegExp.escape(symbol);
-    final declaration = RegExp(
-      '\\b(?:class|mixin|enum|extension|typedef)\\s+$escaped\\b|'
-      '\\b(?:final|const|var|late)\\s+(?:[A-Za-z0-9_<>?, ]+\\s+)?$escaped\\b|'
-      '\\b$escaped\\s*\\(',
-    );
+    final declaration = switch (type) {
+      'class' => RegExp('\\bclass\\s+$escaped\\b'),
+      'mixin' => RegExp('\\bmixin\\s+$escaped\\b'),
+      'enum' => RegExp('\\benum\\s+$escaped\\b'),
+      'extension' => RegExp('\\bextension\\s+$escaped\\b'),
+      'typedef' => RegExp('\\btypedef\\s+(?:[^;=]+\\s+)?$escaped\\b'),
+      'variable' => RegExp(
+        '\\b(?:final|const|var|late)\\s+(?:[A-Za-z0-9_<>?, ]+\\s+)?$escaped\\b',
+      ),
+      'function' => RegExp(
+        '^\\s*(?:[A-Za-z_][A-Za-z0-9_<>?, ]*\\s+)?$escaped\\s*\\([^;]*\\)\\s*(?:async\\s*)?(?:\\{|=>)',
+        multiLine: true,
+      ),
+      _ => RegExp(
+        '\\b(?:class|mixin|enum|extension|typedef)\\s+$escaped\\b|'
+        '\\b(?:final|const|var|late)\\s+(?:[A-Za-z0-9_<>?, ]+\\s+)?$escaped\\b|'
+        '^\\s*(?:[A-Za-z_][A-Za-z0-9_<>?, ]*\\s+)?$escaped\\s*\\([^;]*\\)\\s*(?:async\\s*)?(?:\\{|=>)',
+        multiLine: true,
+      ),
+    };
     expect(
       declaration.hasMatch(source),
       isTrue,
-      reason: 'Thiếu symbol $symbol trong $path',
+      reason: 'Thiếu symbol $symbol loại $type trong $path',
+    );
+  }
+}
+
+Future<void> _checkTemplateSourceTerms(Map<String, dynamic> parameters) async {
+  final source = _templateSource(parameters);
+  final path = _requiredText(parameters, 'sourcePath');
+  for (final term in _csv(parameters, 'requiredTerms')) {
+    expect(
+      source.contains(term),
+      isTrue,
+      reason: '$path thiếu nội dung bắt buộc "$term"',
+    );
+  }
+  for (final term in _csv(parameters, 'forbiddenTerms')) {
+    expect(
+      source.contains(term),
+      isFalse,
+      reason: '$path chứa nội dung không được phép "$term"',
     );
   }
 }
@@ -416,31 +586,55 @@ Future<void> _checkTemplateModelFields(Map<String, dynamic> parameters) async {
   }
 }
 
+Future<void> _checkTemplateModelCopyWith(
+  Map<String, dynamic> parameters,
+) async {
+  final source = _templateSource(parameters);
+  final path = _requiredText(parameters, 'sourcePath');
+  final className = _requiredText(parameters, 'className');
+  final method = _requiredText(parameters, 'copyMethod');
+  final body = _classBody(source, className, path);
+  final methodBody = _methodBody(body, method, 'Class $className');
+  for (final specification in _csv(parameters, 'fields')) {
+    final field = specification.contains(':')
+        ? specification.substring(0, specification.indexOf(':')).trim()
+        : specification.trim();
+    expect(
+      RegExp('\\b${RegExp.escape(field)}\\b').hasMatch(methodBody),
+      isTrue,
+      reason: '$method chưa xử lý field $field',
+    );
+  }
+}
+
 Future<void> _checkTemplateModelMapping(Map<String, dynamic> parameters) async {
   final source = _templateSource(parameters);
   final path = _requiredText(parameters, 'sourcePath');
   final className = _requiredText(parameters, 'className');
   final body = _classBody(source, className, path);
+  final methodBodies = <String, String>{};
   for (final key in <String>['toMapMethod', 'fromMapMethod']) {
     final method = _requiredText(parameters, key);
-    expect(
-      RegExp('\\b${RegExp.escape(method)}\\s*\\(').hasMatch(body),
-      isTrue,
-      reason: 'Class $className thiếu method $method',
-    );
+    methodBodies[method] = _methodBody(body, method, 'Class $className');
   }
   for (final column in _csv(parameters, 'columns')) {
-    expect(
-      RegExp("['\\\"]${RegExp.escape(column)}['\\\"]").hasMatch(body),
-      isTrue,
-      reason: 'Mapping $className thiếu cột $column',
-    );
+    for (final entry in methodBodies.entries) {
+      expect(
+        RegExp("['\\\"]${RegExp.escape(column)}['\\\"]").hasMatch(entry.value),
+        isTrue,
+        reason: 'Method ${entry.key} của $className thiếu cột $column',
+      );
+    }
   }
 }
 
 Future<void> _checkTemplateSqliteSchema(Map<String, dynamic> parameters) async {
   final source = _templateSource(parameters);
   final path = _requiredText(parameters, 'sourcePath');
+  final schemaMethod = _text(parameters, 'schemaMethod');
+  final schemaSource = schemaMethod.isEmpty
+      ? source
+      : _methodBody(source, schemaMethod, path);
   expect(
     RegExp(r'sqflite|openDatabase|Database\s*').hasMatch(source),
     isTrue,
@@ -448,13 +642,15 @@ Future<void> _checkTemplateSqliteSchema(Map<String, dynamic> parameters) async {
   );
   final table = _requiredText(parameters, 'tableName');
   expect(
-    RegExp("['\\\"]${RegExp.escape(table)}['\\\"]").hasMatch(source),
+    RegExp("['\\\"]${RegExp.escape(table)}['\\\"]").hasMatch(schemaSource),
     isTrue,
     reason: '$path thiếu tên bảng $table',
   );
   for (final column in _csv(parameters, 'columns')) {
     expect(
-      RegExp("['\\\"]?${RegExp.escape(column)}['\\\"]?\\s+").hasMatch(source),
+      RegExp(
+        "['\\\"]?${RegExp.escape(column)}['\\\"]?\\s+",
+      ).hasMatch(schemaSource),
       isTrue,
       reason: 'Schema bảng $table thiếu cột $column',
     );
@@ -470,16 +666,16 @@ Future<void> _checkTemplateRepositoryMethods(
   final body = _classBody(source, className, path);
   for (final method in _csv(parameters, 'methods')) {
     expect(
-      RegExp('\\b${RegExp.escape(method)}\\s*\\(').hasMatch(body),
+      _hasMethodDeclaration(body, method),
       isTrue,
       reason: 'Class $className thiếu method $method',
     );
   }
 }
 
-Finder _inputByContractLabel(String expected) {
+Finder _inputByContractLabel(String expected, {Finder? within}) {
   final normalized = expected.trim().toLowerCase();
-  return find.byWidgetPredicate((widget) {
+  final matches = find.byWidgetPredicate((widget) {
     final decoration = switch (widget) {
       TextField field => field.decoration,
       _ => null,
@@ -490,6 +686,187 @@ Finder _inputByContractLabel(String expected) {
       (value) => value.trim().toLowerCase() == normalized,
     );
   }, description: 'input có label/hint "$expected"');
+  if (within == null) return matches;
+  return find.descendant(of: within, matching: matches, matchRoot: true);
+}
+
+String _scopeParameter(String prefix, String suffix) =>
+    prefix.isEmpty ? 'scope$suffix' : '${prefix}Scope$suffix';
+
+Finder _uiScopeCandidates(String type) {
+  switch (type) {
+    case 'screen':
+      return find.byType(Scaffold);
+    case 'form':
+      return find.byType(Form);
+    case 'dialog':
+      return find.byWidgetPredicate(
+        (widget) =>
+            widget is Dialog || widget is AlertDialog || widget is SimpleDialog,
+      );
+    case 'list':
+      return find.byWidgetPredicate((widget) => widget is ScrollView);
+    case 'appbar':
+      return find.byType(AppBar);
+    case 'bottomsheet':
+      return find.byType(BottomSheet);
+    default:
+      fail('scopeType không được hỗ trợ: $type');
+  }
+}
+
+/// Phạm vi UI tổng quát cho button, text, kết quả action và workflow.
+Finder? _targetUiScope(Map<String, dynamic> parameters, {String prefix = ''}) {
+  final typeKey = _scopeParameter(prefix, 'Type');
+  final indexKey = _scopeParameter(prefix, 'Index');
+  final anchorKey = _scopeParameter(prefix, 'AnchorText');
+  final type = _text(parameters, typeKey).toLowerCase();
+  final rawIndex = _text(parameters, indexKey);
+  final anchor = _text(parameters, anchorKey);
+  if (type.isEmpty) {
+    if (rawIndex.isNotEmpty || anchor.isNotEmpty) {
+      fail('$typeKey phải được nhập khi dùng $indexKey hoặc $anchorKey.');
+    }
+    return null;
+  }
+
+  final candidates = _uiScopeCandidates(type);
+  final count = candidates.evaluate().length;
+  if (count == 0) fail('Không tìm thấy scope loại "$type".');
+
+  bool hasAnchor(Finder candidate) {
+    if (anchor.isEmpty) return true;
+    return find
+        .descendant(
+          of: candidate,
+          matching: find.text(anchor, findRichText: true),
+          matchRoot: true,
+        )
+        .evaluate()
+        .isNotEmpty;
+  }
+
+  if (rawIndex.isNotEmpty) {
+    final oneBasedIndex = int.tryParse(rawIndex);
+    if (oneBasedIndex == null || oneBasedIndex < 1 || oneBasedIndex > count) {
+      fail('$indexKey phải nằm trong khoảng 1..$count.');
+    }
+    final selected = candidates.at(oneBasedIndex - 1);
+    if (!hasAnchor(selected)) {
+      fail('Scope $type #$oneBasedIndex không chứa $anchorKey "$anchor".');
+    }
+    return selected;
+  }
+
+  final matches = <Finder>[];
+  for (var index = 0; index < count; index++) {
+    final candidate = candidates.at(index);
+    if (hasAnchor(candidate)) matches.add(candidate);
+  }
+  if (matches.isEmpty) {
+    fail('Không có scope $type nào chứa $anchorKey "$anchor".');
+  }
+  if (matches.length > 1) {
+    fail(
+      'Có ${matches.length} scope $type cùng khớp. '
+      'Hãy nhập $indexKey hoặc $anchorKey để xác định duy nhất.',
+    );
+  }
+  return matches.single;
+}
+
+Finder _contractText(String expected, String matchMode, {Finder? within}) {
+  final all = matchMode.toLowerCase() == 'exact'
+      ? find.text(expected, findRichText: true)
+      : find.textContaining(expected, findRichText: true);
+  if (within == null) return all;
+  return find.descendant(of: within, matching: all, matchRoot: true);
+}
+
+Finder _selectOccurrence(Finder finder, String rawOccurrence, String target) {
+  if (rawOccurrence.trim().isEmpty) return finder;
+  final occurrence = int.tryParse(rawOccurrence);
+  final count = finder.evaluate().length;
+  if (occurrence == null || occurrence < 1 || occurrence > count) {
+    fail('occurrence của "$target" phải nằm trong khoảng 1..$count.');
+  }
+  return finder.at(occurrence - 1);
+}
+
+/// Chọn đúng Form bằng contract thay vì tìm field trên toàn màn hình.
+///
+/// - Nếu formIndex được nhập, đây là vị trí 1-based trong các Form đang hiển thị.
+/// - Nếu formAnchorText được nhập, text đó phải nằm bên trong Form.
+/// - Nếu không nhập bộ chọn, Form duy nhất chứa đủ fieldLabels sẽ được chọn.
+/// - Starter cũ không dùng Form vẫn được phép khi không khai báo bộ chọn.
+Finder? _targetForm(Map<String, dynamic> parameters, List<String> fieldLabels) {
+  final forms = find.byType(Form);
+  final formCount = forms.evaluate().length;
+  final rawIndex = _text(parameters, 'formIndex');
+  final anchor = _text(parameters, 'formAnchorText');
+
+  if (formCount == 0) {
+    if (rawIndex.isNotEmpty || anchor.isNotEmpty) {
+      fail(
+        'Contract yêu cầu chọn Form nhưng màn hình không có widget Form. '
+        'Hãy kiểm tra formIndex/formAnchorText hoặc starter.',
+      );
+    }
+    return null;
+  }
+
+  bool matchesContract(Finder candidate) {
+    if (anchor.isNotEmpty) {
+      final anchorInForm = find.descendant(
+        of: candidate,
+        matching: find.text(anchor, findRichText: true),
+        matchRoot: true,
+      );
+      if (anchorInForm.evaluate().isEmpty) return false;
+    }
+    return fieldLabels.every(
+      (label) =>
+          _inputByContractLabel(label, within: candidate).evaluate().length ==
+          1,
+    );
+  }
+
+  if (rawIndex.isNotEmpty) {
+    final oneBasedIndex = int.tryParse(rawIndex);
+    if (oneBasedIndex == null ||
+        oneBasedIndex < 1 ||
+        oneBasedIndex > formCount) {
+      fail(
+        'formIndex phải nằm trong khoảng 1..$formCount, nhận được "$rawIndex".',
+      );
+    }
+    final selected = forms.at(oneBasedIndex - 1);
+    if (!matchesContract(selected)) {
+      fail(
+        'Form #$oneBasedIndex không chứa đúng fieldLabels/formAnchorText đã cấu hình.',
+      );
+    }
+    return selected;
+  }
+
+  final candidates = <Finder>[];
+  for (var index = 0; index < formCount; index++) {
+    final candidate = forms.at(index);
+    if (matchesContract(candidate)) candidates.add(candidate);
+  }
+  if (candidates.isEmpty) {
+    fail(
+      'Không có Form nào chứa đủ fieldLabels'
+      '${anchor.isEmpty ? '' : ' và formAnchorText "$anchor"'}.',
+    );
+  }
+  if (candidates.length > 1) {
+    fail(
+      'Có ${candidates.length} Form cùng khớp contract. '
+      'Hãy nhập formIndex hoặc formAnchorText để xác định duy nhất Form cần chấm.',
+    );
+  }
+  return candidates.single;
 }
 
 Future<void> _checkTemplateFormFields(
@@ -497,9 +874,11 @@ Future<void> _checkTemplateFormFields(
   Map<String, dynamic> parameters,
 ) async {
   await _boot(tester);
-  for (final label in _csv(parameters, 'fieldLabels')) {
+  final labels = _csv(parameters, 'fieldLabels');
+  final form = _targetForm(parameters, labels);
+  for (final label in labels) {
     expect(
-      _inputByContractLabel(label),
+      _inputByContractLabel(label, within: form),
       findsOneWidget,
       reason: 'Không tìm thấy ô nhập có label/hint "$label"',
     );
@@ -511,11 +890,18 @@ Future<void> _checkTemplateButtons(
   Map<String, dynamic> parameters,
 ) async {
   await _boot(tester);
+  final scope = _targetUiScope(parameters);
   for (final label in _csv(parameters, 'buttonLabels')) {
     final finder = _buttonWithText(
       RegExp('^${RegExp.escape(label)}' + r'$', caseSensitive: false),
+      within: scope,
     );
-    expect(finder, findsOneWidget, reason: 'Không tìm thấy nút "$label"');
+    expect(
+      finder,
+      findsOneWidget,
+      reason:
+          'Nút "$label" phải xuất hiện đúng một lần trong scope đã cấu hình',
+    );
   }
 }
 
@@ -529,28 +915,262 @@ Future<void> _checkTemplateFormAction(
   if (labels.length != values.length) {
     fail('fieldLabels và inputValues phải có cùng số phần tử.');
   }
+  final expectedTexts = _csv(parameters, 'expectedTexts');
+  final resultMatchMode = _text(parameters, 'resultTextMatchMode', 'contains');
+  final requireNewResult = _bool(parameters, 'requireNewResult', true);
+  final form = _targetForm(parameters, labels);
   for (var index = 0; index < labels.length; index++) {
-    final finder = _inputByContractLabel(labels[index]);
+    final finder = _inputByContractLabel(labels[index], within: form);
     expect(
       finder,
       findsOneWidget,
       reason: 'Không tìm thấy ô nhập "${labels[index]}"',
     );
-    await tester.enterText(finder, values[index]);
+    await tester.enterText(
+      finder,
+      values[index] == '<empty>' ? '' : values[index],
+    );
   }
+  final beforeCounts = <String, int>{
+    for (final expected in expectedTexts)
+      expected: _contractText(expected, resultMatchMode).evaluate().length,
+  };
   final action = _requiredText(parameters, 'actionLabel');
-  final button = _buttonWithText(
+  final button = _formActionButton(
     RegExp('^${RegExp.escape(action)}' + r'$', caseSensitive: false),
+    form,
   );
   expect(button, findsOneWidget, reason: 'Không tìm thấy nút "$action"');
   await _tap(tester, button, action);
   await _settle(tester);
-  for (final expected in _csv(parameters, 'expectedTexts')) {
-    expect(
-      find.textContaining(expected, findRichText: true),
-      findsWidgets,
-      reason: 'Sau action $action không hiển thị "$expected"',
+  final resultScope = _targetUiScope(parameters, prefix: 'result');
+  for (final expected in expectedTexts) {
+    final result = _contractText(
+      expected,
+      resultMatchMode,
+      within: resultScope,
     );
+    final scopedAfterCount = result.evaluate().length;
+    if (requireNewResult) {
+      expect(
+        _contractText(expected, resultMatchMode).evaluate().length,
+        greaterThan(beforeCounts[expected] ?? 0),
+        reason:
+            'Action $action không tạo thêm kết quả "$expected"; nội dung có thể đã tồn tại từ trước.',
+      );
+      expect(
+        scopedAfterCount,
+        greaterThanOrEqualTo(1),
+        reason: 'Kết quả "$expected" không nằm trong result scope đã cấu hình.',
+      );
+    } else {
+      expect(
+        scopedAfterCount,
+        greaterThanOrEqualTo(1),
+        reason: 'Sau action $action không hiển thị "$expected"',
+      );
+    }
+  }
+}
+
+Future<void> _checkTemplateFormValidation(
+  WidgetTester tester,
+  Map<String, dynamic> parameters,
+) async {
+  await _boot(tester);
+  final labels = _csv(parameters, 'fieldLabels');
+  final values = _csv(parameters, 'invalidValues');
+  if (labels.length != values.length) {
+    fail('fieldLabels và invalidValues phải có cùng số phần tử.');
+  }
+  final form = _targetForm(parameters, labels);
+  final errors = _csv(parameters, 'errorTexts');
+  final errorFieldLabels = _csv(parameters, 'errorFieldLabels');
+  if (errorFieldLabels.isNotEmpty && errorFieldLabels.length != errors.length) {
+    fail(
+      'errorFieldLabels phải để trống hoặc có cùng số phần tử với errorTexts.',
+    );
+  }
+  final errorTextMatchMode = _text(
+    parameters,
+    'errorTextMatchMode',
+    'contains',
+  ).toLowerCase();
+  final requireNewErrors = _bool(parameters, 'requireNewErrors', true);
+  for (var index = 0; index < labels.length; index++) {
+    final finder = _inputByContractLabel(labels[index], within: form);
+    expect(
+      finder,
+      findsOneWidget,
+      reason: 'Không tìm thấy ô nhập "${labels[index]}"',
+    );
+    await tester.enterText(
+      finder,
+      values[index] == '<empty>' ? '' : values[index],
+    );
+  }
+  final errorScopes = <Finder?>[];
+  for (var index = 0; index < errors.length; index++) {
+    if (errorFieldLabels.isEmpty) {
+      errorScopes.add(form);
+      continue;
+    }
+    final field = _inputByContractLabel(errorFieldLabels[index], within: form);
+    expect(
+      field,
+      findsOneWidget,
+      reason:
+          'Không tìm thấy field "${errorFieldLabels[index]}" để đối chiếu lỗi "${errors[index]}".',
+    );
+    errorScopes.add(field);
+  }
+  final beforeCounts = <int>[
+    for (var index = 0; index < errors.length; index++)
+      _contractText(
+        errors[index],
+        errorTextMatchMode,
+        within: errorScopes[index],
+      ).evaluate().length,
+  ];
+  final action = _requiredText(parameters, 'actionLabel');
+  final button = _formActionButton(
+    RegExp('^${RegExp.escape(action)}' + r'$', caseSensitive: false),
+    form,
+  );
+  expect(button, findsOneWidget, reason: 'Không tìm thấy nút "$action"');
+  await _tap(tester, button, action);
+  await _settle(tester);
+  for (var index = 0; index < errors.length; index++) {
+    final error = errors[index];
+    final errorFinder = _contractText(
+      error,
+      errorTextMatchMode,
+      within: errorScopes[index],
+    );
+    final afterCount = errorFinder.evaluate().length;
+    if (requireNewErrors) {
+      expect(
+        afterCount,
+        greaterThan(beforeCounts[index]),
+        reason:
+            'Bấm $action không tạo thêm lỗi "$error"${errorFieldLabels.isEmpty ? ' trong Form đã chọn' : ' tại field "${errorFieldLabels[index]}"'}.',
+      );
+    } else {
+      expect(
+        afterCount,
+        greaterThanOrEqualTo(1),
+        reason: 'Form không hiển thị lỗi "$error"',
+      );
+    }
+  }
+}
+
+Future<void> _checkTemplateUiWorkflow(
+  WidgetTester tester,
+  Map<String, dynamic> parameters,
+) async {
+  await _boot(tester);
+  final decoded = jsonDecode(_requiredText(parameters, 'stepsJson'));
+  if (decoded is! List) fail('stepsJson phải là một JSON array.');
+  for (var index = 0; index < decoded.length; index++) {
+    final step = _asMap(decoded[index]);
+    final type = _requiredText(step, 'type');
+    switch (type) {
+      case 'enter':
+        final target = _requiredText(step, 'target');
+        final scope = _targetUiScope(step);
+        final finder = _selectOccurrence(
+          _inputByContractLabel(target, within: scope),
+          _text(step, 'occurrence'),
+          target,
+        );
+        expect(
+          finder,
+          findsOneWidget,
+          reason:
+              'Bước ${index + 1}: ô "$target" phải xác định duy nhất; dùng scope/occurrence nếu bị trùng',
+        );
+        await tester.enterText(finder, _text(step, 'value'));
+        await tester.pump();
+        break;
+      case 'tap':
+        final target = _requiredText(step, 'target');
+        final scope = _targetUiScope(step);
+        final button = _buttonWithText(
+          RegExp('^${RegExp.escape(target)}' + r'$', caseSensitive: false),
+          within: scope,
+        );
+        final candidates = button.evaluate().isNotEmpty
+            ? button
+            : _contractText(
+                target,
+                _text(step, 'matchMode', 'exact'),
+                within: scope,
+              );
+        final finder = _selectOccurrence(
+          candidates,
+          _text(step, 'occurrence'),
+          target,
+        );
+        expect(
+          finder,
+          findsOneWidget,
+          reason:
+              'Bước ${index + 1}: action "$target" phải xác định duy nhất; dùng scope/occurrence nếu bị trùng',
+        );
+        await _tap(tester, finder, target);
+        await _settle(tester);
+        break;
+      case 'expectVisible':
+        final value = _requiredText(step, 'value');
+        final scope = _targetUiScope(step);
+        final finder = _contractText(
+          value,
+          _text(step, 'matchMode', 'contains'),
+          within: scope,
+        );
+        final rawCount = _text(step, 'expectedCount');
+        if (rawCount.isEmpty) {
+          expect(
+            finder,
+            findsWidgets,
+            reason: 'Bước ${index + 1}: không thấy "$value"',
+          );
+        } else {
+          expect(
+            finder,
+            findsNWidgets(int.parse(rawCount)),
+            reason: 'Bước ${index + 1}: số lần xuất hiện "$value" không đúng',
+          );
+        }
+        break;
+      case 'expectAbsent':
+        final value = _requiredText(step, 'value');
+        final scope = _targetUiScope(step);
+        expect(
+          _contractText(
+            value,
+            _text(step, 'matchMode', 'contains'),
+            within: scope,
+          ),
+          findsNothing,
+          reason: 'Bước ${index + 1}: "$value" vẫn còn hiển thị',
+        );
+        break;
+      case 'wait':
+        final milliseconds =
+            int.tryParse(_text(step, 'milliseconds', '300')) ?? 300;
+        await tester.pump(
+          Duration(milliseconds: milliseconds.clamp(0, 5000).toInt()),
+        );
+        break;
+      default:
+        fail('Bước ${index + 1}: loại "$type" chưa được hỗ trợ.');
+    }
+    final exception = tester.takeException();
+    if (exception != null) {
+      fail('Workflow step ${index + 1} threw an exception: $exception');
+    }
   }
 }
 
@@ -559,11 +1179,19 @@ Future<void> _checkTemplateTextVisible(
   Map<String, dynamic> parameters,
 ) async {
   await _boot(tester);
+  final scope = _targetUiScope(parameters);
+  final matchMode = _text(parameters, 'textMatchMode', 'contains');
+  final minimumOccurrences = _number(
+    parameters,
+    'minimumOccurrences',
+    1,
+  ).toInt();
   for (final expected in _csv(parameters, 'expectedTexts')) {
     expect(
-      find.textContaining(expected, findRichText: true),
-      findsWidgets,
-      reason: 'Không tìm thấy nội dung "$expected"',
+      _contractText(expected, matchMode, within: scope),
+      findsAtLeastNWidgets(minimumOccurrences),
+      reason:
+          'Không tìm thấy đủ $minimumOccurrences nội dung "$expected" trong scope đã cấu hình',
     );
   }
 }
@@ -607,17 +1235,28 @@ Future<void> _checkStateReactiveFlow(
   final updatedKey = _requiredText(parameters, 'updatedKey');
   final absentKey = _text(parameters, 'absentKey');
   expect(
-    _byKey(initialKey),
+    _visibleByKey(initialKey),
     findsOneWidget,
     reason: 'Thiếu state ban đầu: $initialKey',
   );
+  final updatedBefore = _visibleKeyCount(updatedKey);
   await _tap(tester, _byKey(actionKey), actionKey);
   await _settle(tester);
-  expect(
-    _byKey(updatedKey),
-    findsOneWidget,
-    reason: 'State không cập nhật sau action $actionKey: $updatedKey',
-  );
+  final updatedAfter = _visibleKeyCount(updatedKey);
+  if (_bool(parameters, 'requireNewUpdatedState', true)) {
+    _expectNewSemanticKey(
+      updatedKey,
+      updatedBefore,
+      updatedAfter,
+      'State không chuyển sang đúng một $updatedKey mới sau $actionKey',
+    );
+  } else {
+    expect(
+      updatedAfter,
+      greaterThanOrEqualTo(1),
+      reason: 'State không cập nhật sau action $actionKey: $updatedKey',
+    );
+  }
   if (absentKey.isNotEmpty) {
     expect(
       _goneByKey(absentKey),
@@ -625,6 +1264,34 @@ Future<void> _checkStateReactiveFlow(
       reason: 'State cũ vẫn còn sau action $actionKey: $absentKey',
     );
   }
+}
+
+Future<void> _checkTemplateAppBoot(
+  WidgetTester tester,
+  Map<String, dynamic> parameters,
+) async {
+  await _boot(tester);
+  final readyText = _text(parameters, 'readyText');
+  if (readyText.isNotEmpty) {
+    final timeoutMs = _number(parameters, 'readyTimeoutMs', 3000).toInt();
+    final deadline = DateTime.now().add(Duration(milliseconds: timeoutMs));
+    while (DateTime.now().isBefore(deadline) &&
+        _contractText(readyText, 'contains').evaluate().isEmpty) {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 50)),
+      );
+      await tester.pump();
+    }
+    expect(
+      _contractText(readyText, 'contains'),
+      findsWidgets,
+      reason:
+          'Ứng dụng không hiển thị readyText "$readyText" sau ${timeoutMs}ms',
+    );
+  }
+  final rootKey = _text(parameters, 'rootKey');
+  if (rootKey.isNotEmpty) expect(_byKey(rootKey), findsOneWidget);
+  expect(tester.takeException(), isNull);
 }
 
 Future<void> _boot(WidgetTester tester) async {
@@ -733,14 +1400,14 @@ Future<void> _waitForVisible(
 ) async {
   final deadline = DateTime.now().add(Duration(milliseconds: timeoutMs));
   while (DateTime.now().isBefore(deadline)) {
-    if (_byKey(key).evaluate().isNotEmpty) return;
+    if (_visibleByKey(key).evaluate().isNotEmpty) return;
     await tester.runAsync(() async {
       await Future<void>.delayed(const Duration(milliseconds: 50));
     });
     await tester.pump();
   }
   expect(
-    _byKey(key),
+    _visibleByKey(key),
     findsOneWidget,
     reason: 'Không xuất hiện semantic key sau khi chờ: $key',
   );
@@ -776,6 +1443,34 @@ Finder _goneByKey(String key) =>
 Finder _exactByKey(String key) =>
     find.byKey(ValueKey<String>(key), skipOffstage: false);
 
+Finder _visibleByKey(String key) {
+  final exact = find.byKey(ValueKey<String>(key));
+  if (exact.evaluate().isNotEmpty ||
+      _suiteBool('strict_semantic_keys', false)) {
+    return exact;
+  }
+  return _byKey(key);
+}
+
+int _visibleKeyCount(String key) => _visibleByKey(key).evaluate().length;
+
+void _expectNewSemanticKey(String key, int before, int after, String reason) {
+  expect(
+    before,
+    0,
+    reason:
+        '$key đã xuất hiện trước thao tác nên không chứng minh được chuyển trạng thái.',
+  );
+  expect(after, 1, reason: reason);
+}
+
+bool _isKeyOnCurrentRoute(String key) {
+  return _visibleByKey(key).evaluate().any((element) {
+    final route = ModalRoute.of(element);
+    return route == null || route.isCurrent;
+  });
+}
+
 Future<void> _tap(WidgetTester tester, Finder finder, String key) async {
   expect(finder, findsOneWidget, reason: 'Missing action semantic key: $key');
   try {
@@ -791,7 +1486,7 @@ Never _failIfActionThrew(String key, Object error, StackTrace stack) {
 
 Future<void> _settle(WidgetTester tester) async {
   // Advance fake time and the real event loop so animations and overlays settle.
-  for (var frame = 0; frame < 6; frame++) {
+  for (var frame = 0; frame < 8; frame++) {
     await tester.pump(const Duration(milliseconds: 50));
     await tester.runAsync(
       () => Future<void>.delayed(const Duration(milliseconds: 1)),
@@ -820,10 +1515,27 @@ Future<void> _responsive(
   tester.view.physicalSize = portrait;
   await _boot(tester);
   expect(tester.takeException(), isNull);
+  _expectResponsiveTexts(parameters, 'portraitExpectedTexts', 'portrait');
 
   tester.view.physicalSize = landscape;
   await _settle(tester);
   expect(tester.takeException(), isNull);
+  _expectResponsiveTexts(parameters, 'landscapeExpectedTexts', 'landscape');
+}
+
+void _expectResponsiveTexts(
+  Map<String, dynamic> parameters,
+  String key,
+  String layout,
+) {
+  final matchMode = _text(parameters, 'textMatchMode', 'contains');
+  for (final expected in _csv(parameters, key)) {
+    expect(
+      _contractText(expected, matchMode),
+      findsWidgets,
+      reason: 'Layout $layout không hiển thị "$expected"',
+    );
+  }
 }
 
 Future<void> _responsiveTarget(
@@ -959,10 +1671,8 @@ Future<void> _checkFormValidateFields(
   final fields = _csv(parameters, 'fieldKeys');
   final values = _csv(parameters, 'invalidValues');
   final errors = _csv(parameters, 'errorKeys');
-  if (fields.isEmpty ||
-      fields.length != values.length ||
-      fields.length != errors.length) {
-    fail('fieldKeys, invalidValues và errorKeys phải có cùng số phần tử.');
+  if (fields.isEmpty || fields.length != values.length || errors.isEmpty) {
+    fail('fieldKeys phải khớp invalidValues và errorKeys không được để trống.');
   }
   final fieldType = _text(parameters, 'fieldType', 'input');
   for (var i = 0; i < fields.length; i++) {
@@ -975,15 +1685,27 @@ Future<void> _checkFormValidateFields(
     _assertTargetType(tester, fieldFinder, fields[i], fieldType);
     await tester.enterText(fieldFinder, _decodeInput(values[i]));
   }
+  final beforeErrors = [for (final key in errors) _visibleKeyCount(key)];
   final submitKey = _requiredText(parameters, 'submitKey');
   await _tap(tester, _byKey(submitKey), submitKey);
   await _settle(tester);
-  for (final errorKey in errors) {
-    expect(
-      _byKey(errorKey),
-      findsOneWidget,
-      reason: 'Thiếu lỗi validation key: $errorKey',
-    );
+  for (var index = 0; index < errors.length; index++) {
+    final errorKey = errors[index];
+    final after = _visibleKeyCount(errorKey);
+    if (_bool(parameters, 'requireNewErrors', true)) {
+      _expectNewSemanticKey(
+        errorKey,
+        beforeErrors[index],
+        after,
+        'Submit không tạo đúng một lỗi validation mới: $errorKey',
+      );
+    } else {
+      expect(
+        after,
+        greaterThanOrEqualTo(1),
+        reason: 'Thiếu lỗi validation key: $errorKey',
+      );
+    }
   }
 }
 
@@ -1025,14 +1747,32 @@ Future<void> _checkFormPrefill(
 ) async {
   await _boot(tester);
   final editKey = _requiredText(parameters, 'editKey');
+  final fields = _csv(parameters, 'fieldKeys');
+  final beforeValues = <String?>[];
+  for (final key in fields) {
+    final field = _byKey(key);
+    if (field.evaluate().length != 1) {
+      beforeValues.add(null);
+      continue;
+    }
+    final editable = find.descendant(
+      of: field,
+      matching: find.byType(EditableText),
+    );
+    beforeValues.add(
+      editable.evaluate().length == 1
+          ? tester.widget<EditableText>(editable).controller.text
+          : null,
+    );
+  }
   await _tap(tester, _byKey(editKey), editKey);
   await _settle(tester);
-  final fields = _csv(parameters, 'fieldKeys');
   final expectedValues = _csv(parameters, 'expectedValues');
   if (fields.isEmpty || fields.length != expectedValues.length) {
     fail('fieldKeys và expectedValues phải có cùng số phần tử.');
   }
   final fieldType = _text(parameters, 'fieldType', 'input');
+  var changedByEdit = false;
   for (var i = 0; i < fields.length; i++) {
     final fieldFinder = _byKey(fields[i]);
     expect(
@@ -1050,10 +1790,21 @@ Future<void> _checkFormPrefill(
       findsOneWidget,
       reason: 'Field ${fields[i]} không phải editable input',
     );
+    final actual = tester.widget<EditableText>(editable).controller.text;
+    final expected = _decodeInput(expectedValues[i]);
     expect(
-      tester.widget<EditableText>(editable).controller.text,
-      _decodeInput(expectedValues[i]),
+      actual,
+      expected,
       reason: 'Field ${fields[i]} không được prefill đúng',
+    );
+    if (beforeValues[i] == null || beforeValues[i] != actual)
+      changedByEdit = true;
+  }
+  if (_bool(parameters, 'requirePrefillTransition', true)) {
+    expect(
+      changedByEdit,
+      isTrue,
+      reason: 'Bấm $editKey không tạo thay đổi prefill quan sát được.',
     );
   }
 }
@@ -1079,11 +1830,24 @@ Future<void> _checkFormSubmit(
     _assertTargetType(tester, fieldFinder, fields[i], fieldType);
     await tester.enterText(fieldFinder, _decodeInput(values[i]));
   }
+  final resultKey = _text(parameters, 'resultKey');
+  final resultBefore = resultKey.isEmpty ? 0 : _visibleKeyCount(resultKey);
   final submitKey = _requiredText(parameters, 'submitKey');
   await _tap(tester, _byKey(submitKey), submitKey);
   await _settle(tester);
-  final resultKey = _text(parameters, 'resultKey');
-  if (resultKey.isNotEmpty) expect(_byKey(resultKey), findsOneWidget);
+  if (resultKey.isNotEmpty) {
+    final resultAfter = _visibleKeyCount(resultKey);
+    if (_bool(parameters, 'requireNewResult', true)) {
+      _expectNewSemanticKey(
+        resultKey,
+        resultBefore,
+        resultAfter,
+        'Submit $submitKey không tạo đúng một $resultKey mới',
+      );
+    } else {
+      expect(resultAfter, greaterThanOrEqualTo(1));
+    }
+  }
   for (final errorKey in _csv(parameters, 'errorKeys')) {
     expect(
       _goneByKey(errorKey),
@@ -1099,25 +1863,54 @@ Future<void> _checkDialogFlow(
 ) async {
   await _boot(tester);
   final actionKey = _requiredText(parameters, 'actionKey');
+  final dialogKey = _requiredText(parameters, 'dialogKey');
+  final dialogBefore = _visibleKeyCount(dialogKey);
+  final resultKey = _text(parameters, 'resultKey');
+  final resultBefore = resultKey.isEmpty ? 0 : _visibleKeyCount(resultKey);
   await _tap(tester, _byKey(actionKey), actionKey);
   await _settle(tester);
 
-  final dialogKey = _requiredText(parameters, 'dialogKey');
-  final dialogFinder = _byKey(dialogKey);
-  expect(
-    dialogFinder,
-    findsOneWidget,
-    reason: 'Không tìm thấy dialog key: $dialogKey',
-  );
+  final dialogFinder = _visibleByKey(dialogKey);
+  final dialogAfter = dialogFinder.evaluate().length;
+  if (_bool(parameters, 'requireNewDialog', true)) {
+    _expectNewSemanticKey(
+      dialogKey,
+      dialogBefore,
+      dialogAfter,
+      'Bấm $actionKey không mở đúng một dialog $dialogKey mới',
+    );
+  } else {
+    expect(
+      dialogFinder,
+      findsOneWidget,
+      reason: 'Không tìm thấy dialog key: $dialogKey',
+    );
+  }
   _assertTargetType(tester, dialogFinder, dialogKey, 'dialog');
 
   final decisionKey = _requiredText(parameters, 'decisionKey');
-  await _tap(tester, _byKey(decisionKey), decisionKey);
+  final decisionFinder = find.descendant(
+    of: dialogFinder,
+    matching: _byKey(decisionKey),
+    matchRoot: true,
+  );
+  await _tap(tester, decisionFinder, decisionKey);
   await _settle(tester);
-  final resultKey = _text(parameters, 'resultKey');
-  if (resultKey.isNotEmpty) expect(_byKey(resultKey), findsOneWidget);
+  if (resultKey.isNotEmpty) {
+    final resultAfter = _visibleKeyCount(resultKey);
+    if (_bool(parameters, 'requireNewResult', false)) {
+      _expectNewSemanticKey(
+        resultKey,
+        resultBefore,
+        resultAfter,
+        'Quyết định $decisionKey không tạo đúng một $resultKey mới',
+      );
+    } else {
+      expect(resultAfter, greaterThanOrEqualTo(1));
+    }
+  }
   final absentKey = _text(parameters, 'absentKey');
-  if (absentKey.isNotEmpty) expect(_byKey(absentKey), findsNothing);
+  if (absentKey.isNotEmpty) expect(_goneByKey(absentKey), findsNothing);
 }
 
 Future<void> _checkWidgetSemanticsLabel(
@@ -1370,7 +2163,7 @@ FontWeight _fontWeight(String value) {
 }
 
 Finder _byKey(String key) {
-  final exact = find.byKey(ValueKey<String>(key), skipOffstage: false);
+  final exact = find.byKey(ValueKey<String>(key));
   if (exact.evaluate().isNotEmpty) return exact;
   if (_suiteBool('strict_semantic_keys', false)) return _notFound();
 
@@ -1476,11 +2269,14 @@ Finder _listTileAt(int index) {
   return items.evaluate().length > index ? items.at(index) : _notFound();
 }
 
-Finder _buttonWithText(RegExp pattern) {
-  final labels = find.byWidgetPredicate(
+Finder _buttonWithText(RegExp pattern, {Finder? within}) {
+  final allLabels = find.byWidgetPredicate(
     (widget) => widget is Text && pattern.hasMatch((widget.data ?? '').trim()),
     skipOffstage: false,
   );
+  final labels = within == null
+      ? allLabels
+      : find.descendant(of: within, matching: allLabels, matchRoot: true);
   final buttons = find.ancestor(
     of: labels,
     matching: find.byWidgetPredicate(
@@ -1493,7 +2289,17 @@ Finder _buttonWithText(RegExp pattern) {
     ),
     matchRoot: true,
   );
-  return buttons.evaluate().isNotEmpty ? buttons.first : _notFound();
+  return buttons.evaluate().isNotEmpty ? buttons : _notFound();
+}
+
+Finder _formActionButton(RegExp pattern, Finder? form) {
+  if (form != null) {
+    final scoped = _buttonWithText(pattern, within: form);
+    if (scoped.evaluate().isNotEmpty) return scoped;
+  }
+  // Flutter cho phép nút submit nằm cạnh Form và gọi formKey.currentState.
+  // Trường hợp đó chỉ an toàn khi actionLabel xác định đúng một nút toàn màn hình.
+  return _buttonWithText(pattern);
 }
 
 Finder _validationErrorFor(String key) {
@@ -1587,11 +2393,30 @@ String _text(Map<String, dynamic> map, String key, [String fallback = '']) {
   return value == null ? fallback : value.toString().trim();
 }
 
-List<String> _csv(Map<String, dynamic> map, String key) => _text(map, key)
-    .split(',')
-    .map((value) => value.trim())
-    .where((value) => value.isNotEmpty)
-    .toList();
+List<String> _csv(Map<String, dynamic> map, String key) {
+  final raw = map[key];
+  if (raw is List) {
+    return raw.map((value) => value == null ? '' : '$value'.trim()).toList();
+  }
+  final text = raw == null ? '' : '$raw'.trim();
+  if (text.startsWith('[')) {
+    try {
+      final decoded = jsonDecode(text);
+      if (decoded is List) {
+        return decoded
+            .map((value) => value == null ? '' : '$value'.trim())
+            .toList();
+      }
+    } catch (_) {
+      fail('$key phải là CSV hoặc JSON array hợp lệ.');
+    }
+  }
+  return text
+      .split(',')
+      .map((value) => value.trim())
+      .where((value) => value.isNotEmpty)
+      .toList();
+}
 
 double _number(Map<String, dynamic> map, String key, double fallback) {
   final value = map[key];

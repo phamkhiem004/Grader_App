@@ -50,7 +50,7 @@ export default function ArchivePage() {
   const [err, setErr] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
 
-  // Modal xem đề: mặc định hiện ĐỀ BÀI (de_bai); có tab phụ để xem 3 file testcase khi cần
+  // Modal xem đề: mặc định hiện ĐỀ BÀI; tab phụ hiển thị ba file testcase.
   const [viewExam, setViewExam] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<"debai" | "files">("debai");
   const [deBai, setDeBai] = useState<string | null>(null);
@@ -121,7 +121,7 @@ export default function ArchivePage() {
     finally { setViewLoading(false); }
   };
 
-  // Đọc 3 file testcase (exam_test.dart, grader.dart, skills_matrix.json) — tải khi cần.
+  // Đọc ba file testcase công khai — tải khi cần.
   const loadFiles = async (examId: string) => {
     setViewLoading(true);
     try {
@@ -222,8 +222,8 @@ export default function ArchivePage() {
       <div className="mb-5 flex items-start gap-2.5 rounded-xl border border-indigo-100 bg-indigo-50/60 p-4 text-xs text-indigo-700">
         <Info size={16} className="mt-0.5 shrink-0" />
         <div className="space-y-1">
-          <p>Mỗi đề lưu sẵn <span className="font-mono">exam_test.dart</span>, <span className="font-mono">skills_matrix.json</span>, <span className="font-mono">grader.dart</span> trên đĩa — bấm <b>Xem</b> để mở đề bài nếu có, hoặc xem trực tiếp testcase của đề upload từ <b>Cấu hình Đề thi</b>.</p>
-          <p className="text-indigo-600/80">Nhóm nút <b>Tải</b> cho phép tải <b>Testcase</b> (ZIP 3 file để dùng/upload lại), <b>Đề bài</b> (de_bai.md), <b>starter</b> và <b>lời giải</b> nếu đề có lưu kèm.</p>
+          <p>Mỗi đề lưu đúng ba file <span className="font-mono">exam_test.dart</span>, <span className="font-mono">skills_matrix.json</span> và <span className="font-mono">grader.dart</span> — bấm <b>Xem</b> để đối chiếu.</p>
+          <p className="text-indigo-600/80">Nhóm nút <b>Tải</b> cho phép tải <b>Testcase</b> (ZIP ba file), <b>Đề bài</b>, <b>starter</b> và <b>lời giải</b> nếu đề có lưu kèm.</p>
           <p className="text-indigo-600/80"><b>Xóa đề</b> sẽ gỡ testcase + ảnh Docker để giải phóng dung lượng — sau khi xóa sẽ KHÔNG chấm lại được đề đó nữa.</p>
         </div>
       </div>
@@ -284,7 +284,7 @@ export default function ArchivePage() {
                     </td>
                     <td className="px-5 py-3">
                       <div className="flex flex-wrap items-center justify-end gap-1.5">
-                        {/* Tải về: đề bài (.md) · exam_test (zip 3 file) · starter (zip khung lib/) */}
+                        {/* Tải về: đề bài · ZIP ba file testcase · starter · lời giải */}
                         <div className="inline-flex items-center overflow-hidden rounded-lg border border-slate-200 bg-white text-[11px] font-semibold">
                           <span className="px-1.5 py-1.5 text-slate-400" title="Tải về"><Download size={12} /></span>
                           <button onClick={() => doDownload(`/exam-setup/${encodeURIComponent(e.examId)}/download/de-bai`, `${e.examId}_de_bai.md`)}
@@ -298,7 +298,7 @@ export default function ArchivePage() {
                             <Printer size={12} /> PDF
                           </button>
                           <button onClick={() => doDownload(`/exam-setup/${encodeURIComponent(e.examId)}/download/exam-test`, `${e.examId}_exam_test.zip`)}
-                            disabled={!e.hasTestcase} title="Tải testcase: exam_test.dart + grader.dart + skills_matrix.json"
+                            disabled={!e.hasTestcase} title="Tải exam_test.dart + grader.dart + skills_matrix.json"
                             className="flex items-center gap-1 border-l border-slate-200 px-2 py-1.5 text-slate-600 transition-colors hover:bg-indigo-50 hover:text-indigo-600 disabled:opacity-30 disabled:hover:bg-white disabled:hover:text-slate-600">
                             <FileArchive size={12} /> Testcase
                           </button>
@@ -345,7 +345,7 @@ export default function ArchivePage() {
         </div>
       )}
 
-      {/* Modal xem đề — mặc định ĐỀ BÀI; đổi tab để xem 3 file testcase. Portal ra <body>. */}
+      {/* Modal xem đề — mặc định ĐỀ BÀI; đổi tab để xem ba file testcase. */}
       {mounted && viewExam && createPortal(
         <div className="animate-modal-overlay fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm" onClick={() => setViewExam(null)}>
           <div className="animate-modal-pop flex max-h-[85vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-black/5" onClick={(e) => e.stopPropagation()}>
@@ -356,7 +356,7 @@ export default function ArchivePage() {
               <button onClick={() => setViewExam(null)} className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"><X size={18} /></button>
             </div>
 
-            {/* Tab: Đề bài | Testcase (3 file) */}
+            {/* Tab: Đề bài | ba file testcase */}
             <div className="flex shrink-0 items-center gap-1 border-b border-slate-100 bg-slate-50/60 px-3 py-2">
               <button onClick={showDeBai}
                 className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${viewMode === "debai" ? "bg-indigo-50 text-indigo-700" : "text-slate-500 hover:bg-slate-100"}`}>
@@ -376,7 +376,7 @@ export default function ArchivePage() {
               ) : (
                 <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-16 text-center">
                   <FileText size={30} className="text-slate-300" />
-                  <p className="max-w-sm text-sm text-slate-500">Đề này chưa có <b>đề bài</b> (de_bai.md). Bạn vẫn có thể xem 3 file testcase của đề.</p>
+                  <p className="max-w-sm text-sm text-slate-500">Đề này chưa có <b>đề bài</b> (de_bai.md). Bạn vẫn có thể xem ba file testcase của đề.</p>
                   <button onClick={showFiles} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 hover:text-indigo-600">
                     <FileCode size={13} /> Xem 3 file testcase
                   </button>

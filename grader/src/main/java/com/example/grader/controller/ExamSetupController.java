@@ -140,7 +140,7 @@ public class ExamSetupController {
         }
     }
 
-    /** Đọc các file testcase của 1 đề (exam_test.dart, skills_matrix.json, grader.dart) — cho trang Kho đề. */
+    /** Đọc ba file testcase công khai của một đề — cho trang Kho đề. */
     @GetMapping("/{examId}/testcase")
     public ResponseEntity<?> testcaseFiles(@PathVariable String examId) {
         try {
@@ -171,7 +171,7 @@ public class ExamSetupController {
         }
     }
 
-    /** Tải EXAM_TEST: ZIP 3 file testcase (exam_test.dart + grader.dart + skills_matrix.json) — upload lại được. */
+    /** Tải EXAM_TEST: ZIP ba file exam_test.dart, grader.dart và skills_matrix.json. */
     @GetMapping("/{examId}/download/exam-test")
     public ResponseEntity<?> downloadExamTest(@PathVariable String examId) {
         try {

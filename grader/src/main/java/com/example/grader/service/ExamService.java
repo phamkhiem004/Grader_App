@@ -197,8 +197,8 @@ public class ExamService {
     }
 
     /**
-     * Đọc các file testcase của 1 ĐỀ (theo examId) để xem/đối chiếu trong trang Kho đề:
-     * exam_test.dart, skills_matrix.json, grader.dart... Ưu tiên testcasePath trong DB, fallback đĩa.
+     * Đọc đúng ba file testcase công khai của một đề. File metadata/module nội bộ
+     * (nếu còn trong Draft cũ) không thuộc contract chấm và không được lộ ra UI.
      */
     public List<Map<String, String>> readExamTestcaseFiles(String examId) {
         safeId(examId, "đề");
@@ -206,16 +206,14 @@ public class ExamService {
         Path dir = previewTestcaseDirOf(examId);
         if (dir == null) return out;
 
-        final Path base = dir;
         final int MAX_BYTES = 200_000;
-        try (Stream<Path> s = Files.walk(base)) {
-            for (Path p : s.filter(Files::isRegularFile).toList()) {
-                String name = base.relativize(p).toString().replace('\\', '/');
-                String lower = name.toLowerCase();
-                if (!(lower.endsWith(".dart") || lower.endsWith(".json") || lower.endsWith(".yaml")
-                        || lower.endsWith(".yml") || lower.endsWith(".md") || lower.endsWith(".txt"))) continue;
+        try {
+            for (String name : List.of("exam_test.dart", "skills_matrix.json", "grader.dart")) {
+                Path p = dir.resolve(name);
+                if (!Files.isRegularFile(p)) continue;
                 String content = Files.readString(p, StandardCharsets.UTF_8);
-                if (content.length() > MAX_BYTES) content = content.substring(0, MAX_BYTES) + "\n… (đã cắt bớt)";
+                if (content.length() > MAX_BYTES)
+                    content = content.substring(0, MAX_BYTES) + "\n… (đã cắt bớt)";
                 Map<String, String> m = new LinkedHashMap<>();
                 m.put("name", name);
                 m.put("content", content);
@@ -224,17 +222,7 @@ public class ExamService {
         } catch (Exception e) {
             log.warn("Đọc testcase đề {} lỗi: {}", examId, e.getMessage());
         }
-        out.sort((a, b) -> rankTestcaseFile(a.get("name")) - rankTestcaseFile(b.get("name")));
         return out;
-    }
-
-    /** exam_test.dart → skills_matrix.json → grader.dart → còn lại (cho dễ đọc trên UI). */
-    private int rankTestcaseFile(String name) {
-        String n = name.toLowerCase();
-        if (n.endsWith("exam_test.dart"))     return 0;
-        if (n.endsWith("skills_matrix.json")) return 1;
-        if (n.endsWith("grader.dart"))        return 2;
-        return 3;
     }
 
     // ════════════════════════════════════════════════════════════════════════════
@@ -379,7 +367,7 @@ public class ExamService {
         return any;
     }
 
-    /** ZIP 3 file testcase (exam_test.dart + grader.dart + skills_matrix.json) để tải về / upload lại; null nếu thiếu. */
+    /** ZIP đúng ba file testcase công khai để tải về và upload lại. */
     public byte[] zipTestcase(String examId) throws Exception {
         safeId(examId, "đề");
         Path dir = previewTestcaseDirOf(examId);

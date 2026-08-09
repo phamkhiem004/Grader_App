@@ -51,9 +51,11 @@ bool _isDirectMetadata(Map<String, dynamic> metadata) {
   if ((metadata['runner'] ?? '').toString() == 'DIRECT_FUNCTION') return true;
   if ((metadata['runner'] ?? '').toString() != 'GROUP') return false;
   final children = _asList(metadata['children']);
-  return children.isNotEmpty && children.every(
-    (child) => (_asMap(child)['runner'] ?? '').toString() == 'DIRECT_FUNCTION',
-  );
+  return children.isNotEmpty &&
+      children.every(
+        (child) =>
+            (_asMap(child)['runner'] ?? '').toString() == 'DIRECT_FUNCTION',
+      );
 }
 
 Future<void> _runCase(
@@ -74,14 +76,26 @@ Future<void> _runCase(
     case 'APP_BOOT':
       await _boot(tester);
       final rootKey = _text(parameters, 'rootKey');
-      if (rootKey.isNotEmpty) expect(_byKey(rootKey), findsOneWidget);
+      if (rootKey.isNotEmpty) expect(_visibleByKey(rootKey), findsOneWidget);
+      final readyKey = _text(parameters, 'readyKey');
+      if (readyKey.isNotEmpty) {
+        await _waitForVisible(
+          tester,
+          readyKey,
+          _number(parameters, 'readyTimeoutMs', 3000).toInt(),
+        );
+      }
       expect(tester.takeException(), isNull);
       return;
     case 'WIDGET_VISIBLE':
       await _boot(tester);
       final widgetKey = _requiredText(parameters, 'widgetKey');
       final widgetFinder = _byKey(widgetKey);
-      expect(widgetFinder, findsOneWidget, reason: 'Không tìm thấy widget key: $widgetKey');
+      expect(
+        widgetFinder,
+        findsOneWidget,
+        reason: 'Không tìm thấy widget key: $widgetKey',
+      );
       final visibleType = _text(parameters, 'targetType');
       if (visibleType.isNotEmpty) {
         _assertTargetType(tester, widgetFinder, widgetKey, visibleType);
@@ -122,15 +136,44 @@ Future<void> _runCase(
       return;
     case 'FORM_REQUIRED_FIELDS':
       await _boot(tester);
-      for (final key in _csv(parameters, 'fieldKeys')) {
-        expect(_byKey(key), findsOneWidget, reason: 'Thiếu field semantic key: $key');
+      final fields = _csv(parameters, 'fieldKeys');
+      final errors = _csv(parameters, 'errorKeys');
+      if (fields.isEmpty || errors.isEmpty) {
+        fail('fieldKeys và errorKeys không được để trống.');
       }
+      final fieldType = _text(parameters, 'fieldType', 'input');
+      for (final key in fields) {
+        final field = _byKey(key);
+        expect(field, findsOneWidget, reason: 'Thiếu field semantic key: $key');
+        _assertTargetType(tester, field, key, fieldType);
+        await tester.enterText(field, '');
+      }
+      final beforeErrors = [for (final key in errors) _visibleKeyCount(key)];
       final submitKey = _text(parameters, 'submitKey');
-      expect(_byKey(submitKey), findsOneWidget, reason: 'Thiếu submit key: $submitKey');
+      expect(
+        _byKey(submitKey),
+        findsOneWidget,
+        reason: 'Thiếu submit key: $submitKey',
+      );
       await _tap(tester, _byKey(submitKey), submitKey);
       await _settle(tester);
-      for (final key in _csv(parameters, 'errorKeys')) {
-        expect(_byKey(key), findsOneWidget, reason: 'Thiếu error key: $key');
+      for (var index = 0; index < errors.length; index++) {
+        final key = errors[index];
+        final after = _visibleKeyCount(key);
+        if (_bool(parameters, 'requireNewErrors', true)) {
+          _expectNewSemanticKey(
+            key,
+            beforeErrors[index],
+            after,
+            'Submit rỗng không tạo đúng một lỗi mới: $key',
+          );
+        } else {
+          expect(
+            after,
+            greaterThanOrEqualTo(1),
+            reason: 'Thiếu error key: $key',
+          );
+        }
       }
       return;
     case 'RESPONSIVE_NO_OVERFLOW':
@@ -155,15 +198,37 @@ Future<void> _runCase(
       await _boot(tester);
       final openKey = _text(parameters, 'openKey');
       final destinationKey = _text(parameters, 'destinationKey');
+      final destinationBefore = _visibleKeyCount(destinationKey);
       await _tap(tester, _byKey(openKey), openKey);
       await _settle(tester);
-      expect(_byKey(destinationKey), findsOneWidget);
+      final destinationAfter = _visibleKeyCount(destinationKey);
+      if (_bool(parameters, 'requireNewDestination', true)) {
+        _expectNewSemanticKey(
+          destinationKey,
+          destinationBefore,
+          destinationAfter,
+          'Bấm $openKey không mở đúng một màn hình mới $destinationKey',
+        );
+      } else {
+        expect(destinationAfter, greaterThanOrEqualTo(1));
+      }
       final backKey = _text(parameters, 'backKey');
       final homeKey = _text(parameters, 'homeKey');
       if (backKey.isNotEmpty && homeKey.isNotEmpty) {
         await _tap(tester, _byKey(backKey), backKey);
         await _settle(tester);
-        expect(_byKey(homeKey), findsOneWidget);
+        expect(
+          _isKeyOnCurrentRoute(homeKey),
+          isTrue,
+          reason: 'Bấm $backKey không quay lại route chứa $homeKey',
+        );
+        if (_bool(parameters, 'hideDestinationAfterBack', true)) {
+          expect(
+            _isKeyOnCurrentRoute(destinationKey),
+            isFalse,
+            reason: '$destinationKey vẫn là route hiện tại sau khi quay lại',
+          );
+        }
       }
       return;
     case 'LIST_VISIBLE':
@@ -174,16 +239,35 @@ Future<void> _runCase(
       for (final key in _csv(parameters, 'itemKeys')) {
         final itemFinder = _exactByKey(key);
         await _revealLazyItem(tester, listFinder, itemFinder);
-        expect(itemFinder, findsOneWidget, reason: 'Thiếu item semantic key: $key');
+        expect(
+          find.descendant(
+            of: listFinder,
+            matching: itemFinder,
+            matchRoot: true,
+          ),
+          findsOneWidget,
+          reason: 'Item $key không nằm trong list $listKey',
+        );
       }
       return;
     case 'BUTTON_ACTION':
       await _boot(tester);
       final buttonKey = _text(parameters, 'buttonKey');
       final resultKey = _text(parameters, 'resultKey');
+      final resultBefore = _visibleKeyCount(resultKey);
       await _tap(tester, _byKey(buttonKey), buttonKey);
       await _settle(tester);
-      expect(_byKey(resultKey), findsOneWidget);
+      final resultAfter = _visibleKeyCount(resultKey);
+      if (_bool(parameters, 'requireNewResult', true)) {
+        _expectNewSemanticKey(
+          resultKey,
+          resultBefore,
+          resultAfter,
+          'Bấm $buttonKey không tạo đúng một $resultKey mới',
+        );
+      } else {
+        expect(resultAfter, greaterThanOrEqualTo(1));
+      }
       return;
     default:
       fail('Testcase $testId chưa có common runner: $runner');
@@ -208,16 +292,27 @@ Future<void> _checkDirectFunction(Map<String, dynamic> parameters) async {
   );
   if (actual is Future) actual = await actual;
 
-  final expectedType = _text(parameters, 'expectedType', 'string').toLowerCase();
+  final expectedType = _text(
+    parameters,
+    'expectedType',
+    'string',
+  ).toLowerCase();
   final expectedRaw = _text(parameters, 'expectedValue');
   final expected = _parseDirectExpected(expectedRaw, expectedType);
   final matchMode = _text(parameters, 'matchMode', 'equals').toLowerCase();
   if (matchMode == 'contains') {
-    expect(actual.toString(), contains(expected.toString()),
-        reason: '$functionName không chứa giá trị mong đợi');
+    expect(
+      actual.toString(),
+      contains(expected.toString()),
+      reason: '$functionName không chứa giá trị mong đợi',
+    );
   } else {
     // equals() so sánh sâu List/Map; expect(actual, expected) chỉ so sánh cùng object.
-    expect(actual, equals(expected), reason: '$functionName trả về giá trị không đúng');
+    expect(
+      actual,
+      equals(expected),
+      reason: '$functionName trả về giá trị không đúng',
+    );
   }
 }
 
@@ -252,14 +347,26 @@ Future<void> _checkSourceContracts() async {
     final contract = _asMap(raw);
     final path = _text(contract, 'path');
     final type = _text(contract, 'type', 'symbol');
-    final symbols = _asList(contract['symbols']).map((value) => value.toString()).toList();
+    final symbols = _asList(
+      contract['symbols'],
+    ).map((value) => value.toString()).toList();
     final file = File(path);
-    expect(file.existsSync(), isTrue, reason: 'Khong tim thay source contract $path');
+    expect(
+      file.existsSync(),
+      isTrue,
+      reason: 'Khong tim thay source contract $path',
+    );
     final source = file.readAsStringSync();
     for (final symbol in symbols) {
       final escaped = RegExp.escape(symbol);
-      final declaration = RegExp('\\b(?:class|mixin|enum|extension|typedef)\\s+$escaped\\b|\\b(?:final|const|var|late)\\s+$escaped\\b|\\b$escaped\\s*\\(');
-      expect(declaration.hasMatch(source), isTrue, reason: 'Thieu $type symbol $symbol trong $path');
+      final declaration = RegExp(
+        '\\b(?:class|mixin|enum|extension|typedef)\\s+$escaped\\b|\\b(?:final|const|var|late)\\s+$escaped\\b|\\b$escaped\\s*\\(',
+      );
+      expect(
+        declaration.hasMatch(source),
+        isTrue,
+        reason: 'Thieu $type symbol $symbol trong $path',
+      );
     }
   }
 }
@@ -286,8 +393,10 @@ Future<void> _checkGroup(
   }
 
   if (failures.isNotEmpty) {
-    fail('Nhóm ${metadata['name'] ?? groupId} thất bại vì assert con không đạt:\n'
-        '${failures.join('\n')}');
+    fail(
+      'Nhóm ${metadata['name'] ?? groupId} thất bại vì assert con không đạt:\n'
+      '${failures.join('\n')}',
+    );
   }
 }
 
@@ -300,15 +409,35 @@ Future<void> _checkStateReactiveFlow(
   final actionKey = _requiredText(parameters, 'actionKey');
   final updatedKey = _requiredText(parameters, 'updatedKey');
   final absentKey = _text(parameters, 'absentKey');
-  expect(_byKey(initialKey), findsOneWidget,
-      reason: 'Thiếu state ban đầu: $initialKey');
+  expect(
+    _visibleByKey(initialKey),
+    findsOneWidget,
+    reason: 'Thiếu state ban đầu: $initialKey',
+  );
+  final updatedBefore = _visibleKeyCount(updatedKey);
   await _tap(tester, _byKey(actionKey), actionKey);
   await _settle(tester);
-  expect(_byKey(updatedKey), findsOneWidget,
-      reason: 'State không cập nhật sau action $actionKey: $updatedKey');
+  final updatedAfter = _visibleKeyCount(updatedKey);
+  if (_bool(parameters, 'requireNewUpdatedState', true)) {
+    _expectNewSemanticKey(
+      updatedKey,
+      updatedBefore,
+      updatedAfter,
+      'State không chuyển sang đúng một $updatedKey mới sau $actionKey',
+    );
+  } else {
+    expect(
+      updatedAfter,
+      greaterThanOrEqualTo(1),
+      reason: 'State không cập nhật sau action $actionKey: $updatedKey',
+    );
+  }
   if (absentKey.isNotEmpty) {
-    expect(_goneByKey(absentKey), findsNothing,
-        reason: 'State cũ vẫn còn sau action $actionKey: $absentKey');
+    expect(
+      _goneByKey(absentKey),
+      findsNothing,
+      reason: 'State cũ vẫn còn sau action $actionKey: $absentKey',
+    );
   }
 }
 
@@ -334,39 +463,71 @@ Future<void> _boot(WidgetTester tester) async {
 Future<void> _applySuiteSetup(WidgetTester tester) async {
   final requiredKeys = _suiteCsv('required_keys');
   for (final key in requiredKeys) {
-    expect(_byKey(key), findsOneWidget,
-        reason: 'Suite yêu cầu semantic key nhưng không tìm thấy: $key');
+    expect(
+      _byKey(key),
+      findsOneWidget,
+      reason: 'Suite yêu cầu semantic key nhưng không tìm thấy: $key',
+    );
   }
   final readyKey = _suiteText('ready_key');
-  if (readyKey.isNotEmpty) await _waitForVisible(tester, readyKey, _suiteNumber('boot_timeout_ms', 3000));
+  if (readyKey.isNotEmpty)
+    await _waitForVisible(
+      tester,
+      readyKey,
+      _suiteNumber('boot_timeout_ms', 3000).toInt(),
+    );
   await _runSetupSteps(tester, _asList(_activeSuite['setup_steps']), 'suite');
   await _runSetupSteps(tester, _asList(_activeCase['setup_steps']), 'testcase');
 }
 
-Future<void> _runSetupSteps(WidgetTester tester, List<dynamic> rawSteps, String owner) async {
+Future<void> _runSetupSteps(
+  WidgetTester tester,
+  List<dynamic> rawSteps,
+  String owner,
+) async {
   var index = 1;
   for (final raw in rawSteps) {
     final step = _asMap(raw);
     final type = _text(step, 'type').toLowerCase();
     final key = _requiredText(step, 'key');
-    final timeout = _number(step, 'timeout_ms', _suiteNumber('step_timeout_ms', 2000));
+    final timeout = _number(
+      step,
+      'timeout_ms',
+      _suiteNumber('step_timeout_ms', 2000),
+    );
     switch (type) {
       case 'tap':
-        expect(_byKey(key), findsOneWidget, reason: 'Setup $owner #$index thiếu key: $key');
+        expect(
+          _byKey(key),
+          findsOneWidget,
+          reason: 'Setup $owner #$index thiếu key: $key',
+        );
         await _tap(tester, _byKey(key), key);
         await _settle(tester);
         break;
       case 'enter_text':
         final finder = _byKey(key);
-        expect(finder, findsOneWidget, reason: 'Setup $owner #$index thiếu field: $key');
+        expect(
+          finder,
+          findsOneWidget,
+          reason: 'Setup $owner #$index thiếu field: $key',
+        );
         await tester.enterText(finder, _decodeInput(_text(step, 'value')));
         await _settle(tester);
         break;
       case 'expect_visible':
-        expect(_byKey(key), findsOneWidget, reason: 'Setup $owner #$index cần thấy key: $key');
+        expect(
+          _byKey(key),
+          findsOneWidget,
+          reason: 'Setup $owner #$index cần thấy key: $key',
+        );
         break;
       case 'expect_absent':
-        expect(_byKey(key), findsNothing, reason: 'Setup $owner #$index cần ẩn key: $key');
+        expect(
+          _byKey(key),
+          findsNothing,
+          reason: 'Setup $owner #$index cần ẩn key: $key',
+        );
         break;
       case 'wait_for_visible':
         await _waitForVisible(tester, key, timeout.toInt());
@@ -378,16 +539,24 @@ Future<void> _runSetupSteps(WidgetTester tester, List<dynamic> rawSteps, String 
   }
 }
 
-Future<void> _waitForVisible(WidgetTester tester, String key, int timeoutMs) async {
+Future<void> _waitForVisible(
+  WidgetTester tester,
+  String key,
+  int timeoutMs,
+) async {
   final deadline = DateTime.now().add(Duration(milliseconds: timeoutMs));
   while (DateTime.now().isBefore(deadline)) {
-    if (_byKey(key).evaluate().isNotEmpty) return;
+    if (_visibleByKey(key).evaluate().isNotEmpty) return;
     await tester.runAsync(() async {
       await Future<void>.delayed(const Duration(milliseconds: 50));
     });
     await tester.pump();
   }
-  expect(_byKey(key), findsOneWidget, reason: 'Không xuất hiện semantic key sau khi chờ: $key');
+  expect(
+    _visibleByKey(key),
+    findsOneWidget,
+    reason: 'Không xuất hiện semantic key sau khi chờ: $key',
+  );
 }
 
 Future<void> _revealLazyItem(
@@ -420,6 +589,34 @@ Finder _goneByKey(String key) =>
 Finder _exactByKey(String key) =>
     find.byKey(ValueKey<String>(key), skipOffstage: false);
 
+Finder _visibleByKey(String key) {
+  final exact = find.byKey(ValueKey<String>(key));
+  if (exact.evaluate().isNotEmpty ||
+      _suiteBool('strict_semantic_keys', false)) {
+    return exact;
+  }
+  return _byKey(key);
+}
+
+int _visibleKeyCount(String key) => _visibleByKey(key).evaluate().length;
+
+void _expectNewSemanticKey(String key, int before, int after, String reason) {
+  expect(
+    before,
+    0,
+    reason:
+        '$key đã xuất hiện trước thao tác nên không chứng minh được chuyển trạng thái.',
+  );
+  expect(after, 1, reason: reason);
+}
+
+bool _isKeyOnCurrentRoute(String key) {
+  return _visibleByKey(key).evaluate().any((element) {
+    final route = ModalRoute.of(element);
+    return route == null || route.isCurrent;
+  });
+}
+
 Future<void> _tap(WidgetTester tester, Finder finder, String key) async {
   expect(finder, findsOneWidget, reason: 'Missing action semantic key: $key');
   try {
@@ -435,7 +632,7 @@ Never _failIfActionThrew(String key, Object error, StackTrace stack) {
 
 Future<void> _settle(WidgetTester tester) async {
   // Advance fake time and the real event loop so animations and overlays settle.
-  for (var frame = 0; frame < 6; frame++) {
+  for (var frame = 0; frame < 8; frame++) {
     await tester.pump(const Duration(milliseconds: 50));
     await tester.runAsync(
       () => Future<void>.delayed(const Duration(milliseconds: 1)),
@@ -493,16 +690,22 @@ Future<void> _responsiveTarget(
   await _boot(tester);
   expect(tester.takeException(), isNull);
   final portraitFinder = _byKey(targetKey);
-  expect(portraitFinder, findsOneWidget,
-      reason: 'Thiếu target ở portrait: $targetKey');
+  expect(
+    portraitFinder,
+    findsOneWidget,
+    reason: 'Thiếu target ở portrait: $targetKey',
+  );
   _assertTargetType(tester, portraitFinder, targetKey, targetType);
 
   tester.view.physicalSize = landscape;
   await _settle(tester);
   expect(tester.takeException(), isNull);
   final landscapeFinder = _byKey(targetKey);
-  expect(landscapeFinder, findsOneWidget,
-      reason: 'Thiếu target ở landscape: $targetKey');
+  expect(
+    landscapeFinder,
+    findsOneWidget,
+    reason: 'Thiếu target ở landscape: $targetKey',
+  );
   _assertTargetType(tester, landscapeFinder, targetKey, targetType);
 }
 
@@ -522,8 +725,13 @@ Future<void> _checkWidgetDimension(
   final tolerance = _number(parameters, 'tolerance', 0.5);
   final size = tester.getSize(finder);
   final actual = dimension == 'width' ? size.width : size.height;
-  _assertNumber(actual, expected, tolerance, _text(parameters, 'comparison'),
-      '$key ($targetType) có $dimension=$actual, mong đợi $expected');
+  _assertNumber(
+    actual,
+    expected,
+    tolerance,
+    _text(parameters, 'comparison'),
+    '$key ($targetType) có $dimension=$actual, mong đợi $expected',
+  );
 }
 
 Future<void> _checkWidgetTypeVisible(
@@ -553,7 +761,11 @@ Future<void> _checkWidgetTextContent(
   final expected = _requiredText(parameters, 'expectedText');
   final matchMode = _text(parameters, 'matchMode', 'equals').toLowerCase();
   if (matchMode == 'contains') {
-    expect(actual, contains(expected), reason: 'Nội dung $key không chứa expectedText');
+    expect(
+      actual,
+      contains(expected),
+      reason: 'Nội dung $key không chứa expectedText',
+    );
   } else {
     expect(actual, expected, reason: 'Nội dung $key không đúng');
   }
@@ -573,8 +785,11 @@ Future<void> _checkWidgetEnabled(
   if (enabled == null) {
     fail('Không đọc được trạng thái enabled của $key (${targetType}).');
   }
-  expect(enabled, _bool(parameters, 'expectedEnabled', true),
-      reason: 'Trạng thái enabled của $key không đúng');
+  expect(
+    enabled,
+    _bool(parameters, 'expectedEnabled', true),
+    reason: 'Trạng thái enabled của $key không đúng',
+  );
 }
 
 Future<void> _checkFormValidateFields(
@@ -585,22 +800,41 @@ Future<void> _checkFormValidateFields(
   final fields = _csv(parameters, 'fieldKeys');
   final values = _csv(parameters, 'invalidValues');
   final errors = _csv(parameters, 'errorKeys');
-  if (fields.isEmpty || fields.length != values.length || fields.length != errors.length) {
-    fail('fieldKeys, invalidValues và errorKeys phải có cùng số phần tử.');
+  if (fields.isEmpty || fields.length != values.length || errors.isEmpty) {
+    fail('fieldKeys phải khớp invalidValues và errorKeys không được để trống.');
   }
   final fieldType = _text(parameters, 'fieldType', 'input');
   for (var i = 0; i < fields.length; i++) {
     final fieldFinder = _byKey(fields[i]);
-    expect(fieldFinder, findsOneWidget, reason: 'Thiếu field key: ${fields[i]}');
+    expect(
+      fieldFinder,
+      findsOneWidget,
+      reason: 'Thiếu field key: ${fields[i]}',
+    );
     _assertTargetType(tester, fieldFinder, fields[i], fieldType);
     await tester.enterText(fieldFinder, _decodeInput(values[i]));
   }
+  final beforeErrors = [for (final key in errors) _visibleKeyCount(key)];
   final submitKey = _requiredText(parameters, 'submitKey');
   await _tap(tester, _byKey(submitKey), submitKey);
   await _settle(tester);
-  for (final errorKey in errors) {
-    expect(_byKey(errorKey), findsOneWidget,
-        reason: 'Thiếu lỗi validation key: $errorKey');
+  for (var index = 0; index < errors.length; index++) {
+    final errorKey = errors[index];
+    final after = _visibleKeyCount(errorKey);
+    if (_bool(parameters, 'requireNewErrors', true)) {
+      _expectNewSemanticKey(
+        errorKey,
+        beforeErrors[index],
+        after,
+        'Submit không tạo đúng một lỗi validation mới: $errorKey',
+      );
+    } else {
+      expect(
+        after,
+        greaterThanOrEqualTo(1),
+        reason: 'Thiếu lỗi validation key: $errorKey',
+      );
+    }
   }
 }
 
@@ -611,19 +845,29 @@ Future<void> _checkListItemCount(
   await _boot(tester);
   final listKey = _requiredText(parameters, 'listKey');
   final listFinder = _byKey(listKey);
-  expect(listFinder, findsOneWidget, reason: 'Không tìm thấy list key: $listKey');
+  expect(
+    listFinder,
+    findsOneWidget,
+    reason: 'Không tìm thấy list key: $listKey',
+  );
   final itemKeys = _csv(parameters, 'itemKeys');
   if (itemKeys.isEmpty) fail('Thiếu itemKeys khi kiểm tra list.');
   var count = 0;
   for (final itemKey in itemKeys) {
     final itemFinder = _exactByKey(itemKey);
     await _revealLazyItem(tester, listFinder, itemFinder);
-    if (find.descendant(of: listFinder, matching: itemFinder).evaluate().isNotEmpty) {
+    if (find
+        .descendant(of: listFinder, matching: itemFinder)
+        .evaluate()
+        .isNotEmpty) {
       count++;
     }
   }
-  expect(count, _number(parameters, 'expectedCount', double.nan).toInt(),
-      reason: 'Số item trong $listKey không đúng');
+  expect(
+    count,
+    _number(parameters, 'expectedCount', double.nan).toInt(),
+    reason: 'Số item trong $listKey không đúng',
+  );
 }
 
 Future<void> _checkFormPrefill(
@@ -632,22 +876,65 @@ Future<void> _checkFormPrefill(
 ) async {
   await _boot(tester);
   final editKey = _requiredText(parameters, 'editKey');
+  final fields = _csv(parameters, 'fieldKeys');
+  final beforeValues = <String?>[];
+  for (final key in fields) {
+    final field = _byKey(key);
+    if (field.evaluate().length != 1) {
+      beforeValues.add(null);
+      continue;
+    }
+    final editable = find.descendant(
+      of: field,
+      matching: find.byType(EditableText),
+    );
+    beforeValues.add(
+      editable.evaluate().length == 1
+          ? tester.widget<EditableText>(editable).controller.text
+          : null,
+    );
+  }
   await _tap(tester, _byKey(editKey), editKey);
   await _settle(tester);
-  final fields = _csv(parameters, 'fieldKeys');
   final expectedValues = _csv(parameters, 'expectedValues');
   if (fields.isEmpty || fields.length != expectedValues.length) {
     fail('fieldKeys và expectedValues phải có cùng số phần tử.');
   }
   final fieldType = _text(parameters, 'fieldType', 'input');
+  var changedByEdit = false;
   for (var i = 0; i < fields.length; i++) {
     final fieldFinder = _byKey(fields[i]);
-    expect(fieldFinder, findsOneWidget, reason: 'Thiếu field key: ${fields[i]}');
+    expect(
+      fieldFinder,
+      findsOneWidget,
+      reason: 'Thiếu field key: ${fields[i]}',
+    );
     _assertTargetType(tester, fieldFinder, fields[i], fieldType);
-    final editable = find.descendant(of: fieldFinder, matching: find.byType(EditableText));
-    expect(editable, findsOneWidget, reason: 'Field ${fields[i]} không phải editable input');
-    expect(tester.widget<EditableText>(editable).controller.text, _decodeInput(expectedValues[i]),
-        reason: 'Field ${fields[i]} không được prefill đúng');
+    final editable = find.descendant(
+      of: fieldFinder,
+      matching: find.byType(EditableText),
+    );
+    expect(
+      editable,
+      findsOneWidget,
+      reason: 'Field ${fields[i]} không phải editable input',
+    );
+    final actual = tester.widget<EditableText>(editable).controller.text;
+    final expected = _decodeInput(expectedValues[i]);
+    expect(
+      actual,
+      expected,
+      reason: 'Field ${fields[i]} không được prefill đúng',
+    );
+    if (beforeValues[i] == null || beforeValues[i] != actual)
+      changedByEdit = true;
+  }
+  if (_bool(parameters, 'requirePrefillTransition', true)) {
+    expect(
+      changedByEdit,
+      isTrue,
+      reason: 'Bấm $editKey không tạo thay đổi prefill quan sát được.',
+    );
   }
 }
 
@@ -664,18 +951,38 @@ Future<void> _checkFormSubmit(
   final fieldType = _text(parameters, 'fieldType', 'input');
   for (var i = 0; i < fields.length; i++) {
     final fieldFinder = _byKey(fields[i]);
-    expect(fieldFinder, findsOneWidget, reason: 'Thiếu field key: ${fields[i]}');
+    expect(
+      fieldFinder,
+      findsOneWidget,
+      reason: 'Thiếu field key: ${fields[i]}',
+    );
     _assertTargetType(tester, fieldFinder, fields[i], fieldType);
     await tester.enterText(fieldFinder, _decodeInput(values[i]));
   }
+  final resultKey = _text(parameters, 'resultKey');
+  final resultBefore = resultKey.isEmpty ? 0 : _visibleKeyCount(resultKey);
   final submitKey = _requiredText(parameters, 'submitKey');
   await _tap(tester, _byKey(submitKey), submitKey);
   await _settle(tester);
-  final resultKey = _text(parameters, 'resultKey');
-  if (resultKey.isNotEmpty) expect(_byKey(resultKey), findsOneWidget);
+  if (resultKey.isNotEmpty) {
+    final resultAfter = _visibleKeyCount(resultKey);
+    if (_bool(parameters, 'requireNewResult', true)) {
+      _expectNewSemanticKey(
+        resultKey,
+        resultBefore,
+        resultAfter,
+        'Submit $submitKey không tạo đúng một $resultKey mới',
+      );
+    } else {
+      expect(resultAfter, greaterThanOrEqualTo(1));
+    }
+  }
   for (final errorKey in _csv(parameters, 'errorKeys')) {
-    expect(_goneByKey(errorKey), findsNothing,
-        reason: 'Dữ liệu hợp lệ nhưng vẫn còn error key: $errorKey');
+    expect(
+      _goneByKey(errorKey),
+      findsNothing,
+      reason: 'Dữ liệu hợp lệ nhưng vẫn còn error key: $errorKey',
+    );
   }
 }
 
@@ -685,19 +992,52 @@ Future<void> _checkDialogFlow(
 ) async {
   await _boot(tester);
   final actionKey = _requiredText(parameters, 'actionKey');
+  final dialogKey = _requiredText(parameters, 'dialogKey');
+  final dialogBefore = _visibleKeyCount(dialogKey);
+  final resultKey = _text(parameters, 'resultKey');
+  final resultBefore = resultKey.isEmpty ? 0 : _visibleKeyCount(resultKey);
   await _tap(tester, _byKey(actionKey), actionKey);
   await _settle(tester);
 
-  final dialogKey = _requiredText(parameters, 'dialogKey');
-  final dialogFinder = _byKey(dialogKey);
-  expect(dialogFinder, findsOneWidget, reason: 'Không tìm thấy dialog key: $dialogKey');
+  final dialogFinder = _visibleByKey(dialogKey);
+  final dialogAfter = dialogFinder.evaluate().length;
+  if (_bool(parameters, 'requireNewDialog', true)) {
+    _expectNewSemanticKey(
+      dialogKey,
+      dialogBefore,
+      dialogAfter,
+      'Bấm $actionKey không mở đúng một dialog $dialogKey mới',
+    );
+  } else {
+    expect(
+      dialogFinder,
+      findsOneWidget,
+      reason: 'Không tìm thấy dialog key: $dialogKey',
+    );
+  }
   _assertTargetType(tester, dialogFinder, dialogKey, 'dialog');
 
   final decisionKey = _requiredText(parameters, 'decisionKey');
-  await _tap(tester, _byKey(decisionKey), decisionKey);
+  final decisionFinder = find.descendant(
+    of: dialogFinder,
+    matching: _byKey(decisionKey),
+    matchRoot: true,
+  );
+  await _tap(tester, decisionFinder, decisionKey);
   await _settle(tester);
-  final resultKey = _text(parameters, 'resultKey');
-  if (resultKey.isNotEmpty) expect(_byKey(resultKey), findsOneWidget);
+  if (resultKey.isNotEmpty) {
+    final resultAfter = _visibleKeyCount(resultKey);
+    if (_bool(parameters, 'requireNewResult', false)) {
+      _expectNewSemanticKey(
+        resultKey,
+        resultBefore,
+        resultAfter,
+        'Quyết định $decisionKey không tạo đúng một $resultKey mới',
+      );
+    } else {
+      expect(resultAfter, greaterThanOrEqualTo(1));
+    }
+  }
   final absentKey = _text(parameters, 'absentKey');
   if (absentKey.isNotEmpty) expect(_byKey(absentKey), findsNothing);
 }
@@ -718,9 +1058,17 @@ Future<void> _checkWidgetSemanticsLabel(
     final expected = _requiredText(parameters, 'expectedLabel');
     final matchMode = _text(parameters, 'matchMode', 'equals').toLowerCase();
     if (matchMode == 'contains') {
-      expect(actual, contains(expected), reason: 'Semantics label does not contain expectedLabel.');
+      expect(
+        actual,
+        contains(expected),
+        reason: 'Semantics label does not contain expectedLabel.',
+      );
     } else {
-      expect(actual, expected, reason: 'Semantics label does not match expectedLabel.');
+      expect(
+        actual,
+        expected,
+        reason: 'Semantics label does not match expectedLabel.',
+      );
     }
   } finally {
     semantics.dispose();
@@ -741,14 +1089,34 @@ Future<void> _checkWidgetPadding(
   final render = tester.renderObject<RenderPadding>(finder);
   final padding = render.padding.resolve(TextDirection.ltr);
   final tolerance = _number(parameters, 'tolerance', 0.5);
-  _assertNumber(padding.left, _number(parameters, 'left', double.nan), tolerance,
-      'equals', '$key left padding');
-  _assertNumber(padding.top, _number(parameters, 'top', double.nan), tolerance,
-      'equals', '$key top padding');
-  _assertNumber(padding.right, _number(parameters, 'right', double.nan), tolerance,
-      'equals', '$key right padding');
-  _assertNumber(padding.bottom, _number(parameters, 'bottom', double.nan), tolerance,
-      'equals', '$key bottom padding');
+  _assertNumber(
+    padding.left,
+    _number(parameters, 'left', double.nan),
+    tolerance,
+    'equals',
+    '$key left padding',
+  );
+  _assertNumber(
+    padding.top,
+    _number(parameters, 'top', double.nan),
+    tolerance,
+    'equals',
+    '$key top padding',
+  );
+  _assertNumber(
+    padding.right,
+    _number(parameters, 'right', double.nan),
+    tolerance,
+    'equals',
+    '$key right padding',
+  );
+  _assertNumber(
+    padding.bottom,
+    _number(parameters, 'bottom', double.nan),
+    tolerance,
+    'equals',
+    '$key bottom padding',
+  );
 }
 
 Future<void> _checkWidgetTextStyle(
@@ -763,19 +1131,27 @@ Future<void> _checkWidgetTextStyle(
   _assertTargetType(tester, finder, key, targetType);
 
   final text = tester.widget<Text>(finder);
-  final resolved = DefaultTextStyle.of(tester.element(finder))
-      .style
-      .merge(text.style);
+  final resolved = DefaultTextStyle.of(
+    tester.element(finder),
+  ).style.merge(text.style);
   final tolerance = _number(parameters, 'tolerance', 0.5);
   final expectedSize = _number(parameters, 'fontSize', double.nan);
   if (!expectedSize.isNaN) {
-    _assertNumber(resolved.fontSize ?? double.nan, expectedSize, tolerance,
-        'equals', '$key fontSize');
+    _assertNumber(
+      resolved.fontSize ?? double.nan,
+      expectedSize,
+      tolerance,
+      'equals',
+      '$key fontSize',
+    );
   }
   final expectedWeight = _text(parameters, 'fontWeight');
   if (expectedWeight.isNotEmpty) {
-    expect(resolved.fontWeight, _fontWeight(expectedWeight),
-        reason: '$key fontWeight không đúng');
+    expect(
+      resolved.fontWeight,
+      _fontWeight(expectedWeight),
+      reason: '$key fontWeight không đúng',
+    );
   }
 }
 
@@ -788,20 +1164,31 @@ Future<void> _checkWidgetGap(
   final toKey = _requiredText(parameters, 'toKey');
   final fromFinder = _byKey(fromKey);
   final toFinder = _byKey(toKey);
-  expect(fromFinder, findsOneWidget, reason: 'Không tìm thấy fromKey: $fromKey');
+  expect(
+    fromFinder,
+    findsOneWidget,
+    reason: 'Không tìm thấy fromKey: $fromKey',
+  );
   expect(toFinder, findsOneWidget, reason: 'Không tìm thấy toKey: $toKey');
   final fromType = _text(parameters, 'fromType');
   final toType = _text(parameters, 'toType');
-  if (fromType.isNotEmpty) _assertTargetType(tester, fromFinder, fromKey, fromType);
+  if (fromType.isNotEmpty)
+    _assertTargetType(tester, fromFinder, fromKey, fromType);
   if (toType.isNotEmpty) _assertTargetType(tester, toFinder, toKey, toType);
 
   final axis = _text(parameters, 'axis').toLowerCase();
   final from = tester.getRect(fromFinder);
   final to = tester.getRect(toFinder);
-  final actual = axis == 'horizontal' ? to.left - from.right : to.top - from.bottom;
-  _assertNumber(actual, _number(parameters, 'expectedGap', double.nan),
-      _number(parameters, 'tolerance', 0.5), 'equals',
-      'Khoảng cách $fromKey → $toKey');
+  final actual = axis == 'horizontal'
+      ? to.left - from.right
+      : to.top - from.bottom;
+  _assertNumber(
+    actual,
+    _number(parameters, 'expectedGap', double.nan),
+    _number(parameters, 'tolerance', 0.5),
+    'equals',
+    'Khoảng cách $fromKey → $toKey',
+  );
 }
 
 String _requiredText(Map<String, dynamic> map, String key) {
@@ -824,10 +1211,11 @@ void _assertTargetType(
     'image' => widget is Image,
     'text' => widget is Text,
     'input' => widget is TextField || widget is TextFormField,
-    'button' => widget is ButtonStyleButton ||
-        widget is IconButton ||
-        widget is FloatingActionButton ||
-        widget is RawMaterialButton,
+    'button' =>
+      widget is ButtonStyleButton ||
+          widget is IconButton ||
+          widget is FloatingActionButton ||
+          widget is RawMaterialButton,
     'dialog' => widget is AlertDialog,
     'icon' => widget is Icon,
     'checkbox' => widget is Checkbox,
@@ -840,7 +1228,9 @@ void _assertTargetType(
     _ => false,
   };
   if (!matches) {
-    fail('Key $key đang gắn vào ${widget.runtimeType}, không phải targetType=$targetType');
+    fail(
+      'Key $key đang gắn vào ${widget.runtimeType}, không phải targetType=$targetType',
+    );
   }
 }
 
@@ -902,7 +1292,7 @@ FontWeight _fontWeight(String value) {
 }
 
 Finder _byKey(String key) {
-  final exact = find.byKey(ValueKey<String>(key), skipOffstage: false);
+  final exact = find.byKey(ValueKey<String>(key));
   if (exact.evaluate().isNotEmpty) return exact;
   if (_suiteBool('strict_semantic_keys', false)) return _notFound();
 
@@ -926,18 +1316,28 @@ Finder _byKey(String key) {
         skipOffstage: false,
       );
     case 'action.save':
-      return _buttonWithText(RegExp(
-        r'^(add|create|save|submit|update|thêm|tạo|lưu|cập nhật)(\s+user)?$',
-        caseSensitive: false,
-      ));
+      return _buttonWithText(
+        RegExp(
+          r'^(add|create|save|submit|update|thêm|tạo|lưu|cập nhật)(\s+user)?$',
+          caseSensitive: false,
+        ),
+      );
     case 'action.item.edit':
-      return _buttonWithText(RegExp(r'^(edit|sửa|chỉnh sửa)$', caseSensitive: false));
+      return _buttonWithText(
+        RegExp(r'^(edit|sửa|chỉnh sửa)$', caseSensitive: false),
+      );
     case 'action.delete':
-      return _buttonWithText(RegExp(r'^(delete|remove|xóa)$', caseSensitive: false));
+      return _buttonWithText(
+        RegExp(r'^(delete|remove|xóa)$', caseSensitive: false),
+      );
     case 'action.delete.cancel':
-      return _buttonWithText(RegExp(r'^(cancel|no|hủy|đóng)$', caseSensitive: false));
+      return _buttonWithText(
+        RegExp(r'^(cancel|no|hủy|đóng)$', caseSensitive: false),
+      );
     case 'action.back':
-      return _buttonWithText(RegExp(r'^(back|quay lại|trở về)$', caseSensitive: false));
+      return _buttonWithText(
+        RegExp(r'^(back|quay lại|trở về)$', caseSensitive: false),
+      );
     case 'action.open-detail':
       return find.byType(ListTile, skipOffstage: false);
     case 'list.items':
@@ -952,18 +1352,22 @@ Finder _byKey(String key) {
       return find.byType(AlertDialog, skipOffstage: false);
     case 'message.success':
       return find.byWidgetPredicate(
-        (widget) => widget is Text && RegExp(
-          r'success|successful|saved|added|updated|thành công|đã thêm|đã cập nhật|đã lưu',
-          caseSensitive: false,
-        ).hasMatch(widget.data ?? ''),
+        (widget) =>
+            widget is Text &&
+            RegExp(
+              r'success|successful|saved|added|updated|thành công|đã thêm|đã cập nhật|đã lưu',
+              caseSensitive: false,
+            ).hasMatch(widget.data ?? ''),
         skipOffstage: false,
       );
     case 'state.empty':
       return find.byWidgetPredicate(
-        (widget) => widget is Text && RegExp(
-          r'no users|empty|chưa có|không có',
-          caseSensitive: false,
-        ).hasMatch(widget.data ?? ''),
+        (widget) =>
+            widget is Text &&
+            RegExp(
+              r'no users|empty|chưa có|không có',
+              caseSensitive: false,
+            ).hasMatch(widget.data ?? ''),
         skipOffstage: false,
       );
     case 'state.loaded':
@@ -1002,7 +1406,8 @@ Finder _buttonWithText(RegExp pattern) {
   final buttons = find.ancestor(
     of: labels,
     matching: find.byWidgetPredicate(
-      (widget) => widget is ButtonStyleButton ||
+      (widget) =>
+          widget is ButtonStyleButton ||
           widget is IconButton ||
           widget is FloatingActionButton ||
           widget is RawMaterialButton,
@@ -1010,7 +1415,9 @@ Finder _buttonWithText(RegExp pattern) {
     ),
     matchRoot: true,
   );
-  return buttons.evaluate().isNotEmpty ? buttons.first : _notFound();
+  // Không âm thầm chọn nút đầu tiên khi label bị trùng. Testcase gọi hàm này
+  // phải chứng minh target là duy nhất hoặc dùng semantic key chính xác.
+  return buttons.evaluate().isNotEmpty ? buttons : _notFound();
 }
 
 Finder _validationErrorFor(String key) {
@@ -1030,21 +1437,18 @@ Finder _validationErrorFor(String key) {
     }
   }
   if (field == null) return _notFound();
-  final errorWidgets = find.byWidgetPredicate(
-    (widget) {
-      if (widget is InputDecorator) {
-        return widget.decoration.errorText?.trim().isNotEmpty == true;
-      }
-      if (widget is Text) {
-        return RegExp(
-          r'required|minimum|min|invalid|error',
-          caseSensitive: false,
-        ).hasMatch(widget.data ?? '');
-      }
-      return false;
-    },
-    skipOffstage: false,
-  );
+  final errorWidgets = find.byWidgetPredicate((widget) {
+    if (widget is InputDecorator) {
+      return widget.decoration.errorText?.trim().isNotEmpty == true;
+    }
+    if (widget is Text) {
+      return RegExp(
+        r'required|minimum|min|invalid|error',
+        caseSensitive: false,
+      ).hasMatch(widget.data ?? '');
+    }
+    return false;
+  }, skipOffstage: false);
   final scoped = find.descendant(
     of: field,
     matching: errorWidgets,
@@ -1057,24 +1461,36 @@ Finder _notFound() => find.byWidgetPredicate((_) => false);
 
 Map<String, dynamic> _suiteMap() => _activeSuite;
 
-String _suiteText(String key, [String fallback = '']) => _text(_suiteMap(), key, fallback);
+String _suiteText(String key, [String fallback = '']) =>
+    _text(_suiteMap(), key, fallback);
 
 bool _suiteBool(String key, bool fallback) => _bool(_suiteMap(), key, fallback);
 
-double _suiteNumber(String key, double fallback) => _number(_suiteMap(), key, fallback);
+double _suiteNumber(String key, double fallback) =>
+    _number(_suiteMap(), key, fallback);
 
 List<String> _suiteCsv(String key) {
   final value = _suiteMap()[key];
   if (value is List) {
-    return value.map((item) => item.toString().trim()).where((item) => item.isNotEmpty).toList();
+    return value
+        .map((item) => item.toString().trim())
+        .where((item) => item.isNotEmpty)
+        .toList();
   }
-  return _text(_suiteMap(), key).split(',').map((item) => item.trim()).where((item) => item.isNotEmpty).toList();
+  return _text(_suiteMap(), key)
+      .split(',')
+      .map((item) => item.trim())
+      .where((item) => item.isNotEmpty)
+      .toList();
 }
 
 List<dynamic> _asList(dynamic value) => value is List ? value : <dynamic>[];
 
 Map<String, dynamic> _loadMatrix() {
-  for (final path in <String>['test/skills_matrix.json', 'skills_matrix.json']) {
+  for (final path in <String>[
+    'test/skills_matrix.json',
+    'skills_matrix.json',
+  ]) {
     final file = File(path);
     if (!file.existsSync()) continue;
     final value = jsonDecode(file.readAsStringSync());
@@ -1095,13 +1511,34 @@ String _text(Map<String, dynamic> map, String key, [String fallback = '']) {
   return value == null ? fallback : value.toString().trim();
 }
 
-List<String> _csv(Map<String, dynamic> map, String key) => _text(map, key)
-    .split(',')
-    .map((value) => value.trim())
-    .where((value) => value.isNotEmpty)
-    .toList();
+List<String> _csv(Map<String, dynamic> map, String key) {
+  final raw = map[key];
+  if (raw is List) {
+    return raw.map((value) => value == null ? '' : '$value'.trim()).toList();
+  }
+  final text = raw == null ? '' : '$raw'.trim();
+  if (text.startsWith('[')) {
+    try {
+      final decoded = jsonDecode(text);
+      if (decoded is List) {
+        return decoded
+            .map((value) => value == null ? '' : '$value'.trim())
+            .toList();
+      }
+    } catch (_) {
+      fail('$key phải là CSV hoặc JSON array hợp lệ.');
+    }
+  }
+  return text
+      .split(',')
+      .map((value) => value.trim())
+      .where((value) => value.isNotEmpty)
+      .toList();
+}
 
 double _number(Map<String, dynamic> map, String key, double fallback) {
   final value = map[key];
-  return value is num ? value.toDouble() : double.tryParse('$value') ?? fallback;
+  return value is num
+      ? value.toDouble()
+      : double.tryParse('$value') ?? fallback;
 }

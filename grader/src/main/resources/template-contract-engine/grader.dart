@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-const kEngineVersion = 'TEMPLATE_CONTRACT_V1-1.0.1';
+const kEngineVersion = 'TEMPLATE_CONTRACT_V1-2.6.0';
 
 Future<void> main() async {
   final matrix = _loadMatrix();
@@ -185,6 +185,8 @@ bool _isStatefulMetadata(Map<String, dynamic> metadata) {
     'FORM_SUBMIT',
     'STATE_REACTIVE_FLOW',
     'TEMPLATE_FORM_ACTION',
+    'TEMPLATE_FORM_VALIDATION',
+    'TEMPLATE_UI_WORKFLOW',
   };
   final runner = (metadata['runner'] ?? '').toString();
   if (stateful.contains(runner)) return true;

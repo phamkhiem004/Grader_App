@@ -49,6 +49,10 @@ public class TestcaseTemplateService {
     private static final String CUSTOM_TEMPLATE_VERSION = "teacher-v1";
     private static final String CUSTOM_TEMPLATE_FILE = "custom-testcase-templates.json";
     private static final Pattern DART_IDENTIFIER = Pattern.compile("[A-Za-z_][A-Za-z0-9_]*");
+    private static final Pattern CONTRACT_ID = Pattern.compile("[A-Za-z][A-Za-z0-9_-]{0,79}");
+    private static final Pattern CONTRACT_KEY = Pattern.compile("[A-Za-z][A-Za-z0-9_.-]{0,119}");
+    private static final Set<String> CONTRACT_VALUE_KINDS = Set.of(
+            "text", "path", "identifier", "csv", "json", "number");
     private static final Set<String> SUITE_PROFILES = Set.of(
             "COMMON_UI", "FLUTTER_LAYERED", "PERSISTENCE", "REPOSITORY_SQLITE", "GOLDEN_RESPONSIVE",
             "TODO_STARTER_V12", "TEMPLATE_CONTRACT_V1");
@@ -72,7 +76,8 @@ public class TestcaseTemplateService {
             "APP_BOOT", "TEMPLATE_SOURCE_SYMBOLS", "TEMPLATE_MODEL_FIELDS",
             "TEMPLATE_MODEL_MAPPING", "TEMPLATE_SQLITE_SCHEMA", "TEMPLATE_REPOSITORY_METHODS",
             "TEMPLATE_FORM_FIELDS", "TEMPLATE_BUTTONS", "TEMPLATE_FORM_ACTION",
-            "TEMPLATE_TEXT_VISIBLE", "RESPONSIVE_NO_OVERFLOW");
+            "TEMPLATE_TEXT_VISIBLE", "TEMPLATE_SOURCE_TERMS", "TEMPLATE_MODEL_COPY_WITH",
+            "TEMPLATE_FORM_VALIDATION", "TEMPLATE_UI_WORKFLOW", "RESPONSIVE_NO_OVERFLOW");
     private static final Set<String> SUITE_STEP_TYPES = Set.of(
             "tap", "enter_text", "expect_visible", "expect_absent", "wait_for_visible");
     /** Nhóm lọc hiển thị ở Khu vực 1; không thay thế category/skill của syllabus. */
@@ -333,6 +338,7 @@ public class TestcaseTemplateService {
         if (!(body.get("parameters_schema") instanceof Map<?, ?>))
             throw new IllegalArgumentException("parameters_schema phải là một JSON object");
         Map<String, Object> schema = normalizeTemplateParameters(castMap(body.get("parameters_schema")), id);
+        Map<String, Object> contractBindings = normalizeContractBindings(body.get("contract_bindings"), schema);
         Set<String> allowedParameters = referenceParameterKeys(runner, engineType);
         for (String parameter : schema.keySet()) {
             if (!allowedParameters.contains(parameter)) {
@@ -353,6 +359,7 @@ public class TestcaseTemplateService {
         row.put("skill_code", skillCode); row.put("layer", layer); row.put("testcase_group", group);
         row.put("name", name); row.put("description", description); row.put("difficulty", difficulty);
         row.put("weight_default", weight); row.put("parameters_schema", schema);
+        if (!contractBindings.isEmpty()) row.put("contract_bindings", contractBindings);
         row.put("expected_template", expected); row.put("execution_key", id);
         row.put("custom", true); row.put("created_by", text(teacherEmail, "unknown"));
         row.put("created_at", now.toString());
@@ -362,6 +369,24 @@ public class TestcaseTemplateService {
             throw new IllegalStateException("Không lưu được template custom: " + e.getMessage(), e);
         }
         return enrichTemplate(row);
+    }
+
+    private Map<String, Object> normalizeContractBindings(Object raw, Map<String, Object> schema) {
+        if (raw == null) return new LinkedHashMap<>();
+        if (!(raw instanceof Map<?, ?>))
+            throw new IllegalArgumentException("contract_bindings phai la JSON object");
+        Map<String, Object> input = castMap(raw);
+        Map<String, Object> out = new LinkedHashMap<>();
+        for (Map.Entry<String, Object> entry : input.entrySet()) {
+            if (!schema.containsKey(entry.getKey()))
+                throw new IllegalArgumentException("contract_bindings tham chieu tham so khong ton tai: " + entry.getKey());
+            String contractKey = limitedText(entry.getValue(), "", 120,
+                    "contract_bindings." + entry.getKey()).trim();
+            if (!CONTRACT_KEY.matcher(contractKey).matches())
+                throw new IllegalArgumentException("Ma contract binding khong hop le: " + contractKey);
+            out.put(entry.getKey(), contractKey);
+        }
+        return out;
     }
 
     private Set<String> referenceParameterKeys(String runner) {
@@ -584,15 +609,12 @@ public class TestcaseTemplateService {
             // Publish, vì vậy lưu Draft không thể ghi đè bộ đang chấm.
             Path dir = examService.testcaseBuildDirectory(examId, version, publish);
             Files.createDirectories(dir);
-            materializeEngine(dir, engineType);
+            materializeEngine(dir, engineType, items);
             if (COMMON_ENGINE.equals(engineType)) materializeDirectFunctionRunner(dir, items);
             config.put("materialized_path", dir.toAbsolutePath().normalize().toString());
             Files.writeString(dir.resolve("skills_matrix.json"), mapper.writerWithDefaultPrettyPrinter()
                     .writeValueAsString(publishedMatrix), StandardCharsets.UTF_8);
-            Files.writeString(dir.resolve("testcase-config.json"), mapper.writerWithDefaultPrettyPrinter()
-                    .writeValueAsString(config), StandardCharsets.UTF_8);
-            boolean engineReady = Files.exists(dir.resolve("exam_test.dart"))
-                    && Files.exists(dir.resolve("grader.dart"));
+            boolean engineReady = isEngineReady(dir);
             if (publish) {
                 examService.snapshotCurrentTestcase(examId);
                 exam.setTestcasePath(dir.toAbsolutePath().normalize().toString());
@@ -621,6 +643,10 @@ public class TestcaseTemplateService {
 
     /** Chọn engine theo profile, không dùng grader gắn chặt với một đề cho testcase chung. */
     void materializeEngine(Path dir, String engineType) throws Exception {
+        materializeEngine(dir, engineType, List.of());
+    }
+
+    void materializeEngine(Path dir, String engineType, List<Map<String, Object>> items) throws Exception {
         if (COMMON_ENGINE.equals(engineType)) {
             copyClasspathEngine(dir, "common-testcase-engine/grader.dart", "grader.dart");
             copyClasspathEngine(dir, "common-testcase-engine/exam_test.dart", "exam_test.dart");
@@ -629,10 +655,271 @@ public class TestcaseTemplateService {
             copyClasspathEngine(dir, "todo-user-v12-engine/exam_test.dart", "exam_test.dart");
         } else if (TEMPLATE_CONTRACT_ENGINE.equals(engineType)) {
             copyClasspathEngine(dir, "template-contract-engine/grader.dart", "grader.dart");
-            copyClasspathEngine(dir, "template-contract-engine/exam_test.dart", "exam_test.dart");
+            bundleTemplateContractExam(dir, items);
         } else {
             throw new IllegalArgumentException("Unsupported testcase engine: " + engineType);
         }
+    }
+
+    private boolean isEngineReady(Path dir) {
+        if (dir == null || !Files.exists(dir.resolve("exam_test.dart"))
+                || !Files.exists(dir.resolve("skills_matrix.json"))
+                || !Files.exists(dir.resolve("grader.dart"))) return false;
+        return true;
+    }
+
+    /**
+     * Module runner chỉ là source nội bộ để bảo trì. Artifact phát hành vẫn đúng contract
+     * ba file và exam_test.dart tự chứa toàn bộ code cần để chạy độc lập.
+     */
+    private void bundleTemplateContractExam(Path dir, List<Map<String, Object>> items) throws Exception {
+        ClassPathResource resource = new ClassPathResource(
+                "template-contract-engine/common_testcase_engine.dart");
+        if (!resource.exists())
+            throw new IllegalStateException("Thiếu source module template-contract engine");
+        String source;
+        try (InputStream in = resource.getInputStream()) {
+            source = new String(in.readAllBytes(), StandardCharsets.UTF_8);
+        }
+        Map<String, String> functions = extractDartFunctions(source);
+        if (!functions.containsKey("runTemplateContractExam"))
+            throw new IllegalStateException("Source module thiếu entry point runTemplateContractExam");
+
+        List<Map<String, Object>> enabledItems = items == null ? List.of() : items.stream()
+                .filter(item -> bool(item.get("enabled"), true))
+                .toList();
+        LinkedHashSet<String> runners = new LinkedHashSet<>();
+        for (Map<String, Object> item : enabledItems) {
+            String runner = text(item.get("runner"), "");
+            if (!SUPPORTED_TEMPLATE_CONTRACT_RUNNERS.contains(runner))
+                throw new IllegalArgumentException("Runner không thuộc template-contract engine: " + runner);
+            runners.add(runner);
+        }
+
+        LinkedHashSet<String> roots = new LinkedHashSet<>(List.of(
+                "_isDirectMetadata", "_findSharedSuite", "_suiteFor", "_checkSourceContracts",
+                "_asMap", "_asList", "_loadMatrix"));
+        for (String runner : runners) roots.addAll(templateRunnerRoots(runner));
+        Set<String> requiredFunctions = dartFunctionClosure(functions, roots);
+
+        int firstFunction = source.indexOf(functions.get("runTemplateContractExam"));
+        if (firstFunction < 0) throw new IllegalStateException("Không xác định được header Dart của engine");
+        String header = source.substring(0, firstFunction)
+                .replace("// __DIRECT_FUNCTION_IMPORTS__", "")
+                .stripTrailing();
+        String generated = header + "\n\n"
+                + renderTemplateEntry(enabledItems, runners) + "\n\n";
+        StringBuilder out = new StringBuilder(generated);
+        for (Map.Entry<String, String> entry : functions.entrySet()) {
+            if (requiredFunctions.contains(entry.getKey())) {
+                out.append(entry.getValue().strip()).append("\n\n");
+            }
+        }
+        Files.writeString(dir.resolve("exam_test.dart"), out.toString().stripTrailing() + "\n",
+                StandardCharsets.UTF_8);
+    }
+
+    /** Sinh entry point có đúng các testcase đang chọn; mỗi ID xuất hiện rõ trong file để dễ đối chiếu. */
+    private String renderTemplateEntry(List<Map<String, Object>> items, Set<String> runners) throws Exception {
+        boolean hasBootCase = runners.stream().anyMatch(runner -> !isTemplateDirectRunner(runner));
+        StringBuilder registrations = new StringBuilder();
+        int index = 1;
+        for (Map<String, Object> item : items) {
+            String id = text(item.get("instance_id"), "");
+            String runner = text(item.get("runner"), "");
+            String name = text(item.get("name"), id).replace('\n', ' ').replace('\r', ' ');
+            double weight = number(item.get("weight"), 0);
+            String dartId = mapper.writeValueAsString(id);
+            int caseNumber = index++;
+            registrations.append("  // TESTCASE #").append(caseNumber).append(": ")
+                    .append(name).append(" · ").append(String.format(java.util.Locale.ROOT, "%.2f", weight))
+                    .append(" diem · ").append(runner).append("\n")
+                    .append("  final metadata").append(caseNumber).append(" = _asMap(matrix[")
+                    .append(dartId).append("]);\n")
+                    .append("  if (metadata").append(caseNumber).append(".isNotEmpty &&\n")
+                    .append("      (mode != 'direct' || _isDirectMetadata(metadata").append(caseNumber).append(")) &&\n")
+                    .append("      (mode != 'case' || Platform.environment['GRADER_CASE_ID'] == ").append(dartId).append(")) {\n")
+                    .append("    testWidgets(").append(dartId).append(", (tester) async {\n")
+                    .append("      await _runSelectedCase(tester, ").append(dartId)
+                    .append(", metadata").append(caseNumber).append(");\n")
+                    .append("    });\n")
+                    .append("  }\n");
+        }
+
+        StringBuilder dispatch = new StringBuilder();
+        for (String runner : runners) dispatch.append(templateRunnerDispatch(runner));
+        return """
+                /// Bộ chấm được sinh theo Draft hiện tại. Chỉ các testcase đã chọn và runner cần dùng
+                /// mới xuất hiện trong file này; tham số/điểm nằm trong skills_matrix.json.
+                void main() {
+                  TestWidgetsFlutterBinding.ensureInitialized();
+                  final matrix = _loadMatrix();
+                  _sharedSuite = _findSharedSuite(matrix);
+                  final mode = Platform.environment['GRADER_CASE_MODE'] ?? 'all';
+                %s
+                %s}
+
+                Future<void> _runSelectedCase(
+                  WidgetTester tester,
+                  String testId,
+                  Map<String, dynamic> metadata,
+                ) async {
+                  _activeCase = metadata;
+                  _activeSuite = _suiteFor(metadata);
+                  await _checkSourceContracts();
+                  final runner = (metadata['runner'] ?? '').toString();
+                  final parameters = _asMap(metadata['parameters']);
+                  switch (runner) {
+                %s    default:
+                      fail('Testcase $testId chưa có runner trong Draft hiện tại: $runner');
+                  }
+                }
+                """.formatted(
+                hasBootCase ? """
+                  if (mode == 'preflight') {
+                    testWidgets('_GRADER_PREFLIGHT', (tester) async {
+                      _activeSuite = _sharedSuite;
+                      await _checkSourceContracts();
+                      await _boot(tester);
+                    });
+                    return;
+                  }
+                """ : "  if (mode == 'preflight') return;\n",
+                registrations,
+                dispatch);
+    }
+
+    private boolean isTemplateDirectRunner(String runner) {
+        return runner.startsWith("TEMPLATE_SOURCE_") || runner.startsWith("TEMPLATE_MODEL_")
+                || Set.of("TEMPLATE_SQLITE_SCHEMA", "TEMPLATE_REPOSITORY_METHODS").contains(runner);
+    }
+
+    private List<String> templateRunnerRoots(String runner) {
+        return switch (runner) {
+            case "TEMPLATE_SOURCE_SYMBOLS" -> List.of("_checkTemplateSourceSymbols");
+            case "TEMPLATE_SOURCE_TERMS" -> List.of("_checkTemplateSourceTerms");
+            case "TEMPLATE_MODEL_FIELDS" -> List.of("_checkTemplateModelFields");
+            case "TEMPLATE_MODEL_COPY_WITH" -> List.of("_checkTemplateModelCopyWith");
+            case "TEMPLATE_MODEL_MAPPING" -> List.of("_checkTemplateModelMapping");
+            case "TEMPLATE_SQLITE_SCHEMA" -> List.of("_checkTemplateSqliteSchema");
+            case "TEMPLATE_REPOSITORY_METHODS" -> List.of("_checkTemplateRepositoryMethods");
+            case "TEMPLATE_FORM_FIELDS" -> List.of("_checkTemplateFormFields");
+            case "TEMPLATE_BUTTONS" -> List.of("_checkTemplateButtons");
+            case "TEMPLATE_FORM_ACTION" -> List.of("_checkTemplateFormAction");
+            case "TEMPLATE_FORM_VALIDATION" -> List.of("_checkTemplateFormValidation");
+            case "TEMPLATE_UI_WORKFLOW" -> List.of("_checkTemplateUiWorkflow");
+            case "TEMPLATE_TEXT_VISIBLE" -> List.of("_checkTemplateTextVisible");
+            case "RESPONSIVE_NO_OVERFLOW" -> List.of("_responsive");
+            case "APP_BOOT" -> List.of("_checkTemplateAppBoot");
+            default -> throw new IllegalArgumentException("Runner template chưa có module: " + runner);
+        };
+    }
+
+    private String templateRunnerDispatch(String runner) {
+        String call = switch (runner) {
+            case "TEMPLATE_SOURCE_SYMBOLS" -> "await _checkTemplateSourceSymbols(parameters);";
+            case "TEMPLATE_SOURCE_TERMS" -> "await _checkTemplateSourceTerms(parameters);";
+            case "TEMPLATE_MODEL_FIELDS" -> "await _checkTemplateModelFields(parameters);";
+            case "TEMPLATE_MODEL_COPY_WITH" -> "await _checkTemplateModelCopyWith(parameters);";
+            case "TEMPLATE_MODEL_MAPPING" -> "await _checkTemplateModelMapping(parameters);";
+            case "TEMPLATE_SQLITE_SCHEMA" -> "await _checkTemplateSqliteSchema(parameters);";
+            case "TEMPLATE_REPOSITORY_METHODS" -> "await _checkTemplateRepositoryMethods(parameters);";
+            case "TEMPLATE_FORM_FIELDS" -> "await _checkTemplateFormFields(tester, parameters);";
+            case "TEMPLATE_BUTTONS" -> "await _checkTemplateButtons(tester, parameters);";
+            case "TEMPLATE_FORM_ACTION" -> "await _checkTemplateFormAction(tester, parameters);";
+            case "TEMPLATE_FORM_VALIDATION" -> "await _checkTemplateFormValidation(tester, parameters);";
+            case "TEMPLATE_UI_WORKFLOW" -> "await _checkTemplateUiWorkflow(tester, parameters);";
+            case "TEMPLATE_TEXT_VISIBLE" -> "await _checkTemplateTextVisible(tester, parameters);";
+            case "RESPONSIVE_NO_OVERFLOW" -> "await _responsive(tester, parameters);";
+            case "APP_BOOT" -> "await _checkTemplateAppBoot(tester, parameters);";
+            default -> throw new IllegalArgumentException("Runner template chưa có dispatch: " + runner);
+        };
+        return "    case '" + runner + "':\n      " + call.replace("\n", "\n      ") + "\n      return;\n";
+    }
+
+    /** Tách top-level function từ source Dart nội bộ để ghép dependency closure của runner đã chọn. */
+    private Map<String, String> extractDartFunctions(String source) {
+        Pattern declaration = Pattern.compile(
+                "(?m)^[A-Za-z_][A-Za-z0-9_<>, ?\\.]*?\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*\\(");
+        var matcher = declaration.matcher(source);
+        Map<String, String> out = new LinkedHashMap<>();
+        while (matcher.find()) {
+            String name = matcher.group(1);
+            int signatureEnd = findDartMatching(source, matcher.end() - 1, '(', ')');
+            if (signatureEnd < 0) continue;
+            int bodyStart = signatureEnd + 1;
+            while (bodyStart < source.length() && Character.isWhitespace(source.charAt(bodyStart))) bodyStart++;
+            if (source.startsWith("async", bodyStart)) {
+                bodyStart += 5;
+                while (bodyStart < source.length() && (Character.isWhitespace(source.charAt(bodyStart))
+                        || source.charAt(bodyStart) == '*')) bodyStart++;
+            }
+            int end;
+            if (bodyStart < source.length() && source.charAt(bodyStart) == '{') {
+                end = findDartMatching(source, bodyStart, '{', '}');
+            } else if (source.startsWith("=>", bodyStart)) {
+                end = findDartStatementEnd(source, bodyStart + 2);
+            } else continue;
+            if (end < 0) throw new IllegalStateException("Không tách được Dart function " + name);
+            out.put(name, source.substring(matcher.start(), end + 1));
+        }
+        return out;
+    }
+
+    private Set<String> dartFunctionClosure(Map<String, String> functions, Set<String> roots) {
+        LinkedHashSet<String> required = new LinkedHashSet<>();
+        List<String> queue = new ArrayList<>(roots);
+        while (!queue.isEmpty()) {
+            String name = queue.remove(0);
+            if (!required.add(name)) continue;
+            String code = functions.get(name);
+            if (code == null) throw new IllegalStateException("Source engine thiếu Dart function " + name);
+            for (String candidate : functions.keySet()) {
+                if (!required.contains(candidate)
+                        && Pattern.compile("(?<![A-Za-z0-9_])" + Pattern.quote(candidate) + "\\s*\\(")
+                        .matcher(code).find()) queue.add(candidate);
+            }
+        }
+        return required;
+    }
+
+    private int findDartMatching(String source, int start, char open, char close) {
+        int depth = 0;
+        char quote = 0;
+        boolean escaped = false, lineComment = false, blockComment = false;
+        for (int i = start; i < source.length(); i++) {
+            char current = source.charAt(i);
+            char next = i + 1 < source.length() ? source.charAt(i + 1) : 0;
+            if (lineComment) { if (current == '\n') lineComment = false; continue; }
+            if (blockComment) { if (current == '*' && next == '/') { blockComment = false; i++; } continue; }
+            if (quote != 0) {
+                if (escaped) { escaped = false; continue; }
+                if (current == '\\') { escaped = true; continue; }
+                if (current == quote) quote = 0;
+                continue;
+            }
+            if (current == '/' && next == '/') { lineComment = true; i++; continue; }
+            if (current == '/' && next == '*') { blockComment = true; i++; continue; }
+            if (current == '\'' || current == '"') { quote = current; continue; }
+            if (current == open) depth++;
+            else if (current == close && --depth == 0) return i;
+        }
+        return -1;
+    }
+
+    private int findDartStatementEnd(String source, int start) {
+        char quote = 0;
+        boolean escaped = false;
+        for (int i = start; i < source.length(); i++) {
+            char current = source.charAt(i);
+            if (quote != 0) {
+                if (escaped) escaped = false;
+                else if (current == '\\') escaped = true;
+                else if (current == quote) quote = 0;
+            } else if (current == '\'' || current == '"') quote = current;
+            else if (current == ';') return i;
+        }
+        return -1;
     }
 
     private void materializeDirectFunctionRunner(Path dir, List<Map<String, Object>> items) throws Exception {
@@ -733,8 +1020,7 @@ public class TestcaseTemplateService {
         out.put("total_weight", totalWeight(items));
         String materializedPath = text(config.get("materialized_path"));
         boolean engineReady = materializedPath != null && !materializedPath.isBlank()
-                && Files.exists(Path.of(materializedPath).resolve("exam_test.dart"))
-                && Files.exists(Path.of(materializedPath).resolve("grader.dart"));
+                && isEngineReady(Path.of(materializedPath));
         out.put("engine_ready", engineReady);
         if (publish && !engineReady) {
             out.put("warning", "Đã Publish cấu hình, nhưng đề chưa có exam_test.dart và grader.dart để chạy chấm.");
@@ -828,20 +1114,90 @@ public class TestcaseTemplateService {
         if (raw == null) return new LinkedHashMap<>();
         if (!(raw instanceof Map<?, ?>))
             throw new IllegalArgumentException("template_contract phai la object");
-        Set<String> allowed = Set.of(
-                "modelPath", "modelClass", "modelFields", "databasePath", "tableName", "columns",
-                "repositoryPath", "repositoryClass", "repositoryMethods", "fieldLabels", "buttonLabels",
-                "inputValues", "expectedTexts");
         Map<String, Object> input = castMap(raw);
+        if (!(input.get("sections") instanceof List<?> sections)) {
+            return migrateLegacyTemplateContract(input);
+        }
+        if (sections.size() > 30)
+            throw new IllegalArgumentException("template_contract khong duoc vuot qua 30 nhom");
+        List<Map<String, Object>> normalizedSections = new ArrayList<>();
+        Set<String> sectionIds = new LinkedHashSet<>();
+        Set<String> contractKeys = new LinkedHashSet<>();
+        int totalFields = 0;
+        for (int index = 0; index < sections.size(); index++) {
+            if (!(sections.get(index) instanceof Map<?, ?>))
+                throw new IllegalArgumentException("template_contract.sections #" + (index + 1) + " phai la object");
+            Map<String, Object> section = castMap(sections.get(index));
+            String id = limitedText(section.get("id"), "section_" + (index + 1), 80,
+                    "template_contract.sections.id").trim();
+            if (!CONTRACT_ID.matcher(id).matches() || !sectionIds.add(id))
+                throw new IllegalArgumentException("id nhom contract khong hop le hoac bi trung: " + id);
+            String name = requiredLimitedText(section.get("name"), 120, "Ten nhom contract");
+            Object rawFields = section.get("fields");
+            if (!(rawFields instanceof List<?> fields))
+                throw new IllegalArgumentException("fields cua nhom contract phai la mang: " + id);
+            if (fields.size() > 50 || (totalFields += fields.size()) > 300)
+                throw new IllegalArgumentException("template_contract co qua nhieu truong");
+            List<Map<String, Object>> normalizedFields = new ArrayList<>();
+            Set<String> fieldIds = new LinkedHashSet<>();
+            for (int fieldIndex = 0; fieldIndex < fields.size(); fieldIndex++) {
+                if (!(fields.get(fieldIndex) instanceof Map<?, ?>))
+                    throw new IllegalArgumentException("field contract phai la object trong nhom " + id);
+                Map<String, Object> field = castMap(fields.get(fieldIndex));
+                String fieldId = limitedText(field.get("id"), id + "_" + (fieldIndex + 1), 80,
+                        "template_contract.field.id").trim();
+                if (!CONTRACT_ID.matcher(fieldId).matches() || !fieldIds.add(fieldId))
+                    throw new IllegalArgumentException("id field contract khong hop le hoac bi trung: " + fieldId);
+                String key = requiredLimitedText(field.get("key"), 120, "Ma anh xa contract").trim();
+                if (!CONTRACT_KEY.matcher(key).matches() || !contractKeys.add(key))
+                    throw new IllegalArgumentException("Ma anh xa contract khong hop le hoac bi trung: " + key);
+                String label = requiredLimitedText(field.get("label"), 160, "Nhan field contract");
+                String kind = enumValue(field.get("kind"), "text", CONTRACT_VALUE_KINDS, "Loai field contract");
+                String value = limitedText(field.get("value"), "", 4000,
+                        "template_contract." + key).trim();
+                Map<String, Object> normalizedField = new LinkedHashMap<>();
+                normalizedField.put("id", fieldId);
+                normalizedField.put("key", key);
+                normalizedField.put("label", label);
+                normalizedField.put("kind", kind);
+                normalizedField.put("value", value);
+                normalizedFields.add(normalizedField);
+            }
+            Map<String, Object> normalizedSection = new LinkedHashMap<>();
+            normalizedSection.put("id", id);
+            normalizedSection.put("name", name);
+            normalizedSection.put("fields", normalizedFields);
+            normalizedSections.add(normalizedSection);
+        }
         Map<String, Object> out = new LinkedHashMap<>();
-        for (String key : input.keySet()) {
-            if (!allowed.contains(key))
-                throw new IllegalArgumentException("Truong template_contract khong duoc ho tro: " + key);
+        out.put("version", 4);
+        out.put("sections", normalizedSections);
+        return out;
+    }
+
+    private Map<String, Object> migrateLegacyTemplateContract(Map<String, Object> input) {
+        Map<String, String> mappings = Map.ofEntries(
+                Map.entry("modelPath", "model.path"), Map.entry("modelClass", "model.class"),
+                Map.entry("modelFields", "model.fields"), Map.entry("databasePath", "storage.path"),
+                Map.entry("tableName", "storage.table"), Map.entry("columns", "storage.columns"),
+                Map.entry("repositoryPath", "service.path"), Map.entry("repositoryClass", "service.class"),
+                Map.entry("repositoryMethods", "service.methods"), Map.entry("fieldLabels", "ui.fieldLabels"),
+                Map.entry("buttonLabels", "ui.buttonLabels"), Map.entry("inputValues", "behavior.inputValues"),
+                Map.entry("expectedTexts", "ui.expectedTexts"));
+        List<Map<String, Object>> fields = new ArrayList<>();
+        for (Map.Entry<String, Object> entry : input.entrySet()) {
+            String target = mappings.get(entry.getKey());
+            if (target == null)
+                throw new IllegalArgumentException("Truong template_contract cu khong duoc ho tro: " + entry.getKey());
+            String value = limitedText(entry.getValue(), "", 4000, "template_contract." + entry.getKey()).trim();
+            if (value.isBlank()) continue;
+            fields.add(Map.of("id", "legacy_" + fields.size(), "key", target,
+                    "label", entry.getKey(), "kind", "text", "value", value));
         }
-        for (String key : allowed) {
-            String value = limitedText(input.get(key), "", 1000, "template_contract." + key).trim();
-            if (!value.isBlank()) out.put(key, value);
-        }
+        if (fields.isEmpty()) return new LinkedHashMap<>();
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("version", 4);
+        out.put("sections", List.of(Map.of("id", "legacy", "name", "Contract da migrate", "fields", fields)));
         return out;
     }
 
@@ -1076,6 +1432,21 @@ public class TestcaseTemplateService {
             item.put("order", index++);
             item.put("weight", weight);
             item.put("parameters", params);
+            if (TEMPLATE_CONTRACT_ENGINE.equals(templateEngine)) {
+                LinkedHashSet<String> overrides = new LinkedHashSet<>();
+                Object rawOverrides = input.get("contract_overrides");
+                if (rawOverrides instanceof List<?> values) {
+                    if (values.size() > params.size())
+                        throw new IllegalArgumentException("contract_overrides có quá nhiều phần tử ở " + instanceId);
+                    for (Object value : values) {
+                        String parameter = text(value, "").trim();
+                        if (!params.containsKey(parameter))
+                            throw new IllegalArgumentException("contract_overrides tham chiếu tham số không tồn tại: " + parameter);
+                        overrides.add(parameter);
+                    }
+                }
+                item.put("contract_overrides", new ArrayList<>(overrides));
+            }
             item.put("setup_steps", normalizeSetupSteps(input.get("setup_steps"),
                     "testcase " + instanceId, 15));
             String generatedExpected = renderExpected(text(template.get("expected_template")), params);
@@ -1187,8 +1558,9 @@ public class TestcaseTemplateService {
 
     void validateTemplateContractParameters(String runner, Map<String, Object> params,
                                               String instanceId) {
-        if (Set.of("TEMPLATE_SOURCE_SYMBOLS", "TEMPLATE_MODEL_FIELDS", "TEMPLATE_MODEL_MAPPING",
-                "TEMPLATE_SQLITE_SCHEMA", "TEMPLATE_REPOSITORY_METHODS").contains(runner)) {
+        if (Set.of("TEMPLATE_SOURCE_SYMBOLS", "TEMPLATE_SOURCE_TERMS", "TEMPLATE_MODEL_FIELDS",
+                "TEMPLATE_MODEL_COPY_WITH", "TEMPLATE_MODEL_MAPPING", "TEMPLATE_SQLITE_SCHEMA",
+                "TEMPLATE_REPOSITORY_METHODS").contains(runner)) {
             String path = text(params.get("sourcePath"), "").trim().replace('\\', '/');
             if (path.isBlank() || path.startsWith("/") || path.contains("..")
                     || !path.startsWith("lib/") || !path.endsWith(".dart")) {
@@ -1197,7 +1569,23 @@ public class TestcaseTemplateService {
             params.put("sourcePath", path);
         }
         switch (runner) {
-            case "TEMPLATE_SOURCE_SYMBOLS" -> validateDartIdentifierCsv(params, "symbols", instanceId, false);
+            case "TEMPLATE_SOURCE_SYMBOLS" -> {
+                validateDartIdentifierCsv(params, "symbols", instanceId, false);
+                List<String> symbols = templateCsv(params, "symbols", instanceId);
+                List<String> types = optionalTemplateCsv(params, "symbolTypes");
+                if (!types.isEmpty() && types.size() != symbols.size())
+                    throw new IllegalArgumentException("symbolTypes phai de trong hoac cung so phan tu voi symbols o " + instanceId);
+                Set<String> allowedTypes = Set.of("auto", "class", "function", "variable", "typedef",
+                        "enum", "mixin", "extension");
+                for (String type : types) if (!allowedTypes.contains(type.toLowerCase()))
+                    throw new IllegalArgumentException("symbolTypes khong hop le o " + instanceId + ": " + type);
+            }
+            case "TEMPLATE_SOURCE_TERMS" -> {
+                List<String> required = optionalTemplateCsv(params, "requiredTerms");
+                List<String> forbidden = optionalTemplateCsv(params, "forbiddenTerms");
+                if (required.isEmpty() && forbidden.isEmpty())
+                    throw new IllegalArgumentException("requiredTerms hoac forbiddenTerms phai co gia tri o " + instanceId);
+            }
             case "TEMPLATE_MODEL_FIELDS" -> {
                 validateDartIdentifierParameter(params, "className", instanceId);
                 List<String> fields = templateCsv(params, "fields", instanceId);
@@ -1205,6 +1593,15 @@ public class TestcaseTemplateService {
                     String name = field.contains(":") ? field.substring(0, field.indexOf(':')).trim() : field;
                     if (!DART_IDENTIFIER.matcher(name).matches())
                         throw new IllegalArgumentException("Ten field khong hop le o " + instanceId + ": " + name);
+                }
+            }
+            case "TEMPLATE_MODEL_COPY_WITH" -> {
+                validateDartIdentifierParameter(params, "className", instanceId);
+                validateDartIdentifierParameter(params, "copyMethod", instanceId);
+                for (String field : templateCsv(params, "fields", instanceId)) {
+                    String name = field.contains(":") ? field.substring(0, field.indexOf(':')).trim() : field;
+                    if (!DART_IDENTIFIER.matcher(name).matches())
+                        throw new IllegalArgumentException("Ten field copy khong hop le o " + instanceId + ": " + name);
                 }
             }
             case "TEMPLATE_MODEL_MAPPING" -> {
@@ -1215,26 +1612,181 @@ public class TestcaseTemplateService {
             }
             case "TEMPLATE_SQLITE_SCHEMA" -> {
                 requireParameter(params, "tableName", instanceId);
+                String schemaMethod = text(params.get("schemaMethod"), "").trim();
+                if (!schemaMethod.isBlank() && !DART_IDENTIFIER.matcher(schemaMethod).matches())
+                    throw new IllegalArgumentException("schemaMethod khong hop le o " + instanceId);
                 validateDartIdentifierCsv(params, "columns", instanceId, true);
             }
             case "TEMPLATE_REPOSITORY_METHODS" -> {
                 validateDartIdentifierParameter(params, "className", instanceId);
                 validateDartIdentifierCsv(params, "methods", instanceId, false);
             }
-            case "TEMPLATE_FORM_FIELDS" -> templateCsv(params, "fieldLabels", instanceId);
-            case "TEMPLATE_BUTTONS" -> templateCsv(params, "buttonLabels", instanceId);
-            case "TEMPLATE_TEXT_VISIBLE" -> templateCsv(params, "expectedTexts", instanceId);
+            case "TEMPLATE_FORM_FIELDS" -> {
+                templateCsv(params, "fieldLabels", instanceId);
+                validateOptionalFormScope(params, instanceId);
+            }
+            case "TEMPLATE_BUTTONS" -> {
+                templateCsv(params, "buttonLabels", instanceId);
+                validateOptionalUiScope(params, "", instanceId);
+            }
+            case "TEMPLATE_TEXT_VISIBLE" -> {
+                templateCsv(params, "expectedTexts", instanceId);
+                validateOptionalUiScope(params, "", instanceId);
+                validateTextMatchMode(params, "textMatchMode", instanceId);
+                validateOptionalPositiveInt(params, "minimumOccurrences", 1, 100, instanceId);
+            }
             case "TEMPLATE_FORM_ACTION" -> {
                 List<String> fields = templateCsv(params, "fieldLabels", instanceId);
                 List<String> values = templateCsv(params, "inputValues", instanceId);
                 if (fields.size() != values.size())
                     throw new IllegalArgumentException("fieldLabels va inputValues phai cung so phan tu o " + instanceId);
+                validateOptionalFormScope(params, instanceId);
+                validateOptionalUiScope(params, "result", instanceId);
+                validateTextMatchMode(params, "resultTextMatchMode", instanceId);
+                validateBooleanParameter(params, "requireNewResult", instanceId);
                 requireParameter(params, "actionLabel", instanceId);
                 templateCsv(params, "expectedTexts", instanceId);
             }
-            case "RESPONSIVE_NO_OVERFLOW" -> validateResponsiveSizes(params, instanceId);
-            case "APP_BOOT" -> { /* no contract parameter is required */ }
+            case "TEMPLATE_FORM_VALIDATION" -> {
+                List<String> fields = templateCsv(params, "fieldLabels", instanceId);
+                List<String> values = templateCsv(params, "invalidValues", instanceId);
+                if (fields.size() != values.size())
+                    throw new IllegalArgumentException("fieldLabels va invalidValues phai cung so phan tu o " + instanceId);
+                validateOptionalFormScope(params, instanceId);
+                validateBooleanParameter(params, "requireNewErrors", instanceId);
+                requireParameter(params, "actionLabel", instanceId);
+                List<String> errors = templateCsv(params, "errorTexts", instanceId);
+                List<String> errorFields = optionalTemplateCsv(params, "errorFieldLabels");
+                if (!errorFields.isEmpty() && errorFields.size() != errors.size())
+                    throw new IllegalArgumentException(
+                            "errorFieldLabels phai de trong hoac cung so phan tu voi errorTexts o " + instanceId);
+                validateTextMatchMode(params, "errorTextMatchMode", instanceId);
+            }
+            case "TEMPLATE_UI_WORKFLOW" -> validateTemplateWorkflow(params, instanceId);
+            case "RESPONSIVE_NO_OVERFLOW" -> {
+                validateResponsiveSizes(params, instanceId);
+                optionalTemplateCsv(params, "portraitExpectedTexts");
+                optionalTemplateCsv(params, "landscapeExpectedTexts");
+                validateTextMatchMode(params, "textMatchMode", instanceId);
+            }
+            case "APP_BOOT" -> validateOptionalPositiveInt(params, "readyTimeoutMs", 100, 30000, instanceId);
             default -> throw new IllegalArgumentException("Runner template contract chua duoc ho tro: " + runner);
+        }
+    }
+
+    private void validateOptionalFormScope(Map<String, Object> params, String instanceId) {
+        String rawIndex = text(params.get("formIndex"), "").trim();
+        if (rawIndex.isBlank()) return;
+        try {
+            int index = Integer.parseInt(rawIndex);
+            if (index < 1 || index > 100) throw new NumberFormatException();
+        } catch (NumberFormatException exception) {
+            throw new IllegalArgumentException(
+                    "formIndex phai la so nguyen tu 1 den 100 o " + instanceId);
+        }
+    }
+
+    private void validateOptionalUiScope(Map<String, Object> params, String prefix, String instanceId) {
+        String typeKey = prefix.isBlank() ? "scopeType" : prefix + "ScopeType";
+        String indexKey = prefix.isBlank() ? "scopeIndex" : prefix + "ScopeIndex";
+        String anchorKey = prefix.isBlank() ? "scopeAnchorText" : prefix + "ScopeAnchorText";
+        String type = text(params.get(typeKey), "").trim().toLowerCase();
+        String rawIndex = text(params.get(indexKey), "").trim();
+        String anchor = text(params.get(anchorKey), "").trim();
+        if (type.isBlank()) {
+            if (!rawIndex.isBlank() || !anchor.isBlank())
+                throw new IllegalArgumentException(typeKey + " phai duoc nhap khi dung "
+                        + indexKey + "/" + anchorKey + " o " + instanceId);
+            return;
+        }
+        if (!Set.of("screen", "form", "dialog", "list", "appbar", "bottomsheet").contains(type))
+            throw new IllegalArgumentException(typeKey + " khong hop le o " + instanceId + ": " + type);
+        validateOptionalPositiveInt(params, indexKey, 1, 100, instanceId);
+    }
+
+    private void validateTextMatchMode(Map<String, Object> params, String key, String instanceId) {
+        String value = text(params.get(key), "contains").trim().toLowerCase();
+        if (!Set.of("contains", "exact").contains(value))
+            throw new IllegalArgumentException(key + " chi nhan contains/exact o " + instanceId);
+    }
+
+    private void validateOptionalPositiveInt(Map<String, Object> params, String key,
+                                             int min, int max, String instanceId) {
+        String raw = text(params.get(key), "").trim();
+        if (raw.isBlank()) return;
+        try {
+            int value = Integer.parseInt(raw);
+            if (value < min || value > max) throw new NumberFormatException();
+        } catch (NumberFormatException exception) {
+            throw new IllegalArgumentException(key + " phai la so nguyen " + min + "-" + max
+                    + " o " + instanceId);
+        }
+    }
+
+    private void validateBooleanParameter(Map<String, Object> params, String key, String instanceId) {
+        Object raw = params.get(key);
+        if (raw == null) return;
+        String value = String.valueOf(raw).trim().toLowerCase();
+        if (!Set.of("true", "false").contains(value))
+            throw new IllegalArgumentException(key + " chi nhan true/false o " + instanceId);
+    }
+
+    private List<String> optionalTemplateCsv(Map<String, Object> params, String key) {
+        String value = text(params.get(key), "").trim();
+        return value.isBlank() ? List.of() : csv(value);
+    }
+
+    private void validateTemplateWorkflow(Map<String, Object> params, String instanceId) {
+        String raw = text(params.get("stepsJson"), "").trim();
+        if (raw.isBlank()) throw new IllegalArgumentException("stepsJson khong duoc de trong o " + instanceId);
+        try {
+            List<Map<String, Object>> steps = mapper.readValue(raw,
+                    new TypeReference<List<Map<String, Object>>>() {});
+            if (steps.isEmpty() || steps.size() > 30)
+                throw new IllegalArgumentException("stepsJson phai co 1-30 buoc o " + instanceId);
+            Set<String> allowed = Set.of("enter", "tap", "expectVisible", "expectAbsent", "wait");
+            for (int index = 0; index < steps.size(); index++) {
+                Map<String, Object> step = steps.get(index);
+                String type = text(step.get("type"), "").trim();
+                if (!allowed.contains(type))
+                    throw new IllegalArgumentException("Loai buoc workflow khong hop le: " + type);
+                Set<String> allowedKeys = switch (type) {
+                    case "enter" -> Set.of("type", "target", "value", "scopeType", "scopeIndex",
+                            "scopeAnchorText", "occurrence");
+                    case "tap" -> Set.of("type", "target", "scopeType", "scopeIndex",
+                            "scopeAnchorText", "occurrence", "matchMode");
+                    case "expectVisible" -> Set.of("type", "value", "scopeType", "scopeIndex",
+                            "scopeAnchorText", "matchMode", "expectedCount");
+                    case "expectAbsent" -> Set.of("type", "value", "scopeType", "scopeIndex",
+                            "scopeAnchorText", "matchMode");
+                    case "wait" -> Set.of("type", "milliseconds");
+                    default -> Set.of("type");
+                };
+                for (String key : step.keySet()) if (!allowedKeys.contains(key))
+                    throw new IllegalArgumentException("Truong workflow khong duoc ho tro: " + key);
+                if (type.equals("wait")) {
+                    boundedInt(step.get("milliseconds"), 300, 0, 5000, "workflow milliseconds");
+                } else {
+                    String target = type.startsWith("expect") ? text(step.get("value"), "") : text(step.get("target"), "");
+                    if (target.trim().isBlank())
+                        throw new IllegalArgumentException("Buoc workflow #" + (index + 1) + " thieu target/value");
+                    if (type.equals("enter") && !step.containsKey("value"))
+                        throw new IllegalArgumentException("Buoc enter #" + (index + 1) + " thieu value");
+                    validateOptionalUiScope(step, "", instanceId + " workflow #" + (index + 1));
+                    if (type.equals("enter") || type.equals("tap"))
+                        validateOptionalPositiveInt(step, "occurrence", 1, 100,
+                                instanceId + " workflow #" + (index + 1));
+                    if (type.equals("tap") || type.startsWith("expect"))
+                        validateTextMatchMode(step, "matchMode", instanceId + " workflow #" + (index + 1));
+                    if (type.equals("expectVisible"))
+                        validateOptionalPositiveInt(step, "expectedCount", 1, 100,
+                                instanceId + " workflow #" + (index + 1));
+                }
+            }
+        } catch (IllegalArgumentException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IllegalArgumentException("stepsJson khong phai JSON array hop le o " + instanceId + ": " + e.getMessage());
         }
     }
 
@@ -1273,13 +1825,23 @@ public class TestcaseTemplateService {
                 validateOptionalTargetType(params, "targetType", instanceId);
             }
             case "FORM_REQUIRED_FIELDS" -> {
-                requireParameter(params, "fieldKeys", instanceId);
+                List<String> fields = csv(params.get("fieldKeys"));
+                List<String> errors = csv(params.get("errorKeys"));
+                if (fields.isEmpty() || errors.isEmpty())
+                    throw new IllegalArgumentException("fieldKeys va errorKeys khong duoc rong o " + instanceId);
                 requireParameter(params, "submitKey", instanceId);
-                requireParameter(params, "errorKeys", instanceId);
+                validateInputFieldType(params, instanceId);
+                validateBooleanParameter(params, "requireNewErrors", instanceId);
             }
             case "NAVIGATION" -> {
                 requireParameter(params, "openKey", instanceId);
                 requireParameter(params, "destinationKey", instanceId);
+                String backKey = text(params.get("backKey"), "").trim();
+                String homeKey = text(params.get("homeKey"), "").trim();
+                if (backKey.isBlank() != homeKey.isBlank())
+                    throw new IllegalArgumentException("backKey va homeKey phai cung co hoac cung de trong o " + instanceId);
+                validateBooleanParameter(params, "requireNewDestination", instanceId);
+                validateBooleanParameter(params, "hideDestinationAfterBack", instanceId);
             }
             case "LIST_VISIBLE" -> {
                 requireParameter(params, "listKey", instanceId);
@@ -1288,6 +1850,7 @@ public class TestcaseTemplateService {
             case "BUTTON_ACTION" -> {
                 requireParameter(params, "buttonKey", instanceId);
                 requireParameter(params, "resultKey", instanceId);
+                validateBooleanParameter(params, "requireNewResult", instanceId);
             }
             case "RESPONSIVE_NO_OVERFLOW" -> {
                 validateResponsiveSizes(params, instanceId);
@@ -1302,6 +1865,10 @@ public class TestcaseTemplateService {
                 requireParameter(params, "actionKey", instanceId);
                 requireParameter(params, "updatedKey", instanceId);
                 requireParameter(params, "absentKey", instanceId);
+                if (text(params.get("initialKey"), "").trim()
+                        .equals(text(params.get("updatedKey"), "").trim()))
+                    throw new IllegalArgumentException("initialKey va updatedKey phai khac nhau o " + instanceId);
+                validateBooleanParameter(params, "requireNewUpdatedState", instanceId);
             }
             case "WIDGET_TYPE_VISIBLE" -> validateWidgetTypeVisible(params, instanceId);
             case "WIDGET_TEXT_CONTENT" -> validateWidgetTextContent(params, instanceId);
@@ -1317,7 +1884,7 @@ public class TestcaseTemplateService {
             case "WIDGET_TEXT_STYLE" -> validateWidgetTextStyle(params, instanceId);
             case "WIDGET_GAP" -> validateWidgetGap(params, instanceId);
             case "DIRECT_FUNCTION" -> validateDirectFunction(params, instanceId);
-            case "APP_BOOT" -> { /* rootKey có thể để trống nếu app không công bố root key. */ }
+            case "APP_BOOT" -> validateOptionalPositiveInt(params, "readyTimeoutMs", 100, 30000, instanceId);
             default -> throw new IllegalArgumentException("Common runner không tồn tại: " + runner);
         }
         validateSemanticParameters(params, instanceId);
@@ -1427,8 +1994,10 @@ public class TestcaseTemplateService {
         List<String> fields = csv(params.get("fieldKeys"));
         List<String> values = csv(params.get("invalidValues"));
         List<String> errors = csv(params.get("errorKeys"));
-        if (fields.isEmpty() || fields.size() != values.size() || fields.size() != errors.size())
-            throw new IllegalArgumentException("fieldKeys, invalidValues và errorKeys phải cùng số phần tử ở " + instanceId);
+        if (fields.isEmpty() || fields.size() != values.size() || errors.isEmpty())
+            throw new IllegalArgumentException(
+                    "fieldKeys phải khớp invalidValues và errorKeys không được rỗng ở " + instanceId);
+        validateBooleanParameter(params, "requireNewErrors", instanceId);
     }
 
     private void validateFormPrefill(Map<String, Object> params, String instanceId) {
@@ -1440,6 +2009,7 @@ public class TestcaseTemplateService {
         List<String> values = csv(params.get("expectedValues"));
         if (fields.isEmpty() || fields.size() != values.size())
             throw new IllegalArgumentException("fieldKeys và expectedValues phải cùng số phần tử ở " + instanceId);
+        validateBooleanParameter(params, "requirePrefillTransition", instanceId);
     }
 
     private void validateFormSubmit(Map<String, Object> params, String instanceId) {
@@ -1451,6 +2021,7 @@ public class TestcaseTemplateService {
         List<String> values = csv(params.get("values"));
         if (fields.isEmpty() || fields.size() != values.size())
             throw new IllegalArgumentException("fieldKeys và values phải cùng số phần tử ở " + instanceId);
+        validateBooleanParameter(params, "requireNewResult", instanceId);
     }
 
     private void validateInputFieldType(Map<String, Object> params, String instanceId) {
@@ -1472,6 +2043,8 @@ public class TestcaseTemplateService {
         requireParameter(params, "dialogKey", instanceId);
         requireParameter(params, "decisionKey", instanceId);
         validateTarget(paramsWithType(params, "dialog"), instanceId, Set.of("dialog"));
+        validateBooleanParameter(params, "requireNewDialog", instanceId);
+        validateBooleanParameter(params, "requireNewResult", instanceId);
     }
 
     private void validateWidgetSemanticsLabel(Map<String, Object> params, String instanceId) {
@@ -1567,7 +2140,18 @@ public class TestcaseTemplateService {
     }
 
     private List<String> csv(Object value) {
+        if (value instanceof List<?> list) {
+            return list.stream().map(item -> item == null ? "" : String.valueOf(item).trim()).toList();
+        }
         String text = value == null ? "" : String.valueOf(value);
+        if (text.trim().startsWith("[")) {
+            try {
+                List<?> list = mapper.readValue(text, List.class);
+                return list.stream().map(item -> item == null ? "" : String.valueOf(item).trim()).toList();
+            } catch (Exception exception) {
+                throw new IllegalArgumentException("Danh sách phải là CSV hoặc JSON array hợp lệ");
+            }
+        }
         List<String> out = new ArrayList<>();
         for (String part : text.split(",")) {
             if (!part.trim().isEmpty()) out.add(part.trim());
@@ -1586,6 +2170,14 @@ public class TestcaseTemplateService {
                                                Map<String, Object> suite) {
         Map<String, Object> matrix = new LinkedHashMap<>();
         Set<String> emittedGroups = new LinkedHashSet<>();
+        boolean templateSuiteEmitted = false;
+        // template_contract is the editor model of the Draft. It can contain dozens of
+        // empty fields and is already persisted in testcaseConfigJson. The generated
+        // runner only needs the small runtime subset below, so never publish the whole
+        // editor contract in skills_matrix.json.
+        Map<String, Object> publishedSuite = TEMPLATE_CONTRACT_ENGINE.equals(engineType)
+                ? templateRuntimeSuite(suite)
+                : suite;
         for (Map<String, Object> item : items) {
             // Disabled instance vẫn nằm trong config Draft để bật lại sau, nhưng không được
             // đưa vào matrix đang Publish vì grader cũ chưa hiểu cờ enabled.
@@ -1603,10 +2195,50 @@ public class TestcaseTemplateService {
             if (TODO_USER_ENGINE.equals(engineType)) {
                 matrix.put(String.valueOf(item.get("execution_key")), fixedContractRubricRow(item));
             } else {
-                matrix.put(String.valueOf(item.get("instance_id")), commonRubricRow(item, suite));
+                Map<String, Object> rowSuite = TEMPLATE_CONTRACT_ENGINE.equals(engineType)
+                        && templateSuiteEmitted ? Map.of() : publishedSuite;
+                matrix.put(String.valueOf(item.get("instance_id")), commonRubricRow(item, rowSuite));
+                if (TEMPLATE_CONTRACT_ENGINE.equals(engineType)) templateSuiteEmitted = true;
             }
         }
         return matrix;
+    }
+
+    /**
+     * Returns only values read by TEMPLATE_CONTRACT_V1 while a testcase is running.
+     * The complete editor contract remains in the Draft stored in the database.
+     */
+    private Map<String, Object> templateRuntimeSuite(Map<String, Object> suite) {
+        Map<String, Object> runtime = new LinkedHashMap<>();
+        if (suite == null || suite.isEmpty()) return runtime;
+
+        List<?> sourceContracts = suite.get("source_contracts") instanceof List<?> values
+                ? values : List.of();
+        if (!sourceContracts.isEmpty()) runtime.put("source_contracts", sourceContracts);
+
+        if (bool(suite.get("strict_semantic_keys"), false)) {
+            runtime.put("strict_semantic_keys", true);
+        }
+
+        String readyKey = text(suite.get("ready_key"), "");
+        if (readyKey != null && !readyKey.isBlank()) runtime.put("ready_key", readyKey);
+
+        List<?> requiredKeys = suite.get("required_keys") instanceof List<?> values
+                ? values : List.of();
+        if (!requiredKeys.isEmpty()) runtime.put("required_keys", requiredKeys);
+
+        int bootTimeout = boundedInt(suite.get("boot_timeout_ms"), 3000, 100, 30000,
+                "boot_timeout_ms");
+        if (bootTimeout != 3000) runtime.put("boot_timeout_ms", bootTimeout);
+
+        int stepTimeout = boundedInt(suite.get("step_timeout_ms"), 2000, 100, 30000,
+                "step_timeout_ms");
+        if (stepTimeout != 2000) runtime.put("step_timeout_ms", stepTimeout);
+
+        List<?> setupSteps = suite.get("setup_steps") instanceof List<?> values
+                ? values : List.of();
+        if (!setupSteps.isEmpty()) runtime.put("setup_steps", setupSteps);
+        return runtime;
     }
 
     /** Preserve the exact metadata shape expected by the supplied fixed V9 runner. */
@@ -1636,8 +2268,10 @@ public class TestcaseTemplateService {
         row.put("difficulty", item.get("difficulty"));
         row.put("weight", item.get("weight"));
         row.put("parameters", item.get("parameters"));
-        row.put("setup_steps", item.getOrDefault("setup_steps", List.of()));
-        row.put("suite", suite);
+        List<?> setupSteps = item.get("setup_steps") instanceof List<?> values
+                ? values : List.of();
+        if (!setupSteps.isEmpty()) row.put("setup_steps", setupSteps);
+        if (suite != null && !suite.isEmpty()) row.put("suite", suite);
         return row;
     }
 

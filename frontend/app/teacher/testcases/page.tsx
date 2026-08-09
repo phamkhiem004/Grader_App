@@ -39,6 +39,7 @@ interface Template {
   difficulty: string;
   weight_default: number;
   parameters_schema: JsonMap;
+  contract_bindings?: Record<string, string>;
   expected_template: string;
   custom?: boolean;
   created_by?: string;
@@ -61,6 +62,7 @@ interface TestcaseItem {
   order: number;
   weight: number;
   parameters: JsonMap;
+  contract_overrides?: string[];
   expected: string;
   expected_custom?: boolean;
   group_id?: string;
@@ -70,20 +72,22 @@ interface TestcaseItem {
   setup_steps?: SetupStep[];
 }
 
+type ContractValueKind = "text" | "path" | "identifier" | "csv" | "json" | "number";
+interface TemplateContractField {
+  id: string;
+  key: string;
+  label: string;
+  value: string;
+  kind: ContractValueKind;
+}
+interface TemplateContractSection {
+  id: string;
+  name: string;
+  fields: TemplateContractField[];
+}
 interface TemplateContractDraft {
-  modelPath: string;
-  modelClass: string;
-  modelFields: string;
-  databasePath: string;
-  tableName: string;
-  columns: string;
-  repositoryPath: string;
-  repositoryClass: string;
-  repositoryMethods: string;
-  fieldLabels: string;
-  buttonLabels: string;
-  inputValues: string;
-  expectedTexts: string;
+  version: 4;
+  sections: TemplateContractSection[];
 }
 
 interface SetupStep {
@@ -137,13 +141,17 @@ const TESTCASE_GROUP_LABEL: Record<string, string> = {
 const RUNNER_LABEL: Record<string, string> = {
   APP_BOOT: "Mở ứng dụng",
   TEMPLATE_SOURCE_SYMBOLS: "Kiểm tra file và symbol",
+  TEMPLATE_SOURCE_TERMS: "Kiểm tra wiring/import trong source",
   TEMPLATE_MODEL_FIELDS: "Kiểm tra field của model",
+  TEMPLATE_MODEL_COPY_WITH: "Kiểm tra method tạo bản sao",
   TEMPLATE_MODEL_MAPPING: "Kiểm tra mapping của model",
   TEMPLATE_SQLITE_SCHEMA: "Kiểm tra schema SQLite",
   TEMPLATE_REPOSITORY_METHODS: "Kiểm tra method Repository",
   TEMPLATE_FORM_FIELDS: "Kiểm tra ô nhập theo label/hint",
   TEMPLATE_BUTTONS: "Kiểm tra nút theo nội dung",
   TEMPLATE_FORM_ACTION: "Nhập form và kiểm tra kết quả",
+  TEMPLATE_FORM_VALIDATION: "Kiểm tra validation theo label",
+  TEMPLATE_UI_WORKFLOW: "Chạy luồng UI nhiều bước",
   TEMPLATE_TEXT_VISIBLE: "Kiểm tra nội dung hiển thị",
   WIDGET_VISIBLE: "Kiểm tra thành phần hiển thị",
   FORM_REQUIRED_FIELDS: "Kiểm tra ô bắt buộc",
@@ -211,7 +219,7 @@ const PARAMETER_ROLE_STYLE: Record<ParameterRole, string> = {
 };
 
 const INPUT_PARAMETER_KEYS = new Set([
-  "argumentsJson", "invalidValues", "values", "expectedValues", "inputValues",
+  "argumentsJson", "invalidValues", "values", "expectedValues", "inputValues", "stepsJson",
 ]);
 const ASSERTION_PARAMETER_KEYS = new Set([
   "absentKey", "destinationKey", "errorKeys", "expected", "expectedCount", "expectedEnabled",
@@ -220,10 +228,15 @@ const ASSERTION_PARAMETER_KEYS = new Set([
   "left", "top", "right", "bottom", "portraitWidth", "portraitHeight",
   "landscapeWidth", "landscapeHeight",
   "expectedTexts",
+  "errorTexts", "forbiddenTerms", "minimumOccurrences", "portraitExpectedTexts",
+  "landscapeExpectedTexts", "requireNewResult", "requireNewErrors", "requireNewDestination",
+  "hideDestinationAfterBack", "requireNewDialog", "requireNewUpdatedState", "requirePrefillTransition",
 ]);
 const OPTION_PARAMETER_KEYS = new Set([
   "axis", "comparison", "dimension", "fieldType", "fromType", "matchMode",
-  "targetType", "toType", "tolerance",
+  "targetType", "toType", "tolerance", "scopeType", "scopeIndex", "scopeAnchorText",
+  "resultScopeType", "resultScopeIndex", "resultScopeAnchorText", "textMatchMode",
+  "resultTextMatchMode", "errorTextMatchMode", "symbolTypes", "schemaMethod", "readyTimeoutMs",
 ]);
 
 function parameterRole(key: string, runner?: string): ParameterRole {
@@ -236,13 +249,23 @@ function parameterRole(key: string, runner?: string): ParameterRole {
 function runnerContract(item: TestcaseItem, template?: Template) {
   const runner = String(template?.runner || "");
   const p = item.parameters || {};
+  const formScope = formatParam(p.formIndex)
+    ? ` trong Form #${formatParam(p.formIndex)}`
+    : formatParam(p.formAnchorText)
+      ? ` trong Form chứa "${formatParam(p.formAnchorText)}"`
+      : " trong Form duy nhất chứa đủ các field đã khai báo";
+  const uiScope = formatParam(p.scopeType)
+    ? ` trong ${formatParam(p.scopeType)}${formatParam(p.scopeIndex) ? ` #${formatParam(p.scopeIndex)}` : ""}${formatParam(p.scopeAnchorText) ? ` chứa "${formatParam(p.scopeAnchorText)}"` : ""}`
+    : "";
   if (runner.startsWith("TEMPLATE_")) return {
     input: runner === "TEMPLATE_FORM_ACTION"
       ? `Nhập inputValues (${formatParam(p.inputValues)}) theo fieldLabels (${formatParam(p.fieldLabels)}).`
+      : runner === "TEMPLATE_FORM_VALIDATION"
+        ? `Nhập nguyên văn invalidValues (${formatParam(p.invalidValues)}) theo fieldLabels (${formatParam(p.fieldLabels)}); chỉ <empty> có nghĩa đặc biệt.`
       : "Không dùng dữ liệu của pack cố định; mọi giá trị đều lấy từ contract đang nhập.",
     target: p.sourcePath
       ? `Kiểm tra ${formatParam(p.className || p.symbols || p.tableName)} trong file ${formatParam(p.sourcePath)}.`
-      : `Tìm thành phần UI theo label/text: ${formatParam(p.fieldLabels || p.buttonLabels || p.actionLabel || p.expectedTexts)}.`,
+      : `Tìm thành phần UI theo label/text${p.fieldLabels ? formScope : uiScope}: ${formatParam(p.fieldLabels || p.buttonLabels || p.actionLabel || p.expectedTexts)}.`,
     pass: `Các điều kiện trong contract phải đầy đủ; expected hiển thị là ${item.expected}.`,
   };
   if (runner === "LIST_VISIBLE") return {
@@ -277,7 +300,17 @@ function dartQuote(value: unknown) {
 }
 
 function csvValues(value: unknown) {
-  return String(value ?? "").split(",").map((part) => part.trim()).filter(Boolean);
+  if (Array.isArray(value)) return value.map((part) => String(part ?? "").trim());
+  const text = String(value ?? "").trim();
+  if (text.startsWith("[")) {
+    try {
+      const parsed = JSON.parse(text);
+      if (Array.isArray(parsed)) return parsed.map((part) => String(part ?? "").trim());
+    } catch {
+      return [];
+    }
+  }
+  return text.split(",").map((part) => part.trim()).filter(Boolean);
 }
 
 function setupStepHint(type: SetupStep["type"]) {
@@ -377,6 +410,97 @@ function cloneParams(template: Template): JsonMap {
   return { ...(template.parameters_schema || {}) };
 }
 
+type ItemProgressState = "ready" | "attention" | "disabled";
+interface ItemProgress {
+  state: ItemProgressState;
+  issues: string[];
+}
+
+const REQUIRED_RUNNER_PARAMETERS: Record<string, string[]> = {
+  TEMPLATE_SOURCE_SYMBOLS: ["sourcePath", "symbols"],
+  TEMPLATE_SOURCE_TERMS: ["sourcePath"],
+  TEMPLATE_MODEL_FIELDS: ["sourcePath", "className", "fields"],
+  TEMPLATE_MODEL_COPY_WITH: ["sourcePath", "className", "copyMethod", "fields"],
+  TEMPLATE_MODEL_MAPPING: ["sourcePath", "className", "toMapMethod", "fromMapMethod", "columns"],
+  TEMPLATE_SQLITE_SCHEMA: ["sourcePath", "tableName", "columns"],
+  TEMPLATE_REPOSITORY_METHODS: ["sourcePath", "className", "methods"],
+  TEMPLATE_FORM_FIELDS: ["fieldLabels"],
+  TEMPLATE_BUTTONS: ["buttonLabels"],
+  TEMPLATE_FORM_ACTION: ["fieldLabels", "inputValues", "actionLabel", "expectedTexts"],
+  TEMPLATE_FORM_VALIDATION: ["fieldLabels", "invalidValues", "actionLabel", "errorTexts"],
+  TEMPLATE_TEXT_VISIBLE: ["expectedTexts"],
+  TEMPLATE_UI_WORKFLOW: ["stepsJson"],
+  WIDGET_VISIBLE: ["widgetKey"],
+  FORM_REQUIRED_FIELDS: ["fieldKeys", "submitKey", "errorKeys"],
+  NAVIGATION: ["openKey", "destinationKey"],
+  LIST_VISIBLE: ["listKey", "itemKeys"],
+  BUTTON_ACTION: ["buttonKey", "resultKey"],
+  STATE_REACTIVE_FLOW: ["initialKey", "actionKey", "updatedKey", "absentKey"],
+  DIRECT_FUNCTION: ["functionPath", "functionName", "argumentsJson", "expectedType", "matchMode"],
+  RESPONSIVE_NO_OVERFLOW: ["portraitWidth", "portraitHeight", "landscapeWidth", "landscapeHeight"],
+  RESPONSIVE_TARGET: ["portraitWidth", "portraitHeight", "landscapeWidth", "landscapeHeight", "targetKey"],
+};
+
+function isBlankParameter(value: unknown) {
+  return value === null || value === undefined || (typeof value === "string" && value.trim() === "");
+}
+
+function testcaseProgress(item: TestcaseItem, template?: Template): ItemProgress {
+  if (!item.enabled) return { state: "disabled", issues: [] };
+  const issues: string[] = [];
+  const runner = String(template?.runner || "");
+  const required = new Set(REQUIRED_RUNNER_PARAMETERS[runner] || []);
+
+  // Tham số có giá trị mặc định trong template được xem là bắt buộc. Các trường mặc định
+  // rỗng (rootKey, forbiddenTerms...) vẫn là tùy chọn nếu runner không khai báo bắt buộc.
+  Object.entries(template?.parameters_schema || {}).forEach(([key, defaultValue]) => {
+    if (runner === "TEMPLATE_SOURCE_TERMS" && ["requiredTerms", "forbiddenTerms"].includes(key)) return;
+    if (!isBlankParameter(defaultValue)) required.add(key);
+  });
+  required.forEach((key) => {
+    if (isBlankParameter(item.parameters?.[key])) {
+      issues.push(`Thiếu ${PARAMETER_LABELS[key] || key}`);
+    }
+  });
+
+  if (runner === "TEMPLATE_SOURCE_TERMS"
+      && isBlankParameter(item.parameters.requiredTerms)
+      && isBlankParameter(item.parameters.forbiddenTerms)) {
+    issues.push("Cần ít nhất một nội dung source bắt buộc hoặc bị cấm");
+  }
+  if (["TEMPLATE_FORM_ACTION", "TEMPLATE_FORM_VALIDATION"].includes(runner)) {
+    const labels = csvValues(item.parameters.fieldLabels);
+    const values = csvValues(runner === "TEMPLATE_FORM_ACTION"
+      ? item.parameters.inputValues : item.parameters.invalidValues);
+    if (labels.length !== values.length) issues.push("Số ô nhập và số giá trị thử chưa khớp");
+    if (runner === "TEMPLATE_FORM_VALIDATION") {
+      const errors = csvValues(item.parameters.errorTexts);
+      const errorFields = csvValues(item.parameters.errorFieldLabels);
+      if (errorFields.length > 0 && errorFields.length !== errors.length) {
+        issues.push("Số field chứa lỗi và số thông báo lỗi chưa khớp");
+      }
+    }
+  }
+  if (runner === "TEMPLATE_UI_WORKFLOW" && !isBlankParameter(item.parameters.stepsJson)) {
+    try {
+      const steps = JSON.parse(String(item.parameters.stepsJson));
+      if (!Array.isArray(steps) || steps.length === 0) issues.push("Workflow phải có ít nhất một bước");
+    } catch {
+      issues.push("Workflow chưa phải JSON hợp lệ");
+    }
+  }
+  for (const step of item.setup_steps || []) {
+    if (!step.key.trim()) {
+      issues.push("Có bước chuẩn bị chưa nhập key");
+      break;
+    }
+  }
+  if (!item.expected.trim()) issues.push("Chưa có mô tả rubric khi pass");
+  if (!Number.isFinite(Number(item.weight)) || Number(item.weight) <= 0) issues.push("Trọng số phải lớn hơn 0");
+
+  return issues.length ? { state: "attention", issues } : { state: "ready", issues: [] };
+}
+
 function emptySuite(): SuiteConfig {
   return {
     suite_version: 1,
@@ -413,72 +537,178 @@ function templateContractSuite(): SuiteConfig {
   };
 }
 
+const DEFAULT_CONTRACT_SECTIONS: Array<Omit<TemplateContractSection, "fields"> & { fields: Array<Omit<TemplateContractField, "id" | "value">> }> = [
+  { id: "app", name: "Ứng dụng / project", fields: [
+    { key: "app.rootKey", label: "Root Key (nếu starter có công bố)", kind: "text" },
+    { key: "app.readyText", label: "Nội dung báo ứng dụng đã sẵn sàng", kind: "text" },
+    { key: "app.readyTimeoutMs", label: "Thời gian chờ sẵn sàng (ms)", kind: "number" },
+    { key: "source.path", label: "File contract tổng quát", kind: "path" },
+    { key: "source.symbols", label: "Các symbol bắt buộc", kind: "csv" },
+    { key: "source.symbolTypes", label: "Loại tương ứng của các symbol", kind: "csv" },
+    { key: "source.requiredTerms", label: "Nội dung source bắt buộc", kind: "csv" },
+    { key: "source.forbiddenTerms", label: "Nội dung source không được có", kind: "csv" },
+  ] },
+  { id: "model", name: "Model / dữ liệu", fields: [
+    { key: "model.path", label: "File model", kind: "path" },
+    { key: "model.class", label: "Class model", kind: "identifier" },
+    { key: "model.fields", label: "Các field (field:type)", kind: "csv" },
+    { key: "model.copyMethod", label: "Method tạo bản sao", kind: "identifier" },
+    { key: "model.toMapMethod", label: "Method chuyển thành Map", kind: "identifier" },
+    { key: "model.fromMapMethod", label: "Method tạo từ Map", kind: "identifier" },
+  ] },
+  { id: "storage", name: "Lưu trữ / API", fields: [
+    { key: "storage.path", label: "File storage/database", kind: "path" },
+    { key: "storage.schemaMethod", label: "Method tạo schema cần kiểm tra", kind: "identifier" },
+    { key: "storage.table", label: "Tên bảng/collection", kind: "text" },
+    { key: "storage.columns", label: "Các cột/JSON keys", kind: "csv" },
+    { key: "storage.requiredTerms", label: "Dấu hiệu source bắt buộc", kind: "csv" },
+    { key: "storage.forbiddenTerms", label: "Dấu hiệu source không được có", kind: "csv" },
+  ] },
+  { id: "service", name: "Repository / service", fields: [
+    { key: "service.path", label: "File repository/service", kind: "path" },
+    { key: "service.class", label: "Class repository/service", kind: "identifier" },
+    { key: "service.methods", label: "Các method công khai", kind: "csv" },
+  ] },
+  { id: "state", name: "State / ViewModel", fields: [
+    { key: "state.path", label: "File state/ViewModel", kind: "path" },
+    { key: "state.class", label: "Class state/ViewModel", kind: "identifier" },
+    { key: "state.methods", label: "Các method/state bắt buộc", kind: "csv" },
+    { key: "state.requiredTerms", label: "Provider/import/annotation bắt buộc", kind: "csv" },
+  ] },
+  { id: "ui", name: "Màn hình / form", fields: [
+    { key: "ui.fieldLabels", label: "Label/hint các ô", kind: "csv" },
+    { key: "ui.formIndex", label: "Vị trí Form (bắt đầu từ 1)", kind: "number" },
+    { key: "ui.formAnchorText", label: "Nội dung nhận diện bên trong Form", kind: "text" },
+    { key: "ui.scopeType", label: "Loại vùng UI cần kiểm tra", kind: "text" },
+    { key: "ui.scopeIndex", label: "Vị trí vùng UI (bắt đầu từ 1)", kind: "number" },
+    { key: "ui.scopeAnchorText", label: "Nội dung nhận diện trong vùng UI", kind: "text" },
+    { key: "ui.resultScopeType", label: "Loại vùng hiển thị kết quả", kind: "text" },
+    { key: "ui.resultScopeIndex", label: "Vị trí vùng kết quả", kind: "number" },
+    { key: "ui.resultScopeAnchorText", label: "Nội dung nhận diện vùng kết quả", kind: "text" },
+    { key: "ui.textMatchMode", label: "Cách so khớp nội dung", kind: "text" },
+    { key: "ui.minimumOccurrences", label: "Số lần xuất hiện tối thiểu", kind: "number" },
+    { key: "ui.buttonLabels", label: "Nội dung các nút", kind: "csv" },
+    { key: "ui.expectedTexts", label: "Nội dung phải xuất hiện", kind: "csv" },
+    { key: "ui.absentTexts", label: "Nội dung không được xuất hiện", kind: "csv" },
+    { key: "ui.errorFieldLabels", label: "Field chứa từng thông báo lỗi", kind: "csv" },
+    { key: "ui.errorTextMatchMode", label: "Cách so khớp thông báo lỗi", kind: "text" },
+  ] },
+  { id: "behavior", name: "Dữ liệu và luồng hành vi", fields: [
+    { key: "behavior.inputValues", label: "Dữ liệu nhập thử", kind: "csv" },
+    { key: "behavior.actionLabel", label: "Nút thực hiện", kind: "text" },
+    { key: "behavior.errorTexts", label: "Thông báo validation", kind: "csv" },
+    { key: "behavior.requireNewResult", label: "Kết quả phải được tạo mới sau action", kind: "text" },
+    { key: "behavior.requireNewErrors", label: "Lỗi phải xuất hiện mới sau submit", kind: "text" },
+    { key: "behavior.stepsJson", label: "Các bước luồng (JSON)", kind: "json" },
+  ] },
+  { id: "responsive", name: "Responsive", fields: [
+    { key: "responsive.portraitWidth", label: "Rộng điện thoại", kind: "number" },
+    { key: "responsive.portraitHeight", label: "Cao điện thoại", kind: "number" },
+    { key: "responsive.landscapeWidth", label: "Rộng máy tính/tablet", kind: "number" },
+    { key: "responsive.landscapeHeight", label: "Cao máy tính/tablet", kind: "number" },
+    { key: "responsive.portraitExpectedTexts", label: "Nội dung cần thấy ở điện thoại", kind: "csv" },
+    { key: "responsive.landscapeExpectedTexts", label: "Nội dung cần thấy ở màn hình rộng", kind: "csv" },
+  ] },
+];
+
+const contractId = () => `contract_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
 function emptyTemplateContract(): TemplateContractDraft {
   return {
-    modelPath: "",
-    modelClass: "",
-    modelFields: "",
-    databasePath: "",
-    tableName: "",
-    columns: "",
-    repositoryPath: "",
-    repositoryClass: "",
-    repositoryMethods: "",
-    fieldLabels: "",
-    buttonLabels: "",
-    inputValues: "",
-    expectedTexts: "",
+    version: 4,
+    sections: DEFAULT_CONTRACT_SECTIONS.map((section) => ({
+      id: section.id,
+      name: section.name,
+      fields: section.fields.map((field) => ({ ...field, id: contractId(), value: "" })),
+    })),
   };
 }
 
+const CONTRACT_V3_ADDITION_KEYS = new Set([
+  "app.readyText", "app.readyTimeoutMs", "source.symbolTypes", "storage.schemaMethod",
+  "ui.formIndex", "ui.formAnchorText", "ui.scopeType", "ui.scopeIndex", "ui.scopeAnchorText",
+  "ui.resultScopeType", "ui.resultScopeIndex", "ui.resultScopeAnchorText", "ui.textMatchMode",
+  "ui.minimumOccurrences", "behavior.requireNewResult", "behavior.requireNewErrors",
+  "responsive.portraitExpectedTexts", "responsive.landscapeExpectedTexts",
+]);
+
+const CONTRACT_V4_ADDITION_KEYS = new Set([
+  "ui.errorFieldLabels", "ui.errorTextMatchMode",
+]);
+
+const LEGACY_CONTRACT_KEYS: Record<string, string> = {
+  modelPath: "model.path", modelClass: "model.class", modelFields: "model.fields",
+  databasePath: "storage.path", tableName: "storage.table", columns: "storage.columns",
+  repositoryPath: "service.path", repositoryClass: "service.class", repositoryMethods: "service.methods",
+  fieldLabels: "ui.fieldLabels", buttonLabels: "ui.buttonLabels",
+  inputValues: "behavior.inputValues", expectedTexts: "ui.expectedTexts",
+};
+
+function normalizeTemplateContract(raw: unknown): TemplateContractDraft {
+  const base = emptyTemplateContract();
+  if (!raw || typeof raw !== "object") return base;
+  const object = raw as Record<string, unknown>;
+  const incomingVersion = Number(object.version || 2);
+  const incoming = Array.isArray(object.sections) ? object.sections : [];
+  if (incoming.length > 0) {
+    const sections = incoming.flatMap((value) => {
+      if (!value || typeof value !== "object") return [];
+      const section = value as Record<string, unknown>;
+      const fields = Array.isArray(section.fields) ? section.fields.flatMap((fieldValue) => {
+        if (!fieldValue || typeof fieldValue !== "object") return [];
+        const field = fieldValue as Record<string, unknown>;
+        const key = String(field.key || "").trim();
+        if (!key) return [];
+        const kind = String(field.kind || "text") as ContractValueKind;
+        return [{ id: String(field.id || contractId()), key, label: String(field.label || key), value: String(field.value || ""), kind }];
+      }) : [];
+      return [{ id: String(section.id || contractId()), name: String(section.name || "Nhóm contract"), fields }];
+    });
+    const existingKeys = new Set(sections.flatMap((section) => section.fields.map((field) => field.key)));
+    if (incomingVersion < 3) {
+      base.sections.forEach((baseSection) => {
+        const additions = baseSection.fields.filter((field) =>
+          CONTRACT_V3_ADDITION_KEYS.has(field.key) && !existingKeys.has(field.key));
+        if (!additions.length) return;
+        const target = sections.find((section) => section.id === baseSection.id);
+        if (target) target.fields.push(...additions);
+        else sections.push({ ...baseSection, fields: additions });
+        additions.forEach((field) => existingKeys.add(field.key));
+      });
+    }
+    if (incomingVersion < 4) {
+      base.sections.forEach((baseSection) => {
+        const additions = baseSection.fields.filter((field) =>
+          CONTRACT_V4_ADDITION_KEYS.has(field.key) && !existingKeys.has(field.key));
+        if (!additions.length) return;
+        const target = sections.find((section) => section.id === baseSection.id);
+        if (target) target.fields.push(...additions);
+        else sections.push({ ...baseSection, fields: additions });
+        additions.forEach((field) => existingKeys.add(field.key));
+      });
+    }
+    return { version: 4, sections };
+  }
+  const values = new Map(Object.entries(LEGACY_CONTRACT_KEYS).map(([oldKey, newKey]) => [newKey, String(object[oldKey] || "")]));
+  return { ...base, sections: base.sections.map((section) => ({ ...section, fields: section.fields.map((field) => ({ ...field, value: values.get(field.key) || "" })) })) };
+}
+
 function applyTemplateContract(
-  runner: string | undefined,
+  template: Template,
   current: JsonMap,
   contract: TemplateContractDraft,
+  resetMissing = false,
 ): JsonMap {
   const next = { ...current };
-  const put = (key: string, value: string) => {
-    if (value.trim()) next[key] = value.trim();
-  };
-  switch (runner) {
-    case "TEMPLATE_SOURCE_SYMBOLS":
-      put("sourcePath", contract.modelPath);
-      put("symbols", contract.modelClass);
-      break;
-    case "TEMPLATE_MODEL_FIELDS":
-      put("sourcePath", contract.modelPath);
-      put("className", contract.modelClass);
-      put("fields", contract.modelFields);
-      break;
-    case "TEMPLATE_MODEL_MAPPING":
-      put("sourcePath", contract.modelPath);
-      put("className", contract.modelClass);
-      put("columns", contract.columns);
-      break;
-    case "TEMPLATE_SQLITE_SCHEMA":
-      put("sourcePath", contract.databasePath);
-      put("tableName", contract.tableName);
-      put("columns", contract.columns);
-      break;
-    case "TEMPLATE_REPOSITORY_METHODS":
-      put("sourcePath", contract.repositoryPath);
-      put("className", contract.repositoryClass);
-      put("methods", contract.repositoryMethods);
-      break;
-    case "TEMPLATE_FORM_FIELDS":
-      put("fieldLabels", contract.fieldLabels);
-      break;
-    case "TEMPLATE_BUTTONS":
-      put("buttonLabels", contract.buttonLabels);
-      break;
-    case "TEMPLATE_FORM_ACTION":
-      put("fieldLabels", contract.fieldLabels);
-      put("inputValues", contract.inputValues);
-      put("expectedTexts", contract.expectedTexts);
-      break;
-    case "TEMPLATE_TEXT_VISIBLE":
-      put("expectedTexts", contract.expectedTexts);
-      break;
+  const values = new Map<string, string>();
+  contract.sections.forEach((section) => section.fields.forEach((field) => {
+    if (field.key.trim() && field.value.trim()) values.set(field.key.trim(), field.value.trim());
+  }));
+  for (const parameter of Object.keys(template.parameters_schema || {})) {
+    const contractKey = template.contract_bindings?.[parameter] || parameter;
+    const value = values.get(contractKey);
+    if (value !== undefined) next[parameter] = value;
+    else if (resetMissing) next[parameter] = template.parameters_schema[parameter];
   }
   return next;
 }
@@ -510,23 +740,67 @@ const PARAMETER_OPTIONS: Record<string, string[]> = {
   fontWeight: ["w400", "w500", "w600", "w700", "w800"],
   expectedType: ["string", "bool", "int", "double", "json", "null"],
   matchMode: ["equals", "contains"],
+  scopeType: ["", "screen", "form", "dialog", "list", "appbar", "bottomsheet"],
+  resultScopeType: ["", "screen", "form", "dialog", "list", "appbar", "bottomsheet"],
+  textMatchMode: ["contains", "exact"],
+  resultTextMatchMode: ["contains", "exact"],
+  errorTextMatchMode: ["contains", "exact"],
+  requireNewResult: ["true", "false"],
+  requireNewErrors: ["true", "false"],
+  requireNewDestination: ["true", "false"],
+  hideDestinationAfterBack: ["true", "false"],
+  requireNewDialog: ["true", "false"],
+  requireNewUpdatedState: ["true", "false"],
+  requirePrefillTransition: ["true", "false"],
 };
 
 const PARAMETER_LABELS: Record<string, string> = {
   sourcePath: "Đường dẫn file trong starter",
   symbols: "Class / hàm / provider bắt buộc",
+  symbolTypes: "Loại symbol tương ứng (class,function,variable,...)",
+  requiredTerms: "Nội dung source bắt buộc",
+  forbiddenTerms: "Nội dung source không được có",
   className: "Tên class",
   fields: "Danh sách field (field:type)",
+  copyMethod: "Tên method tạo bản sao",
   toMapMethod: "Tên hàm ghi Map",
   fromMapMethod: "Tên hàm đọc Map",
   columns: "Danh sách cột dữ liệu",
   tableName: "Tên bảng SQLite",
+  schemaMethod: "Method tạo schema cần kiểm tra",
   methods: "Các method bắt buộc",
   fieldLabels: "Label/hint các ô nhập",
+  formIndex: "Vị trí Form (bắt đầu từ 1)",
+  formAnchorText: "Nội dung nhận diện bên trong Form",
+  scopeType: "Loại vùng UI",
+  scopeIndex: "Vị trí vùng UI (bắt đầu từ 1)",
+  scopeAnchorText: "Nội dung nhận diện trong vùng UI",
+  resultScopeType: "Loại vùng hiển thị kết quả",
+  resultScopeIndex: "Vị trí vùng kết quả",
+  resultScopeAnchorText: "Nội dung nhận diện vùng kết quả",
+  textMatchMode: "Cách so khớp nội dung",
+  resultTextMatchMode: "Cách so khớp kết quả",
+  minimumOccurrences: "Số lần xuất hiện tối thiểu",
   buttonLabels: "Nội dung các nút",
   inputValues: "Dữ liệu nhập thử",
   actionLabel: "Nội dung nút thao tác",
   expectedTexts: "Nội dung phải xuất hiện",
+  errorTexts: "Nội dung lỗi phải xuất hiện",
+  errorFieldLabels: "Field chứa từng thông báo lỗi (tùy chọn)",
+  errorTextMatchMode: "Cách so khớp thông báo lỗi",
+  requireNewResult: "Kết quả phải xuất hiện mới sau action",
+  requireNewErrors: "Lỗi phải xuất hiện mới sau submit",
+  requireNewDestination: "Màn hình đích phải được mở mới sau thao tác",
+  hideDestinationAfterBack: "Màn hình đích phải ẩn sau khi quay lại",
+  requireNewDialog: "Dialog phải được mở mới sau thao tác",
+  requireNewUpdatedState: "Trạng thái mới phải xuất hiện sau thao tác",
+  requirePrefillTransition: "Nút Edit phải tạo thay đổi prefill quan sát được",
+  readyKey: "Key báo ứng dụng đã sẵn sàng",
+  readyText: "Nội dung báo ứng dụng đã sẵn sàng",
+  readyTimeoutMs: "Thời gian chờ sẵn sàng (ms)",
+  portraitExpectedTexts: "Nội dung cần thấy ở điện thoại",
+  landscapeExpectedTexts: "Nội dung cần thấy ở màn hình rộng",
+  stepsJson: "Các bước workflow (JSON)",
   widgetKey: "Mã thành phần",
   rootKey: "Mã thành phần gốc",
   fieldKeys: "Mã các ô nhập",
@@ -593,6 +867,8 @@ export default function TestcasesPage() {
   const [message, setMessage] = useState<{ type: "ok" | "error"; text: string } | null>(null);
   const [selectedCategory, setSelectedCategory] = useState("ALL");
   const [search, setSearch] = useState("");
+  const [itemGroupFilter, setItemGroupFilter] = useState("ALL");
+  const [itemProgressFilter, setItemProgressFilter] = useState<"ALL" | ItemProgressState>("ALL");
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draggedTemplateId, setDraggedTemplateId] = useState<string | null>(null);
@@ -612,6 +888,7 @@ export default function TestcasesPage() {
     template_id: "", name: "", description: "", skill_code: "UI_TEXT_INPUT", layer: "SCREEN",
     testcase_group: "LOGIC", difficulty: "basic", weight_default: "1", runner: "FORM_VALIDATE_FIELDS",
     parameters_schema: '{"fieldKeys":"field.name,field.email","invalidValues":"invalid-name,invalid-email","submitKey":"action.save","errorKeys":"error.name,error.email","fieldType":"input"}',
+    contract_bindings: "{}",
     expected_template: "Khi nhập dữ liệu không hợp lệ, các ô nhập phải hiển thị lỗi tương ứng.",
   });
 
@@ -661,7 +938,7 @@ export default function TestcasesPage() {
             if (config.suite && typeof config.suite === "object") {
               const loaded = config.suite as Partial<SuiteConfig>;
               if (loaded.template_contract && typeof loaded.template_contract === "object") {
-                setTemplateContract({ ...emptyTemplateContract(), ...loaded.template_contract });
+                setTemplateContract(normalizeTemplateContract(loaded.template_contract));
               }
               setSuite({
                 ...(loadedEngine === "TEMPLATE_CONTRACT_V1" ? templateContractSuite() : emptySuite()),
@@ -707,6 +984,26 @@ export default function TestcasesPage() {
       .finally(() => setLoading(false));
   }, []);
 
+  // Draft cũ có thể thiếu tham số mới được bổ sung vào blueprint (ví dụ bộ chọn
+  // Form). Bổ sung riêng các giá trị mặc định còn thiếu để giảng viên thấy và cấu
+  // hình được ngay, nhưng không ghi đè tham số/override đã nhập trước đó.
+  useEffect(() => {
+    if (!templates.length) return;
+    const loadedTemplateMap = new Map(templates.map((template) => [template.template_id, template]));
+    setItems((current) => current.map((item) => {
+      const schema = loadedTemplateMap.get(item.template_id)?.parameters_schema || {};
+      const parameters = { ...(item.parameters || {}) };
+      let changed = false;
+      Object.entries(schema).forEach(([key, value]) => {
+        if (!(key in parameters)) {
+          parameters[key] = value;
+          changed = true;
+        }
+      });
+      return changed ? { ...item, parameters } : item;
+    }));
+  }, [templates]);
+
   const templatesForEngine = useMemo(
     () => templates.filter((template) => (template.engine_type || "COMMON_V1") === engineMode),
     [templates, engineMode],
@@ -743,6 +1040,34 @@ export default function TestcasesPage() {
     : engineMode;
   const supportsGrouping = activeEngine === "COMMON_V1";
   const totalWeight = items.reduce((sum, item) => item.enabled ? sum + Number(item.weight || 0) : sum, 0);
+  const itemProgressMap = useMemo(() => new Map(items.map((item) => [
+    item.instance_id,
+    testcaseProgress(item, templateMap.get(item.template_id)),
+  ])), [items, templateMap]);
+  const activeItemCount = items.filter((item) => item.enabled).length;
+  const readyItemCount = items.filter((item) => itemProgressMap.get(item.instance_id)?.state === "ready").length;
+  const attentionItemCount = items.filter((item) => itemProgressMap.get(item.instance_id)?.state === "attention").length;
+  const disabledItemCount = items.length - activeItemCount;
+  const progressPercent = activeItemCount === 0 ? 0 : Math.round((readyItemCount / activeItemCount) * 100);
+  const progressGroups = useMemo(() => TESTCASE_GROUP_ORDER.slice(1).map((code) => {
+    const groupItems = items.filter((item) => {
+      const template = templateMap.get(item.template_id);
+      return item.enabled && (item.testcase_group || (template ? testcaseGroup(template) : "LOGIC")) === code;
+    });
+    return {
+      code,
+      count: groupItems.length,
+      ready: groupItems.filter((item) => itemProgressMap.get(item.instance_id)?.state === "ready").length,
+      weight: groupItems.reduce((sum, item) => sum + Number(item.weight || 0), 0),
+    };
+  }), [items, itemProgressMap, templateMap]);
+  const filteredItems = useMemo(() => items.filter((item) => {
+    const template = templateMap.get(item.template_id);
+    const group = item.testcase_group || (template ? testcaseGroup(template) : "LOGIC");
+    const progress = itemProgressMap.get(item.instance_id)?.state || "attention";
+    return (itemGroupFilter === "ALL" || group === itemGroupFilter)
+      && (itemProgressFilter === "ALL" || progress === itemProgressFilter);
+  }), [items, itemGroupFilter, itemProgressFilter, itemProgressMap, templateMap]);
   const groupSummaries = useMemo(() => {
     const map = new Map<string, { name: string; count: number; weight: number }>();
     items.forEach((item) => {
@@ -784,6 +1109,7 @@ export default function TestcasesPage() {
       engine_type: engineMode,
       runner: builtIn.runner || "APP_BOOT",
       parameters_schema: JSON.stringify(builtIn.parameters_schema || {}, null, 2),
+      contract_bindings: JSON.stringify(builtIn.contract_bindings || {}, null, 2),
       testcase_group: testcaseGroup(builtIn),
       layer: builtIn.layer,
       skill_code: builtIn.skill_code,
@@ -801,6 +1127,7 @@ export default function TestcasesPage() {
       ...current,
       runner,
       parameters_schema: builtIn ? JSON.stringify(builtIn.parameters_schema || {}, null, 2) : current.parameters_schema,
+      contract_bindings: builtIn ? JSON.stringify(builtIn.contract_bindings || {}, null, 2) : current.contract_bindings,
       testcase_group: builtIn ? testcaseGroup(builtIn) : current.testcase_group,
       layer: builtIn?.layer || current.layer,
       skill_code: builtIn?.skill_code || current.skill_code,
@@ -816,10 +1143,17 @@ export default function TestcasesPage() {
       catch { throw new Error("Schema tham số phải là JSON object hợp lệ."); }
       if (!schema || typeof schema !== "object" || Array.isArray(schema))
         throw new Error("Schema tham số phải là JSON object.");
+      let bindings: unknown = {};
+      if (engineMode === "TEMPLATE_CONTRACT_V1") {
+        try { bindings = JSON.parse(newTemplate.contract_bindings); }
+        catch { throw new Error("Ánh xạ contract phải là JSON object hợp lệ."); }
+        if (!bindings || typeof bindings !== "object" || Array.isArray(bindings))
+          throw new Error("Ánh xạ contract phải là JSON object.");
+      }
       const response = await fetch(`${API_BASE}/testcase-templates`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` },
-        body: JSON.stringify({ ...newTemplate, engine_type: engineMode, weight_default: Number(newTemplate.weight_default), parameters_schema: schema }),
+        body: JSON.stringify({ ...newTemplate, engine_type: engineMode, weight_default: Number(newTemplate.weight_default), parameters_schema: schema, contract_bindings: bindings }),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || "Không tạo được template mới.");
@@ -848,7 +1182,7 @@ export default function TestcasesPage() {
     while (usedIds.has(`${examId.trim() || "exam"}_item_${pad(nextNumber)}`)) nextNumber += 1;
     const fixedId = template.execution_key || template.template_id;
     const parameters = templateEngine === "TEMPLATE_CONTRACT_V1"
-      ? applyTemplateContract(template.runner, cloneParams(template), templateContract)
+      ? applyTemplateContract(template, cloneParams(template), templateContract)
       : cloneParams(template);
     const item: TestcaseItem = {
       instance_id: `${examId.trim() || "exam"}_item_${pad(nextNumber)}`,
@@ -866,6 +1200,7 @@ export default function TestcasesPage() {
       order: items.length + 1,
       weight: Number(template.weight_default || 1),
       parameters,
+      contract_overrides: [],
       expected: renderExpected(template.expected_template, parameters),
       expected_custom: false,
     };
@@ -881,11 +1216,12 @@ export default function TestcasesPage() {
       if (item.engine_type !== "TEMPLATE_CONTRACT_V1") return item;
       const template = templateMap.get(item.template_id);
       if (!template) return item;
-      const parameters = applyTemplateContract(template.runner, item.parameters, templateContract);
+      const parameters = applyTemplateContract(template, item.parameters, templateContract, true);
       changed += 1;
       return {
         ...item,
         parameters,
+        contract_overrides: [],
         expected: item.expected_custom ? item.expected : renderExpected(template.expected_template, parameters),
       };
     });
@@ -897,6 +1233,73 @@ export default function TestcasesPage() {
         : "Đã ghi nhận contract. Testcase template thêm sau sẽ tự nhận các giá trị phù hợp.",
     });
   };
+
+  const addContractSection = () => setTemplateContract((contract) => ({
+    ...contract,
+    sections: [...contract.sections, { id: contractId(), name: "Nhóm contract mới", fields: [] }],
+  }));
+
+  const updateContractSection = (sectionId: string, patch: Partial<TemplateContractSection>) =>
+    setTemplateContract((contract) => ({
+      ...contract,
+      sections: contract.sections.map((section) => section.id === sectionId ? { ...section, ...patch } : section),
+    }));
+
+  const removeContractSection = (sectionId: string) => setTemplateContract((contract) => ({
+    ...contract,
+    sections: contract.sections.filter((section) => section.id !== sectionId),
+  }));
+
+  const addContractField = (sectionId: string) => setTemplateContract((contract) => ({
+    ...contract,
+    sections: contract.sections.map((section) => section.id === sectionId ? {
+      ...section,
+      fields: [...section.fields, { id: contractId(), key: "custom.parameter", label: "Trường contract mới", value: "", kind: "text" }],
+    } : section),
+  }));
+
+  const updateContractField = (sectionId: string, fieldId: string, patch: Partial<TemplateContractField>) => {
+    const currentField = templateContract.sections
+      .flatMap((section) => section.fields)
+      .find((field) => field.id === fieldId);
+    if (currentField && patch.value !== undefined && patch.value !== currentField.value) {
+      setItems((currentItems) => currentItems.map((item) => {
+        if (item.engine_type !== "TEMPLATE_CONTRACT_V1") return item;
+        const template = templateMap.get(item.template_id);
+        if (!template) return item;
+        const overridden = new Set(item.contract_overrides || []);
+        let changed = false;
+        const parameters = { ...item.parameters };
+        Object.keys(template.parameters_schema || {}).forEach((parameter) => {
+          const contractKey = template.contract_bindings?.[parameter] || parameter;
+          if (contractKey !== currentField.key || overridden.has(parameter)) return;
+          parameters[parameter] = patch.value?.trim()
+            ? patch.value : template.parameters_schema[parameter];
+          changed = true;
+        });
+        return changed ? {
+          ...item,
+          parameters,
+          expected: item.expected_custom ? item.expected : renderExpected(template.expected_template, parameters),
+        } : item;
+      }));
+    }
+    setTemplateContract((contract) => ({
+      ...contract,
+      sections: contract.sections.map((section) => section.id === sectionId ? {
+        ...section,
+        fields: section.fields.map((field) => field.id === fieldId ? { ...field, ...patch } : field),
+      } : section),
+    }));
+  };
+
+  const removeContractField = (sectionId: string, fieldId: string) => setTemplateContract((contract) => ({
+    ...contract,
+    sections: contract.sections.map((section) => section.id === sectionId ? {
+      ...section,
+      fields: section.fields.filter((field) => field.id !== fieldId),
+    } : section),
+  }));
 
   const updateItem = (instanceId: string, patch: Partial<TestcaseItem>) => {
     setItems((current) => current.map((item) => item.instance_id === instanceId ? { ...item, ...patch } : item));
@@ -970,6 +1373,8 @@ export default function TestcasesPage() {
     const parameters = { ...item.parameters, [key]: parsed };
     updateItem(item.instance_id, {
       parameters,
+      contract_overrides: item.engine_type === "TEMPLATE_CONTRACT_V1"
+        ? Array.from(new Set([...(item.contract_overrides || []), key])) : item.contract_overrides,
       // Chỉ tự sinh lại expected khi giáo viên chưa nhập nội dung riêng.
       expected: item.expected_custom
         ? item.expected
@@ -1252,23 +1657,37 @@ export default function TestcasesPage() {
           </div>
           <details className="border-t border-slate-100 bg-slate-50/50 px-4 py-3">
             <summary className="cursor-pointer text-xs font-bold text-indigo-700">Thiết lập contract gợi ý cho đề (không bắt buộc)</summary>
-            <p className="mt-2 text-[11px] leading-relaxed text-slate-500">Khai báo một lần rồi các testcase thêm sau sẽ tự nhận đúng file, class, field, method và label phù hợp. Giá trị vẫn sửa riêng được ở từng testcase.</p>
-            <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-              <label className="text-xs font-semibold text-slate-600">File model<input value={templateContract.modelPath} onChange={(e) => setTemplateContract((v) => ({ ...v, modelPath: e.target.value }))} placeholder="lib/models/person.dart" className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2.5 py-2 font-mono text-xs font-normal" /></label>
-              <label className="text-xs font-semibold text-slate-600">Class model<input value={templateContract.modelClass} onChange={(e) => setTemplateContract((v) => ({ ...v, modelClass: e.target.value }))} placeholder="Person" className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2.5 py-2 font-mono text-xs font-normal" /></label>
-              <label className="text-xs font-semibold text-slate-600">Fields model<input value={templateContract.modelFields} onChange={(e) => setTemplateContract((v) => ({ ...v, modelFields: e.target.value }))} placeholder="uid:String,firstName:String,lastName:String" className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2.5 py-2 font-mono text-xs font-normal" /></label>
-              <label className="text-xs font-semibold text-slate-600">File SQLite<input value={templateContract.databasePath} onChange={(e) => setTemplateContract((v) => ({ ...v, databasePath: e.target.value }))} placeholder="lib/database/database_service.dart" className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2.5 py-2 font-mono text-xs font-normal" /></label>
-              <label className="text-xs font-semibold text-slate-600">Tên bảng<input value={templateContract.tableName} onChange={(e) => setTemplateContract((v) => ({ ...v, tableName: e.target.value }))} placeholder="persons" className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2.5 py-2 font-mono text-xs font-normal" /></label>
-              <label className="text-xs font-semibold text-slate-600">Các cột SQLite<input value={templateContract.columns} onChange={(e) => setTemplateContract((v) => ({ ...v, columns: e.target.value }))} placeholder="uid,first_name,last_name" className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2.5 py-2 font-mono text-xs font-normal" /></label>
-              <label className="text-xs font-semibold text-slate-600">File Repository<input value={templateContract.repositoryPath} onChange={(e) => setTemplateContract((v) => ({ ...v, repositoryPath: e.target.value }))} placeholder="lib/repositories/person_repository.dart" className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2.5 py-2 font-mono text-xs font-normal" /></label>
-              <label className="text-xs font-semibold text-slate-600">Class Repository<input value={templateContract.repositoryClass} onChange={(e) => setTemplateContract((v) => ({ ...v, repositoryClass: e.target.value }))} placeholder="PersonRepository" className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2.5 py-2 font-mono text-xs font-normal" /></label>
-              <label className="text-xs font-semibold text-slate-600">Methods Repository<input value={templateContract.repositoryMethods} onChange={(e) => setTemplateContract((v) => ({ ...v, repositoryMethods: e.target.value }))} placeholder="addPerson,readPersons,removePerson" className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2.5 py-2 font-mono text-xs font-normal" /></label>
-              <label className="text-xs font-semibold text-slate-600">Label/hint các ô<input value={templateContract.fieldLabels} onChange={(e) => setTemplateContract((v) => ({ ...v, fieldLabels: e.target.value }))} placeholder="input uid,input firstname,input lastname" className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2.5 py-2 text-xs font-normal" /></label>
-              <label className="text-xs font-semibold text-slate-600">Nội dung các nút<input value={templateContract.buttonLabels} onChange={(e) => setTemplateContract((v) => ({ ...v, buttonLabels: e.target.value }))} placeholder="Add,Read,Remove" className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2.5 py-2 text-xs font-normal" /></label>
-              <label className="text-xs font-semibold text-slate-600">Dữ liệu nhập thử<input value={templateContract.inputValues} onChange={(e) => setTemplateContract((v) => ({ ...v, inputValues: e.target.value }))} placeholder="SV01,An,Nguyen" className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2.5 py-2 text-xs font-normal" /></label>
-              <label className="text-xs font-semibold text-slate-600 md:col-span-2">Nội dung phải xuất hiện<input value={templateContract.expectedTexts} onChange={(e) => setTemplateContract((v) => ({ ...v, expectedTexts: e.target.value }))} placeholder="SV01,An,Nguyen" className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2.5 py-2 text-xs font-normal" /></label>
+            <p className="mt-2 text-[11px] leading-relaxed text-slate-500">Contract là bộ biến dùng chung của đề. Có thể thêm/xóa nhóm và trường tùy ý; mỗi blueprint ánh xạ tham số tới một mã như <code>model.path</code>, <code>ui.fieldLabels</code> hoặc <code>behavior.stepsJson</code>.</p>
+            <div className="mt-3 space-y-3">
+              {templateContract.sections.map((section) => (
+                <div key={section.id} className="rounded-xl border border-slate-200 bg-white p-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <input value={section.name} onChange={(event) => updateContractSection(section.id, { name: event.target.value })} className="min-w-56 flex-1 rounded-md border border-slate-200 px-2.5 py-2 text-xs font-bold text-slate-700" aria-label="Tên nhóm contract" />
+                    <button type="button" onClick={() => addContractField(section.id)} className="rounded-md border border-indigo-200 px-2.5 py-2 text-[11px] font-bold text-indigo-700 hover:bg-indigo-50"><Plus size={13} className="mr-1 inline" />Thêm trường</button>
+                    <button type="button" onClick={() => removeContractSection(section.id)} className="rounded-md border border-rose-200 p-2 text-rose-600 hover:bg-rose-50" title="Xóa nhóm"><Trash2 size={14} /></button>
+                  </div>
+                  {section.fields.length === 0 ? <p className="mt-3 text-[11px] text-slate-400">Nhóm chưa có trường.</p> : (
+                    <div className="mt-3 grid grid-cols-1 gap-2 xl:grid-cols-2">
+                      {section.fields.map((field) => (
+                        <div key={field.id} className="rounded-lg border border-slate-100 bg-slate-50/70 p-2">
+                          <div className="grid grid-cols-[1fr_1fr_auto] gap-2">
+                            <input value={field.label} onChange={(event) => updateContractField(section.id, field.id, { label: event.target.value })} placeholder="Tên hiển thị" className="rounded-md border border-slate-200 bg-white px-2 py-1.5 text-[11px] font-semibold" />
+                            <input value={field.key} onChange={(event) => updateContractField(section.id, field.id, { key: event.target.value })} placeholder="model.path" className="rounded-md border border-slate-200 bg-white px-2 py-1.5 font-mono text-[11px]" />
+                            <button type="button" onClick={() => removeContractField(section.id, field.id)} className="rounded-md p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600" title="Xóa trường"><X size={14} /></button>
+                          </div>
+                          <div className="mt-2 grid grid-cols-[110px_1fr] gap-2">
+                            <select value={field.kind} onChange={(event) => updateContractField(section.id, field.id, { kind: event.target.value as ContractValueKind })} className="rounded-md border border-slate-200 bg-white px-2 py-2 text-[11px]"><option value="text">Text</option><option value="path">Đường dẫn</option><option value="identifier">Dart identifier</option><option value="csv">Danh sách CSV</option><option value="json">JSON</option><option value="number">Số</option></select>
+                            {field.kind === "json" ? <textarea rows={2} value={field.value} onChange={(event) => updateContractField(section.id, field.id, { value: event.target.value })} placeholder="Giá trị contract" className="resize-y rounded-md border border-slate-200 bg-white px-2 py-2 font-mono text-[11px]" /> : <input type={field.kind === "number" ? "number" : "text"} value={field.value} onChange={(event) => updateContractField(section.id, field.id, { value: event.target.value })} placeholder="Giá trị contract" className="rounded-md border border-slate-200 bg-white px-2 py-2 text-[11px]" />}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
             </div>
-            <div className="mt-3 flex flex-wrap justify-end gap-2"><button type="button" onClick={() => setTemplateContract(emptyTemplateContract())} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100">Xóa gợi ý</button><button type="button" onClick={applyContractToSelectedTestcases} className="rounded-lg bg-indigo-600 px-3 py-2 text-xs font-bold text-white hover:bg-indigo-700">Áp dụng cho testcase trong đề</button></div>
+            <p className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-[11px] leading-relaxed text-emerald-700">Giá trị contract được cập nhật tự động vào các testcase đang kế thừa. Tham số bạn sửa trực tiếp trong từng testcase được giữ làm override.</p>
+            <div className="mt-3 flex flex-wrap justify-between gap-2"><button type="button" onClick={addContractSection} className="rounded-lg border border-indigo-200 bg-white px-3 py-2 text-xs font-semibold text-indigo-700 hover:bg-indigo-50"><Plus size={14} className="mr-1 inline" />Thêm nhóm contract</button><div className="flex flex-wrap gap-2"><button type="button" onClick={() => setTemplateContract(emptyTemplateContract())} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100">Khôi phục khung gợi ý</button><button type="button" onClick={applyContractToSelectedTestcases} className="rounded-lg bg-indigo-600 px-3 py-2 text-xs font-bold text-white hover:bg-indigo-700">Bỏ override và đồng bộ lại</button></div></div>
           </details>
           <div className="border-t border-slate-100 px-4 py-3 text-xs text-slate-500"><strong className="text-slate-700">Không có nút nạp hàng loạt:</strong> đề cần gì thì chọn mẫu đó, sau đó thay tham số theo đúng starter đang phát.</div>
         </section>
@@ -1313,11 +1732,35 @@ export default function TestcasesPage() {
         )}
 
         <section className="card overflow-hidden">
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3">
-            <div><p className="eyebrow">File testcase đang sinh</p><h2 className="mt-1 text-sm font-bold text-slate-800">exam_test.dart</h2><p className="mt-1 text-xs text-slate-500">{engineMode === "TEMPLATE_CONTRACT_V1" ? "Engine sinh bộ chấm từ các mẫu và contract đang nhập cho đề này." : "Bấm Lưu Draft để sinh lại file từ cấu hình Key hiện tại."}</p></div>
-            <button type="button" onClick={openPreview} disabled={version === 0 || previewLoading} className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 disabled:opacity-50"><Eye size={14} /> Xem đủ 3 file</button>
+          <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3">
+            <div>
+              <p className="eyebrow">Tiến độ bộ testcase</p>
+              <h2 className="mt-1 text-sm font-bold text-slate-800">Theo dõi tiêu chí đang xây dựng</h2>
+              <p className="mt-1 text-xs text-slate-500">Thêm và hoàn thiện từng testcase. Code máy chỉ mở khi cần kiểm tra kỹ thuật.</p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${status === "PUBLISHED" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>{version > 0 ? `${status || "DRAFT"} · v${version}` : "Chưa lưu Draft"}</span>
+              <button type="button" onClick={openPreview} disabled={version === 0 || previewLoading} className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 disabled:opacity-50"><Eye size={14} /> Xem 3 file kỹ thuật</button>
+            </div>
           </div>
-          {version === 0 ? <div className="p-6 text-center text-sm text-slate-400">Chưa có file. Hãy nhập mã đề, tên đề và bấm Lưu Draft.</div> : previewLoading ? <div className="flex justify-center p-8 text-slate-400"><Loader2 className="animate-spin" size={20} /></div> : <pre className="custom-scrollbar max-h-[520px] overflow-auto whitespace-pre bg-slate-900 p-4 text-[11px] leading-relaxed text-slate-100">{previewFiles.find((file) => file.name.endsWith("exam_test.dart"))?.content || "Không đọc được exam_test.dart. Hãy lưu lại Draft."}</pre>}
+          <div className="grid gap-4 p-4 lg:grid-cols-[220px_minmax(0,1fr)]">
+            <div className="rounded-xl border border-slate-200 bg-white p-4">
+              <div className="flex items-end justify-between gap-3"><div><p className="text-xs font-semibold text-slate-500">Đã sẵn sàng</p><p className="mt-1 text-2xl font-black text-slate-800">{readyItemCount}<span className="text-sm font-semibold text-slate-400">/{activeItemCount}</span></p></div><span className={`text-lg font-black ${attentionItemCount ? "text-amber-600" : "text-emerald-600"}`}>{progressPercent}%</span></div>
+              <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-100"><div className={`h-full rounded-full ${attentionItemCount ? "bg-amber-400" : "bg-emerald-500"}`} style={{ width: `${progressPercent}%` }} /></div>
+              <div className="mt-3 space-y-1 text-xs"><div className="flex justify-between text-slate-500"><span>Cần hoàn thiện</span><strong className={attentionItemCount ? "text-amber-600" : "text-slate-600"}>{attentionItemCount}</strong></div><div className="flex justify-between text-slate-500"><span>Đang tắt</span><strong className="text-slate-600">{disabledItemCount}</strong></div><div className="flex justify-between text-slate-500"><span>Tổng trọng số</span><strong className="text-indigo-700">{totalWeight.toFixed(2)}</strong></div></div>
+              {attentionItemCount > 0 && <button type="button" onClick={() => { setItemGroupFilter("ALL"); setItemProgressFilter("attention"); document.getElementById("selected-testcases")?.scrollIntoView({ behavior: "smooth", block: "start" }); }} className="mt-3 w-full rounded-lg bg-amber-50 px-3 py-2 text-xs font-bold text-amber-700 hover:bg-amber-100">Xem {attentionItemCount} mục cần hoàn thiện</button>}
+            </div>
+            <div className="grid gap-3 sm:grid-cols-3">
+              {progressGroups.map((group) => (
+                <button key={group.code} type="button" onClick={() => { setItemGroupFilter(group.code); setItemProgressFilter("ALL"); document.getElementById("selected-testcases")?.scrollIntoView({ behavior: "smooth", block: "start" }); }} className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-left transition-colors hover:border-indigo-200 hover:bg-indigo-50/40">
+                  <div className="flex items-center justify-between gap-2"><span className="text-sm font-bold text-slate-700">{TESTCASE_GROUP_LABEL[group.code]}</span><ChevronRight size={15} className="text-slate-300" /></div>
+                  <p className="mt-3 text-xl font-black text-slate-800">{group.ready}<span className="text-sm text-slate-400">/{group.count}</span></p>
+                  <p className="mt-1 text-xs text-slate-500">sẵn sàng · {group.weight.toFixed(2)} điểm</p>
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="border-t border-slate-100 bg-indigo-50/50 px-4 py-3 text-xs leading-relaxed text-indigo-700"><strong>Luồng đề xuất:</strong> chọn một mẫu → thêm vào đề → sửa cấu hình đang mở → kiểm tra trạng thái → lưu Draft → tiếp tục testcase kế tiếp.</div>
         </section>
 
         {message && (
@@ -1414,10 +1857,17 @@ export default function TestcasesPage() {
           </section>
 
           {/* Khu vực 3: testcase instance của đề */}
-          <section className="card min-w-0 overflow-hidden">
+          <section id="selected-testcases" className="card min-w-0 scroll-mt-24 overflow-hidden">
             <div className="border-b border-slate-100 bg-slate-50/70 px-4 py-3">
               <div className="flex flex-wrap items-center justify-between gap-3"><div><p className="eyebrow">Khu vực 3</p><h2 className="mt-1 text-sm font-bold text-slate-800">Testcase trong đề</h2></div><div className="flex items-center gap-2"><span className="rounded-full bg-indigo-100 px-2.5 py-1 text-xs font-bold text-indigo-700">{items.length} mục</span>{supportsGrouping && selectedItemIds.length >= 2 && <button onClick={openGroupModal} className="rounded-lg bg-indigo-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700">Gộp thành testcase lớn</button>}{items.length > 0 && <button onClick={clearAllItems} className="flex items-center gap-1 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-100" title="Xóa toàn bộ testcase"><Trash2 size={13} /> Xóa tất cả</button>}</div></div>
               <div className="mt-3 flex items-center justify-between text-xs"><span className="text-slate-500">Tổng trọng số</span><strong className="text-indigo-700">{totalWeight.toFixed(2)}</strong></div>
+              {items.length > 0 && <div className="mt-3 space-y-2 border-t border-slate-200 pt-3">
+                <div className="flex flex-wrap gap-1.5">{TESTCASE_GROUP_ORDER.map((code) => <button key={code} type="button" onClick={() => setItemGroupFilter(code)} className={`rounded-md px-2 py-1 text-[10px] font-bold ${itemGroupFilter === code ? "bg-indigo-600 text-white" : "bg-white text-slate-500 hover:bg-slate-100"}`}>{code === "ALL" ? "Mọi tầng" : TESTCASE_GROUP_LABEL[code].replace("Testcase ", "")}</button>)}</div>
+                <div className="flex flex-wrap gap-1.5">{([
+                  ["ALL", `Tất cả ${items.length}`], ["ready", `Sẵn sàng ${readyItemCount}`],
+                  ["attention", `Cần xử lý ${attentionItemCount}`], ["disabled", `Đang tắt ${disabledItemCount}`],
+                ] as const).map(([code, label]) => <button key={code} type="button" onClick={() => setItemProgressFilter(code)} className={`rounded-md px-2 py-1 text-[10px] font-semibold ${itemProgressFilter === code ? "bg-slate-700 text-white" : "bg-white text-slate-500 hover:bg-slate-100"}`}>{label}</button>)}</div>
+              </div>}
             </div>
             <div
               className="custom-scrollbar max-h-[calc(100vh-295px)] min-h-[360px] space-y-2 overflow-y-auto p-3"
@@ -1427,10 +1877,19 @@ export default function TestcasesPage() {
               {items.length === 0 ? (
                 <div className="flex min-h-[330px] flex-col items-center justify-center rounded-xl border-2 border-dashed border-slate-200 p-8 text-center" onDragOver={(e) => e.preventDefault()}>
                   <Package size={28} className="mb-3 text-slate-300" />
-                  <p className="text-sm font-semibold text-slate-600">Kéo testcase vào đây</p>
-                  <p className="mt-1 text-xs text-slate-400">Hoặc bấm “Thêm vào đề” để tránh bỏ sót thao tác.</p>
+                  <p className="text-sm font-semibold text-slate-600">Bắt đầu từ một testcase đơn giản</p>
+                  <p className="mt-1 text-xs text-slate-400">Thêm kiểm tra khởi động làm dòng đầu tiên có trọng số, sau đó bổ sung từng tiêu chí.</p>
+                  {templatesForEngine.find((template) => template.runner === "APP_BOOT") && <button type="button" onClick={() => addTemplate(templatesForEngine.find((template) => template.runner === "APP_BOOT")!.template_id)} className="mt-3 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-bold text-white hover:bg-indigo-700"><Plus size={13} className="mr-1 inline" />Khởi tạo testcase đầu tiên</button>}
                 </div>
-              ) : items.map((item) => (
+              ) : filteredItems.length === 0 ? (
+                <div className="flex min-h-[260px] flex-col items-center justify-center rounded-xl border-2 border-dashed border-slate-200 p-8 text-center">
+                  <CheckCircle2 size={28} className="mb-3 text-emerald-400" />
+                  <p className="text-sm font-semibold text-slate-600">Không có testcase khớp bộ lọc</p>
+                  <button type="button" onClick={() => { setItemGroupFilter("ALL"); setItemProgressFilter("ALL"); }} className="mt-3 rounded-md bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-200">Hiển thị tất cả</button>
+                </div>
+              ) : filteredItems.map((item) => {
+                const progress = itemProgressMap.get(item.instance_id) || { state: "attention", issues: ["Chưa xác định được trạng thái"] };
+                return (
                 <div
                   key={item.instance_id}
                   draggable
@@ -1442,11 +1901,12 @@ export default function TestcasesPage() {
                   <div className="flex items-start gap-2">
                     <GripVertical size={16} className="mt-0.5 shrink-0 cursor-grab text-slate-300" />
                     <div className="min-w-0 flex-1">
-                      <div className="flex items-start justify-between gap-2"><div className="min-w-0"><p className="text-sm font-semibold text-slate-800">{item.name}</p>{item.group_id && <div className="mt-1.5 rounded-lg border border-indigo-100 bg-indigo-50/70 px-2.5 py-2 text-[10px] text-indigo-700"><p className="font-bold">Testcase lớn: {groupSummaries.get(item.group_id)?.name || item.group_name || item.group_id}</p><p className="mt-0.5">{groupSummaries.get(item.group_id)?.count || 0} testcase nhỏ · {Number(groupSummaries.get(item.group_id)?.weight || 0).toFixed(2)} điểm · một assert fail sẽ làm cả nhóm fail</p><p className="mt-0.5 font-mono text-indigo-400">{item.group_id}</p></div>}</div><span className="shrink-0 rounded bg-indigo-50 px-1.5 py-0.5 font-mono text-[10px] text-indigo-600">#{item.order}</span></div>
+                      <div className="flex items-start justify-between gap-2"><div className="min-w-0"><p className="text-sm font-semibold text-slate-800">{item.name}</p>{item.group_id && <div className="mt-1.5 rounded-lg border border-indigo-100 bg-indigo-50/70 px-2.5 py-2 text-[10px] text-indigo-700"><p className="font-bold">Testcase lớn: {groupSummaries.get(item.group_id)?.name || item.group_name || item.group_id}</p><p className="mt-0.5">{groupSummaries.get(item.group_id)?.count || 0} testcase nhỏ · {Number(groupSummaries.get(item.group_id)?.weight || 0).toFixed(2)} điểm · một assert fail sẽ làm cả nhóm fail</p><p className="mt-0.5 font-mono text-indigo-400">{item.group_id}</p></div>}</div><div className="flex shrink-0 items-center gap-1.5"><span className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${progress.state === "ready" ? "bg-emerald-100 text-emerald-700" : progress.state === "disabled" ? "bg-slate-100 text-slate-500" : "bg-amber-100 text-amber-700"}`}>{progress.state === "ready" ? "Sẵn sàng" : progress.state === "disabled" ? "Đang tắt" : "Cần xử lý"}</span><span className="rounded bg-indigo-50 px-1.5 py-0.5 font-mono text-[10px] text-indigo-600">#{item.order}</span></div></div>
                       <p className="mt-1 truncate font-mono text-[10px] text-slate-400">{item.instance_id}</p>
                       <div className="mt-2 flex flex-wrap items-center gap-1.5"><span className="rounded bg-violet-100 px-1.5 py-0.5 text-[10px] font-bold text-violet-700">{LAYER_LABEL[item.layer] || item.layer}</span><span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-500">{DIFF_LABEL[item.difficulty] || item.difficulty}</span><span className="text-[11px] font-semibold text-slate-500">{Number(item.weight).toFixed(2)} điểm</span></div>
                     </div>
                   </div>
+                  {progress.state === "attention" && <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[10px] leading-relaxed text-amber-800"><p className="font-bold">Cần hoàn thiện trước khi Publish</p><p className="mt-0.5">{progress.issues.join(" · ")}</p></div>}
                   <div className="mt-2 flex items-center justify-between border-t border-slate-100 pt-2">
                     <div className="flex items-center gap-3"><label className="flex items-center gap-1.5 text-xs text-slate-500"><input type="checkbox" checked={item.enabled} onChange={(e) => updateItem(item.instance_id, { enabled: e.target.checked })} /> Đang bật</label>{supportsGrouping && <label className="flex items-center gap-1.5 text-xs text-indigo-600"><input type="checkbox" checked={selectedItemIds.includes(item.instance_id)} onChange={() => toggleItemSelection(item.instance_id)} /> Chọn nhóm</label>}</div>
                     <div className="flex gap-1">{item.group_id && <button onClick={() => ungroupItems(item.group_id!)} className="rounded-md px-2 py-1 text-xs font-semibold text-slate-500 hover:bg-slate-100">Tách nhóm</button>}<button onClick={() => setEditingId(editingId === item.instance_id ? null : item.instance_id)} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold text-indigo-600 hover:bg-indigo-50"><Settings2 size={13} /> Cấu hình</button><button onClick={() => { setSelectedItemIds((current) => current.filter((id) => id !== item.instance_id)); setItems((current) => current.filter((x) => x.instance_id !== item.instance_id).map((x, i) => ({ ...x, order: i + 1 }))); }} className="rounded-md p-1 text-slate-400 hover:bg-rose-50 hover:text-rose-600"><Trash2 size={14} /></button></div>
@@ -1482,7 +1942,8 @@ export default function TestcasesPage() {
                     </div>
                   )}
                 </div>
-              ))}
+                );
+              })}
             </div>
           </section>
         </div>
@@ -1513,6 +1974,7 @@ export default function TestcasesPage() {
                     <label className="text-xs font-semibold text-slate-600">Trọng số mặc định<input type="number" min={0} max={100} step={0.5} value={newTemplate.weight_default} onChange={(e) => setNewTemplate((v) => ({ ...v, weight_default: e.target.value }))} className="mt-1.5 w-full rounded-md border border-slate-200 px-2.5 py-2 text-xs" /></label>
                     <label className="text-xs font-semibold text-slate-600 md:col-span-2">Expected template<textarea rows={2} value={newTemplate.expected_template} onChange={(e) => setNewTemplate((v) => ({ ...v, expected_template: e.target.value }))} className="mt-1.5 w-full resize-y rounded-md border border-slate-200 px-2.5 py-2 text-xs" /><span className="mt-1 block text-[10px] font-normal text-slate-400">Đây là mô tả rubric. Kết quả pass/fail thật do runner và parameters_schema quyết định.</span></label>
                     <label className="text-xs font-semibold text-slate-600 md:col-span-2">Schema tham số mặc định (JSON object)<textarea rows={8} value={newTemplate.parameters_schema} onChange={(e) => setNewTemplate((v) => ({ ...v, parameters_schema: e.target.value }))} spellCheck={false} className="mt-1.5 w-full resize-y rounded-md border border-slate-200 bg-slate-900 px-3 py-2 font-mono text-[11px] leading-relaxed text-slate-100" /><span className="mt-1 block text-[10px] font-normal text-slate-400">Các key phải đúng với runner đã chọn. Không nhập Dart code tại đây.</span></label>
+                    {engineMode === "TEMPLATE_CONTRACT_V1" && <label className="text-xs font-semibold text-slate-600 md:col-span-2">Ánh xạ tham số → mã contract (JSON object)<textarea rows={5} value={newTemplate.contract_bindings} onChange={(e) => setNewTemplate((v) => ({ ...v, contract_bindings: e.target.value }))} spellCheck={false} className="mt-1.5 w-full resize-y rounded-md border border-slate-200 bg-slate-900 px-3 py-2 font-mono text-[11px] leading-relaxed text-slate-100" /><span className="mt-1 block text-[10px] font-normal text-slate-400">Ví dụ: {`{"sourcePath":"model.path","className":"model.class"}`}. Chỉ ánh xạ những tham số cần tự nhận từ contract; vẫn có thể sửa riêng sau khi thêm vào đề.</span></label>}
                   </div>
                   {newTemplateError && <p className="mt-3 rounded-lg bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700">{newTemplateError}</p>}
                   <div className="mt-5 flex justify-end gap-2"><button type="button" disabled={newTemplateSaving} onClick={() => setNewTemplateOpen(false)} className="rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-50">Hủy</button><button type="button" disabled={newTemplateSaving} onClick={saveNewTemplate} className="flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3.5 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50">{newTemplateSaving ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />} Lưu template</button></div>

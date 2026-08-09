@@ -11,7 +11,7 @@
     "description": "Dùng khi đề yêu cầu app mở được từ main(). Runner khởi động app, chờ giao diện ổn định và xác nhận không có exception; rootKey là tùy chọn nếu cần kiểm tra thêm vùng gốc.",
     "difficulty": "basic",
     "weight_default": 1,
-    "parameters_schema": {"rootKey": ""},
+    "parameters_schema": {"rootKey": "", "readyKey": "", "readyTimeoutMs": 3000},
     "expected_template": "Ứng dụng phải khởi động từ main() và không phát sinh exception."
   },
   {
@@ -43,8 +43,10 @@
     "weight_default": 2,
     "parameters_schema": {
       "fieldKeys": "field.title,field.email",
+      "fieldType": "input",
       "submitKey": "action.save",
-      "errorKeys": "error.title,error.email"
+      "errorKeys": "error.title,error.email",
+      "requireNewErrors": true
     },
     "expected_template": "Khi submit rỗng, các field {fieldKeys} phải hiển thị lỗi tương ứng."
   },
@@ -106,7 +108,9 @@
       "openKey": "action.open-detail",
       "destinationKey": "screen.detail",
       "backKey": "action.back",
-      "homeKey": "screen.home"
+      "homeKey": "screen.home",
+      "requireNewDestination": true,
+      "hideDestinationAfterBack": true
     },
     "expected_template": "Từ key {openKey} phải mở {destinationKey} và quay lại được {homeKey}."
   },
@@ -142,7 +146,8 @@
     "weight_default": 2,
     "parameters_schema": {
       "buttonKey": "action.save",
-      "resultKey": "message.success"
+      "resultKey": "message.success",
+      "requireNewResult": true
     },
     "expected_template": "Bấm {buttonKey} phải tạo hoặc hiển thị {resultKey}."
   },
@@ -300,8 +305,8 @@
     "runner": "FORM_VALIDATE_FIELDS",
     "skill_code": "UI_TEXT_INPUT",
     "layer": "SCREEN",
-    "name": "Form validate dữ liệu không hợp lệ",
-    "description": "Nhập invalidValues theo đúng thứ tự fieldKeys, bấm submitKey và kiểm tra từng errorKey tương ứng xuất hiện. Dùng __EMPTY__ để biểu diễn chuỗi rỗng vì danh sách CSV không giữ được phần tử trống.",
+    "name": "Form hiển thị errorKey theo bộ dữ liệu cấu hình",
+    "description": "Mẫu validation Key tổng quát: nhập nguyên văn invalidValues theo fieldKeys, bấm submitKey và kiểm tra các errorKeys mới xuất hiện. Dùng __EMPTY__ hoặc phần tử rỗng trong JSON array cho chuỗi rỗng.",
     "difficulty": "intermediate",
     "weight_default": 2,
     "parameters_schema": {
@@ -309,9 +314,76 @@
       "fieldType": "input",
       "invalidValues": "__EMPTY__,invalid-email",
       "submitKey": "action.save",
-      "errorKeys": "error.title,error.email"
+      "errorKeys": "error.title,error.email",
+      "requireNewErrors": true
     },
-    "expected_template": "Khi submit dữ liệu lỗi ({invalidValues}), từng field {fieldKeys} phải hiển thị lỗi tương ứng."
+    "expected_template": "Khi submit dữ liệu lỗi ({invalidValues}) cho {fieldKeys}, form phải tạo các lỗi {errorKeys}."
+  },
+  {
+    "template_id": "COMMON_FORM_FORMAT_VALIDATION",
+    "template_version": "common-v3",
+    "engine_type": "COMMON_V1",
+    "profile_id": "COMMON_SEMANTIC_V1",
+    "runner": "FORM_VALIDATE_FIELDS",
+    "skill_code": "UI_TEXT_INPUT",
+    "layer": "SCREEN",
+    "name": "Form Key từ chối dữ liệu sai định dạng",
+    "description": "Kiểm tra email, số, ngày, URL hoặc mẫu chuỗi sai bằng dữ liệu literal do giảng viên nhập. Engine không tự suy luận kiểu dữ liệu từ tên fieldKey.",
+    "difficulty": "intermediate",
+    "weight_default": 1.5,
+    "parameters_schema": {
+      "fieldKeys": "field.email",
+      "fieldType": "input",
+      "invalidValues": "abc@",
+      "submitKey": "action.save",
+      "errorKeys": "error.email",
+      "requireNewErrors": true
+    },
+    "expected_template": "Nhập {invalidValues} vào {fieldKeys} phải tạo lỗi định dạng {errorKeys}."
+  },
+  {
+    "template_id": "COMMON_FORM_BOUNDARY_VALIDATION",
+    "template_version": "common-v3",
+    "engine_type": "COMMON_V1",
+    "profile_id": "COMMON_SEMANTIC_V1",
+    "runner": "FORM_VALIDATE_FIELDS",
+    "skill_code": "UI_TEXT_INPUT",
+    "layer": "SCREEN",
+    "name": "Form Key từ chối dữ liệu vi phạm giới hạn",
+    "description": "Kiểm tra min/max, độ dài hoặc miền giá trị bằng dữ liệu nằm ngoài giới hạn được công bố trong đề.",
+    "difficulty": "intermediate",
+    "weight_default": 1.5,
+    "parameters_schema": {
+      "fieldKeys": "field.password",
+      "fieldType": "input",
+      "invalidValues": "123",
+      "submitKey": "action.save",
+      "errorKeys": "error.password",
+      "requireNewErrors": true
+    },
+    "expected_template": "Nhập {invalidValues} vào {fieldKeys} phải tạo lỗi giới hạn {errorKeys}."
+  },
+  {
+    "template_id": "COMMON_FORM_CROSS_FIELD_VALIDATION",
+    "template_version": "common-v3",
+    "engine_type": "COMMON_V1",
+    "profile_id": "COMMON_SEMANTIC_V1",
+    "runner": "FORM_VALIDATE_FIELDS",
+    "skill_code": "UI_TEXT_INPUT",
+    "layer": "SCREEN",
+    "name": "Form Key đối chiếu dữ liệu giữa nhiều field",
+    "description": "Kiểm tra quy tắc phụ thuộc giữa nhiều field. Số errorKeys không bắt buộc bằng số fieldKeys vì một lỗi có thể đại diện cho cả bộ dữ liệu.",
+    "difficulty": "advanced",
+    "weight_default": 2,
+    "parameters_schema": {
+      "fieldKeys": "field.password,field.confirmPassword",
+      "fieldType": "input",
+      "invalidValues": "secret123,different",
+      "submitKey": "action.save",
+      "errorKeys": "error.passwordMismatch",
+      "requireNewErrors": true
+    },
+    "expected_template": "Bộ dữ liệu {invalidValues} trong {fieldKeys} phải tạo lỗi đối chiếu {errorKeys}."
   },
   {
     "template_id": "COMMON_LIST_ITEM_COUNT",
@@ -321,8 +393,8 @@
     "runner": "LIST_ITEM_COUNT",
     "skill_code": "ADVUI_LISTVIEW",
     "layer": "SCREEN",
-    "name": "Số lượng item trong list",
-    "description": "Xác nhận listKey xuất hiện, đúng expectedCount itemKeys được render và từng key trong danh sách đều tồn tại. Dùng khi đề yêu cầu số lượng phần tử hiển thị cụ thể.",
+    "name": "Số itemKey mong đợi xuất hiện trong list",
+    "description": "Đếm bao nhiêu key trong itemKeys thực sự là hậu duệ của listKey và so với expectedCount. Mẫu này không khẳng định list không có item khác ngoài các key đã khai báo.",
     "difficulty": "intermediate",
     "weight_default": 1,
     "parameters_schema": {
@@ -349,7 +421,9 @@
       "dialogKey": "dialog.delete",
       "decisionKey": "action.delete.cancel",
       "resultKey": "screen.list",
-      "absentKey": "dialog.delete"
+      "absentKey": "dialog.delete",
+      "requireNewDialog": true,
+      "requireNewResult": false
     },
     "expected_template": "Bấm {actionKey} phải mở {dialogKey}; chọn {decisionKey} phải cho kết quả đúng và xử lý {absentKey}."
   },
@@ -369,7 +443,8 @@
       "editKey": "action.item.edit",
       "fieldKeys": "field.title,field.email",
       "fieldType": "input",
-      "expectedValues": "Task cũ,user@example.com"
+      "expectedValues": "Task cũ,user@example.com",
+      "requirePrefillTransition": true
     },
     "expected_template": "Sau khi bấm {editKey}, các field {fieldKeys} phải được prefill đúng giá trị."
   },
@@ -391,7 +466,8 @@
       "values": "Task mới,user@example.com",
       "submitKey": "action.save",
       "resultKey": "message.success",
-      "errorKeys": "error.title,error.email"
+      "errorKeys": "error.title,error.email",
+      "requireNewResult": true
     },
     "expected_template": "Submit {submitKey} với dữ liệu hợp lệ phải tạo {resultKey} và không hiển thị lỗi."
   },
@@ -431,7 +507,8 @@
       "initialKey": "state.empty",
       "actionKey": "action.load",
       "updatedKey": "state.loaded",
-      "absentKey": "state.empty"
+      "absentKey": "state.empty",
+      "requireNewUpdatedState": true
     },
     "expected_template": "Sau khi bấm {actionKey}, state phải chuyển từ {initialKey} sang {updatedKey}."
   },

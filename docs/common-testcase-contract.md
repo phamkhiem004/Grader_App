@@ -38,6 +38,29 @@ Quy ước:
 Tên nghiệp vụ có thể khác nhau giữa Todo, Expense hoặc Product; semantic key giữ cho
 runner dùng chung không bị phụ thuộc vào tên class/model của từng đề.
 
+Các danh sách vẫn nhận CSV để nhập nhanh. Khi dữ liệu có dấu phẩy hoặc cần giữ phần tử
+rỗng, dùng JSON array, ví dụ `['Doe, John', '']` phải được nhập theo JSON chuẩn là
+`["Doe, John", ""]`. Chỉ các key vẫn nên là chuỗi semantic ngắn, không chứa dấu phẩy.
+
+## Kiểm tra chuyển trạng thái, không chỉ ảnh chụp sau cùng
+
+Runner hành vi mặc định phải chứng minh kết quả được tạo bởi thao tác đang chấm:
+
+- `BUTTON_ACTION` và `FORM_SUBMIT`: `resultKey` phải xuất hiện mới (`requireNewResult`).
+- `NAVIGATION`: `destinationKey` phải được mở mới; sau Back, màn hình đích phải ẩn.
+- `FORM_REQUIRED_FIELDS` và `FORM_VALIDATE_FIELDS`: `errorKeys` phải xuất hiện mới sau submit.
+- `DIALOG_FLOW`: `dialogKey` phải được mở mới và `decisionKey` phải nằm trong đúng dialog.
+- `STATE_REACTIVE_FLOW`: `updatedKey` phải là state mới, khác state ban đầu.
+- `FORM_PREFILL`: thao tác Edit phải tạo thay đổi prefill quan sát được.
+
+Các cờ này có thể tắt ở một đề đặc biệt, nhưng khi tắt thì testcase chỉ xác nhận trạng thái
+sau cùng và mức chống pass giả sẽ thấp hơn. Finder thông thường chỉ tính widget đang hiển thị;
+kiểm tra `absentKey` mới quét cả widget offstage để chắc chắn đối tượng thực sự biến mất.
+
+`LIST_ITEM_COUNT` chỉ đếm các `itemKeys` đã khai báo nằm bên trong `listKey`; nó không thể kết
+luận danh sách không chứa thêm item chưa được gắn key. Vì vậy tên hiển thị của mẫu là
+“Số itemKey mong đợi xuất hiện trong list”, không phải tổng số phần tử nội bộ của mọi cách dựng list.
+
 ## Khi lưu cấu hình testcase
 
 Chức năng tạo testcase materialize một engine chung thành ba file chạy được:
@@ -131,20 +154,29 @@ cho group. Engine vẫn chạy toàn bộ testcase con để báo đủ lỗi; c
 con hoặc một assert fail thì group fail. Điểm của group bằng tổng điểm các testcase con.
 
 
-## Khung b? testcase (suite contract)
+## Khung bộ testcase (suite contract)
 
-Khi t?o b? testcase m?i, gi?ng vi?n c? th? khai b?o `suite` ? c?p b? ??. C?u h?nh n?y ???c
-l?u trong `testcase-config.json` v? ???c nh?ng v?o t?ng d?ng c?a `skills_matrix.json`, do ??
-ZIP legacy g?m `exam_test.dart`, `grader.dart`, `skills_matrix.json` v?n ch?y b?nh th??ng.
+Khi tạo bộ testcase mới, giảng viên có thể khai báo `suite` ở cấp bộ đề. Cấu hình Draft
+đầy đủ được backend giữ trong database để có thể mở lại và chỉnh sửa. Khi sinh bộ chấm
+template-contract, backend loại bỏ schema biên tập `template_contract`, persistence/golden đang tắt
+và các giá trị mặc định. Chỉ `suite` runtime không rỗng mà Dart runner thực sự đọc mới được ghi
+một lần trong dòng testcase đầu tiên của `skills_matrix.json`; các dòng sau tự dùng lại cấu hình đó.
+
+ZIP và thư mục chấm công khai luôn chỉ có đúng ba file: `exam_test.dart`, `grader.dart`
+và `skills_matrix.json`. Không có `testcase-config.json` trong artifact chấm.
+
+Pack `TODO_USER_STARTER_V12` là bộ chấm cố định cho đúng starter V12, không thuộc thư viện
+tái sử dụng. Không kéo 48 tiêu chí của pack đó sang một đề khác. Đề linh hoạt phải dùng các
+runner common theo Key hoặc template-contract theo public symbol/label của starter tương ứng.
 
 ```json
 {
   "suite": {
     "suite_version": 1,
-    "name": "Todo CRUD c? b?n",
+    "name": "Todo CRUD cơ bản",
     "context": "todo_crud",
     "fixture_name": "one_existing_todo",
-    "fixture_description": "Starter m? l?n c? m?t Todo ?? s?a.",
+    "fixture_description": "Starter mở lên có một Todo để sửa.",
     "strict_semantic_keys": true,
     "ready_key": "screen.home.ready",
     "required_keys": ["screen.home", "list.items", "action.add"],
@@ -158,21 +190,21 @@ ZIP legacy g?m `exam_test.dart`, `grader.dart`, `skills_matrix.json` v?n ch?y b?
 }
 ```
 
-`setup_steps` ch? h? tr? thao t?c black-box trong whitelist:
+`setup_steps` chỉ hỗ trợ thao tác black-box trong whitelist:
 
-- `tap`: b?m semantic key.
-- `enter_text`: nh?p `value` v?o semantic key c?a input.
-- `expect_visible`: y?u c?u key xu?t hi?n ngay.
-- `expect_absent`: y?u c?u key kh?ng xu?t hi?n.
-- `wait_for_visible`: ch? key xu?t hi?n trong `timeout_ms`.
+- `tap`: bấm semantic key.
+- `enter_text`: nhập `value` vào semantic key của input.
+- `expect_visible`: yêu cầu key xuất hiện ngay.
+- `expect_absent`: yêu cầu key không xuất hiện.
+- `wait_for_visible`: chờ key xuất hiện trong `timeout_ms`.
 
-M?i testcase c?ng c? th? c? `setup_steps` ri?ng. Engine ch?y theo th? t?:
+Mỗi testcase cũng có thể có `setup_steps` riêng. Engine chạy theo thứ tự:
 
 ```text
-boot app m?i ? ki?m tra required_keys ? ch? ready_key ? suite.setup_steps ? testcase.setup_steps ? assertion
+boot app mới → kiểm tra required_keys → chờ ready_key → suite.setup_steps → testcase.setup_steps → assertion
 ```
 
-Starter/template d?ng khung strict ph?i c?ng b? `ValueKey` ?n ??nh, v? d?:
+Starter/template dùng khung strict phải công bố `ValueKey` ổn định, ví dụ:
 
 ```dart
 Scaffold(key: const ValueKey('screen.home'))
@@ -180,9 +212,9 @@ ListView(key: const ValueKey('list.items'))
 ElevatedButton(key: const ValueKey('action.add'), onPressed: ...)
 ```
 
-Kh?ng ??a Dart code, model, repository ho?c t?n provider v?o `suite`. N?u y?u c?u c?n seed
-database, API mock ho?c ki?m tra persistence th?t, ?? l? profile testcase ri?ng ch? kh?ng ph?i
-fixture black-box c?a common engine.
+Không đưa Dart code, model, repository hoặc tên provider vào `suite`. Nếu yêu cầu cần seed
+database, API mock hoặc kiểm tra persistence thật, đó là profile testcase riêng chứ không phải
+fixture black-box của common engine.
 
-C?u h?nh testcase c? kh?ng c? `suite` v?n ch?y ? ch? ?? t??ng th?ch fallback. B? ?? m?i n?n
-b?t `strict_semantic_keys` ?? thi?u key s? fail r? r?ng thay v? runner t? ?o?n theo User CRUD.
+Cấu hình testcase cũ không có `suite` vẫn chạy ở chế độ tương thích fallback. Bộ đề mới nên
+bật `strict_semantic_keys` để thiếu key sẽ fail rõ ràng thay vì runner tự đoán theo User CRUD.

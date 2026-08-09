@@ -167,6 +167,21 @@ BẰNG nguồn thật, lệch là đỏ) + `GroupModeAndKeyGrammarTest`.
 
 **Triệu chứng: mọi bài do khảo thí chấm đều mất "Yêu cầu của đề".**
 
+> ### 🔴 Vì sao chúng tôi xin xếp việc này ƯU TIÊN CAO
+>
+> Đây **không phải** một trường JSON bị rỗng. Đây là **một tính năng đã làm xong ở CẢ HAI phía mà
+> không bao giờ tới được người dùng cuối** — chỉ vì đề đi qua ZIP giữa hai máy.
+>
+> Cụ thể thứ bị mất: bot có một khối *"Đề bài yêu cầu:"* in nguyên văn yêu cầu của giảng viên. Khối
+> đó sinh ra để lấp đúng một lỗ — với **bài gần hoàn hảo**, bot gần như không có gì hợp lệ để nói:
+> không được suy diễn về mã nguồn sinh viên, không được gợi ý nâng cao (đã bỏ vì hay bịa). Thứ duy
+> nhất được phép nói là *đề đã yêu cầu những gì*, bằng **chữ của chính giảng viên**.
+>
+> Mất `requirements` ⇒ **bài 10 điểm nhận về một lời khen chung chung.** Đó là bài của sinh viên
+> làm tốt nhất lớp, và cũng là nhận xét dễ bị đem ra so sánh nhất.
+>
+> Hôm nay trên bài thi thật, khối đó **chưa xuất hiện lần nào**.
+
 ### Đo được (chạy thật trên stack, không phải đọc code)
 
 Luồng thật: giảng viên soạn đề ở **máy A** → tải ZIP → khảo thí ở **máy B** vào *Cấu hình đề thi*
@@ -203,9 +218,15 @@ tạo mã đề bằng ZIP đó → chấm bài.
 > Ghi chú: `testcase-config.json` hiện **được ghi ra đĩa nhưng không code nào đọc lại** — nguồn đọc
 > là cột DB. Nếu các bạn thiết kế lại, đây là chỗ đáng dọn.
 
-### Một hệ quả cho hợp đồng dữ liệu, chúng tôi sẽ tự xử
-Vì khiếm khuyết này, `[]` hiện **có hai nghĩa**: "đề cũ" *hoặc* "đề mới nhưng đi qua ZIP". Chúng tôi
-sẽ báo phía bot đừng suy `[]` = "đề cũ" nữa, cho tới khi mục 5 được sửa.
+### Một hệ quả cho hợp đồng dữ liệu, chúng tôi đã tự xử
+Vì khiếm khuyết này, `[]` hiện **có hai nghĩa**: "đề cũ" *hoặc* "đề mới nhưng đi qua ZIP". Đã đính
+chính hợp đồng và báo phía bot đừng suy `[]` = "đề cũ" nữa (2026-08-14). Phía bot đã soát: không có
+chỗ nào suy như vậy, và họ thêm một test khoá để phiên sau **không dựng lại** nhánh đó.
+
+### 📣 Xin báo lại chúng tôi khi sửa xong
+Khi đường nhập đề chở được `requirements`, xin báo — chúng tôi cần **mốc** đó để nói với phía bot
+*"từ đây bài thi thật có khối yêu cầu"*, và để `[]` quay lại **một** nghĩa. Trước mốc đó, tài liệu
+bàn giao của phía bot phải ghi tính năng này là *"có, nhưng chết trong luồng hai máy"*.
 
 ---
 

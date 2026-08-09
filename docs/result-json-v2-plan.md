@@ -97,6 +97,17 @@ viên. Việc của phiên này **chỉ là chất lượng `result.json`** đ�
 > **ĐẶC TẢ VÀ BÀN GIAO, không tự thi công.** Bản bàn giao đầu tiên:
 > [`docs/HOP_DONG_KHAU_SOAN_DE.md`](HOP_DONG_KHAU_SOAN_DE.md).
 
+### 📌 MÓN NỢ ĐANG TREO Ở SÂN NHÓM KHÁC — phiên sau đừng đánh rơi
+
+**Đường nhập đề (ZIP) không chở `requirements`** ⇒ mọi bài khảo thí chấm ra `exam.requirements = []`.
+Hệ quả ở tầng sản phẩm, không phải tầng dữ liệu: khối *"Đề bài yêu cầu:"* của bot **chưa xuất hiện
+lần nào trên bài thi thật**, và nó là thứ *duy nhất* bot được phép nói với bài gần hoàn hảo — nên
+bài 10 điểm hiện nhận một lời khen chung chung.
+
+**Việc của phiên này khi nhóm Grader sửa xong:** báo **MỐC** vào `CHANGELOG_FOR_NLP.md`, **kèm cách
+nhận biết mốc** (không chỉ ghi ngày). Từ mốc đó — và chỉ từ đó — `[]` mới quay lại **một** nghĩa, và
+runbook bàn giao phía NLP mới được đổi khỏi dòng *"tính năng có, nhưng chết trong luồng hai máy"*.
+
 **Tự soát: đã vượt ranh 4 chỗ** (đều đã commit, đã liệt kê trong bản bàn giao để nhóm kia quyết giữ
 hay gỡ) — ô nhập requirements trên UI (`eff5c6f`), `group_mode` hai nút + modal (`f133595`), cưỡng
 chế ngữ pháp khoá lúc lưu đề (`f133595`, **đổi hành vi: đề dùng khoá lạ nay không lưu được**), và

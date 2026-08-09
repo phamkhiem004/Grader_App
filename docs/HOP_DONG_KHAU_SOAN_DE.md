@@ -17,7 +17,7 @@ Tài liệu này nói ba việc:
 2. **Một khiếm khuyết đang chạy** mà chúng tôi đo được nhưng KHÔNG tự sửa vì nó thuộc phần các bạn
    đang thiết kế lại (mục 5). Đây là phần cần các bạn quyết.
 3. **Những chỗ chúng tôi đã đụng vào code của các bạn** — liệt kê đủ, kèm mã commit, để các bạn giữ,
-   sửa hay gỡ tuỳ ý (mục 6).
+   sửa hay gỡ tuỳ ý (mục 6); kèm **ba chỗ đang dùng danh tính** cần xử khi bỏ đăng nhập (mục 6.4).
 
 > **Nguyên tắc chúng tôi tự đặt từ nay:** khi chất lượng `result.json` đòi một thay đổi ở khâu soạn
 > đề, chúng tôi **đặc tả và bàn giao**, không tự thi công. Tài liệu này là lần bàn giao đầu tiên.
@@ -26,6 +26,28 @@ Tài liệu này nói ba việc:
 toàn bộ bài nộp rồi gửi qua mail; **chỉ bài bị bot gắn cờ mới có người xem lại**. Một chữ sai không
 dừng ở một sinh viên — nó tới hàng trăm người. Vì thế mọi thứ dưới đây đều là "chặn ở khâu nhập"
 chứ không phải "sửa ở khâu xuất".
+
+### Luồng vận hành đã chốt (mentor, 2026-08-15) — **bỏ tài khoản đăng nhập**
+
+```
+MÁY A — giảng viên            MÁY B — khảo thí (chỉ mở phần mềm SAU khi thi xong)
+────────────────────          ──────────────────────────────────────────────────
+soạn đề + testcase                 tạo mã đề bằng ZIP nhận được
+        │                                      │
+        └──────── file ZIP ────────────────────┘
+                                               ↓
+                                    ném bài làm sinh viên vào, chấm
+```
+
+Hai máy cá nhân riêng, **không dùng chung máy chủ, không còn đăng nhập** — ai làm việc nấy. Hai hệ
+quả cho tài liệu này:
+
+1. **ZIP là kênh vận chuyển chính thức và DUY NHẤT** giữa hai vai. Đo được: toàn hệ thống chỉ có
+   **một** đường nhập đề (`POST /api/exam-setup/upload-testcase`); chép tay thư mục `exams/` sang
+   máy B **không chấm được** vì thiếu bản ghi trong CSDL. ⇒ Mục 5 nằm trên con đường đó.
+2. **Bỏ tài khoản KHÔNG chạm `result.json`.** Đã đo: không trường nào trong file kết quả bắt nguồn
+   từ người đăng nhập (`teacher_note` lấy từ ô nhập lúc soạn đề, không phải từ tài khoản). Hợp đồng
+   với bot **không đổi một chữ**. Ba chỗ các bạn cần tự quyết khi gỡ — xem mục 6.4.
 
 ---
 
@@ -169,6 +191,19 @@ BẰNG nguồn thật, lệch là đỏ) + `GroupModeAndKeyGrammarTest`.
 
 > ### 🔴 Vì sao chúng tôi xin xếp việc này ƯU TIÊN CAO
 >
+> **Cập nhật 2026-08-15 — mentor đã chốt: bỏ tài khoản đăng nhập.** Lý do: giảng viên và khảo thí
+> chạy phần mềm trên **hai máy cá nhân riêng**, ai làm việc nấy; giảng viên soạn đề → xuất ZIP →
+> gửi khảo thí; hết kỳ thi khảo thí mới mở phần mềm lên để chấm.
+>
+> Quyết định đó **đổi mức nghiêm trọng của khiếm khuyết này**, nên xin đọc lại với con mắt khác:
+> trước đây ZIP chỉ là *một trong các cách* mang đề đi (còn tài khoản thì còn tưởng tượng được một
+> ngày dùng chung máy chủ). Nay ZIP là **kênh vận chuyển CHÍNH THỨC và DUY NHẤT** giữa hai vai —
+> đã đo: toàn hệ thống chỉ có **một** đường nhập đề, và chép tay thư mục `exams/` thì không chấm
+> được vì thiếu bản ghi trong CSDL.
+>
+> ⇒ Đây không phải bug ở một nhánh phụ. **Nó nằm trên con đường chính thức duy nhất của sản phẩm**,
+> và mọi bài khảo thí chấm đều đi qua nó.
+>
 > Đây **không phải** một trường JSON bị rỗng. Đây là **một tính năng đã làm xong ở CẢ HAI phía mà
 > không bao giờ tới được người dùng cuối** — chỉ vì đề đi qua ZIP giữa hai máy.
 >
@@ -249,6 +284,22 @@ Làm trong lúc các bạn refactor, nên **báo đủ để các bạn quyết 
    để tìm cách khác.
 2. **`group_mode` thêm một khái niệm vào màn soạn đề.** Nếu các bạn đang thiết kế lại đúng màn đó,
    hai thiết kế sẽ chồng nhau — nên xem mục 3 như *đặc tả cần đạt*, còn giao diện thì làm theo ý các bạn.
+
+### 6.4 Bỏ tài khoản đăng nhập — ba chỗ đang dùng danh tính, cần các bạn quyết
+
+Không phải việc của chúng tôi (và **không chạm `result.json`**), nhưng đo được nên báo để các bạn
+không sót — cả ba đều hỏng **lúc chạy** chứ không lúc biên dịch:
+
+| Chỗ | Đang dùng danh tính làm gì | Cần quyết |
+|---|---|---|
+| `created_by`/`updated_by` trong `testcase-config.json` + cột `exams.created_by` | ghi ai soạn đề | bỏ hẳn, hay ghi hằng/tên máy |
+| `TestcaseTemplateService.isTemplateCreatedExam` | cổng *"ai được sửa lại đề"* (`created_by == email` đăng nhập) | bỏ tài khoản thì cổng mất nghĩa — thay bằng gì, hay bỏ |
+| `GET /api/batch/recent` | lọc danh sách theo `teacherEmail` | trả gì khi không còn tài khoản |
+
+**Một điều chốt lại cho rõ, không phải phản đối:** bỏ đăng nhập ⇒ hệ thống **sẽ không bao giờ** ghi
+được *"ai đã chấm bài này"*. Hôm nay nó **cũng không ghi**, nên đây không phải mất mát — chỉ là từ
+nay điều đó thành vĩnh viễn. Nếu sau này nhà trường cần vết truy đó thì phải **thêm trường vào
+`result.json`**, và đó là **đổi hợp đồng ⇒ báo chúng tôi trước**.
 
 ### Ba lỗi phía các bạn chúng tôi phát hiện khi đo (đã sửa, không phải bàn giao)
 

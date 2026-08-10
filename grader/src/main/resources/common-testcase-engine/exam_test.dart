@@ -131,6 +131,12 @@ Future<void> _runCase(
     case 'STATE_REACTIVE_FLOW':
       await _checkStateReactiveFlow(tester, parameters);
       return;
+    case 'WIDGET_RELATIONSHIP':
+      await _checkWidgetRelationship(tester, parameters);
+      return;
+    case 'RESPONSIVE_PAIR_LAYOUT':
+      await _checkResponsivePairLayout(tester, parameters);
+      return;
     case 'GROUP':
       await _checkGroup(tester, testId, metadata);
       return;
@@ -438,6 +444,81 @@ Future<void> _checkStateReactiveFlow(
       findsNothing,
       reason: 'State cũ vẫn còn sau action $actionKey: $absentKey',
     );
+  }
+}
+
+Future<void> _checkWidgetRelationship(
+  WidgetTester tester,
+  Map<String, dynamic> parameters,
+) async {
+  await _boot(tester);
+  final ancestorKey = _requiredText(parameters, 'ancestorKey');
+  final ancestor = _byKey(ancestorKey);
+  expect(ancestor, findsOneWidget, reason: 'Thiếu ancestor key: $ancestorKey');
+  final ancestorType = _text(parameters, 'ancestorType');
+  if (ancestorType.isNotEmpty) {
+    _assertTargetType(tester, ancestor, ancestorKey, ancestorType);
+  }
+
+  final keys = _csv(parameters, 'descendantKeys');
+  final types = _csv(parameters, 'descendantTypes');
+  if (keys.isEmpty) fail('descendantKeys không được để trống.');
+  final finders = <Finder>[];
+  for (var index = 0; index < keys.length; index++) {
+    final key = keys[index];
+    final descendant = find.descendant(
+      of: ancestor,
+      matching: _byKey(key),
+      matchRoot: false,
+    );
+    expect(descendant, findsOneWidget, reason: '$key không nằm trong $ancestorKey');
+    if (types.length == keys.length && types[index].isNotEmpty) {
+      _assertTargetType(tester, descendant, key, types[index]);
+    }
+    finders.add(descendant);
+  }
+
+  final axis = _text(parameters, 'orderedAxis', 'none').toLowerCase();
+  if (axis == 'none' || finders.length < 2) return;
+  for (var index = 1; index < finders.length; index++) {
+    final previous = tester.getCenter(finders[index - 1]);
+    final current = tester.getCenter(finders[index]);
+    expect(
+      axis == 'horizontal' ? current.dx > previous.dx : current.dy > previous.dy,
+      isTrue,
+      reason: '${keys[index - 1]} và ${keys[index]} không đúng thứ tự $axis',
+    );
+  }
+}
+
+Future<void> _checkResponsivePairLayout(
+  WidgetTester tester,
+  Map<String, dynamic> parameters,
+) async {
+  tester.view.devicePixelRatio = 1.0;
+  addTearDown(tester.view.resetPhysicalSize);
+  addTearDown(tester.view.resetDevicePixelRatio);
+  tester.view.physicalSize = Size(
+    _number(parameters, 'width', 390),
+    _number(parameters, 'height', 844),
+  );
+  await _boot(tester);
+  expect(tester.takeException(), isNull);
+  final firstKey = _requiredText(parameters, 'firstKey');
+  final secondKey = _requiredText(parameters, 'secondKey');
+  final first = _byKey(firstKey);
+  final second = _byKey(secondKey);
+  expect(first, findsOneWidget, reason: 'Thiếu key responsive: $firstKey');
+  expect(second, findsOneWidget, reason: 'Thiếu key responsive: $secondKey');
+  final firstCenter = tester.getCenter(first);
+  final secondCenter = tester.getCenter(second);
+  final tolerance = _number(parameters, 'tolerance', 8).abs();
+  if (_text(parameters, 'alignment', 'row').toLowerCase() == 'column') {
+    expect((firstCenter.dx - secondCenter.dx).abs(), lessThanOrEqualTo(tolerance));
+    expect(secondCenter.dy, greaterThan(firstCenter.dy));
+  } else {
+    expect((firstCenter.dy - secondCenter.dy).abs(), lessThanOrEqualTo(tolerance));
+    expect(secondCenter.dx, greaterThan(firstCenter.dx));
   }
 }
 

@@ -26,7 +26,7 @@
     "description": "Xác nhận widget gắn ValueKey đang xuất hiện sau khi app khởi động. Testcase không kiểm tra class/model; có thể thêm targetType để xác nhận key đang gắn đúng loại widget.",
     "difficulty": "basic",
     "weight_default": 1,
-    "parameters_schema": {"widgetKey": "screen.home"},
+    "parameters_schema": {"widgetKey": "screen.home", "targetType": "any"},
     "expected_template": "Widget có key '{widgetKey}' phải được render."
   },
   {
@@ -511,6 +511,51 @@
       "requireNewUpdatedState": true
     },
     "expected_template": "Sau khi bấm {actionKey}, state phải chuyển từ {initialKey} sang {updatedKey}."
+  },
+  {
+    "template_id": "COMMON_WIDGET_RELATIONSHIP",
+    "template_version": "common-v3",
+    "engine_type": "COMMON_V1",
+    "profile_id": "COMMON_SEMANTIC_V1",
+    "runner": "WIDGET_RELATIONSHIP",
+    "skill_code": "UI_TEXT_INPUT",
+    "layer": "SCREEN",
+    "testcase_group": "WIDGET",
+    "name": "Các widget nằm đúng vùng và đúng thứ tự",
+    "description": "Kiểm tra mọi descendantKey nằm trong đúng ancestorKey. orderedAxis có thể là none, vertical hoặc horizontal để đối chiếu thứ tự render mà không ép sinh viên dùng một loại layout cụ thể.",
+    "difficulty": "intermediate",
+    "weight_default": 2,
+    "parameters_schema": {
+      "ancestorKey": "form.main",
+      "ancestorType": "form",
+      "descendantKeys": "field.name,field.email,action.save",
+      "descendantTypes": "input,input,button",
+      "orderedAxis": "vertical"
+    },
+    "expected_template": "Các key {descendantKeys} phải nằm trong {ancestorKey} và theo thứ tự {orderedAxis}."
+  },
+  {
+    "template_id": "COMMON_RESPONSIVE_PAIR_LAYOUT",
+    "template_version": "common-v3",
+    "engine_type": "COMMON_V1",
+    "profile_id": "COMMON_SEMANTIC_V1",
+    "runner": "RESPONSIVE_PAIR_LAYOUT",
+    "skill_code": "ADVUI_GRIDVIEW",
+    "layer": "RESPONSIVE",
+    "testcase_group": "WIDGET",
+    "name": "Hai vùng responsive cùng hàng hoặc cùng cột",
+    "description": "Render app ở đúng viewport rồi so sánh tâm của hai widget theo Key. Dùng alignment=row cho màn hình rộng và alignment=column cho điện thoại dọc.",
+    "difficulty": "intermediate",
+    "weight_default": 2,
+    "parameters_schema": {
+      "width": 390,
+      "height": 844,
+      "firstKey": "section.form",
+      "secondKey": "section.list",
+      "alignment": "column",
+      "tolerance": 8
+    },
+    "expected_template": "Ở viewport {width}x{height}, {firstKey} và {secondKey} phải bố trí theo {alignment}."
   },
   {
     "template_id": "COMMON_DIRECT_FUNCTION",

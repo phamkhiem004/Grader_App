@@ -165,6 +165,7 @@ Future<void> main() async {
 bool _isDirectMetadata(Map<String, dynamic> metadata) {
   final runner = (metadata['runner'] ?? '').toString();
   if (runner == 'DIRECT_FUNCTION' ||
+      runner == 'STARTER_CALL_SEQUENCE' ||
       runner.startsWith('TEMPLATE_SOURCE_') ||
       runner.startsWith('TEMPLATE_MODEL_') ||
       runner == 'TEMPLATE_SQLITE_SCHEMA' ||

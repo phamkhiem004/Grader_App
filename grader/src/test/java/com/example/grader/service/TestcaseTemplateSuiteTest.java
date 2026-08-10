@@ -54,6 +54,35 @@ class TestcaseTemplateSuiteTest {
     }
 
     @Test
+    void normalizesReusableStarterKeyCatalogAndRejectsAmbiguousKeys() {
+        Map<String, Object> suite = service.normalizeSuite(Map.of(
+                "key_contract", Map.of(
+                        "source_path", "lib/grading/app_keys.dart",
+                        "class_name", "AppKeys",
+                        "keys", List.of(
+                                Map.of("symbol", "uidField", "value", "person.form.uid",
+                                        "group", "Form", "description", "Ô nhập UID"),
+                                Map.of("symbol", "addButton", "value", "person.action.add",
+                                        "group", "Action", "description", "Nút Add")))), null);
+
+        Map<?, ?> keyContract = (Map<?, ?>) suite.get("key_contract");
+        assertEquals("lib/grading/app_keys.dart", keyContract.get("source_path"));
+        assertEquals("AppKeys", keyContract.get("class_name"));
+        List<?> keys = (List<?>) keyContract.get("keys");
+        assertEquals(2, keys.size());
+        assertEquals("person.form.uid", ((Map<?, ?>) keys.get(0)).get("value"));
+
+        assertThrows(IllegalArgumentException.class, () -> service.normalizeSuite(Map.of(
+                "key_contract", Map.of("source_path", "../app_keys.dart",
+                        "class_name", "AppKeys", "keys", List.of())), null));
+        assertThrows(IllegalArgumentException.class, () -> service.normalizeSuite(Map.of(
+                "key_contract", Map.of("source_path", "lib/grading/app_keys.dart",
+                        "class_name", "AppKeys", "keys", List.of(
+                                Map.of("symbol", "first", "value", "person.form.uid"),
+                                Map.of("symbol", "second", "value", "person.form.uid")))), null));
+    }
+
+    @Test
     void acceptsDynamicContractSectionsAndRejectsDuplicateKeys() {
         Map<String, Object> contract = Map.of(
                 "version", 2,
@@ -202,8 +231,8 @@ class TestcaseTemplateSuiteTest {
                 new ClassPathResource("common-testcase-templates.json").getInputStream(),
                 new TypeReference<List<Map<String, Object>>>() {});
 
-        assertEquals(27, templates.size());
-        assertEquals(27, templates.stream().map(row -> row.get("template_id")).distinct().count());
+        assertEquals(29, templates.size());
+        assertEquals(29, templates.stream().map(row -> row.get("template_id")).distinct().count());
         Map<String, Map<String, Object>> byId = templates.stream().collect(java.util.stream.Collectors.toMap(
                 row -> String.valueOf(row.get("template_id")), row -> row));
         assertTrue(((Map<?, ?>) byId.get("COMMON_BUTTON_ACTION").get("parameters_schema"))
@@ -406,6 +435,10 @@ class TestcaseTemplateSuiteTest {
                         "type", "model",
                         "path", "lib/models/person.dart",
                         "symbols", "Person")),
+                "key_contract", Map.of(
+                        "source_path", "lib/grading/app_keys.dart",
+                        "class_name", "AppKeys",
+                        "keys", List.of(Map.of("symbol", "home", "value", "screen.home"))),
                 "ready_key", "screen.home",
                 "boot_timeout_ms", 4500), null);
 
@@ -416,6 +449,7 @@ class TestcaseTemplateSuiteTest {
         assertEquals(4500, runtimeSuite.get("boot_timeout_ms"));
         assertEquals(1, ((List<?>) runtimeSuite.get("source_contracts")).size());
         assertTrue(!runtimeSuite.containsKey("template_contract"));
+        assertTrue(!runtimeSuite.containsKey("key_contract"));
         assertTrue(!runtimeSuite.containsKey("persistence"));
         assertTrue(!runtimeSuite.containsKey("golden"));
         assertTrue(!runtimeSuite.containsKey("profile"));
@@ -471,6 +505,117 @@ class TestcaseTemplateSuiteTest {
                 "Module nội bộ không được xuất hiện trong artifact ba file");
         assertTrue(Files.readString(root.resolve("grader.dart"), StandardCharsets.UTF_8)
                 .contains("TEMPLATE_CONTRACT_V1-2.6.0"));
+    }
+
+    @Test
+    void materializesHybridStarterLogicAndSemanticKeyUiWithoutAdapter(@TempDir Path root) throws Exception {
+        service.materializeEngine(root, "STARTER_KEY_HYBRID_V1", List.of(
+                Map.of("enabled", true, "instance_id", "MODEL_01", "runner", "TEMPLATE_MODEL_FIELDS",
+                        "name", "Model starter contract", "weight", 1.0),
+                Map.of("enabled", true, "instance_id", "WIDGET_01", "runner", "WIDGET_VISIBLE",
+                        "name", "Widget semantic key", "weight", 1.0),
+                Map.of("enabled", true, "instance_id", "FORM_01", "runner", "FORM_SUBMIT",
+                        "name", "Submit by key", "weight", 2.0)));
+
+        String examTest = Files.readString(root.resolve("exam_test.dart"), StandardCharsets.UTF_8);
+        String grader = Files.readString(root.resolve("grader.dart"), StandardCharsets.UTF_8);
+
+        assertTrue(examTest.contains("testWidgets(\"MODEL_01\""));
+        assertTrue(examTest.contains("testWidgets(\"WIDGET_01\""));
+        assertTrue(examTest.contains("testWidgets(\"FORM_01\""));
+        assertTrue(examTest.contains("Future<void> _checkTemplateModelFields"));
+        assertTrue(examTest.contains("Future<void> _checkKeyWidgetVisible"));
+        assertTrue(examTest.contains("Future<void> _checkFormSubmit"));
+        assertTrue(!examTest.contains("_checkTemplateFormAction"),
+                "Hybrid UI phải dùng semantic Key, không ghép runner dò label/text");
+        assertTrue(!examTest.contains("grading_adapter.dart"));
+        assertTrue(grader.contains("STARTER_KEY_HYBRID_V1-1.0.0"));
+        assertTrue(!Files.exists(root.resolve("common_testcase_engine.dart")));
+    }
+
+    @Test
+    void hybridEngineRejectsAdapterPathAndAcceptsPublicStarterCalls(@TempDir Path root) throws Exception {
+        assertEquals("STARTER_KEY_HYBRID_V1", service.engineType(List.of(
+                Map.of("engine_type", "STARTER_KEY_HYBRID_V1"),
+                Map.of("engine_type", "STARTER_KEY_HYBRID_V1"))));
+        assertThrows(IllegalArgumentException.class,
+                () -> service.materializeEngine(root, "STARTER_KEY_HYBRID_V1", List.of(
+                        Map.of("enabled", true, "instance_id", "BAD_ADAPTER", "runner", "DIRECT_FUNCTION",
+                                "parameters", Map.of(
+                                        "functionPath", "lib/grading/grading_adapter.dart",
+                                        "functionName", "runGradingCase",
+                                        "argumentsJson", "[]")))));
+
+        service.materializeEngine(root, "STARTER_KEY_HYBRID_V1", List.of(
+                Map.of("enabled", true, "instance_id", "PUBLIC_LOGIC", "runner", "DIRECT_FUNCTION",
+                        "name", "Public starter function", "weight", 1.0,
+                        "parameters", Map.of(
+                                "functionPath", "lib/domain/validator.dart",
+                                "functionName", "validate",
+                                "argumentsJson", "[\"ok\"]"))));
+        String source = Files.readString(root.resolve("exam_test.dart"), StandardCharsets.UTF_8);
+        assertTrue(source.contains("import '../lib/domain/validator.dart' as direct_0;"));
+        assertTrue(source.contains("return direct_0.validate(arguments[0]);"));
+        assertTrue(source.contains("await _checkDirectFunction(tester, parameters);"));
+        assertTrue(source.contains("final actual = await tester.runAsync<dynamic>(() async"),
+                "Direct functions must start async/SQLite work inside WidgetTester's real async zone");
+        assertTrue(!source.contains("grading_adapter.dart"));
+    }
+
+    @Test
+    void materializesReusableStarterCallSequence(@TempDir Path root) throws Exception {
+        String steps = """
+                [
+                  {"functionName":"resetStore","arguments":[],"expectedType":"null","expectedValue":null},
+                  {"functionName":"addPerson","arguments":["S01","An"],"expectedType":"int","expectedValue":1},
+                  {"functionName":"readCount","arguments":[],"expectedType":"int","expectedValue":1}
+                ]
+                """;
+        service.materializeEngine(root, "STARTER_KEY_HYBRID_V1", List.of(
+                Map.of("enabled", true, "instance_id", "SQL_SEQUENCE", "runner", "STARTER_CALL_SEQUENCE",
+                        "name", "SQLite sequence", "weight", 3.0,
+                        "parameters", Map.of(
+                                "sourcePath", "lib/database/person_store.dart",
+                                "stepsJson", steps))));
+
+        String source = Files.readString(root.resolve("exam_test.dart"), StandardCharsets.UTF_8);
+        assertTrue(source.contains("Future<void> _checkStarterCallSequence"));
+        assertTrue(source.contains("await _checkStarterCallSequence(tester, parameters);"));
+        assertTrue(source.contains("final actual = await tester.runAsync<dynamic>(() async"),
+                "SQLite sequence steps must be invoked inside runAsync, not merely awaited there");
+        assertTrue(source.contains("import '../lib/database/person_store.dart' as direct_0;"));
+        assertEquals(1, count(source, "case 'lib/database/person_store.dart::resetStore':"));
+        assertEquals(1, count(source, "case 'lib/database/person_store.dart::addPerson':"));
+        assertEquals(1, count(source, "case 'lib/database/person_store.dart::readCount':"));
+        assertTrue(Files.readString(root.resolve("grader.dart"), StandardCharsets.UTF_8)
+                .contains("runner == 'STARTER_CALL_SEQUENCE'"));
+    }
+
+    @Test
+    void hybridLibraryContainsOnlyStarterLogicAndKeyUiBlueprints(@TempDir Path root) throws Exception {
+        SyllabusService syllabus = mock(SyllabusService.class);
+        when(syllabus.skills()).thenReturn(List.of());
+        setField(service, "syllabusService", syllabus);
+        setField(service, "examsDirectory", root.toString());
+        service.loadTemplates();
+
+        List<Map<String, Object>> hybrid = service.listTemplates(null, null, null).stream()
+                .filter(row -> "STARTER_KEY_HYBRID_V1".equals(row.get("engine_type")))
+                .toList();
+
+        assertEquals(89, hybrid.size());
+        assertEquals(52, hybrid.stream()
+                .filter(row -> String.valueOf(row.get("template_id")).startsWith("HYBRID_REUSE_"))
+                .count());
+        assertTrue(hybrid.stream().anyMatch(row -> "DIRECT_FUNCTION".equals(row.get("runner"))));
+        assertTrue(hybrid.stream().anyMatch(row -> "STARTER_CALL_SEQUENCE".equals(row.get("runner"))));
+        assertTrue(hybrid.stream().noneMatch(row -> String.valueOf(row.get("template_id"))
+                .contains("GRADING_ADAPTER")));
+        assertTrue(hybrid.stream().noneMatch(row -> "TEMPLATE_FORM_ACTION".equals(row.get("runner"))));
+        assertTrue(hybrid.stream().anyMatch(row -> "TEMPLATE_SQLITE_SCHEMA".equals(row.get("runner"))
+                && "STARTER_CONTRACT".equals(row.get("hybrid_target"))));
+        assertTrue(hybrid.stream().anyMatch(row -> "FORM_SUBMIT".equals(row.get("runner"))
+                && "SEMANTIC_KEY".equals(row.get("hybrid_target"))));
     }
 
     @Test

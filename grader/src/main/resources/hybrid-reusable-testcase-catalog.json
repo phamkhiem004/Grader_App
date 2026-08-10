@@ -1,0 +1,345 @@
+[
+  {
+    "template_id": "HYBRID_REUSE_CONTRACT_MODEL_SYMBOLS",
+    "base_template_id": "HYBRID_TPL_SOURCE_SYMBOLS",
+    "name": "Contract Model công khai",
+    "description": "Kiểm tra file model có đúng class, enum, typedef hoặc symbol đã công bố trong starter.",
+    "parameter_defaults": { "sourcePath": "lib/models/entity.dart", "symbols": "Entity", "symbolTypes": "class" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_CONTRACT_REPOSITORY_SYMBOLS",
+    "base_template_id": "HYBRID_TPL_SOURCE_SYMBOLS",
+    "name": "Contract Repository công khai",
+    "description": "Kiểm tra abstraction và implementation repository mà starter yêu cầu sinh viên hoàn thiện.",
+    "parameter_defaults": { "sourcePath": "lib/repositories/entity_repository.dart", "symbols": "EntityRepository,SqliteEntityRepository", "symbolTypes": "class,class" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_CONTRACT_STATE_SYMBOLS",
+    "base_template_id": "HYBRID_TPL_SOURCE_SYMBOLS",
+    "name": "Contract State/ViewModel công khai",
+    "description": "Kiểm tra class state và provider/notifier thuộc public contract của starter.",
+    "parameter_defaults": { "sourcePath": "lib/viewmodels/entity_view_model.dart", "symbols": "EntityViewModel,entityViewModelProvider", "symbolTypes": "class,variable" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_CONTRACT_SCREEN_SYMBOLS",
+    "base_template_id": "HYBRID_TPL_SOURCE_SYMBOLS",
+    "name": "Contract màn hình công khai",
+    "description": "Kiểm tra các screen class bắt buộc tồn tại mà không ép cấu trúc widget tree.",
+    "parameter_defaults": { "sourcePath": "lib/screens/home_screen.dart", "symbols": "HomeScreen", "symbolTypes": "class" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_MODEL_FIELDS",
+    "base_template_id": "HYBRID_TPL_MODEL_FIELDS",
+    "name": "Model có đủ field và kiểu dữ liệu",
+    "description": "Tái sử dụng kiểm tra field V9; thay file, class và danh sách field cho từng domain.",
+    "parameter_defaults": { "sourcePath": "lib/models/entity.dart", "className": "Entity", "fields": "id:int,name:String" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_MODEL_COPY_WITH",
+    "base_template_id": "HYBRID_TPL_MODEL_COPY_WITH",
+    "name": "Model hỗ trợ tạo bản sao",
+    "description": "Kiểm tra method copy có nhận và sử dụng đúng các field được cấu hình.",
+    "parameter_defaults": { "sourcePath": "lib/models/entity.dart", "className": "Entity", "copyMethod": "copyWith", "fields": "id,name" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_MODEL_SQL_MAPPING",
+    "base_template_id": "HYBRID_TPL_MODEL_MAPPING",
+    "name": "Model ánh xạ dữ liệu SQLite",
+    "description": "Kiểm tra toMap/fromMap và các cột dữ liệu theo contract của đề.",
+    "parameter_defaults": { "sourcePath": "lib/models/entity.dart", "className": "Entity", "toMapMethod": "toMap", "fromMapMethod": "fromMap", "columns": "id,name" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_SQLITE_SCHEMA",
+    "base_template_id": "HYBRID_TPL_SQLITE_SCHEMA",
+    "name": "SQLite đúng bảng và cột",
+    "description": "Kiểm tra schema nằm trong đúng method tạo database và chứa các cột của đề.",
+    "parameter_defaults": { "sourcePath": "lib/database/database_service.dart", "schemaMethod": "onCreate", "tableName": "entities", "columns": "id,name" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_REPOSITORY_CRUD_METHODS",
+    "base_template_id": "HYBRID_TPL_REPOSITORY_METHODS",
+    "name": "Repository công bố đủ CRUD",
+    "description": "Kiểm tra class repository có đúng các method starter yêu cầu; hành vi được chấm thêm bằng testcase gọi API starter.",
+    "parameter_defaults": { "sourcePath": "lib/repositories/entity_repository.dart", "className": "EntityRepository", "methods": "add,readAll,update,remove" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_STATE_PUBLIC_METHODS",
+    "base_template_id": "HYBRID_TPL_STATE_PUBLIC_METHODS",
+    "name": "State/ViewModel công bố đủ thao tác",
+    "description": "Kiểm tra các method load/add/update/remove được starter khóa tên.",
+    "parameter_defaults": { "sourcePath": "lib/viewmodels/entity_view_model.dart", "className": "EntityViewModel", "methods": "load,add,update,remove" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_ARCH_MVVM_WIRING",
+    "base_template_id": "HYBRID_TPL_SOURCE_REQUIRED_TERMS",
+    "name": "Wiring kiến trúc theo yêu cầu đề",
+    "description": "Kiểm tra import/annotation hoặc lời gọi bắt buộc trong đúng file; mọi term đều do giảng viên cấu hình.",
+    "parameter_defaults": { "sourcePath": "lib/screens/home_screen.dart", "requiredTerms": "ViewModel,Repository", "forbiddenTerms": "" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_DATABASE_BOUNDARY",
+    "base_template_id": "HYBRID_TPL_SOURCE_REQUIRED_TERMS",
+    "name": "Ranh giới truy cập database",
+    "description": "Buộc code storage dùng API khởi tạo headless của starter và cấm các API mở database ngoài contract.",
+    "parameter_defaults": { "sourcePath": "lib/database/database_service.dart", "requiredTerms": "databaseFactoryFfiNoIsolate", "forbiddenTerms": "sqfliteFfiInit,getDatabasesPath" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_RIVERPOD_RUNTIME_WIRING",
+    "base_template_id": "HYBRID_TPL_SOURCE_REQUIRED_TERMS",
+    "name": "UI thực sự sử dụng state/provider",
+    "description": "Kiểm tra dấu hiệu watch/read/listen hoặc API state mà đề công bố, không khóa tên Riverpod nếu đề dùng giải pháp khác.",
+    "parameter_defaults": { "sourcePath": "lib/screens/home_screen.dart", "requiredTerms": "watch", "forbiddenTerms": "" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_CODE_GENERATION_CONTRACT",
+    "base_template_id": "HYBRID_TPL_SOURCE_REQUIRED_TERMS",
+    "name": "Annotation và code generation theo đề",
+    "description": "Dùng khi đề thực sự yêu cầu generator; có thể đổi hoặc bỏ mẫu này ở đề không dùng codegen.",
+    "parameter_defaults": { "sourcePath": "lib/viewmodels/entity_view_model.dart", "requiredTerms": "@riverpod,part", "forbiddenTerms": "" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_FUNCTION_VALID_CASE",
+    "base_template_id": "HYBRID_COMMON_DIRECT_FUNCTION",
+    "name": "Hàm nghiệp vụ xử lý dữ liệu hợp lệ",
+    "description": "Gọi trực tiếp top-level function được phát trong starter; thay arguments và expected cho từng đề.",
+    "parameter_defaults": { "functionPath": "lib/domain/validator.dart", "functionName": "validate", "argumentsJson": "[\"valid\"]", "expectedType": "bool", "expectedValue": "true", "matchMode": "equals" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_FUNCTION_INVALID_CASE",
+    "base_template_id": "HYBRID_COMMON_DIRECT_FUNCTION",
+    "name": "Hàm nghiệp vụ từ chối dữ liệu sai",
+    "description": "Một input sai độc lập để báo cáo đúng quy tắc bị lỗi, không gộp mọi validation vào một testcase.",
+    "parameter_defaults": { "functionPath": "lib/domain/validator.dart", "functionName": "validate", "argumentsJson": "[\"invalid\"]", "expectedType": "bool", "expectedValue": "false", "matchMode": "equals" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_FUNCTION_BOUNDARY_CASE",
+    "base_template_id": "HYBRID_COMMON_DIRECT_FUNCTION",
+    "name": "Hàm nghiệp vụ tại giá trị biên",
+    "description": "Kiểm tra min/max, chuỗi rỗng hoặc giới hạn do đề công bố bằng API thật của starter.",
+    "parameter_defaults": { "functionPath": "lib/domain/validator.dart", "functionName": "isWithinLimit", "argumentsJson": "[0]", "expectedType": "bool", "expectedValue": "true", "matchMode": "equals" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_ASYNC_FUNCTION_RESULT",
+    "base_template_id": "HYBRID_COMMON_DIRECT_FUNCTION",
+    "name": "Hàm Future trả về đúng kết quả",
+    "description": "Runner tự await Future rồi so sánh sâu List/Map hoặc các kiểu primitive.",
+    "parameter_defaults": { "functionPath": "lib/services/entity_service.dart", "functionName": "loadCount", "argumentsJson": "[]", "expectedType": "int", "expectedValue": "0", "matchMode": "equals" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_SQLITE_CRUD_SEQUENCE",
+    "base_template_id": "HYBRID_STARTER_CALL_SEQUENCE",
+    "name": "Chuỗi SQLite Add - Read - Remove",
+    "description": "Gọi tuần tự API nghiệp vụ thật trong starter và giữ cùng database/state giữa các bước; không dùng adapter.",
+    "parameter_defaults": { "sourcePath": "lib/database/person_store.dart", "stepsJson": "[{\"functionName\":\"resetStore\",\"arguments\":[],\"expectedType\":\"null\",\"expectedValue\":null},{\"functionName\":\"addPerson\",\"arguments\":[\"SV01\",\"An\",\"Nguyen\"],\"expectedType\":\"int\",\"expectedValue\":1},{\"functionName\":\"readPersons\",\"arguments\":[],\"expectedType\":\"json\",\"expectedValue\":[{\"uid\":\"SV01\",\"firstName\":\"An\",\"lastName\":\"Nguyen\"}]},{\"functionName\":\"removePerson\",\"arguments\":[\"SV01\"],\"expectedType\":\"int\",\"expectedValue\":1},{\"functionName\":\"readPersons\",\"arguments\":[],\"expectedType\":\"json\",\"expectedValue\":[]}]" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_DUPLICATE_ROWS_SEQUENCE",
+    "base_template_id": "HYBRID_STARTER_CALL_SEQUENCE",
+    "name": "Lưu hai bản ghi có dữ liệu trùng",
+    "description": "Kiểm tra storage tạo hai record độc lập khi đề cho phép dữ liệu trùng.",
+    "parameter_defaults": { "sourcePath": "lib/database/entity_store.dart", "stepsJson": "[{\"functionName\":\"resetStore\",\"arguments\":[],\"expectedType\":\"null\",\"expectedValue\":null},{\"functionName\":\"insertSample\",\"arguments\":[\"same\"],\"expectedType\":\"int\",\"expectedValue\":1},{\"functionName\":\"insertSample\",\"arguments\":[\"same\"],\"expectedType\":\"int\",\"expectedValue\":2},{\"functionName\":\"countRows\",\"arguments\":[],\"expectedType\":\"int\",\"expectedValue\":2}]" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_UPDATE_INVARIANT_SEQUENCE",
+    "base_template_id": "HYBRID_STARTER_CALL_SEQUENCE",
+    "name": "Update giữ ID và số lượng bản ghi",
+    "description": "Kiểm tra cập nhật đúng record, giữ identity và không insert thêm dòng.",
+    "parameter_defaults": { "sourcePath": "lib/database/entity_store.dart", "stepsJson": "[{\"functionName\":\"seedOne\",\"arguments\":[],\"expectedType\":\"int\",\"expectedValue\":1},{\"functionName\":\"updateName\",\"arguments\":[1,\"Updated\"],\"expectedType\":\"int\",\"expectedValue\":1},{\"functionName\":\"countRows\",\"arguments\":[],\"expectedType\":\"int\",\"expectedValue\":1}]" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_DELETE_EXACT_ID_SEQUENCE",
+    "base_template_id": "HYBRID_STARTER_CALL_SEQUENCE",
+    "name": "Delete đúng ID và giữ record khác",
+    "description": "Seed nhiều record, xóa một ID rồi đối chiếu record còn lại bằng API starter.",
+    "parameter_defaults": { "sourcePath": "lib/database/entity_store.dart", "stepsJson": "[{\"functionName\":\"seedTwo\",\"arguments\":[],\"expectedType\":\"int\",\"expectedValue\":2},{\"functionName\":\"removeById\",\"arguments\":[1],\"expectedType\":\"int\",\"expectedValue\":1},{\"functionName\":\"remainingIds\",\"arguments\":[],\"expectedType\":\"json\",\"expectedValue\":[2]}]" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_APP_READY",
+    "base_template_id": "HYBRID_COMMON_APP_BOOT",
+    "name": "Ứng dụng khởi động và màn hình sẵn sàng",
+    "description": "Chờ readyKey hữu hạn để tách lỗi khởi động/loading khỏi lỗi widget domino.",
+    "parameter_defaults": { "rootKey": "screen.home", "readyKey": "state.ready", "readyTimeoutMs": 5000 }
+  },
+  {
+    "template_id": "HYBRID_REUSE_HOME_ROOT",
+    "base_template_id": "HYBRID_COMMON_WIDGET_VISIBLE",
+    "name": "Màn hình chính tồn tại",
+    "parameter_defaults": { "widgetKey": "screen.home", "targetType": "container" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_FORM_ROOT",
+    "base_template_id": "HYBRID_COMMON_WIDGET_VISIBLE",
+    "name": "Form nghiệp vụ tồn tại",
+    "parameter_defaults": { "widgetKey": "form.main", "targetType": "form" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_LIST_ROOT",
+    "base_template_id": "HYBRID_COMMON_WIDGET_VISIBLE",
+    "name": "Vùng danh sách tồn tại",
+    "parameter_defaults": { "widgetKey": "list.main", "targetType": "container" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_FORM_CONTROLS_ORDER",
+    "base_template_id": "HYBRID_COMMON_WIDGET_RELATIONSHIP",
+    "name": "Control nằm trong cùng Form và đúng thứ tự",
+    "description": "Tái sử dụng kiểm tra cấu trúc form của V8 nhưng dùng Key và không khóa widget tree.",
+    "parameter_defaults": { "ancestorKey": "form.main", "ancestorType": "form", "descendantKeys": "field.id,field.name,action.save", "descendantTypes": "input,input,button", "orderedAxis": "vertical" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_SELECT_CONTROL_STATE",
+    "base_template_id": "HYBRID_COMMON_STATE_REACTIVE",
+    "name": "Chọn giá trị làm UI đổi trạng thái",
+    "description": "Dùng cho avatar, dropdown, checkbox hoặc lựa chọn khác thông qua ba Key trạng thái.",
+    "parameter_defaults": { "initialKey": "state.selection.empty", "actionKey": "action.selection.open", "updatedKey": "state.selection.selected", "absentKey": "state.selection.empty", "requireNewUpdatedState": true }
+  },
+  {
+    "template_id": "HYBRID_REUSE_CONTROL_TAPPABLE_SIZE",
+    "base_template_id": "HYBRID_COMMON_WIDGET_DIMENSION",
+    "name": "Control có kích thước thao tác tối thiểu",
+    "description": "Đo kết quả render để bảo đảm control không quá nhỏ; tạo hai testcase riêng cho width và height khi cần.",
+    "parameter_defaults": { "targetKey": "action.save", "targetType": "button", "dimension": "height", "comparison": "at_least", "expected": 20, "tolerance": 0 }
+  },
+  {
+    "template_id": "HYBRID_REUSE_LIST_SINGLE_ITEM",
+    "base_template_id": "HYBRID_COMMON_LIST_VISIBLE",
+    "name": "Danh sách hiển thị đúng một item",
+    "parameter_defaults": { "listKey": "list.main", "itemKeys": "item.sample-01" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_LIST_MULTIPLE_ITEMS",
+    "base_template_id": "HYBRID_COMMON_LIST_ITEM_COUNT",
+    "name": "Danh sách hiển thị đủ nhiều item",
+    "description": "Hỗ trợ lazy list bằng cách reveal từng item Key trước khi đếm.",
+    "parameter_defaults": { "listKey": "list.main", "itemKeys": "item.sample-01,item.sample-02", "expectedCount": 2 }
+  },
+  {
+    "template_id": "HYBRID_REUSE_ITEM_CONTENT",
+    "base_template_id": "HYBRID_COMMON_WIDGET_TEXT_CONTENT",
+    "name": "Item hiển thị đúng nội dung",
+    "description": "Dùng setup step để đưa item vào màn hình rồi đối chiếu Text Key trong item.",
+    "parameter_defaults": { "targetKey": "item.sample-01.name", "targetType": "text", "expectedText": "Sample", "matchMode": "equals" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_ITEM_ACTION",
+    "base_template_id": "HYBRID_COMMON_WIDGET_VISIBLE",
+    "name": "Item có action riêng",
+    "parameter_defaults": { "widgetKey": "item.sample-01.edit", "targetType": "button" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_REQUIRED_VALIDATION",
+    "base_template_id": "HYBRID_COMMON_FORM_REQUIRED_FIELDS",
+    "name": "Mỗi field bắt buộc có error Key",
+    "description": "Submit rỗng và kiểm tra lỗi mới xuất hiện theo từng semantic Key.",
+    "parameter_defaults": { "fieldKeys": "field.id,field.name", "errorKeys": "error.id,error.name", "submitKey": "action.save", "fieldType": "input", "requireNewErrors": true }
+  },
+  {
+    "template_id": "HYBRID_REUSE_FORMAT_VALIDATION",
+    "base_template_id": "HYBRID_COMMON_FORM_FORMAT_VALIDATION",
+    "name": "Validation sai định dạng",
+    "parameter_defaults": { "fieldKeys": "field.email", "fieldType": "input", "invalidValues": "invalid-email", "submitKey": "action.save", "errorKeys": "error.email", "requireNewErrors": true }
+  },
+  {
+    "template_id": "HYBRID_REUSE_BOUNDARY_VALIDATION",
+    "base_template_id": "HYBRID_COMMON_FORM_BOUNDARY_VALIDATION",
+    "name": "Validation vi phạm giới hạn",
+    "parameter_defaults": { "fieldKeys": "field.name", "fieldType": "input", "invalidValues": "A", "submitKey": "action.save", "errorKeys": "error.name", "requireNewErrors": true }
+  },
+  {
+    "template_id": "HYBRID_REUSE_CROSS_FIELD_VALIDATION",
+    "base_template_id": "HYBRID_COMMON_FORM_CROSS_FIELD_VALIDATION",
+    "name": "Validation liên hệ nhiều field",
+    "parameter_defaults": { "fieldKeys": "field.password,field.confirm", "fieldType": "input", "invalidValues": "secret,different", "submitKey": "action.save", "errorKeys": "error.mismatch", "requireNewErrors": true }
+  },
+  {
+    "template_id": "HYBRID_REUSE_CREATE_FLOW",
+    "base_template_id": "HYBRID_COMMON_FORM_SUBMIT",
+    "name": "Thêm dữ liệu hợp lệ qua UI",
+    "description": "Nhập dữ liệu bằng field Key, bấm submit và yêu cầu item Key mới xuất hiện.",
+    "parameter_defaults": { "fieldKeys": "field.id,field.name", "fieldType": "input", "values": "S01,Sample", "submitKey": "action.add", "resultKey": "item.s01", "errorKeys": "error.id,error.name", "requireNewResult": true }
+  },
+  {
+    "template_id": "HYBRID_REUSE_EDIT_PREFILL",
+    "base_template_id": "HYBRID_COMMON_FORM_PREFILL",
+    "name": "Edit nạp đúng dữ liệu vào form",
+    "parameter_defaults": { "editKey": "item.s01.edit", "fieldKeys": "field.id,field.name", "fieldType": "input", "expectedValues": "S01,Sample", "requirePrefillTransition": true }
+  },
+  {
+    "template_id": "HYBRID_REUSE_UPDATE_FLOW",
+    "base_template_id": "HYBRID_COMMON_FORM_SUBMIT",
+    "name": "Update dữ liệu hợp lệ qua UI",
+    "description": "Kết hợp setup step mở Edit với form submit; resultKey phải đại diện trạng thái cập nhật mới.",
+    "parameter_defaults": { "fieldKeys": "field.name", "fieldType": "input", "values": "Updated", "submitKey": "action.update", "resultKey": "state.update.success", "errorKeys": "error.name", "requireNewResult": true }
+  },
+  {
+    "template_id": "HYBRID_REUSE_DELETE_CANCEL",
+    "base_template_id": "HYBRID_COMMON_DIALOG_FLOW",
+    "name": "Hủy xóa giữ nguyên item",
+    "parameter_defaults": { "actionKey": "item.s01.delete", "dialogKey": "dialog.delete", "decisionKey": "action.delete.cancel", "resultKey": "item.s01", "absentKey": "dialog.delete", "requireNewDialog": true, "requireNewResult": false }
+  },
+  {
+    "template_id": "HYBRID_REUSE_DELETE_CONFIRM",
+    "base_template_id": "HYBRID_COMMON_DIALOG_FLOW",
+    "name": "Xác nhận xóa làm item biến mất",
+    "parameter_defaults": { "actionKey": "item.s01.delete", "dialogKey": "dialog.delete", "decisionKey": "action.delete.confirm", "resultKey": "list.main", "absentKey": "item.s01", "requireNewDialog": true, "requireNewResult": false }
+  },
+  {
+    "template_id": "HYBRID_REUSE_DETAIL_NAVIGATION",
+    "base_template_id": "HYBRID_COMMON_NAVIGATION",
+    "name": "Mở chi tiết và quay lại",
+    "parameter_defaults": { "openKey": "item.s01.open", "destinationKey": "screen.detail", "backKey": "action.detail.back", "homeKey": "screen.home", "requireNewDestination": true, "hideDestinationAfterBack": true }
+  },
+  {
+    "template_id": "HYBRID_REUSE_BUTTON_RESULT",
+    "base_template_id": "HYBRID_COMMON_BUTTON_ACTION",
+    "name": "Action tạo trạng thái kết quả mới",
+    "parameter_defaults": { "buttonKey": "action.read", "resultKey": "state.read.success", "requireNewResult": true }
+  },
+  {
+    "template_id": "HYBRID_REUSE_RESPONSIVE_NO_OVERFLOW",
+    "base_template_id": "HYBRID_COMMON_RESPONSIVE_NO_OVERFLOW",
+    "name": "Không overflow trên phone và màn hình rộng",
+    "parameter_defaults": { "portraitWidth": 390, "portraitHeight": 844, "landscapeWidth": 1024, "landscapeHeight": 768 }
+  },
+  {
+    "template_id": "HYBRID_REUSE_RESPONSIVE_TARGET",
+    "base_template_id": "HYBRID_COMMON_RESPONSIVE_TARGET",
+    "name": "Vùng chính không biến mất khi đổi viewport",
+    "parameter_defaults": { "portraitWidth": 390, "portraitHeight": 844, "landscapeWidth": 1024, "landscapeHeight": 768, "targetKey": "screen.home", "targetType": "container" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_PHONE_ONE_COLUMN",
+    "base_template_id": "HYBRID_COMMON_RESPONSIVE_PAIR_LAYOUT",
+    "name": "Phone portrait xếp hai vùng theo cột",
+    "parameter_defaults": { "width": 390, "height": 844, "firstKey": "section.form", "secondKey": "section.list", "alignment": "column", "tolerance": 8 }
+  },
+  {
+    "template_id": "HYBRID_REUSE_PHONE_LANDSCAPE_ROW",
+    "base_template_id": "HYBRID_COMMON_RESPONSIVE_PAIR_LAYOUT",
+    "name": "Phone landscape xếp hai vùng cùng hàng",
+    "parameter_defaults": { "width": 700, "height": 400, "firstKey": "section.form", "secondKey": "section.list", "alignment": "row", "tolerance": 8 }
+  },
+  {
+    "template_id": "HYBRID_REUSE_TABLET_ROW",
+    "base_template_id": "HYBRID_COMMON_RESPONSIVE_PAIR_LAYOUT",
+    "name": "Tablet xếp hai vùng cùng hàng",
+    "parameter_defaults": { "width": 800, "height": 1100, "firstKey": "section.form", "secondKey": "section.list", "alignment": "row", "tolerance": 8 }
+  },
+  {
+    "template_id": "HYBRID_REUSE_PADDING",
+    "base_template_id": "HYBRID_COMMON_WIDGET_PADDING",
+    "name": "Padding vùng giao diện theo yêu cầu",
+    "parameter_defaults": { "targetKey": "layout.content.padding", "targetType": "padding", "left": 16, "top": 16, "right": 16, "bottom": 16, "tolerance": 0.5 }
+  },
+  {
+    "template_id": "HYBRID_REUSE_TEXT_STYLE",
+    "base_template_id": "HYBRID_COMMON_WIDGET_TEXT_STYLE",
+    "name": "Text style của nội dung được chỉ định",
+    "parameter_defaults": { "targetKey": "text.title", "targetType": "text", "fontSize": 20, "fontWeight": "w700", "tolerance": 0.5 }
+  },
+  {
+    "template_id": "HYBRID_REUSE_WIDGET_GAP",
+    "base_template_id": "HYBRID_COMMON_WIDGET_GAP",
+    "name": "Khoảng cách render giữa hai control",
+    "parameter_defaults": { "fromKey": "field.id", "fromType": "input", "toKey": "field.name", "toType": "input", "axis": "vertical", "expectedGap": 12, "tolerance": 0.5 }
+  }
+]

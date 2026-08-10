@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 
 type JsonMap = Record<string, unknown>;
-type EngineMode = "TEMPLATE_CONTRACT_V1" | "COMMON_V1";
+type EngineMode = "STARTER_KEY_HYBRID_V1" | "TEMPLATE_CONTRACT_V1" | "COMMON_V1";
 
 interface SkillOption {
   code: string;
@@ -24,6 +24,7 @@ interface Template {
   template_id: string;
   template_version: string;
   engine_type?: string;
+  hybrid_target?: "STARTER_CONTRACT" | "SEMANTIC_KEY";
   execution_key?: string;
   fixed_contract?: boolean;
   runner?: string;
@@ -100,6 +101,8 @@ type SourceContractType = "model" | "repository" | "provider" | "screen" | "help
 interface SourceContract { type: SourceContractType; path: string; symbols: string; }
 interface PersistenceConfig { enabled: boolean; storage_kind: "none" | "sqlite" | "api" | "shared_preferences"; reload_key: string; notes: string; reset_steps: SetupStep[]; }
 interface GoldenConfig { enabled: boolean; portrait_asset: string; landscape_asset: string; threshold: number; }
+interface SemanticKeyDefinition { symbol: string; value: string; group: string; description: string; }
+interface SemanticKeyContract { source_path: string; class_name: string; keys: SemanticKeyDefinition[]; }
 
 interface SuiteConfig {
   suite_version: number;
@@ -113,11 +116,12 @@ interface SuiteConfig {
   boot_timeout_ms: number;
   step_timeout_ms: number;
   setup_steps: SetupStep[];
-  profile: "COMMON_UI" | "FLUTTER_LAYERED" | "PERSISTENCE" | "REPOSITORY_SQLITE" | "GOLDEN_RESPONSIVE" | "TODO_STARTER_V12" | "TEMPLATE_CONTRACT_V1";
+  profile: "COMMON_UI" | "FLUTTER_LAYERED" | "PERSISTENCE" | "REPOSITORY_SQLITE" | "GOLDEN_RESPONSIVE" | "TODO_STARTER_V12" | "TEMPLATE_CONTRACT_V1" | "STARTER_KEY_HYBRID_V1";
   reset_strategy: "APP_RESTART" | "FIXTURE_STEPS" | "CLEAR_STORAGE" | "PERSISTENCE_PHASE";
   source_contracts: SourceContract[];
   persistence: PersistenceConfig;
   golden: GoldenConfig;
+  key_contract: SemanticKeyContract;
   template_contract?: TemplateContractDraft;
 }
 
@@ -174,10 +178,14 @@ const RUNNER_LABEL: Record<string, string> = {
   FORM_SUBMIT: "Kiểm tra gửi biểu mẫu",
   WIDGET_SEMANTICS_LABEL: "Kiểm tra nhãn hỗ trợ trợ năng",
   STATE_REACTIVE_FLOW: "Kiểm tra cập nhật trạng thái",
+  WIDGET_RELATIONSHIP: "Kiểm tra quan hệ và thứ tự widget",
+  RESPONSIVE_PAIR_LAYOUT: "Kiểm tra hai vùng responsive",
+  STARTER_CALL_SEQUENCE: "Chạy chuỗi API nghiệp vụ starter",
   GROUP: "Nhóm testcase",
 };
 
 const ENGINE_LABEL: Record<string, string> = {
+  STARTER_KEY_HYBRID_V1: "Starter TODO cho Logic/SQLite + Key cho UI",
   TEMPLATE_CONTRACT_V1: "Bộ testcase chấm theo khung template mẫu",
   TODO_USER_V12: "Pack User CRUD V12 cũ",
   COMMON_V1: "Bộ testcase 3 tầng chấm theo Key",
@@ -231,12 +239,14 @@ const ASSERTION_PARAMETER_KEYS = new Set([
   "errorTexts", "forbiddenTerms", "minimumOccurrences", "portraitExpectedTexts",
   "landscapeExpectedTexts", "requireNewResult", "requireNewErrors", "requireNewDestination",
   "hideDestinationAfterBack", "requireNewDialog", "requireNewUpdatedState", "requirePrefillTransition",
+  "descendantKeys", "secondKey",
 ]);
 const OPTION_PARAMETER_KEYS = new Set([
   "axis", "comparison", "dimension", "fieldType", "fromType", "matchMode",
   "targetType", "toType", "tolerance", "scopeType", "scopeIndex", "scopeAnchorText",
   "resultScopeType", "resultScopeIndex", "resultScopeAnchorText", "textMatchMode",
   "resultTextMatchMode", "errorTextMatchMode", "symbolTypes", "schemaMethod", "readyTimeoutMs",
+  "ancestorType", "descendantTypes", "orderedAxis", "alignment", "width", "height",
 ]);
 
 function parameterRole(key: string, runner?: string): ParameterRole {
@@ -282,6 +292,11 @@ function runnerContract(item: TestcaseItem, template?: Template) {
     input: `Giải mã argumentsJson ${formatParam(p.argumentsJson)} và truyền vào hàm ${formatParam(p.functionName)}.`,
     target: `Import ${formatParam(p.functionPath)} và gọi đúng hàm top-level đã khai báo.`,
     pass: `Actual phải ${formatParam(p.matchMode)} expectedValue=${formatParam(p.expectedValue)} (${formatParam(p.expectedType)}).`,
+  };
+  if (runner === "STARTER_CALL_SEQUENCE") return {
+    input: "Mỗi bước trong stepsJson khai báo functionName, arguments và expected riêng.",
+    target: `Import trực tiếp ${formatParam(p.sourcePath)} thuộc starter; không gọi grading adapter.`,
+    pass: "Các hàm được gọi tuần tự trong cùng testcase và mọi kết quả đều phải đúng.",
   };
   if (runner === "BUTTON_ACTION") return {
     input: "Không có dữ liệu nhập mặc định; setup có thể tạo trạng thái cần thiết trước khi bấm.",
@@ -341,6 +356,13 @@ function testcaseCodePreview(item: TestcaseItem, template?: Template) {
     return [
       `testWidgets(${dartQuote(item.instance_id)}, (tester) async {`,
       `  await runTemplateContractCase(tester, ${dartQuote(runner)}, ${JSON.stringify(p)});`,
+      "});",
+    ].join("\n");
+  }
+  if (runner === "STARTER_CALL_SEQUENCE") {
+    return [
+      `test(${dartQuote(item.instance_id)}, () async {`,
+      `  await runStarterCallSequence(${dartQuote(p.sourcePath)}, ${dartQuote(p.stepsJson)});`,
       "});",
     ].join("\n");
   }
@@ -437,6 +459,9 @@ const REQUIRED_RUNNER_PARAMETERS: Record<string, string[]> = {
   BUTTON_ACTION: ["buttonKey", "resultKey"],
   STATE_REACTIVE_FLOW: ["initialKey", "actionKey", "updatedKey", "absentKey"],
   DIRECT_FUNCTION: ["functionPath", "functionName", "argumentsJson", "expectedType", "matchMode"],
+  STARTER_CALL_SEQUENCE: ["sourcePath", "stepsJson"],
+  WIDGET_RELATIONSHIP: ["ancestorKey", "descendantKeys", "orderedAxis"],
+  RESPONSIVE_PAIR_LAYOUT: ["width", "height", "firstKey", "secondKey", "alignment"],
   RESPONSIVE_NO_OVERFLOW: ["portraitWidth", "portraitHeight", "landscapeWidth", "landscapeHeight"],
   RESPONSIVE_TARGET: ["portraitWidth", "portraitHeight", "landscapeWidth", "landscapeHeight", "targetKey"],
 };
@@ -489,6 +514,18 @@ function testcaseProgress(item: TestcaseItem, template?: Template): ItemProgress
       issues.push("Workflow chưa phải JSON hợp lệ");
     }
   }
+  if (runner === "STARTER_CALL_SEQUENCE" && !isBlankParameter(item.parameters.stepsJson)) {
+    try {
+      const steps = JSON.parse(String(item.parameters.stepsJson));
+      if (!Array.isArray(steps) || steps.length === 0) {
+        issues.push("Chuỗi API starter phải có ít nhất một bước");
+      } else if (steps.some((step) => !step || typeof step !== "object" || !String(step.functionName || "").trim())) {
+        issues.push("Mỗi bước chuỗi API phải có functionName");
+      }
+    } catch {
+      issues.push("Chuỗi API starter chưa phải JSON hợp lệ");
+    }
+  }
   for (const step of item.setup_steps || []) {
     if (!step.key.trim()) {
       issues.push("Có bước chuẩn bị chưa nhập key");
@@ -519,6 +556,7 @@ function emptySuite(): SuiteConfig {
     source_contracts: [],
     persistence: { enabled: false, storage_kind: "none", reload_key: "", notes: "", reset_steps: [] },
     golden: { enabled: false, portrait_asset: "", landscape_asset: "", threshold: 0.01 },
+    key_contract: { source_path: "lib/grading/app_keys.dart", class_name: "AppKeys", keys: [] },
   };
 }
 
@@ -535,6 +573,41 @@ function templateContractSuite(): SuiteConfig {
     persistence: { enabled: false, storage_kind: "none", reload_key: "", notes: "", reset_steps: [] },
     golden: { enabled: false, portrait_asset: "", landscape_asset: "", threshold: 0.01 },
   };
+}
+
+function hybridStarterKeySuite(): SuiteConfig {
+  return {
+    ...templateContractSuite(),
+    name: "Starter TODO + semantic Key",
+    context: "starter_key_hybrid",
+    strict_semantic_keys: true,
+    profile: "STARTER_KEY_HYBRID_V1",
+  };
+}
+
+function suiteForEngine(engine: EngineMode): SuiteConfig {
+  if (engine === "STARTER_KEY_HYBRID_V1") return hybridStarterKeySuite();
+  return engine === "TEMPLATE_CONTRACT_V1" ? templateContractSuite() : emptySuite();
+}
+
+function usesStarterContract(engine?: string) {
+  return engine === "TEMPLATE_CONTRACT_V1" || engine === "STARTER_KEY_HYBRID_V1";
+}
+
+function usesSemanticKeys(engine?: string) {
+  return engine === "COMMON_V1" || engine === "STARTER_KEY_HYBRID_V1";
+}
+
+function runnerUsesStarterContract(engine: EngineMode, runner?: string) {
+  return engine === "TEMPLATE_CONTRACT_V1"
+    || (engine === "STARTER_KEY_HYBRID_V1"
+      && (String(runner || "").startsWith("TEMPLATE_")
+        || runner === "DIRECT_FUNCTION"
+        || runner === "STARTER_CALL_SEQUENCE"));
+}
+
+function hasContractBindings(template?: Template): template is Template {
+  return Boolean(template && Object.keys(template.contract_bindings || {}).length > 0);
 }
 
 const DEFAULT_CONTRACT_SECTIONS: Array<Omit<TemplateContractSection, "fields"> & { fields: Array<Omit<TemplateContractField, "id" | "value">> }> = [
@@ -568,6 +641,10 @@ const DEFAULT_CONTRACT_SECTIONS: Array<Omit<TemplateContractSection, "fields"> &
     { key: "service.path", label: "File repository/service", kind: "path" },
     { key: "service.class", label: "Class repository/service", kind: "identifier" },
     { key: "service.methods", label: "Các method công khai", kind: "csv" },
+  ] },
+  { id: "logic", name: "API nghiệp vụ có sẵn trong starter", fields: [
+    { key: "logic.path", label: "File chứa hàm nghiệp vụ", kind: "path" },
+    { key: "logic.function", label: "Hàm top-level cần kiểm tra", kind: "identifier" },
   ] },
   { id: "state", name: "State / ViewModel", fields: [
     { key: "state.path", label: "File state/ViewModel", kind: "path" },
@@ -636,6 +713,10 @@ const CONTRACT_V4_ADDITION_KEYS = new Set([
   "ui.errorFieldLabels", "ui.errorTextMatchMode",
 ]);
 
+const CONTRACT_HYBRID_ADDITION_KEYS = new Set([
+  "logic.path", "logic.function",
+]);
+
 const LEGACY_CONTRACT_KEYS: Record<string, string> = {
   modelPath: "model.path", modelClass: "model.class", modelFields: "model.fields",
   databasePath: "storage.path", tableName: "storage.table", columns: "storage.columns",
@@ -687,10 +768,57 @@ function normalizeTemplateContract(raw: unknown): TemplateContractDraft {
         additions.forEach((field) => existingKeys.add(field.key));
       });
     }
+    base.sections.forEach((baseSection) => {
+      const additions = baseSection.fields.filter((field) =>
+        CONTRACT_HYBRID_ADDITION_KEYS.has(field.key) && !existingKeys.has(field.key));
+      if (!additions.length) return;
+      const target = sections.find((section) => section.id === baseSection.id);
+      if (target) target.fields.push(...additions);
+      else sections.push({ ...baseSection, fields: additions });
+      additions.forEach((field) => existingKeys.add(field.key));
+    });
     return { version: 4, sections };
   }
   const values = new Map(Object.entries(LEGACY_CONTRACT_KEYS).map(([oldKey, newKey]) => [newKey, String(object[oldKey] || "")]));
   return { ...base, sections: base.sections.map((section) => ({ ...section, fields: section.fields.map((field) => ({ ...field, value: values.get(field.key) || "" })) })) };
+}
+
+function normalizeSemanticKeyContract(raw: unknown): SemanticKeyContract {
+  const fallback: SemanticKeyContract = {
+    source_path: "lib/grading/app_keys.dart",
+    class_name: "AppKeys",
+    keys: [],
+  };
+  if (!raw || typeof raw !== "object") return fallback;
+  const value = raw as Record<string, unknown>;
+  const keys = Array.isArray(value.keys) ? value.keys.flatMap((entry) => {
+    if (!entry || typeof entry !== "object") return [];
+    const key = entry as Record<string, unknown>;
+    const semanticValue = String(key.value || "").trim();
+    if (!semanticValue) return [];
+    return [{
+      symbol: String(key.symbol || "").trim(),
+      value: semanticValue,
+      group: String(key.group || "Khác").trim() || "Khác",
+      description: String(key.description || "").trim(),
+    }];
+  }) : [];
+  return {
+    source_path: String(value.source_path || fallback.source_path),
+    class_name: String(value.class_name || fallback.class_name),
+    keys,
+  };
+}
+
+const SEMANTIC_KEY_PATTERN = /^[a-z][a-z0-9_-]*(?:\.[a-z0-9_-]+)+$/;
+
+function isSemanticKeyParameter(parameter: string) {
+  return /(?:^|_)(?:key|keys)$/i.test(parameter)
+    || /(?:Key|Keys)$/.test(parameter);
+}
+
+function isSemanticKeyListParameter(parameter: string) {
+  return /keys$/i.test(parameter) && !/key$/i.test(parameter);
 }
 
 function applyTemplateContract(
@@ -734,9 +862,12 @@ const PARAMETER_OPTIONS: Record<string, string[]> = {
   targetType: ["any", "form", "image", "text", "input", "button", "padding", "container"],
   fromType: ["any", "form", "image", "text", "input", "button", "padding", "container"],
   toType: ["any", "form", "image", "text", "input", "button", "padding", "container"],
+  ancestorType: ["any", "form", "image", "text", "input", "button", "padding", "container"],
   dimension: ["height", "width"],
   comparison: ["equals", "at_least", "at_most"],
   axis: ["vertical", "horizontal"],
+  orderedAxis: ["none", "vertical", "horizontal"],
+  alignment: ["column", "row"],
   fontWeight: ["w400", "w500", "w600", "w700", "w800"],
   expectedType: ["string", "bool", "int", "double", "json", "null"],
   matchMode: ["equals", "contains"],
@@ -830,6 +961,16 @@ const PARAMETER_LABELS: Record<string, string> = {
   fromType: "Loại bắt đầu",
   toKey: "Key kết thúc",
   toType: "Loại kết thúc",
+  ancestorKey: "Key vùng cha",
+  ancestorType: "Loại vùng cha",
+  descendantKeys: "Các Key phải nằm trong vùng cha",
+  descendantTypes: "Loại tương ứng của các widget con",
+  orderedAxis: "Trục kiểm tra thứ tự",
+  firstKey: "Key vùng thứ nhất",
+  secondKey: "Key vùng thứ hai",
+  alignment: "Cách xếp hàng/cột",
+  width: "Chiều rộng viewport",
+  height: "Chiều cao viewport",
   axis: "Trục khoảng cách",
   expectedGap: "Khoảng cách mong đợi",
   fontSize: "Cỡ chữ",
@@ -852,14 +993,14 @@ const PARAMETER_LABELS: Record<string, string> = {
 
 export default function TestcasesPage() {
   const [templates, setTemplates] = useState<Template[]>([]);
-  const [engineMode, setEngineMode] = useState<EngineMode>("TEMPLATE_CONTRACT_V1");
+  const [engineMode, setEngineMode] = useState<EngineMode>("STARTER_KEY_HYBRID_V1");
   const [templateContract, setTemplateContract] = useState<TemplateContractDraft>(emptyTemplateContract);
   const [skillOptions, setSkillOptions] = useState<SkillOption[]>([]);
   const [examId, setExamId] = useState("");
   const [examName, setExamName] = useState("");
   const [teacherNote, setTeacherNote] = useState("");
   const [items, setItems] = useState<TestcaseItem[]>([]);
-  const [suite, setSuite] = useState<SuiteConfig>(templateContractSuite);
+  const [suite, setSuite] = useState<SuiteConfig>(hybridStarterKeySuite);
   const [status, setStatus] = useState("");
   const [version, setVersion] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -896,6 +1037,8 @@ export default function TestcasesPage() {
   const [previewFiles, setPreviewFiles] = useState<Array<{ name: string; content: string }>>([]);
   const [previewFile, setPreviewFile] = useState(0);
   const [previewLoading, setPreviewLoading] = useState(false);
+  const [keyPaletteSearch, setKeyPaletteSearch] = useState("");
+  const [copiedKey, setCopiedKey] = useState("");
 
   useEffect(() => {
     const normalized = examId.trim();
@@ -932,21 +1075,23 @@ export default function TestcasesPage() {
             setTeacherNote(String(exam.teacherNote || ""));
             setItems(config.items as TestcaseItem[]);
             const loadedEngine = String(config.engine_type || config.items[0]?.engine_type || "");
-            if (loadedEngine === "TEMPLATE_CONTRACT_V1" || loadedEngine === "COMMON_V1") {
-              setEngineMode(loadedEngine);
-            }
+            const resolvedEngine: EngineMode = loadedEngine === "STARTER_KEY_HYBRID_V1"
+                || loadedEngine === "TEMPLATE_CONTRACT_V1" || loadedEngine === "COMMON_V1"
+              ? loadedEngine : "STARTER_KEY_HYBRID_V1";
+            setEngineMode(resolvedEngine);
             if (config.suite && typeof config.suite === "object") {
               const loaded = config.suite as Partial<SuiteConfig>;
               if (loaded.template_contract && typeof loaded.template_contract === "object") {
                 setTemplateContract(normalizeTemplateContract(loaded.template_contract));
               }
               setSuite({
-                ...(loadedEngine === "TEMPLATE_CONTRACT_V1" ? templateContractSuite() : emptySuite()),
+                ...suiteForEngine(resolvedEngine),
                 ...loaded,
                 required_keys: Array.isArray(loaded.required_keys)
                   ? loaded.required_keys.join(", ")
                   : String(loaded.required_keys || ""),
                 setup_steps: Array.isArray(loaded.setup_steps) ? loaded.setup_steps : [],
+                key_contract: normalizeSemanticKeyContract(loaded.key_contract),
               });
             }
             setStatus(String(config.status || "DRAFT"));
@@ -1005,7 +1150,9 @@ export default function TestcasesPage() {
   }, [templates]);
 
   const templatesForEngine = useMemo(
-    () => templates.filter((template) => (template.engine_type || "COMMON_V1") === engineMode),
+    () => templates.filter((template) =>
+      (template.engine_type || "COMMON_V1") === engineMode
+      && template.template_id !== "COMMON_GRADING_ADAPTER_CALL"),
     [templates, engineMode],
   );
 
@@ -1035,6 +1182,77 @@ export default function TestcasesPage() {
 
   const selectedTemplate = templates.find((t) => t.template_id === selectedTemplateId) || null;
   const templateMap = useMemo(() => new Map(templates.map((t) => [t.template_id, t])), [templates]);
+  const semanticKeyCatalog = useMemo(() => {
+    const catalog = new Map<string, SemanticKeyDefinition & { declared: boolean }>();
+    const add = (value: unknown, detail?: Partial<SemanticKeyDefinition>, declared = false) => {
+      const normalized = String(value || "").trim();
+      if (!SEMANTIC_KEY_PATTERN.test(normalized)) return;
+      const current = catalog.get(normalized);
+      if (current?.declared && !declared) return;
+      catalog.set(normalized, {
+        symbol: detail?.symbol || current?.symbol || "",
+        value: normalized,
+        group: detail?.group || current?.group || (declared ? "Khác" : "Đang dùng trong Draft"),
+        description: detail?.description || current?.description || "",
+        declared: declared || Boolean(current?.declared),
+      });
+    };
+
+    suite.key_contract.keys.forEach((key) => add(key.value, key, true));
+    add(suite.ready_key, { description: "Key báo ứng dụng sẵn sàng" });
+    String(suite.required_keys || "").split(",").forEach((key) =>
+      add(key, { description: "Key bắt buộc của khung chấm" }));
+    suite.setup_steps.forEach((step) => add(step.key, { description: "Đang dùng trong setup chung" }));
+    if (suite.persistence.reload_key) {
+      add(suite.persistence.reload_key, { description: "Key reload persistence" });
+    }
+    templateContract.sections.forEach((section) => section.fields.forEach((field) => {
+      if (field.key === "app.rootKey") add(field.value, { description: "Root Key trong contract đề" });
+    }));
+    items.forEach((item) => {
+      Object.entries(item.parameters || {}).forEach(([parameter, raw]) => {
+        if (!isSemanticKeyParameter(parameter)) return;
+        String(raw ?? "").split(",").forEach((key) =>
+          add(key, { description: `Đang dùng bởi ${item.instance_id}` }));
+      });
+      (item.setup_steps || []).forEach((step) =>
+        add(step.key, { description: `Setup của ${item.instance_id}` }));
+    });
+    return Array.from(catalog.values()).sort((left, right) =>
+      left.group.localeCompare(right.group, "vi") || left.value.localeCompare(right.value));
+  }, [items, suite.key_contract.keys, suite.persistence.reload_key, suite.ready_key,
+    suite.required_keys, suite.setup_steps, templateContract]);
+  const filteredSemanticKeys = useMemo(() => {
+    const query = keyPaletteSearch.trim().toLocaleLowerCase("vi");
+    if (!query) return semanticKeyCatalog;
+    return semanticKeyCatalog.filter((key) =>
+      `${key.symbol} ${key.value} ${key.group} ${key.description}`.toLocaleLowerCase("vi").includes(query));
+  }, [keyPaletteSearch, semanticKeyCatalog]);
+  const keyContractIssues = useMemo(() => {
+    const issues: string[] = [];
+    const sourcePath = suite.key_contract.source_path.trim().replaceAll("\\", "/");
+    if (sourcePath && (!sourcePath.startsWith("lib/") || sourcePath.includes("..") || !sourcePath.endsWith(".dart"))) {
+      issues.push("File Key phải là đường dẫn .dart tương đối trong lib/");
+    }
+    if (suite.key_contract.class_name && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(suite.key_contract.class_name)) {
+      issues.push("Class Key chưa phải Dart identifier hợp lệ");
+    }
+    const symbols = new Set<string>();
+    const values = new Set<string>();
+    suite.key_contract.keys.forEach((key, index) => {
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key.symbol)) issues.push(`Key #${index + 1} có tên constant không hợp lệ`);
+      else if (symbols.has(key.symbol)) issues.push(`Tên constant bị trùng: ${key.symbol}`);
+      if (!SEMANTIC_KEY_PATTERN.test(key.value)) issues.push(`Key #${index + 1} chưa đúng dạng screen.home`);
+      else if (values.has(key.value)) issues.push(`Giá trị Key bị trùng: ${key.value}`);
+      symbols.add(key.symbol);
+      values.add(key.value);
+    });
+    return Array.from(new Set(issues));
+  }, [suite.key_contract]);
+  const undeclaredUsedKeys = useMemo(
+    () => semanticKeyCatalog.filter((key) => !key.declared),
+    [semanticKeyCatalog],
+  );
   const activeEngine = items.length
     ? (items[0].engine_type || templateMap.get(items[0].template_id)?.engine_type)
     : engineMode;
@@ -1094,7 +1312,7 @@ export default function TestcasesPage() {
     setSelectedCategory("ALL");
     setSelectedTemplateId(null);
     setSearch("");
-    setSuite(next === "TEMPLATE_CONTRACT_V1" ? templateContractSuite() : emptySuite());
+    setSuite(suiteForEngine(next));
     setMessage(null);
   };
 
@@ -1144,7 +1362,7 @@ export default function TestcasesPage() {
       if (!schema || typeof schema !== "object" || Array.isArray(schema))
         throw new Error("Schema tham số phải là JSON object.");
       let bindings: unknown = {};
-      if (engineMode === "TEMPLATE_CONTRACT_V1") {
+      if (runnerUsesStarterContract(engineMode, newTemplate.runner)) {
         try { bindings = JSON.parse(newTemplate.contract_bindings); }
         catch { throw new Error("Ánh xạ contract phải là JSON object hợp lệ."); }
         if (!bindings || typeof bindings !== "object" || Array.isArray(bindings))
@@ -1181,7 +1399,7 @@ export default function TestcasesPage() {
     let nextNumber = items.length + 1;
     while (usedIds.has(`${examId.trim() || "exam"}_item_${pad(nextNumber)}`)) nextNumber += 1;
     const fixedId = template.execution_key || template.template_id;
-    const parameters = templateEngine === "TEMPLATE_CONTRACT_V1"
+    const parameters = hasContractBindings(template)
       ? applyTemplateContract(template, cloneParams(template), templateContract)
       : cloneParams(template);
     const item: TestcaseItem = {
@@ -1213,9 +1431,8 @@ export default function TestcasesPage() {
   const applyContractToSelectedTestcases = () => {
     let changed = 0;
     const nextItems = items.map((item) => {
-      if (item.engine_type !== "TEMPLATE_CONTRACT_V1") return item;
       const template = templateMap.get(item.template_id);
-      if (!template) return item;
+      if (!hasContractBindings(template)) return item;
       const parameters = applyTemplateContract(template, item.parameters, templateContract, true);
       changed += 1;
       return {
@@ -1264,9 +1481,8 @@ export default function TestcasesPage() {
       .find((field) => field.id === fieldId);
     if (currentField && patch.value !== undefined && patch.value !== currentField.value) {
       setItems((currentItems) => currentItems.map((item) => {
-        if (item.engine_type !== "TEMPLATE_CONTRACT_V1") return item;
         const template = templateMap.get(item.template_id);
-        if (!template) return item;
+        if (!hasContractBindings(template)) return item;
         const overridden = new Set(item.contract_overrides || []);
         let changed = false;
         const parameters = { ...item.parameters };
@@ -1307,6 +1523,83 @@ export default function TestcasesPage() {
 
   const updateSuite = (patch: Partial<SuiteConfig>) => {
     setSuite((current) => ({ ...current, ...patch }));
+  };
+
+  const updateKeyContract = (patch: Partial<SemanticKeyContract>) => {
+    setSuite((current) => ({
+      ...current,
+      key_contract: { ...current.key_contract, ...patch },
+    }));
+  };
+
+  const addSemanticKey = () => {
+    const usedSymbols = new Set(suite.key_contract.keys.map((key) => key.symbol));
+    const usedValues = new Set(suite.key_contract.keys.map((key) => key.value));
+    let index = suite.key_contract.keys.length + 1;
+    while (usedSymbols.has(`widgetKey${index}`) || usedValues.has(`widget.item-${index}`)) index += 1;
+    updateKeyContract({
+      keys: [...suite.key_contract.keys, {
+        symbol: `widgetKey${index}`,
+        value: `widget.item-${index}`,
+        group: "Màn hình",
+        description: "",
+      }],
+    });
+  };
+
+  const updateSemanticKey = (index: number, patch: Partial<SemanticKeyDefinition>) => {
+    updateKeyContract({
+      keys: suite.key_contract.keys.map((key, keyIndex) => keyIndex === index ? { ...key, ...patch } : key),
+    });
+  };
+
+  const removeSemanticKey = (index: number) => {
+    updateKeyContract({ keys: suite.key_contract.keys.filter((_, keyIndex) => keyIndex !== index) });
+  };
+
+  const declareUsedSemanticKeys = () => {
+    const usedSymbols = new Set(suite.key_contract.keys.map((key) => key.symbol));
+    const additions = undeclaredUsedKeys.map((key) => {
+      const parts = key.value.split(/[._-]+/).filter(Boolean);
+      const base = parts.map((part, index) => index === 0
+        ? part.toLocaleLowerCase("en")
+        : `${part.charAt(0).toLocaleUpperCase("en")}${part.slice(1).toLocaleLowerCase("en")}`)
+        .join("") || "widgetKey";
+      const symbolBase = /^[A-Za-z_]/.test(base) ? base : `key${base}`;
+      let symbol = symbolBase;
+      let suffix = 2;
+      while (usedSymbols.has(symbol)) symbol = `${symbolBase}${suffix++}`;
+      usedSymbols.add(symbol);
+      return {
+        symbol,
+        value: key.value,
+        group: key.value.split(".")[0] || "Khác",
+        description: key.description,
+      };
+    });
+    updateKeyContract({ keys: [...suite.key_contract.keys, ...additions] });
+  };
+
+  const copySemanticKey = async (value: string) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopiedKey(value);
+      window.setTimeout(() => setCopiedKey((current) => current === value ? "" : current), 1200);
+    } catch {
+      setMessage({ type: "error", text: "Trình duyệt không cho phép sao chép Key tự động." });
+    }
+  };
+
+  const chooseSemanticKey = (item: TestcaseItem, parameter: string, value: string) => {
+    if (!value) return;
+    if (!isSemanticKeyListParameter(parameter)) {
+      updateParameter(item, parameter, value);
+      return;
+    }
+    const current = String(item.parameters[parameter] || "")
+      .split(",").map((entry) => entry.trim()).filter(Boolean);
+    if (!current.includes(value)) current.push(value);
+    updateParameter(item, parameter, current.join(","));
   };
 
   const addSuiteStep = () => {
@@ -1373,7 +1666,7 @@ export default function TestcasesPage() {
     const parameters = { ...item.parameters, [key]: parsed };
     updateItem(item.instance_id, {
       parameters,
-      contract_overrides: item.engine_type === "TEMPLATE_CONTRACT_V1"
+      contract_overrides: hasContractBindings(template)
         ? Array.from(new Set([...(item.contract_overrides || []), key])) : item.contract_overrides,
       // Chỉ tự sinh lại expected khi giáo viên chưa nhập nội dung riêng.
       expected: item.expected_custom
@@ -1510,13 +1803,17 @@ export default function TestcasesPage() {
       setMessage({ type: "error", text: "Vui lòng nhập tên đề thi trước khi lưu." });
       return;
     }
+    if (usesSemanticKeys(engineMode) && keyContractIssues.length > 0) {
+      setMessage({ type: "error", text: `Bộ Semantic Key chưa hợp lệ: ${keyContractIssues[0]}.` });
+      return;
+    }
     setSaving(kind);
     setMessage(null);
     try {
       const res = await fetch(`${API_BASE}/exam-setup/${encodeURIComponent(examId.trim())}/testcases/${kind}`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` },
-        body: JSON.stringify({ exam_name: examName.trim(), teacher_note: teacherNote.trim(), suite: { ...suite, template_contract: templateContract }, items }),
+        body: JSON.stringify({ engine_type: engineMode, exam_name: examName.trim(), teacher_note: teacherNote.trim(), suite: { ...suite, template_contract: templateContract }, items }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Không lưu được cấu hình testcase");
@@ -1525,7 +1822,7 @@ export default function TestcasesPage() {
       setVersion(Number(data.version ?? version));
       if (data.suite && typeof data.suite === "object") {
         const loadedSuite = data.suite as Partial<SuiteConfig>;
-        setSuite({ ...(engineMode === "TEMPLATE_CONTRACT_V1" ? templateContractSuite() : emptySuite()), ...loadedSuite, required_keys: Array.isArray(loadedSuite.required_keys) ? loadedSuite.required_keys.join(", ") : String(loadedSuite.required_keys || ""), setup_steps: Array.isArray(loadedSuite.setup_steps) ? loadedSuite.setup_steps : [] });
+        setSuite({ ...suiteForEngine(engineMode), ...loadedSuite, required_keys: Array.isArray(loadedSuite.required_keys) ? loadedSuite.required_keys.join(", ") : String(loadedSuite.required_keys || ""), setup_steps: Array.isArray(loadedSuite.setup_steps) ? loadedSuite.setup_steps : [], key_contract: normalizeSemanticKeyContract(loadedSuite.key_contract) });
       }
       setItems(Array.isArray(data.items) ? data.items as TestcaseItem[] : items);
       const previewResponse = await fetch(`${API_BASE}/exam-setup/${encodeURIComponent(examId.trim())}/testcase`, { headers: { Authorization: `Bearer ${getToken() ?? ""}` } });
@@ -1570,10 +1867,13 @@ export default function TestcasesPage() {
   return (
     <SidebarLayout
       title="Tạo testcase từ template"
-      subtitle="Chọn chấm theo khung template mẫu hoặc chấm 3 tầng theo Key"
+      subtitle="Kết hợp starter TODO cho Logic/SQLite với semantic Key cho Widget và Behavior"
       activePath="/teacher/testcases"
     >
       <div className="space-y-5">
+        <datalist id="semantic-key-options">
+          {semanticKeyCatalog.map((key) => <option key={key.value} value={key.value}>{key.symbol || key.group}</option>)}
+        </datalist>
         <div className="card flex flex-wrap items-end gap-4 p-4">
           <div className="min-w-[220px] flex-1">
             <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500">Mã đề mới</label>
@@ -1634,7 +1934,11 @@ export default function TestcasesPage() {
             <p className="eyebrow">Cách chấm</p>
             <h2 className="mt-1 text-sm font-bold text-slate-800">Chọn contract phù hợp với template phát cho sinh viên</h2>
           </div>
-          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
+            <button type="button" onClick={() => selectEngineMode("STARTER_KEY_HYBRID_V1")} className={`rounded-xl border p-4 text-left transition ${engineMode === "STARTER_KEY_HYBRID_V1" ? "border-indigo-400 bg-indigo-50 ring-2 ring-indigo-100" : "border-slate-200 hover:border-indigo-200"}`}>
+              <div className="flex items-center justify-between gap-3"><strong className="text-sm text-slate-800">Starter TODO + Key UI</strong><span className="rounded-full bg-indigo-100 px-2 py-1 text-[10px] font-bold text-indigo-700">KHUYẾN NGHỊ</span></div>
+              <p className="mt-2 text-xs leading-relaxed text-slate-500">Logic, Model, Repository và SQLite theo public contract của starter; Widget và luồng UI được định vị bằng semantic Key.</p>
+            </button>
             <button type="button" onClick={() => selectEngineMode("TEMPLATE_CONTRACT_V1")} className={`rounded-xl border p-4 text-left transition ${engineMode === "TEMPLATE_CONTRACT_V1" ? "border-indigo-400 bg-indigo-50 ring-2 ring-indigo-100" : "border-slate-200 hover:border-indigo-200"}`}>
               <div className="flex items-center justify-between gap-3"><strong className="text-sm text-slate-800">Bộ testcase chấm theo khung template mẫu</strong><span className="rounded-full bg-emerald-100 px-2 py-1 text-[10px] font-bold text-emerald-700">TEMPLATE MẪU</span></div>
               <p className="mt-2 text-xs leading-relaxed text-slate-500">Tái sử dụng các mẫu kiểm tra tổng quát; file, class, field, method và label được nhập lại theo từng đề.</p>
@@ -1647,14 +1951,19 @@ export default function TestcasesPage() {
           {items.length > 0 && <p className="mt-3 text-[11px] font-semibold text-amber-600">Kiểu chấm được khóa khi đề đã có testcase. Xóa tất cả testcase nếu cần đổi engine.</p>}
         </section>
 
-        {engineMode === "TEMPLATE_CONTRACT_V1" ? (
+        {usesStarterContract(engineMode) && (
         <section className="card overflow-hidden">
           <div className="border-b border-slate-100 bg-emerald-50/70 px-4 py-3"><p className="eyebrow">Contract thay đổi theo từng đề</p><div className="mt-1 flex flex-wrap items-center justify-between gap-3"><h2 className="text-sm font-bold text-slate-800">Tái sử dụng mẫu kiểm tra, không tái sử dụng bộ đề cố định</h2><button type="button" onClick={() => document.getElementById("testcase-library")?.scrollIntoView({ behavior: "smooth" })} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-bold text-white hover:bg-emerald-700">Chọn mẫu testcase ↓</button></div><p className="mt-1 text-xs text-slate-500">Với mỗi testcase, giảng viên nhập file, class, field, method, label, dữ liệu và expected của đề hiện tại.</p></div>
-          <div className="grid grid-cols-1 gap-3 p-4 md:grid-cols-3">
+          {engineMode === "TEMPLATE_CONTRACT_V1" && <div className="grid grid-cols-1 gap-3 p-4 md:grid-cols-3">
             <div className="rounded-lg border border-blue-200 bg-blue-50 p-3"><p className="text-xs font-bold text-blue-800">1. Chọn mẫu kiểm tra</p><p className="mt-1 text-[10px] leading-relaxed text-blue-700">Ví dụ: Model fields, SQLite schema, Repository methods, form fields, button/action hoặc responsive.</p></div>
             <div className="rounded-lg border border-amber-200 bg-amber-50 p-3"><p className="text-xs font-bold text-amber-800">2. Nhập contract của đề</p><p className="mt-1 text-[10px] leading-relaxed text-amber-700">Mọi đường dẫn, tên class, danh sách field/method và label đều sửa được trong testcase đã chọn.</p></div>
             <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3"><p className="text-xs font-bold text-emerald-800">3. Sinh bộ chấm riêng</p><p className="mt-1 text-[10px] leading-relaxed text-emerald-700">Engine dùng contract hiện tại để chấm starter TODO; không yêu cầu Widget Key hay grading_adapter.dart.</p></div>
-          </div>
+          </div>}
+          {engineMode === "STARTER_KEY_HYBRID_V1" && <div className="grid grid-cols-1 gap-3 p-4 md:grid-cols-3">
+            <div className="rounded-lg border border-blue-200 bg-blue-50 p-3"><p className="text-xs font-bold text-blue-800">1. Khóa contract starter</p><p className="mt-1 text-[10px] leading-relaxed text-blue-700">Khai báo file, class, field, method và schema mà sinh viên phải hoàn thành TODO.</p></div>
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3"><p className="text-xs font-bold text-amber-800">2. Công bố semantic Key</p><p className="mt-1 text-[10px] leading-relaxed text-amber-700">Chỉ khóa điểm tương tác UI; sinh viên vẫn tự xây widget tree, bố cục và state management.</p></div>
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3"><p className="text-xs font-bold text-emerald-800">3. Sinh bộ chấm hybrid</p><p className="mt-1 text-[10px] leading-relaxed text-emerald-700">Logic/SQLite đọc starter trực tiếp, UI dùng Key chính xác; không có grading_adapter.dart.</p></div>
+          </div>}
           <details className="border-t border-slate-100 bg-slate-50/50 px-4 py-3">
             <summary className="cursor-pointer text-xs font-bold text-indigo-700">Thiết lập contract gợi ý cho đề (không bắt buộc)</summary>
             <p className="mt-2 text-[11px] leading-relaxed text-slate-500">Contract là bộ biến dùng chung của đề. Có thể thêm/xóa nhóm và trường tùy ý; mỗi blueprint ánh xạ tham số tới một mã như <code>model.path</code>, <code>ui.fieldLabels</code> hoặc <code>behavior.stepsJson</code>.</p>
@@ -1691,7 +2000,8 @@ export default function TestcasesPage() {
           </details>
           <div className="border-t border-slate-100 px-4 py-3 text-xs text-slate-500"><strong className="text-slate-700">Không có nút nạp hàng loạt:</strong> đề cần gì thì chọn mẫu đó, sau đó thay tham số theo đúng starter đang phát.</div>
         </section>
-        ) : (
+        )}
+        {usesSemanticKeys(engineMode) && (
         <section className="card overflow-hidden">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 bg-slate-50/70 px-4 py-3">
             <div>
@@ -1700,7 +2010,7 @@ export default function TestcasesPage() {
               <p className="mt-1 text-xs text-slate-500">Mỗi testcase sẽ khởi động lại app rồi chạy khung này trước khi kiểm tra riêng.</p>
             </div>
             <label className="flex items-center gap-2 text-xs font-semibold text-slate-600">
-              <input type="checkbox" checked={suite.strict_semantic_keys} onChange={(e) => updateSuite({ strict_semantic_keys: e.target.checked })} />
+              <input type="checkbox" checked={suite.strict_semantic_keys} disabled={engineMode === "STARTER_KEY_HYBRID_V1"} onChange={(e) => updateSuite({ strict_semantic_keys: e.target.checked })} />
               Bắt buộc semantic key chính xác
             </label>
           </div>
@@ -1708,25 +2018,45 @@ export default function TestcasesPage() {
             <label className="text-xs font-semibold text-slate-600">Tên khung<input value={suite.name} onChange={(e) => updateSuite({ name: e.target.value })} placeholder="Todo CRUD cơ bản" className="mt-1.5 w-full rounded-md border border-slate-200 px-2.5 py-2 text-xs font-normal outline-none focus:border-indigo-400" /></label>
             <label className="text-xs font-semibold text-slate-600">Ngữ cảnh<input value={suite.context} onChange={(e) => updateSuite({ context: e.target.value })} placeholder="todo_crud" className="mt-1.5 w-full rounded-md border border-slate-200 px-2.5 py-2 font-mono text-xs font-normal outline-none focus:border-indigo-400" /></label>
             <label className="text-xs font-semibold text-slate-600">Tên fixture<input value={suite.fixture_name} onChange={(e) => updateSuite({ fixture_name: e.target.value })} placeholder="one_existing_todo" className="mt-1.5 w-full rounded-md border border-slate-200 px-2.5 py-2 font-mono text-xs font-normal outline-none focus:border-indigo-400" /></label>
-            <label className="text-xs font-semibold text-slate-600">Key báo sẵn sàng<input value={suite.ready_key} onChange={(e) => updateSuite({ ready_key: e.target.value })} placeholder="screen.home.ready" className="mt-1.5 w-full rounded-md border border-slate-200 px-2.5 py-2 font-mono text-xs font-normal outline-none focus:border-indigo-400" /></label>
+            <label className="text-xs font-semibold text-slate-600">Key báo sẵn sàng<input list="semantic-key-options" value={suite.ready_key} onChange={(e) => updateSuite({ ready_key: e.target.value })} placeholder="screen.home.ready" className="mt-1.5 w-full rounded-md border border-slate-200 px-2.5 py-2 font-mono text-xs font-normal outline-none focus:border-indigo-400" /></label>
             <label className="text-xs font-semibold text-slate-600 md:col-span-2">Mô tả fixture<textarea rows={2} value={suite.fixture_description} onChange={(e) => updateSuite({ fixture_description: e.target.value })} placeholder="Dữ liệu ban đầu mà starter phải hiển thị trước khi chạy testcase." className="mt-1.5 w-full resize-y rounded-md border border-slate-200 px-2.5 py-2 text-xs font-normal outline-none focus:border-indigo-400" /></label>
             <label className="text-xs font-semibold text-slate-600 md:col-span-2">Các key bắt buộc<input value={suite.required_keys} onChange={(e) => updateSuite({ required_keys: e.target.value })} placeholder="screen.home, list.items, action.add" className="mt-1.5 w-full rounded-md border border-slate-200 px-2.5 py-2 font-mono text-xs font-normal outline-none focus:border-indigo-400" /><span className="mt-1 block text-[10px] font-normal text-slate-400">Phân tách bằng dấu phẩy. Bỏ trống nếu chỉ muốn testcase tự khai báo target.</span></label>
             <label className="text-xs font-semibold text-slate-600">Chờ khởi động (ms)<input type="number" min={100} max={30000} step={100} value={suite.boot_timeout_ms} onChange={(e) => updateSuite({ boot_timeout_ms: Number(e.target.value) })} className="mt-1.5 w-full rounded-md border border-slate-200 px-2.5 py-2 text-xs font-normal outline-none focus:border-indigo-400" /></label>
             <label className="text-xs font-semibold text-slate-600">Chờ mỗi bước (ms)<input type="number" min={100} max={30000} step={100} value={suite.step_timeout_ms} onChange={(e) => updateSuite({ step_timeout_ms: Number(e.target.value) })} className="mt-1.5 w-full rounded-md border border-slate-200 px-2.5 py-2 text-xs font-normal outline-none focus:border-indigo-400" /></label>
           </div>
+          <div className="border-t border-slate-100 bg-indigo-50/30 px-4 py-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div><p className="text-xs font-bold text-slate-700">Bộ Semantic Key công bố trong starter</p><p className="mt-1 text-[10px] leading-relaxed text-slate-500">Khai báo một lần theo file Key phát cho sinh viên. Các ô Key của testcase sẽ cho chọn từ danh mục này; vẫn có thể nhập Key mới khi cần.</p></div>
+              <div className="flex flex-wrap gap-2">{undeclaredUsedKeys.length > 0 && <button type="button" onClick={declareUsedSemanticKeys} className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-700 hover:bg-amber-100">Nhập {undeclaredUsedKeys.length} Key đang dùng</button>}<button type="button" onClick={addSemanticKey} className="flex items-center gap-1 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-bold text-white hover:bg-indigo-700"><Plus size={13} /> Thêm Key</button></div>
+            </div>
+            <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
+              <label className="text-[11px] font-semibold text-slate-600">File định nghĩa Key<input value={suite.key_contract.source_path} onChange={(event) => updateKeyContract({ source_path: event.target.value })} placeholder="lib/grading/app_keys.dart" className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2.5 py-2 font-mono text-xs font-normal" /></label>
+              <label className="text-[11px] font-semibold text-slate-600">Class chứa Key<input value={suite.key_contract.class_name} onChange={(event) => updateKeyContract({ class_name: event.target.value })} placeholder="AppKeys" className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2.5 py-2 font-mono text-xs font-normal" /></label>
+            </div>
+            {suite.key_contract.keys.length === 0 ? <p className="mt-3 rounded-lg border border-dashed border-indigo-200 bg-white/70 p-3 text-xs text-slate-500">Chưa khai báo Key. Bấm “Thêm Key”, nhập tên constant và giá trị như <code>uidField</code> → <code>person.form.uid</code>.</p> : <div className="mt-3 space-y-2">{suite.key_contract.keys.map((key, index) => <div key={`${index}-${key.symbol}`} className="grid grid-cols-1 gap-2 rounded-lg border border-indigo-100 bg-white p-2 md:grid-cols-[minmax(120px,0.8fr)_minmax(170px,1fr)_minmax(110px,0.7fr)_minmax(180px,1.4fr)_auto]">
+              <input value={key.symbol} onChange={(event) => updateSemanticKey(index, { symbol: event.target.value })} placeholder="uidField" aria-label={`Tên biến Key ${index + 1}`} className="rounded-md border border-slate-200 px-2 py-1.5 font-mono text-[11px]" />
+              <input value={key.value} onChange={(event) => updateSemanticKey(index, { value: event.target.value })} placeholder="person.form.uid" aria-label={`Giá trị Key ${index + 1}`} className="rounded-md border border-slate-200 px-2 py-1.5 font-mono text-[11px]" />
+              <input value={key.group} onChange={(event) => updateSemanticKey(index, { group: event.target.value })} placeholder="Form" aria-label={`Nhóm Key ${index + 1}`} className="rounded-md border border-slate-200 px-2 py-1.5 text-[11px]" />
+              <input value={key.description} onChange={(event) => updateSemanticKey(index, { description: event.target.value })} placeholder="Ô nhập UID" aria-label={`Mô tả Key ${index + 1}`} className="rounded-md border border-slate-200 px-2 py-1.5 text-[11px]" />
+              <button type="button" onClick={() => removeSemanticKey(index)} className="rounded-md p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600" title="Xóa Key"><Trash2 size={14} /></button>
+            </div>)}</div>}
+            {keyContractIssues.length > 0 && <div className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-[10px] text-rose-700"><strong>Chưa thể lưu:</strong> {keyContractIssues.join(" · ")}</div>}
+            {undeclaredUsedKeys.length > 0 && <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[10px] leading-relaxed text-amber-700"><strong>{undeclaredUsedKeys.length} Key đang được testcase dùng nhưng chưa khai báo trong starter:</strong> {undeclaredUsedKeys.slice(0, 6).map((key) => key.value).join(", ")}{undeclaredUsedKeys.length > 6 ? "…" : ""}. Có thể lưu Draft, nhưng nên thêm chúng vào danh mục trước khi phát starter.</div>}
+            <p className="mt-3 text-[10px] text-indigo-700">Trong starter: <code>{suite.key_contract.class_name || "AppKeys"}.uidField</code> phải trả về <code>const Key(&apos;person.form.uid&apos;)</code>. Máy chấm dùng chính chuỗi <code>person.form.uid</code>.</p>
+          </div>
           <div className="border-t border-slate-100 px-4 py-3">
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                  <label className="text-xs font-semibold text-slate-600">Profile<select value={suite.profile} onChange={(e) => updateSuite({ profile: e.target.value as SuiteConfig["profile"] })} className="mt-1.5 w-full rounded-md border border-slate-200 bg-white px-2.5 py-2 text-xs font-normal"><option value="COMMON_UI">Common UI</option><option value="FLUTTER_LAYERED">Flutter layered</option><option value="PERSISTENCE" disabled>Persistence (chưa có runner)</option><option value="REPOSITORY_SQLITE" disabled>Repository + SQLite (dùng grading adapter/DIRECT_FUNCTION)</option><option value="GOLDEN_RESPONSIVE" disabled>Golden responsive (chưa có runner)</option></select></label>
+                  <label className="text-xs font-semibold text-slate-600">Profile<select value={suite.profile} onChange={(e) => updateSuite({ profile: e.target.value as SuiteConfig["profile"] })} className="mt-1.5 w-full rounded-md border border-slate-200 bg-white px-2.5 py-2 text-xs font-normal"><option value="STARTER_KEY_HYBRID_V1">Starter TODO + Key UI</option><option value="COMMON_UI">Common UI</option><option value="FLUTTER_LAYERED">Flutter layered</option><option value="PERSISTENCE" disabled>Persistence (chưa có runner)</option><option value="REPOSITORY_SQLITE" disabled>Repository + SQLite (khai báo qua starter TODO)</option><option value="GOLDEN_RESPONSIVE" disabled>Golden responsive (chưa có runner)</option></select></label>
                   <label className="text-xs font-semibold text-slate-600">Reset strategy<select value={suite.reset_strategy} onChange={(e) => updateSuite({ reset_strategy: e.target.value as SuiteConfig["reset_strategy"] })} className="mt-1.5 w-full rounded-md border border-slate-200 bg-white px-2.5 py-2 text-xs font-normal"><option value="APP_RESTART">App restart</option><option value="FIXTURE_STEPS">Fixture steps</option><option value="CLEAR_STORAGE" disabled>Clear storage (chưa hỗ trợ)</option><option value="PERSISTENCE_PHASE" disabled>Persistence phase (chưa hỗ trợ)</option></select></label>
             </div>
             <div className="mt-4 flex items-center justify-between gap-2"><div><p className="text-xs font-bold text-slate-700">Source contracts</p><p className="text-[10px] text-slate-400">Dùng path trong lib/ và tên Dart identifier chính xác.</p></div><button onClick={addSourceContract} type="button" className="flex items-center gap-1 rounded-md border border-indigo-200 px-2.5 py-1.5 text-xs font-semibold text-indigo-600 hover:bg-indigo-50"><Plus size={13} /> Thêm contract</button></div>
             {suite.source_contracts.length === 0 ? <p className="mt-3 rounded-md border border-dashed border-slate-200 p-3 text-xs text-slate-400">Chưa khai báo symbol bắt buộc.</p> : <div className="mt-3 space-y-2">{suite.source_contracts.map((contract, index) => <div key={index} className="grid grid-cols-1 gap-2 rounded-md border border-slate-200 bg-slate-50 p-2 md:grid-cols-[150px_minmax(180px,1fr)_minmax(180px,1fr)_auto]"><select value={contract.type} onChange={(e) => updateSourceContract(index, { type: e.target.value as SourceContractType })} className="rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs"><option value="model">Model</option><option value="repository">Repository</option><option value="provider">Provider</option><option value="screen">Screen</option><option value="helper">Helper</option><option value="service">Service</option></select><input value={contract.path} onChange={(e) => updateSourceContract(index, { path: e.target.value })} placeholder="lib/models/user.dart" className="rounded-md border border-slate-200 bg-white px-2 py-1.5 font-mono text-xs" /><input value={contract.symbols} onChange={(e) => updateSourceContract(index, { symbols: e.target.value })} placeholder="User, UserStatus" className="rounded-md border border-slate-200 bg-white px-2 py-1.5 font-mono text-xs" /><button type="button" onClick={() => removeSourceContract(index)} className="rounded-md p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600" title="Xóa contract"><Trash2 size={14} /></button></div>)}</div>}
             <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
-                  <div className="rounded-md border border-slate-200 bg-slate-50 p-3 opacity-70"><label className="flex items-center gap-2 text-xs font-semibold text-slate-600"><input type="checkbox" checked={suite.persistence.enabled} disabled={!suite.persistence.enabled} onChange={() => updateSuite({ persistence: { ...suite.persistence, enabled: false } })} /> Persistence sau reload · chưa có runner</label><p className="mt-2 text-[10px] leading-relaxed text-slate-500">Hiện hãy chấm Repository/SQLite qua grading adapter và DIRECT_FUNCTION. Nếu đề cũ đang bật, bỏ dấu tích trước khi Publish.</p></div>
+                  <div className="rounded-md border border-slate-200 bg-slate-50 p-3 opacity-70"><label className="flex items-center gap-2 text-xs font-semibold text-slate-600"><input type="checkbox" checked={suite.persistence.enabled} disabled={!suite.persistence.enabled} onChange={() => updateSuite({ persistence: { ...suite.persistence, enabled: false } })} /> Persistence sau reload · chưa có runner</label><p className="mt-2 text-[10px] leading-relaxed text-slate-500">Logic và SQLite phải được khai báo trong starter TODO. Persistence qua process/reload vẫn bị khóa cho tới khi có runner cách ly database thật.</p></div>
                   <div className="rounded-md border border-slate-200 bg-slate-50 p-3 opacity-70"><label className="flex items-center gap-2 text-xs font-semibold text-slate-600"><input type="checkbox" checked={suite.golden.enabled} disabled={!suite.golden.enabled} onChange={() => updateSuite({ golden: { ...suite.golden, enabled: false } })} /> Golden image · chưa có runner</label><p className="mt-2 text-[10px] leading-relaxed text-slate-500">Nếu cấu hình cũ đang bật, bỏ dấu tích; chức năng chỉ được bật lại khi engine có phép so sánh golden thật.</p></div>
             </div>
             <div className="mt-4 flex flex-wrap items-center justify-between gap-2"><div><p className="text-xs font-bold text-slate-700">Setup UI dùng chung</p><p className="mt-0.5 text-[10px] text-slate-400">Whitelist: tap, nhập text, chờ/kiểm tra key. Không chạy Dart code tùy ý.</p></div><button onClick={addSuiteStep} type="button" className="flex items-center gap-1 rounded-md bg-indigo-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700"><Plus size={13} /> Thêm bước</button></div>
-            {suite.setup_steps.length === 0 ? <p className="mt-3 rounded-md border border-dashed border-slate-200 p-3 text-xs text-slate-400">Chưa có setup chung. Fixture phải ở đúng trạng thái sau khi app khởi động.</p> : <div className="mt-3 space-y-2">{suite.setup_steps.map((step, index) => <div key={index} className="grid grid-cols-1 gap-2 rounded-md border border-slate-200 bg-slate-50 p-2 md:grid-cols-[170px_minmax(160px,1fr)_minmax(160px,1fr)_auto]"><p className="text-[10px] leading-relaxed text-slate-500 md:col-span-full">{setupStepHint(step.type)}</p><select value={step.type} onChange={(e) => updateSuiteStep(index, { type: e.target.value as SetupStep["type"] })} className="rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs"><option value="tap">Tap key</option><option value="enter_text">Nhập text</option><option value="expect_visible">Bắt buộc thấy key</option><option value="expect_absent">Bắt buộc ẩn key</option><option value="wait_for_visible">Chờ key xuất hiện</option></select><input value={step.key} onChange={(e) => updateSuiteStep(index, { key: e.target.value })} placeholder="action.add" className="rounded-md border border-slate-200 bg-white px-2 py-1.5 font-mono text-xs" />{step.type === "enter_text" ? <input value={step.value || ""} onChange={(e) => updateSuiteStep(index, { value: e.target.value })} placeholder="Giá trị nhập" className="rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs" /> : <div />}{step.type === "wait_for_visible" ? <input type="number" min={100} max={30000} value={step.timeout_ms || suite.step_timeout_ms} onChange={(e) => updateSuiteStep(index, { timeout_ms: Number(e.target.value) })} className="rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs" /> : <div /> }<button onClick={() => removeSuiteStep(index)} type="button" className="rounded-md p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600" title="Xóa bước"><Trash2 size={14} /></button></div>)}</div>}
+            {suite.setup_steps.length === 0 ? <p className="mt-3 rounded-md border border-dashed border-slate-200 p-3 text-xs text-slate-400">Chưa có setup chung. Fixture phải ở đúng trạng thái sau khi app khởi động.</p> : <div className="mt-3 space-y-2">{suite.setup_steps.map((step, index) => <div key={index} className="grid grid-cols-1 gap-2 rounded-md border border-slate-200 bg-slate-50 p-2 md:grid-cols-[170px_minmax(160px,1fr)_minmax(160px,1fr)_auto]"><p className="text-[10px] leading-relaxed text-slate-500 md:col-span-full">{setupStepHint(step.type)}</p><select value={step.type} onChange={(e) => updateSuiteStep(index, { type: e.target.value as SetupStep["type"] })} className="rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs"><option value="tap">Tap key</option><option value="enter_text">Nhập text</option><option value="expect_visible">Bắt buộc thấy key</option><option value="expect_absent">Bắt buộc ẩn key</option><option value="wait_for_visible">Chờ key xuất hiện</option></select><input list="semantic-key-options" value={step.key} onChange={(e) => updateSuiteStep(index, { key: e.target.value })} placeholder="action.add" className="rounded-md border border-slate-200 bg-white px-2 py-1.5 font-mono text-xs" />{step.type === "enter_text" ? <input value={step.value || ""} onChange={(e) => updateSuiteStep(index, { value: e.target.value })} placeholder="Giá trị nhập" className="rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs" /> : <div />}{step.type === "wait_for_visible" ? <input type="number" min={100} max={30000} value={step.timeout_ms || suite.step_timeout_ms} onChange={(e) => updateSuiteStep(index, { timeout_ms: Number(e.target.value) })} className="rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs" /> : <div /> }<button onClick={() => removeSuiteStep(index)} type="button" className="rounded-md p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600" title="Xóa bước"><Trash2 size={14} /></button></div>)}</div>}
           </div>
         </section>
         )}
@@ -1800,7 +2130,7 @@ export default function TestcasesPage() {
           <section id="testcase-library" className="card min-w-0 scroll-mt-4 overflow-hidden">
             <div className="border-b border-slate-100 bg-slate-50/70 px-4 py-3">
               <div className="flex items-center justify-between gap-3">
-                <div><p className="eyebrow">Khu vực 2</p><h2 className="mt-1 text-sm font-bold text-slate-800">Thư viện testcase</h2><p className="mt-1 text-xs text-slate-500">{engineMode === "TEMPLATE_CONTRACT_V1" ? "Các mẫu testcase tổng quát; chọn mẫu nào thì nhập contract của đề cho mẫu đó." : "Thư viện testcase 3 tầng chấm theo Key."}</p></div>
+                <div><p className="eyebrow">Khu vực 2</p><h2 className="mt-1 text-sm font-bold text-slate-800">Thư viện testcase</h2><p className="mt-1 text-xs text-slate-500">{engineMode === "STARTER_KEY_HYBRID_V1" ? "Logic/SQLite lấy contract từ starter TODO; Widget và Behavior dùng semantic Key." : engineMode === "TEMPLATE_CONTRACT_V1" ? "Các mẫu testcase tổng quát; chọn mẫu nào thì nhập contract của đề cho mẫu đó." : "Thư viện testcase 3 tầng chấm theo Key."}</p></div>
                 <div className="flex items-center gap-2"><span className="text-xs text-slate-400">{visibleTemplates.length} template</span><button type="button" onClick={openNewTemplate} className="flex items-center gap-1.5 rounded-lg bg-indigo-600 px-2.5 py-2 text-xs font-semibold text-white hover:bg-indigo-700"><Plus size={14} /> Tạo testcase mới</button></div>
               </div>
               <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Tìm theo tên, skill, layer..." className="mt-3 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" />
@@ -1823,7 +2153,7 @@ export default function TestcasesPage() {
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-1.5">
                         <h3 className="text-sm font-semibold text-slate-800">{template.name}</h3>
-                        <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${template.custom ? "bg-amber-100 text-amber-700" : "bg-emerald-100 text-emerald-700"}`} title={template.custom ? `Tạo bởi ${template.created_by || "giảng viên"}` : ENGINE_LABEL[template.engine_type || ""] || template.engine_type}>{template.custom ? "Tự tạo" : template.engine_type === "TEMPLATE_CONTRACT_V1" ? "Khung chung" : template.fixed_contract ? "Template mẫu" : "Chấm theo Key"}</span>
+                        <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${template.custom ? "bg-amber-100 text-amber-700" : "bg-emerald-100 text-emerald-700"}`} title={template.custom ? `Tạo bởi ${template.created_by || "giảng viên"}` : ENGINE_LABEL[template.engine_type || ""] || template.engine_type}>{template.custom ? "Tự tạo" : template.engine_type === "STARTER_KEY_HYBRID_V1" ? (template.hybrid_target === "STARTER_CONTRACT" ? "Starter TODO" : "Semantic Key") : template.engine_type === "TEMPLATE_CONTRACT_V1" ? "Khung chung" : template.fixed_contract ? "Template mẫu" : "Chấm theo Key"}</span>
                         <span className="rounded bg-cyan-100 px-1.5 py-0.5 text-[10px] font-bold text-cyan-700">{TESTCASE_GROUP_LABEL[testcaseGroup(template)]}</span>
                         <span className="rounded bg-violet-100 px-1.5 py-0.5 text-[10px] font-bold text-violet-700">{LAYER_LABEL[template.layer] || template.layer}</span>
                         <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-500">{DIFF_LABEL[template.difficulty] || template.difficulty}</span>
@@ -1931,12 +2261,30 @@ export default function TestcasesPage() {
                         </div>
                       ) : (<>
                       <div>
-                        <div className="mb-2"><p className="text-xs font-semibold text-slate-700">Cấu hình runner</p><p className="mt-0.5 text-[10px] leading-relaxed text-slate-400">{engineMode === "TEMPLATE_CONTRACT_V1" ? "Nhập contract thật của starter trong đề này: file, class, field, method, label, dữ liệu thử và kết quả cần thấy. Chế độ này không dùng Widget Key." : "Mỗi trường được phân theo vai trò. Semantic key xác định widget trong bài sinh viên; dữ liệu setup chạy trước; điều kiện pass được chuyển thành assertion."}</p></div>
+                        <div className="mb-2"><p className="text-xs font-semibold text-slate-700">Cấu hình runner</p><p className="mt-0.5 text-[10px] leading-relaxed text-slate-400">{hasContractBindings(templateMap.get(item.template_id)) ? "Nhập contract thật của starter trong đề này: file, class, field, method, label, dữ liệu thử và kết quả cần thấy. Chế độ này không dùng Widget Key." : "Mỗi trường được phân theo vai trò. Semantic key xác định widget trong bài sinh viên; dữ liệu setup chạy trước; điều kiện pass được chuyển thành assertion."}</p></div>
                         {(() => { const contract = runnerContract(item, templateMap.get(item.template_id)); return <div className="mb-3 grid grid-cols-1 gap-2"><div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2"><p className="text-[10px] font-bold text-amber-800">1. Dữ liệu đầu vào</p><p className="mt-0.5 text-[10px] leading-relaxed text-amber-700">{contract.input}</p></div><div className="rounded-lg border border-cyan-200 bg-cyan-50 px-3 py-2"><p className="text-[10px] font-bold text-cyan-800">2. Đối tượng được tìm</p><p className="mt-0.5 text-[10px] leading-relaxed text-cyan-700">{contract.target}</p></div><div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2"><p className="text-[10px] font-bold text-emerald-800">3. Testcase pass khi</p><p className="mt-0.5 text-[10px] leading-relaxed text-emerald-700">{contract.pass}</p></div></div>; })()}
-                        <div className="space-y-2">{(["target", "input", "assertion", "option"] as ParameterRole[]).map((role) => { const keys = Object.keys(item.parameters || {}).filter((key) => parameterRole(key, templateMap.get(item.template_id)?.runner) === role); if (!keys.length) return null; return <section key={role} className={`rounded-lg border p-2.5 ${PARAMETER_ROLE_STYLE[role]}`}><div className="mb-2 flex items-center justify-between gap-2"><p className="text-[11px] font-bold">{PARAMETER_ROLE_LABEL[role]}</p><span className="text-[9px] opacity-70">{keys.length} trường</span></div><div className="grid grid-cols-1 gap-2 sm:grid-cols-2">{keys.map((key) => { const template = templateMap.get(item.template_id); const schemaValue = template?.parameters_schema?.[key]; const isNumber = typeof schemaValue === "number"; const options = PARAMETER_OPTIONS[key]; return <label key={key} className="text-[11px] font-medium"><span>{PARAMETER_LABELS[key] || key}</span><span className="ml-1 font-mono text-[9px] opacity-60">{key}</span>{options ? <select value={formatParam(item.parameters[key])} onChange={(e) => updateParameter(item, key, e.target.value)} className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-700">{options.map((option) => <option key={option} value={option}>{option}</option>)}</select> : <input type={isNumber ? "number" : "text"} value={formatParam(item.parameters[key])} onChange={(e) => updateParameter(item, key, e.target.value)} className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-700" />}</label>; })}</div></section>; })}</div>
+                        <div className="space-y-2">{(["target", "input", "assertion", "option"] as ParameterRole[]).map((role) => {
+                          const keys = Object.keys(item.parameters || {}).filter((key) => parameterRole(key, templateMap.get(item.template_id)?.runner) === role);
+                          if (!keys.length) return null;
+                          return <section key={role} className={`rounded-lg border p-2.5 ${PARAMETER_ROLE_STYLE[role]}`}>
+                            <div className="mb-2 flex items-center justify-between gap-2"><p className="text-[11px] font-bold">{PARAMETER_ROLE_LABEL[role]}</p><span className="text-[9px] opacity-70">{keys.length} trường</span></div>
+                            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">{keys.map((key) => {
+                              const template = templateMap.get(item.template_id);
+                              const schemaValue = template?.parameters_schema?.[key];
+                              const isNumber = typeof schemaValue === "number";
+                              const options = PARAMETER_OPTIONS[key];
+                              const semanticKeyField = isSemanticKeyParameter(key);
+                              return <label key={key} className="text-[11px] font-medium">
+                                <span>{PARAMETER_LABELS[key] || key}</span><span className="ml-1 font-mono text-[9px] opacity-60">{key}</span>
+                                {options ? <select value={formatParam(item.parameters[key])} onChange={(e) => updateParameter(item, key, e.target.value)} className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-700">{options.map((option) => <option key={option} value={option}>{option}</option>)}</select> : <input list={semanticKeyField && !isSemanticKeyListParameter(key) ? "semantic-key-options" : undefined} type={isNumber ? "number" : "text"} value={formatParam(item.parameters[key])} onChange={(e) => updateParameter(item, key, e.target.value)} className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-700" />}
+                                {semanticKeyField && <select value="" disabled={semanticKeyCatalog.length === 0} onChange={(event) => chooseSemanticKey(item, key, event.target.value)} className="mt-1 w-full rounded-md border border-indigo-200 bg-indigo-50 px-2 py-1.5 font-mono text-[10px] text-indigo-700 disabled:opacity-50"><option value="">{semanticKeyCatalog.length ? (isSemanticKeyListParameter(key) ? "+ Thêm từ bộ Key starter" : "Chọn từ bộ Key starter") : "Chưa khai báo bộ Key starter"}</option>{semanticKeyCatalog.map((entry) => <option key={entry.value} value={entry.value}>{entry.symbol ? `${entry.symbol} · ` : ""}{entry.value}</option>)}</select>}
+                              </label>;
+                            })}</div>
+                          </section>;
+                        })}</div>
                       </div>
-                      {engineMode === "COMMON_V1" && <div className="border-t border-indigo-100 pt-3"><div className="flex items-center justify-between gap-2"><div><p className="text-xs font-semibold text-slate-600">Chuẩn bị dữ liệu và trạng thái</p><p className="text-[10px] leading-relaxed text-slate-400">“Thêm bước” không tạo thêm field cho runner. Key chỉ định widget; riêng bước Nhập text mới dùng Value làm dữ liệu đầu vào. Bước expect cũng có thể làm testcase fail.</p></div><button type="button" onClick={() => addItemSetupStep(item)} className="flex items-center gap-1 rounded-md border border-indigo-200 px-2 py-1 text-[10px] font-semibold text-indigo-600 hover:bg-indigo-50"><Plus size={12} /> Thêm bước</button></div>{(item.setup_steps || []).length > 0 && <div className="mt-2 space-y-2">{(item.setup_steps || []).map((step, index) => <div key={index} className="grid grid-cols-1 gap-2 rounded-md border border-indigo-100 bg-white p-2 md:grid-cols-[150px_minmax(140px,1fr)_minmax(130px,1fr)_auto]"><p className="text-[10px] leading-relaxed text-indigo-600 md:col-span-full">{setupStepHint(step.type)}</p><select value={step.type} onChange={(e) => updateItemSetupStep(item, index, { type: e.target.value as SetupStep["type"] })} className="rounded border border-slate-200 px-1.5 py-1 text-[10px]"><option value="tap">Tap key</option><option value="enter_text">Nhập text</option><option value="expect_visible">Bắt buộc thấy</option><option value="expect_absent">Bắt buộc ẩn</option><option value="wait_for_visible">Chờ xuất hiện</option></select><input value={step.key} onChange={(e) => updateItemSetupStep(item, index, { key: e.target.value })} placeholder="action.open" className="rounded border border-slate-200 px-1.5 py-1 font-mono text-[10px]" />{step.type === "enter_text" ? <input value={step.value || ""} onChange={(e) => updateItemSetupStep(item, index, { value: e.target.value })} placeholder="Giá trị" className="rounded border border-slate-200 px-1.5 py-1 text-[10px]" /> : <div />}{step.type === "wait_for_visible" ? <input type="number" min={100} max={30000} value={step.timeout_ms || suite.step_timeout_ms} onChange={(e) => updateItemSetupStep(item, index, { timeout_ms: Number(e.target.value) })} className="rounded border border-slate-200 px-1.5 py-1 text-[10px]" /> : <div /> }<button type="button" onClick={() => removeItemSetupStep(item, index)} className="rounded p-1 text-slate-400 hover:bg-rose-50 hover:text-rose-600" title="Xóa bước"><Trash2 size={12} /></button></div>)}</div>}</div>}
-                      <div className="overflow-hidden rounded-lg border border-slate-700 bg-slate-950"><div className="flex items-center justify-between border-b border-slate-700 px-3 py-2"><div><p className="text-[11px] font-bold text-slate-100">Code kiểm tra tương đương</p><p className="mt-0.5 text-[9px] text-slate-400">{engineMode === "TEMPLATE_CONTRACT_V1" ? "Chỉ đọc, cập nhật theo contract và dữ liệu của đề hiện tại." : "Chỉ đọc, cập nhật ngay khi sửa setup, semantic key, input hoặc expected."}</p></div><span className="rounded bg-slate-800 px-2 py-1 font-mono text-[9px] text-cyan-300">{templateMap.get(item.template_id)?.runner}</span></div><pre className="custom-scrollbar max-h-80 overflow-auto whitespace-pre p-3 text-[10px] leading-relaxed text-slate-100">{testcaseCodePreview(item, templateMap.get(item.template_id))}</pre></div>
+                      {usesSemanticKeys(engineMode) && !runnerUsesStarterContract(engineMode, String(templateMap.get(item.template_id)?.runner || "")) && <div className="border-t border-indigo-100 pt-3"><div className="flex items-center justify-between gap-2"><div><p className="text-xs font-semibold text-slate-600">Chuẩn bị dữ liệu và trạng thái</p><p className="text-[10px] leading-relaxed text-slate-400">“Thêm bước” không tạo thêm field cho runner. Key chỉ định widget; riêng bước Nhập text mới dùng Value làm dữ liệu đầu vào. Bước expect cũng có thể làm testcase fail.</p></div><button type="button" onClick={() => addItemSetupStep(item)} className="flex items-center gap-1 rounded-md border border-indigo-200 px-2 py-1 text-[10px] font-semibold text-indigo-600 hover:bg-indigo-50"><Plus size={12} /> Thêm bước</button></div>{(item.setup_steps || []).length > 0 && <div className="mt-2 space-y-2">{(item.setup_steps || []).map((step, index) => <div key={index} className="grid grid-cols-1 gap-2 rounded-md border border-indigo-100 bg-white p-2 md:grid-cols-[150px_minmax(140px,1fr)_minmax(130px,1fr)_auto]"><p className="text-[10px] leading-relaxed text-indigo-600 md:col-span-full">{setupStepHint(step.type)}</p><select value={step.type} onChange={(e) => updateItemSetupStep(item, index, { type: e.target.value as SetupStep["type"] })} className="rounded border border-slate-200 px-1.5 py-1 text-[10px]"><option value="tap">Tap key</option><option value="enter_text">Nhập text</option><option value="expect_visible">Bắt buộc thấy</option><option value="expect_absent">Bắt buộc ẩn</option><option value="wait_for_visible">Chờ xuất hiện</option></select><input list="semantic-key-options" value={step.key} onChange={(e) => updateItemSetupStep(item, index, { key: e.target.value })} placeholder="action.open" className="rounded border border-slate-200 px-1.5 py-1 font-mono text-[10px]" />{step.type === "enter_text" ? <input value={step.value || ""} onChange={(e) => updateItemSetupStep(item, index, { value: e.target.value })} placeholder="Giá trị" className="rounded border border-slate-200 px-1.5 py-1 text-[10px]" /> : <div />}{step.type === "wait_for_visible" ? <input type="number" min={100} max={30000} value={step.timeout_ms || suite.step_timeout_ms} onChange={(e) => updateItemSetupStep(item, index, { timeout_ms: Number(e.target.value) })} className="rounded border border-slate-200 px-1.5 py-1 text-[10px]" /> : <div /> }<button type="button" onClick={() => removeItemSetupStep(item, index)} className="rounded p-1 text-slate-400 hover:bg-rose-50 hover:text-rose-600" title="Xóa bước"><Trash2 size={12} /></button></div>)}</div>}</div>}
+                      <div className="overflow-hidden rounded-lg border border-slate-700 bg-slate-950"><div className="flex items-center justify-between border-b border-slate-700 px-3 py-2"><div><p className="text-[11px] font-bold text-slate-100">Code kiểm tra tương đương</p><p className="mt-0.5 text-[9px] text-slate-400">{hasContractBindings(templateMap.get(item.template_id)) ? "Chỉ đọc, cập nhật theo contract và dữ liệu của đề hiện tại." : "Chỉ đọc, cập nhật ngay khi sửa setup, semantic key, input hoặc expected."}</p></div><span className="rounded bg-slate-800 px-2 py-1 font-mono text-[9px] text-cyan-300">{templateMap.get(item.template_id)?.runner}</span></div><pre className="custom-scrollbar max-h-80 overflow-auto whitespace-pre p-3 text-[10px] leading-relaxed text-slate-100">{testcaseCodePreview(item, templateMap.get(item.template_id))}</pre></div>
                       <p className="text-[10px] text-slate-400">Ô mô tả kết quả chỉ đi vào rubric và báo cáo. Các assertion trong code preview mới quyết định testcase pass/fail.</p>
                       </>)}
                     </div>
@@ -1952,16 +2300,22 @@ export default function TestcasesPage() {
           <>
             {previewOpen && (
               <div className="fixed inset-0 z-[55] flex min-h-screen min-w-full items-center justify-center bg-slate-950/60 p-4" role="dialog" aria-modal="true" onClick={() => setPreviewOpen(false)}>
-                <div className="flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
-                  <header className="flex items-center justify-between border-b border-slate-200 px-5 py-3"><div><p className="eyebrow">Generated testcase</p><h2 className="text-sm font-bold text-slate-800">{examId} · profile {suite.profile}</h2></div><button onClick={() => setPreviewOpen(false)} className="rounded-md p-1 text-slate-400 hover:bg-slate-100" aria-label="Đóng"><X size={18} /></button></header>
-                  {previewLoading ? <div className="flex items-center justify-center py-20 text-slate-400"><Loader2 size={22} className="animate-spin" /></div> : previewFiles.length === 0 ? <p className="p-10 text-center text-sm text-slate-500">Chưa đọc được file sinh.</p> : <div className="flex min-h-0 flex-1 flex-col"><div className="flex gap-1 overflow-x-auto border-b border-slate-200 bg-slate-50 px-3 py-2">{previewFiles.map((file, index) => <button key={file.name} onClick={() => setPreviewFile(index)} className={`shrink-0 rounded-md px-3 py-1.5 font-mono text-xs ${index === previewFile ? "bg-indigo-100 font-bold text-indigo-700" : "text-slate-500 hover:bg-white"}`}>{file.name}</button>)}</div><pre className="custom-scrollbar min-h-0 flex-1 overflow-auto bg-slate-900 p-4 text-[11px] leading-relaxed text-slate-100">{previewFiles[previewFile]?.content}</pre></div>}
+                <div className="flex max-h-[92vh] w-full max-w-7xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
+                  <header className="flex items-center justify-between border-b border-slate-200 px-5 py-3"><div><p className="eyebrow">Generated testcase + Key starter</p><h2 className="text-sm font-bold text-slate-800">{examId} · profile {suite.profile}</h2><p className="mt-0.5 text-[10px] text-slate-500">ZIP vẫn chỉ có ba file chấm; bảng Key bên phải là tham chiếu từ Draft/starter.</p></div><button onClick={() => setPreviewOpen(false)} className="rounded-md p-1 text-slate-400 hover:bg-slate-100" aria-label="Đóng"><X size={18} /></button></header>
+                  {previewLoading ? <div className="flex items-center justify-center py-20 text-slate-400"><Loader2 size={22} className="animate-spin" /></div> : previewFiles.length === 0 ? <p className="p-10 text-center text-sm text-slate-500">Chưa đọc được file sinh.</p> : <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[minmax(0,1fr)_340px]">
+                    <div className="flex min-h-0 min-w-0 flex-col"><div className="flex gap-1 overflow-x-auto border-b border-slate-200 bg-slate-50 px-3 py-2">{previewFiles.map((file, index) => <button key={file.name} onClick={() => setPreviewFile(index)} className={`shrink-0 rounded-md px-3 py-1.5 font-mono text-xs ${index === previewFile ? "bg-indigo-100 font-bold text-indigo-700" : "text-slate-500 hover:bg-white"}`}>{file.name}</button>)}</div><pre className="custom-scrollbar min-h-0 flex-1 overflow-auto bg-slate-900 p-4 text-[11px] leading-relaxed text-slate-100">{previewFiles[previewFile]?.content}</pre></div>
+                    <aside className="custom-scrollbar min-h-0 overflow-y-auto border-t border-slate-200 bg-white p-3 lg:border-l lg:border-t-0">
+                      <div className="sticky top-0 z-10 bg-white pb-3"><div className="flex items-center justify-between gap-2"><div><p className="text-xs font-bold text-slate-800">Bộ Key của starter</p><p className="mt-0.5 font-mono text-[9px] text-indigo-600">{suite.key_contract.source_path} · {suite.key_contract.class_name}</p></div><span className="rounded-full bg-indigo-50 px-2 py-1 text-[10px] font-bold text-indigo-700">{semanticKeyCatalog.length} Key</span></div><input value={keyPaletteSearch} onChange={(event) => setKeyPaletteSearch(event.target.value)} placeholder="Tìm tên, giá trị, nhóm..." className="mt-2 w-full rounded-md border border-slate-200 px-2.5 py-2 text-xs outline-none focus:border-indigo-400" /></div>
+                      {filteredSemanticKeys.length === 0 ? <p className="rounded-lg border border-dashed border-slate-200 p-3 text-xs leading-relaxed text-slate-500">Chưa có Key phù hợp. Hãy khai báo trong “Bộ Semantic Key công bố trong starter” hoặc cấu hình một testcase dùng Key.</p> : <div className="space-y-2">{filteredSemanticKeys.map((key) => <div key={key.value} className="rounded-lg border border-slate-200 bg-slate-50 p-2.5"><div className="flex items-start justify-between gap-2"><div className="min-w-0"><p className="truncate font-mono text-[11px] font-bold text-indigo-700" title={key.value}>{key.value}</p><p className="mt-0.5 truncate font-mono text-[9px] text-slate-500">{key.symbol ? `${suite.key_contract.class_name}.${key.symbol}` : "Tự phát hiện trong Draft"}</p></div><button type="button" onClick={() => copySemanticKey(key.value)} className="shrink-0 rounded-md border border-indigo-200 bg-white px-2 py-1 text-[9px] font-bold text-indigo-700 hover:bg-indigo-50">{copiedKey === key.value ? "Đã chép" : "Chép"}</button></div><div className="mt-2 flex flex-wrap items-center gap-1"><span className="rounded bg-slate-200 px-1.5 py-0.5 text-[9px] text-slate-600">{key.group}</span><span className={`rounded px-1.5 py-0.5 text-[9px] ${key.declared ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>{key.declared ? "Starter công bố" : "Đang dùng"}</span></div>{key.description && <p className="mt-1.5 text-[10px] leading-relaxed text-slate-500">{key.description}</p>}</div>)}</div>}
+                    </aside>
+                  </div>}
                 </div>
               </div>
             )}
             {newTemplateOpen && (
               <div className="fixed inset-0 z-[90] flex min-h-screen min-w-full items-center justify-center bg-slate-950/60 p-4" role="dialog" aria-modal="true" onClick={() => !newTemplateSaving && setNewTemplateOpen(false)}>
                 <div className="max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
-                  <div className="flex items-start justify-between gap-4"><div><p className="eyebrow">Thư viện template</p><h2 className="mt-1 text-lg font-bold text-slate-800">Tạo testcase template mới</h2><p className="mt-1 max-w-2xl text-xs leading-relaxed text-slate-500">{engineMode === "TEMPLATE_CONTRACT_V1" ? "Chọn một runner contract đã được engine hỗ trợ rồi đặt các giá trị mặc định. Testcase tạo ra vẫn thay file, class, field, method và label theo từng đề; không dùng Widget Key hay grading adapter." : "Tạo một khung tái sử dụng từ runner Key đã có. Logic pass/fail do runner và schema tham số quyết định."}</p></div><button type="button" onClick={() => setNewTemplateOpen(false)} className="rounded-lg p-1 text-slate-400 hover:bg-slate-100" aria-label="Đóng"><X size={18} /></button></div>
+                  <div className="flex items-start justify-between gap-4"><div><p className="eyebrow">Thư viện template</p><h2 className="mt-1 text-lg font-bold text-slate-800">Tạo testcase template mới</h2><p className="mt-1 max-w-2xl text-xs leading-relaxed text-slate-500">{engineMode === "STARTER_KEY_HYBRID_V1" ? "Tạo mẫu kiểm tra starter cho Logic/SQLite hoặc mẫu semantic Key cho UI; chế độ này không dùng grading_adapter.dart." : engineMode === "TEMPLATE_CONTRACT_V1" ? "Chọn một runner contract đã được engine hỗ trợ rồi đặt các giá trị mặc định." : "Tạo một khung tái sử dụng từ runner Key đã có. Logic pass/fail do runner và schema tham số quyết định."}</p></div><button type="button" onClick={() => setNewTemplateOpen(false)} className="rounded-lg p-1 text-slate-400 hover:bg-slate-100" aria-label="Đóng"><X size={18} /></button></div>
                   <div className="mt-5 grid grid-cols-1 gap-3 md:grid-cols-2">
                     <label className="text-xs font-semibold text-slate-600">Mã template <span className="font-normal text-slate-400">(để trống để tự sinh)</span><input value={newTemplate.template_id} onChange={(e) => setNewTemplate((v) => ({ ...v, template_id: e.target.value.toUpperCase().replace(/[^A-Z0-9_-]/g, "") }))} placeholder="CUSTOM_EMAIL_INVALID" className="mt-1.5 w-full rounded-md border border-slate-200 px-2.5 py-2 font-mono text-xs" /></label>
                     <label className="text-xs font-semibold text-slate-600">Tên template<input value={newTemplate.name} onChange={(e) => setNewTemplate((v) => ({ ...v, name: e.target.value }))} placeholder="Kiểm tra email không hợp lệ" className="mt-1.5 w-full rounded-md border border-slate-200 px-2.5 py-2 text-xs" /></label>
@@ -1974,7 +2328,7 @@ export default function TestcasesPage() {
                     <label className="text-xs font-semibold text-slate-600">Trọng số mặc định<input type="number" min={0} max={100} step={0.5} value={newTemplate.weight_default} onChange={(e) => setNewTemplate((v) => ({ ...v, weight_default: e.target.value }))} className="mt-1.5 w-full rounded-md border border-slate-200 px-2.5 py-2 text-xs" /></label>
                     <label className="text-xs font-semibold text-slate-600 md:col-span-2">Expected template<textarea rows={2} value={newTemplate.expected_template} onChange={(e) => setNewTemplate((v) => ({ ...v, expected_template: e.target.value }))} className="mt-1.5 w-full resize-y rounded-md border border-slate-200 px-2.5 py-2 text-xs" /><span className="mt-1 block text-[10px] font-normal text-slate-400">Đây là mô tả rubric. Kết quả pass/fail thật do runner và parameters_schema quyết định.</span></label>
                     <label className="text-xs font-semibold text-slate-600 md:col-span-2">Schema tham số mặc định (JSON object)<textarea rows={8} value={newTemplate.parameters_schema} onChange={(e) => setNewTemplate((v) => ({ ...v, parameters_schema: e.target.value }))} spellCheck={false} className="mt-1.5 w-full resize-y rounded-md border border-slate-200 bg-slate-900 px-3 py-2 font-mono text-[11px] leading-relaxed text-slate-100" /><span className="mt-1 block text-[10px] font-normal text-slate-400">Các key phải đúng với runner đã chọn. Không nhập Dart code tại đây.</span></label>
-                    {engineMode === "TEMPLATE_CONTRACT_V1" && <label className="text-xs font-semibold text-slate-600 md:col-span-2">Ánh xạ tham số → mã contract (JSON object)<textarea rows={5} value={newTemplate.contract_bindings} onChange={(e) => setNewTemplate((v) => ({ ...v, contract_bindings: e.target.value }))} spellCheck={false} className="mt-1.5 w-full resize-y rounded-md border border-slate-200 bg-slate-900 px-3 py-2 font-mono text-[11px] leading-relaxed text-slate-100" /><span className="mt-1 block text-[10px] font-normal text-slate-400">Ví dụ: {`{"sourcePath":"model.path","className":"model.class"}`}. Chỉ ánh xạ những tham số cần tự nhận từ contract; vẫn có thể sửa riêng sau khi thêm vào đề.</span></label>}
+                    {runnerUsesStarterContract(engineMode, newTemplate.runner) && <label className="text-xs font-semibold text-slate-600 md:col-span-2">Ánh xạ tham số → mã contract (JSON object)<textarea rows={5} value={newTemplate.contract_bindings} onChange={(e) => setNewTemplate((v) => ({ ...v, contract_bindings: e.target.value }))} spellCheck={false} className="mt-1.5 w-full resize-y rounded-md border border-slate-200 bg-slate-900 px-3 py-2 font-mono text-[11px] leading-relaxed text-slate-100" /><span className="mt-1 block text-[10px] font-normal text-slate-400">Ví dụ: {`{"sourcePath":"model.path","className":"model.class"}`}. Chỉ ánh xạ những tham số cần tự nhận từ contract; vẫn có thể sửa riêng sau khi thêm vào đề.</span></label>}
                   </div>
                   {newTemplateError && <p className="mt-3 rounded-lg bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700">{newTemplateError}</p>}
                   <div className="mt-5 flex justify-end gap-2"><button type="button" disabled={newTemplateSaving} onClick={() => setNewTemplateOpen(false)} className="rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-50">Hủy</button><button type="button" disabled={newTemplateSaving} onClick={saveNewTemplate} className="flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3.5 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50">{newTemplateSaving ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />} Lưu template</button></div>

@@ -1,5 +1,9 @@
 # Engine testcase theo contract của từng đề
 
+Nếu đề dùng starter TODO cho Logic/SQLite nhưng muốn sinh viên tự thiết kế UI, xem chế độ kết hợp
+[starter TODO và semantic Key](hybrid-starter-key-contract.md). Chế độ đó không dùng label/text để
+định vị UI và cũng không yêu cầu `grading_adapter.dart`.
+
 `TEMPLATE_CONTRACT_V1` tái sử dụng **cách kiểm tra**, không tái sử dụng một bộ đề cố định.
 Engine này dành cho starter có sẵn public contract và các vị trí TODO để sinh viên hoàn thiện. Nó không yêu cầu `Widget Key` hoặc `grading_adapter.dart`.
 
@@ -7,7 +11,7 @@ Engine này dành cho starter có sẵn public contract và các vị trí TODO 
 
 1. Giảng viên tạo starter cho đề và công bố tên file, class, field, method, label/hint và nội dung nút cần giữ nguyên.
 2. Trong màn hình **Tạo testcase**, chọn **Bộ testcase chấm theo khung template mẫu**.
-3. Có thể mở **Thiết lập contract gợi ý cho đề**. Contract v4 gồm các nhóm động; giảng viên được thêm/xóa nhóm, thêm/xóa trường và đặt mã ánh xạ riêng. Các nhóm Model, Storage, Service, State, UI, Behavior và Responsive chỉ là gợi ý ban đầu, không phải cấu trúc bắt buộc.
+3. Có thể mở **Thiết lập contract gợi ý cho đề**. Contract v4 gồm các nhóm động; giảng viên được thêm/xóa nhóm, thêm/xóa trường và đặt mã ánh xạ riêng. Các nhóm Model, Storage, Service, Logic API, State, UI, Behavior và Responsive chỉ là gợi ý ban đầu, không phải cấu trúc bắt buộc.
 4. Chỉ kéo các mẫu kiểm tra cần thiết vào đề. Testcase mới tự nhận phần contract phù hợp; không có thao tác nạp toàn bộ một pack.
 5. Mở **Cấu hình** của từng testcase để kiểm tra hoặc thay giá trị riêng.
 6. Nếu thư viện chưa có biến thể cần dùng, bấm **Tạo testcase mới**, chọn runner được hỗ trợ và đặt schema mặc định. Không nhập Dart code tùy ý ở đây.
@@ -106,7 +110,7 @@ Mỗi trường contract có bốn phần:
 - `kind`: text, path, Dart identifier, CSV, JSON hoặc number;
 - `value`: giá trị thực tế của đề hiện tại.
 
-Blueprint khai báo `contract_bindings` để nối tham số runner với các key này. Ví dụ `TEMPLATE_MODEL_FIELDS` nối `sourcePath -> model.path`, còn workflow nối `stepsJson -> behavior.stepsJson`. Vì vậy đề không có SQLite có thể xóa hẳn nhóm Storage; đề gọi API có thể đổi nhóm đó thành API và thêm các key mới. Draft cũ được tự bổ sung selector chống mơ hồ và ánh xạ lỗi theo field khi mở lại, sau đó lưu thành v4; trường đã nhập trước đó không bị ghi đè.
+Blueprint khai báo `contract_bindings` để nối tham số runner với các key này. Ví dụ `TEMPLATE_MODEL_FIELDS` nối `sourcePath -> model.path`, còn hàm nghiệp vụ hybrid nối `functionPath -> logic.path`. Vì vậy đề không có SQLite có thể xóa hẳn nhóm Storage; đề gọi API có thể đổi nhóm đó thành API và thêm các key mới. Draft cũ được tự bổ sung nhóm Logic API khi mở lại nhưng vẫn giữ version 4 để tương thích; trường đã nhập trước đó không bị ghi đè.
 
 ## Những phần đã tái chế từ V9
 

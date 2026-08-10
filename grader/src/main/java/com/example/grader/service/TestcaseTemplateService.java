@@ -42,9 +42,11 @@ public class TestcaseTemplateService {
     private static final String TEMPLATE_CREATED_BY = "system";
     private static final String TEMPLATE_CREATED_AT = "2026-08-02T00:00:00Z";
     private static final String COMMON_ENGINE = "COMMON_V1";
-    /** Reusable blueprints configured against the starter contract of each exam. */
+    /** Blueprint tái sử dụng, được cấu hình theo contract starter của từng đề. */
     private static final String TEMPLATE_CONTRACT_ENGINE = "TEMPLATE_CONTRACT_V1";
-    /** Fixed-contract engine for the starter where students complete existing TODOs. */
+    /** Starter TODO cho logic/data kết hợp semantic Key nghiêm ngặt cho UI. */
+    private static final String HYBRID_STARTER_KEY_ENGINE = "STARTER_KEY_HYBRID_V1";
+    /** Engine contract cố định của starter cũ, sinh viên hoàn thiện TODO có sẵn. */
     private static final String TODO_USER_ENGINE = "TODO_USER_V12";
     private static final String CUSTOM_TEMPLATE_VERSION = "teacher-v1";
     private static final String CUSTOM_TEMPLATE_FILE = "custom-testcase-templates.json";
@@ -55,7 +57,7 @@ public class TestcaseTemplateService {
             "text", "path", "identifier", "csv", "json", "number");
     private static final Set<String> SUITE_PROFILES = Set.of(
             "COMMON_UI", "FLUTTER_LAYERED", "PERSISTENCE", "REPOSITORY_SQLITE", "GOLDEN_RESPONSIVE",
-            "TODO_STARTER_V12", "TEMPLATE_CONTRACT_V1");
+            "TODO_STARTER_V12", "TEMPLATE_CONTRACT_V1", "STARTER_KEY_HYBRID_V1");
     private static final Set<String> RESET_STRATEGIES = Set.of(
             "APP_RESTART", "FIXTURE_STEPS", "CLEAR_STORAGE", "PERSISTENCE_PHASE");
     private static final Set<String> SOURCE_CONTRACT_TYPES = Set.of(
@@ -71,13 +73,35 @@ public class TestcaseTemplateService {
             "WIDGET_PADDING", "WIDGET_TEXT_STYLE", "WIDGET_GAP", "WIDGET_TYPE_VISIBLE",
             "WIDGET_TEXT_CONTENT", "WIDGET_ENABLED", "FORM_VALIDATE_FIELDS", "LIST_ITEM_COUNT",
             "DIALOG_FLOW", "FORM_PREFILL", "FORM_SUBMIT", "WIDGET_SEMANTICS_LABEL",
-            "STATE_REACTIVE_FLOW", "DIRECT_FUNCTION");
+            "STATE_REACTIVE_FLOW", "WIDGET_RELATIONSHIP", "RESPONSIVE_PAIR_LAYOUT",
+            "DIRECT_FUNCTION");
     private static final Set<String> SUPPORTED_TEMPLATE_CONTRACT_RUNNERS = Set.of(
             "APP_BOOT", "TEMPLATE_SOURCE_SYMBOLS", "TEMPLATE_MODEL_FIELDS",
             "TEMPLATE_MODEL_MAPPING", "TEMPLATE_SQLITE_SCHEMA", "TEMPLATE_REPOSITORY_METHODS",
             "TEMPLATE_FORM_FIELDS", "TEMPLATE_BUTTONS", "TEMPLATE_FORM_ACTION",
             "TEMPLATE_TEXT_VISIBLE", "TEMPLATE_SOURCE_TERMS", "TEMPLATE_MODEL_COPY_WITH",
             "TEMPLATE_FORM_VALIDATION", "TEMPLATE_UI_WORKFLOW", "RESPONSIVE_NO_OVERFLOW");
+    /** Hybrid chỉ dùng source contract cho Logic/SQLite và semantic Key cho UI. */
+    private static final Set<String> HYBRID_STARTER_RUNNERS = Set.of(
+            "TEMPLATE_SOURCE_SYMBOLS", "TEMPLATE_SOURCE_TERMS", "TEMPLATE_MODEL_FIELDS",
+            "TEMPLATE_MODEL_COPY_WITH", "TEMPLATE_MODEL_MAPPING", "TEMPLATE_SQLITE_SCHEMA",
+            "TEMPLATE_REPOSITORY_METHODS");
+    /** Gọi trực tiếp API nghiệp vụ công khai trong starter; tuyệt đối không qua adapter chấm. */
+    private static final Set<String> HYBRID_LOGIC_CALL_RUNNERS = Set.of(
+            "DIRECT_FUNCTION", "STARTER_CALL_SEQUENCE");
+    private static final Set<String> HYBRID_KEY_RUNNERS = Set.of(
+            "APP_BOOT", "WIDGET_VISIBLE", "FORM_REQUIRED_FIELDS", "RESPONSIVE_NO_OVERFLOW",
+            "RESPONSIVE_TARGET", "NAVIGATION", "LIST_VISIBLE", "BUTTON_ACTION", "WIDGET_DIMENSION",
+            "WIDGET_PADDING", "WIDGET_TEXT_STYLE", "WIDGET_GAP", "WIDGET_TYPE_VISIBLE",
+            "WIDGET_TEXT_CONTENT", "WIDGET_ENABLED", "FORM_VALIDATE_FIELDS", "LIST_ITEM_COUNT",
+            "DIALOG_FLOW", "FORM_PREFILL", "FORM_SUBMIT", "WIDGET_SEMANTICS_LABEL",
+            "STATE_REACTIVE_FLOW", "WIDGET_RELATIONSHIP", "RESPONSIVE_PAIR_LAYOUT");
+    private static final Set<String> HYBRID_COMMON_VALIDATED_RUNNERS = java.util.stream.Stream
+            .concat(HYBRID_KEY_RUNNERS.stream(), HYBRID_LOGIC_CALL_RUNNERS.stream())
+            .collect(java.util.stream.Collectors.toUnmodifiableSet());
+    private static final Set<String> SUPPORTED_HYBRID_RUNNERS = java.util.stream.Stream
+            .concat(HYBRID_STARTER_RUNNERS.stream(), HYBRID_COMMON_VALIDATED_RUNNERS.stream())
+            .collect(java.util.stream.Collectors.toUnmodifiableSet());
     private static final Set<String> SUITE_STEP_TYPES = Set.of(
             "tap", "enter_text", "expect_visible", "expect_absent", "wait_for_visible");
     /** Nhóm lọc hiển thị ở Khu vực 1; không thay thế category/skill của syllabus. */
@@ -90,7 +114,7 @@ public class TestcaseTemplateService {
             "DIALOG_FLOW", "FORM_PREFILL", "FORM_SUBMIT");
     private static final Set<String> LOGIC_RUNNERS = Set.of(
             "FORM_REQUIRED_FIELDS", "FORM_VALIDATE_FIELDS", "LIST_ITEM_COUNT",
-            "STATE_REACTIVE_FLOW", "DIRECT_FUNCTION");
+            "STATE_REACTIVE_FLOW", "DIRECT_FUNCTION", "STARTER_CALL_SEQUENCE");
     /** Tên thân thiện hiển thị cho giáo viên; template_id vẫn giữ nguyên để grader nhận diện. */
     private static final Map<String, String> FRIENDLY_TEMPLATE_NAMES = Map.ofEntries(
             Map.entry("COMMON_APP_BOOT", "Mở ứng dụng không bị lỗi"),
@@ -247,8 +271,11 @@ public class TestcaseTemplateService {
         boolean templateContractLoaded = loadClasspathTemplates(
                 "template-contract-testcase-templates.json", TEMPLATE_CONTRACT_ENGINE);
         boolean todoLoaded = loadClasspathTemplates("todo-user-v12-testcase-templates.json", TODO_USER_ENGINE);
+        loadHybridTemplates();
+        loadHybridReusableCatalog();
         if (commonLoaded || templateContractLoaded || todoLoaded)
-            log.info("Loaded {} testcase templates for common and fixed TODO engines", templates.size());
+            log.info("Loaded {} testcase templates for common, template-contract, hybrid and fixed TODO engines",
+                    templates.size());
         else log.error("Cannot load testcase template libraries.");
         loadCustomTemplates();
     }
@@ -264,10 +291,10 @@ public class TestcaseTemplateService {
                 if (id == null || id.isBlank() || templates.containsKey(id)) continue;
                 Map<String, Object> row = new LinkedHashMap<>(source);
                 String engineType = text(row.get("engine_type"), COMMON_ENGINE).toUpperCase();
-                if (!Set.of(COMMON_ENGINE, TEMPLATE_CONTRACT_ENGINE).contains(engineType)) continue;
+                if (!Set.of(COMMON_ENGINE, TEMPLATE_CONTRACT_ENGINE, HYBRID_STARTER_KEY_ENGINE)
+                        .contains(engineType)) continue;
                 String runner = text(row.get("runner"), "").toUpperCase();
-                Set<String> supportedRunners = TEMPLATE_CONTRACT_ENGINE.equals(engineType)
-                        ? SUPPORTED_TEMPLATE_CONTRACT_RUNNERS : SUPPORTED_COMMON_RUNNERS;
+                Set<String> supportedRunners = supportedRunners(engineType);
                 if (!supportedRunners.contains(runner)) continue;
                 if (!(row.get("parameters_schema") instanceof Map<?, ?>)) continue;
                 row.put("custom", true);
@@ -299,6 +326,100 @@ public class TestcaseTemplateService {
         }
     }
 
+    /**
+     * Ghép thư viện hybrid từ hai thư viện nguồn đang được bảo trì. ID mới giúp Draft cũ
+     * không nhập nhằng và ngăn trộn testcase khác engine trong cùng một đề.
+     */
+    private void loadHybridTemplates() {
+        List<Map<String, Object>> references = new ArrayList<>(templates.values());
+        for (Map<String, Object> source : references) {
+            String sourceEngine = text(source.get("engine_type"), COMMON_ENGINE);
+            String runner = text(source.get("runner"), "").toUpperCase();
+            String sourceId = text(source.get("template_id"), "");
+            if ("COMMON_GRADING_ADAPTER_CALL".equals(sourceId)) continue;
+            boolean starterRunner = (TEMPLATE_CONTRACT_ENGINE.equals(sourceEngine)
+                    && HYBRID_STARTER_RUNNERS.contains(runner))
+                    || (COMMON_ENGINE.equals(sourceEngine) && HYBRID_LOGIC_CALL_RUNNERS.contains(runner));
+            boolean keyRunner = COMMON_ENGINE.equals(sourceEngine) && HYBRID_KEY_RUNNERS.contains(runner);
+            if (!starterRunner && !keyRunner) continue;
+
+            Map<String, Object> row = new LinkedHashMap<>(source);
+            String hybridId = "HYBRID_" + sourceId;
+            row.put("template_id", hybridId);
+            row.put("template_version", "starter-key-hybrid-v1");
+            row.put("engine_type", HYBRID_STARTER_KEY_ENGINE);
+            row.put("hybrid_target", starterRunner ? "STARTER_CONTRACT" : "SEMANTIC_KEY");
+            if (HYBRID_LOGIC_CALL_RUNNERS.contains(runner)) {
+                row.put("contract_bindings", Map.of(
+                        "functionPath", "logic.path",
+                        "functionName", "logic.function"));
+            }
+            row.put("fixed_contract", false);
+            templates.put(hybridId, row);
+        }
+
+        Map<String, Object> direct = templates.get("HYBRID_COMMON_DIRECT_FUNCTION");
+        if (direct != null) {
+            Map<String, Object> sequence = mapper.convertValue(direct,
+                    new TypeReference<LinkedHashMap<String, Object>>() {});
+            sequence.put("template_id", "HYBRID_STARTER_CALL_SEQUENCE");
+            sequence.put("template_version", "starter-key-hybrid-v2");
+            sequence.put("runner", "STARTER_CALL_SEQUENCE");
+            sequence.put("name", "Chuỗi gọi API nghiệp vụ công khai trong starter");
+            sequence.put("description", "Gọi tuần tự nhiều hàm top-level thuộc code nghiệp vụ của starter, "
+                    + "giữ state giữa các bước và đối chiếu từng kết quả; không dùng grading adapter.");
+            sequence.put("parameters_schema", Map.of(
+                    "sourcePath", "lib/services/person_service.dart",
+                    "stepsJson", "[{\"functionName\":\"resetStore\",\"arguments\":[],\"expectedType\":\"null\",\"expectedValue\":null},{\"functionName\":\"readAll\",\"arguments\":[],\"expectedType\":\"json\",\"expectedValue\":[]}]"));
+            sequence.put("contract_bindings", Map.of("sourcePath", "logic.path"));
+            sequence.put("hybrid_target", "STARTER_CONTRACT");
+            sequence.put("layer", "REPOSITORY");
+            sequence.put("testcase_group", "LOGIC");
+            sequence.put("expected_template", "Chuỗi hàm công khai trong {sourcePath} phải trả về đúng kết quả từng bước.");
+            templates.put("HYBRID_STARTER_CALL_SEQUENCE", sequence);
+        }
+    }
+
+    /**
+     * Các mục V9/V8 được chuyển thành alias của runner tổng quát. Alias chỉ đổi mục đích,
+     * tham số mặc định và rubric; schema thực thi luôn kế thừa blueprint gốc để tái sử dụng lâu dài.
+     */
+    private void loadHybridReusableCatalog() {
+        try (InputStream in = new ClassPathResource("hybrid-reusable-testcase-catalog.json").getInputStream()) {
+            List<Map<String, Object>> specs = mapper.readValue(in,
+                    new TypeReference<List<Map<String, Object>>>() {});
+            for (Map<String, Object> spec : specs) {
+                String id = text(spec.get("template_id"), "");
+                String baseId = text(spec.get("base_template_id"), "");
+                Map<String, Object> base = templates.get(baseId);
+                if (id.isBlank() || base == null || templates.containsKey(id)) continue;
+
+                Map<String, Object> row = mapper.convertValue(base,
+                        new TypeReference<LinkedHashMap<String, Object>>() {});
+                for (Map.Entry<String, Object> entry : spec.entrySet()) {
+                    if (!Set.of("base_template_id", "parameter_defaults").contains(entry.getKey())) {
+                        row.put(entry.getKey(), entry.getValue());
+                    }
+                }
+                Map<String, Object> schema = new LinkedHashMap<>(map(row.get("parameters_schema")));
+                schema.putAll(map(spec.get("parameter_defaults")));
+                row.put("parameters_schema", schema);
+                row.put("engine_type", HYBRID_STARTER_KEY_ENGINE);
+                row.put("template_version", "starter-key-hybrid-v2");
+                row.put("fixed_contract", false);
+                templates.put(id, row);
+            }
+        } catch (Exception e) {
+            log.warn("Không nạp được catalog testcase hybrid tái sử dụng: {}", e.getMessage());
+        }
+    }
+
+    private Set<String> supportedRunners(String engineType) {
+        if (TEMPLATE_CONTRACT_ENGINE.equals(engineType)) return SUPPORTED_TEMPLATE_CONTRACT_RUNNERS;
+        if (HYBRID_STARTER_KEY_ENGINE.equals(engineType)) return SUPPORTED_HYBRID_RUNNERS;
+        return SUPPORTED_COMMON_RUNNERS;
+    }
+
     /** Tạo blueprint dùng lại từ runner đã được engine tương ứng hỗ trợ. */
     public synchronized Map<String, Object> createTemplate(Map<String, Object> body, String teacherEmail) {
         ensureReferenceTemplatesLoaded();
@@ -311,11 +432,11 @@ public class TestcaseTemplateService {
         if (templates.containsKey(id)) throw new IllegalArgumentException("template_id đã tồn tại: " + id);
 
         String engineType = text(body.get("engine_type"), COMMON_ENGINE).trim().toUpperCase();
-        if (!Set.of(COMMON_ENGINE, TEMPLATE_CONTRACT_ENGINE).contains(engineType))
+        if (!Set.of(COMMON_ENGINE, TEMPLATE_CONTRACT_ENGINE, HYBRID_STARTER_KEY_ENGINE)
+                .contains(engineType))
             throw new IllegalArgumentException("Không hỗ trợ tạo template cho engine: " + engineType);
         String runner = text(body.get("runner"), "").trim().toUpperCase();
-        Set<String> supportedRunners = TEMPLATE_CONTRACT_ENGINE.equals(engineType)
-                ? SUPPORTED_TEMPLATE_CONTRACT_RUNNERS : SUPPORTED_COMMON_RUNNERS;
+        Set<String> supportedRunners = supportedRunners(engineType);
         if (!supportedRunners.contains(runner))
             throw new IllegalArgumentException("Runner chưa được engine hỗ trợ: " + runner);
         String skillCode = text(body.get("skill_code"), "").trim();
@@ -346,10 +467,12 @@ public class TestcaseTemplateService {
                         + " không được runner " + runner + " sử dụng.");
             }
         }
-        if (TEMPLATE_CONTRACT_ENGINE.equals(engineType)) {
+        if (TEMPLATE_CONTRACT_ENGINE.equals(engineType)
+                || (HYBRID_STARTER_KEY_ENGINE.equals(engineType) && HYBRID_STARTER_RUNNERS.contains(runner))) {
             validateTemplateContractParameters(runner, schema, id);
         } else {
             validateCommonParameters(runner, schema, id);
+            rejectGradingAdapterPath(engineType, runner, schema, id);
         }
 
         Instant now = Instant.now();
@@ -569,7 +692,18 @@ public class TestcaseTemplateService {
         if (publish) validatePublishable(items);
         Map<String, Object> suite = normalizeSuite(body.get("suite"), oldConfig.get("suite"));
         if (publish) validateSuiteCapabilities(suite);
-        String engineType = engineType(items);
+        String requestedEngine = text(body.get("engine_type"), text(oldConfig.get("engine_type"), ""))
+                .trim().toUpperCase();
+        String engineType = items.isEmpty() && Set.of(COMMON_ENGINE, TEMPLATE_CONTRACT_ENGINE,
+                        HYBRID_STARTER_KEY_ENGINE, TODO_USER_ENGINE).contains(requestedEngine)
+                ? requestedEngine : engineType(items);
+        if (!items.isEmpty() && !requestedEngine.isBlank() && !requestedEngine.equals(engineType)) {
+            throw new IllegalArgumentException("engine_type không khớp với thư viện testcase đã chọn.");
+        }
+        if (HYBRID_STARTER_KEY_ENGINE.equals(engineType)) {
+            suite.put("strict_semantic_keys", true);
+            suite.put("profile", "STARTER_KEY_HYBRID_V1");
+        }
 
         int currentVersion = exam.getTestcaseVersion() == null ? 0 : exam.getTestcaseVersion();
         // Draft cũng là một bản cấu hình materialize được, nên không dùng version 0 sau lần lưu đầu.
@@ -655,7 +789,19 @@ public class TestcaseTemplateService {
             copyClasspathEngine(dir, "todo-user-v12-engine/exam_test.dart", "exam_test.dart");
         } else if (TEMPLATE_CONTRACT_ENGINE.equals(engineType)) {
             copyClasspathEngine(dir, "template-contract-engine/grader.dart", "grader.dart");
-            bundleTemplateContractExam(dir, items);
+            bundleTemplateContractExam(dir, items, SUPPORTED_TEMPLATE_CONTRACT_RUNNERS);
+        } else if (HYBRID_STARTER_KEY_ENGINE.equals(engineType)) {
+            for (Map<String, Object> item : items) {
+                String runner = text(item.get("runner"), "");
+                rejectGradingAdapterPath(engineType, runner, map(item.get("parameters")),
+                        text(item.get("instance_id"), "testcase"));
+            }
+            copyClasspathEngine(dir, "template-contract-engine/grader.dart", "grader.dart");
+            Path grader = dir.resolve("grader.dart");
+            String graderSource = Files.readString(grader, StandardCharsets.UTF_8)
+                    .replace("TEMPLATE_CONTRACT_V1-2.6.0", "STARTER_KEY_HYBRID_V1-1.0.0");
+            Files.writeString(grader, graderSource, StandardCharsets.UTF_8);
+            bundleTemplateContractExam(dir, items, SUPPORTED_HYBRID_RUNNERS);
         } else {
             throw new IllegalArgumentException("Unsupported testcase engine: " + engineType);
         }
@@ -672,7 +818,8 @@ public class TestcaseTemplateService {
      * Module runner chỉ là source nội bộ để bảo trì. Artifact phát hành vẫn đúng contract
      * ba file và exam_test.dart tự chứa toàn bộ code cần để chạy độc lập.
      */
-    private void bundleTemplateContractExam(Path dir, List<Map<String, Object>> items) throws Exception {
+    private void bundleTemplateContractExam(Path dir, List<Map<String, Object>> items,
+                                            Set<String> supportedRunners) throws Exception {
         ClassPathResource resource = new ClassPathResource(
                 "template-contract-engine/common_testcase_engine.dart");
         if (!resource.exists())
@@ -691,7 +838,7 @@ public class TestcaseTemplateService {
         LinkedHashSet<String> runners = new LinkedHashSet<>();
         for (Map<String, Object> item : enabledItems) {
             String runner = text(item.get("runner"), "");
-            if (!SUPPORTED_TEMPLATE_CONTRACT_RUNNERS.contains(runner))
+            if (!supportedRunners.contains(runner))
                 throw new IllegalArgumentException("Runner không thuộc template-contract engine: " + runner);
             runners.add(runner);
         }
@@ -704,9 +851,7 @@ public class TestcaseTemplateService {
 
         int firstFunction = source.indexOf(functions.get("runTemplateContractExam"));
         if (firstFunction < 0) throw new IllegalStateException("Không xác định được header Dart của engine");
-        String header = source.substring(0, firstFunction)
-                .replace("// __DIRECT_FUNCTION_IMPORTS__", "")
-                .stripTrailing();
+        String header = source.substring(0, firstFunction).stripTrailing();
         String generated = header + "\n\n"
                 + renderTemplateEntry(enabledItems, runners) + "\n\n";
         StringBuilder out = new StringBuilder(generated);
@@ -715,8 +860,15 @@ public class TestcaseTemplateService {
                 out.append(entry.getValue().strip()).append("\n\n");
             }
         }
-        Files.writeString(dir.resolve("exam_test.dart"), out.toString().stripTrailing() + "\n",
-                StandardCharsets.UTF_8);
+        String bundled = out.toString().stripTrailing() + "\n";
+        List<Map<String, Object>> dispatcherItems = directDispatcherItems(enabledItems);
+        if (dispatcherItems.isEmpty()) {
+            bundled = bundled.replace("// __DIRECT_FUNCTION_IMPORTS__", "")
+                    .replace("    // __DIRECT_FUNCTION_CASES__", "");
+        } else {
+            bundled = renderDirectFunctionRunner(bundled, dispatcherItems);
+        }
+        Files.writeString(dir.resolve("exam_test.dart"), bundled, StandardCharsets.UTF_8);
     }
 
     /** Sinh entry point có đúng các testcase đang chọn; mỗi ID xuất hiện rõ trong file để dễ đối chiếu. */
@@ -791,7 +943,8 @@ public class TestcaseTemplateService {
 
     private boolean isTemplateDirectRunner(String runner) {
         return runner.startsWith("TEMPLATE_SOURCE_") || runner.startsWith("TEMPLATE_MODEL_")
-                || Set.of("TEMPLATE_SQLITE_SCHEMA", "TEMPLATE_REPOSITORY_METHODS").contains(runner);
+                || Set.of("TEMPLATE_SQLITE_SCHEMA", "TEMPLATE_REPOSITORY_METHODS",
+                "DIRECT_FUNCTION", "STARTER_CALL_SEQUENCE").contains(runner);
     }
 
     private List<String> templateRunnerRoots(String runner) {
@@ -811,6 +964,30 @@ public class TestcaseTemplateService {
             case "TEMPLATE_TEXT_VISIBLE" -> List.of("_checkTemplateTextVisible");
             case "RESPONSIVE_NO_OVERFLOW" -> List.of("_responsive");
             case "APP_BOOT" -> List.of("_checkTemplateAppBoot");
+            case "WIDGET_VISIBLE" -> List.of("_checkKeyWidgetVisible");
+            case "FORM_REQUIRED_FIELDS" -> List.of("_checkKeyRequiredFields");
+            case "RESPONSIVE_TARGET" -> List.of("_responsiveTarget");
+            case "NAVIGATION" -> List.of("_checkKeyNavigation");
+            case "LIST_VISIBLE" -> List.of("_checkKeyListVisible");
+            case "BUTTON_ACTION" -> List.of("_checkKeyButtonAction");
+            case "WIDGET_DIMENSION" -> List.of("_checkWidgetDimension");
+            case "WIDGET_PADDING" -> List.of("_checkWidgetPadding");
+            case "WIDGET_TEXT_STYLE" -> List.of("_checkWidgetTextStyle");
+            case "WIDGET_GAP" -> List.of("_checkWidgetGap");
+            case "WIDGET_TYPE_VISIBLE" -> List.of("_checkWidgetTypeVisible");
+            case "WIDGET_TEXT_CONTENT" -> List.of("_checkWidgetTextContent");
+            case "WIDGET_ENABLED" -> List.of("_checkWidgetEnabled");
+            case "FORM_VALIDATE_FIELDS" -> List.of("_checkFormValidateFields");
+            case "LIST_ITEM_COUNT" -> List.of("_checkListItemCount");
+            case "DIALOG_FLOW" -> List.of("_checkDialogFlow");
+            case "FORM_PREFILL" -> List.of("_checkFormPrefill");
+            case "FORM_SUBMIT" -> List.of("_checkFormSubmit");
+            case "WIDGET_SEMANTICS_LABEL" -> List.of("_checkWidgetSemanticsLabel");
+            case "STATE_REACTIVE_FLOW" -> List.of("_checkStateReactiveFlow");
+            case "WIDGET_RELATIONSHIP" -> List.of("_checkWidgetRelationship");
+            case "RESPONSIVE_PAIR_LAYOUT" -> List.of("_checkResponsivePairLayout");
+            case "DIRECT_FUNCTION" -> List.of("_checkDirectFunction");
+            case "STARTER_CALL_SEQUENCE" -> List.of("_checkStarterCallSequence");
             default -> throw new IllegalArgumentException("Runner template chưa có module: " + runner);
         };
     }
@@ -832,6 +1009,30 @@ public class TestcaseTemplateService {
             case "TEMPLATE_TEXT_VISIBLE" -> "await _checkTemplateTextVisible(tester, parameters);";
             case "RESPONSIVE_NO_OVERFLOW" -> "await _responsive(tester, parameters);";
             case "APP_BOOT" -> "await _checkTemplateAppBoot(tester, parameters);";
+            case "WIDGET_VISIBLE" -> "await _checkKeyWidgetVisible(tester, parameters);";
+            case "FORM_REQUIRED_FIELDS" -> "await _checkKeyRequiredFields(tester, parameters);";
+            case "RESPONSIVE_TARGET" -> "await _responsiveTarget(tester, parameters);";
+            case "NAVIGATION" -> "await _checkKeyNavigation(tester, parameters);";
+            case "LIST_VISIBLE" -> "await _checkKeyListVisible(tester, parameters);";
+            case "BUTTON_ACTION" -> "await _checkKeyButtonAction(tester, parameters);";
+            case "WIDGET_DIMENSION" -> "await _checkWidgetDimension(tester, parameters);";
+            case "WIDGET_PADDING" -> "await _checkWidgetPadding(tester, parameters);";
+            case "WIDGET_TEXT_STYLE" -> "await _checkWidgetTextStyle(tester, parameters);";
+            case "WIDGET_GAP" -> "await _checkWidgetGap(tester, parameters);";
+            case "WIDGET_TYPE_VISIBLE" -> "await _checkWidgetTypeVisible(tester, parameters);";
+            case "WIDGET_TEXT_CONTENT" -> "await _checkWidgetTextContent(tester, parameters);";
+            case "WIDGET_ENABLED" -> "await _checkWidgetEnabled(tester, parameters);";
+            case "FORM_VALIDATE_FIELDS" -> "await _checkFormValidateFields(tester, parameters);";
+            case "LIST_ITEM_COUNT" -> "await _checkListItemCount(tester, parameters);";
+            case "DIALOG_FLOW" -> "await _checkDialogFlow(tester, parameters);";
+            case "FORM_PREFILL" -> "await _checkFormPrefill(tester, parameters);";
+            case "FORM_SUBMIT" -> "await _checkFormSubmit(tester, parameters);";
+            case "WIDGET_SEMANTICS_LABEL" -> "await _checkWidgetSemanticsLabel(tester, parameters);";
+            case "STATE_REACTIVE_FLOW" -> "await _checkStateReactiveFlow(tester, parameters);";
+            case "WIDGET_RELATIONSHIP" -> "await _checkWidgetRelationship(tester, parameters);";
+            case "RESPONSIVE_PAIR_LAYOUT" -> "await _checkResponsivePairLayout(tester, parameters);";
+            case "DIRECT_FUNCTION" -> "await _checkDirectFunction(tester, parameters);";
+            case "STARTER_CALL_SEQUENCE" -> "await _checkStarterCallSequence(tester, parameters);";
             default -> throw new IllegalArgumentException("Runner template chưa có dispatch: " + runner);
         };
         return "    case '" + runner + "':\n      " + call.replace("\n", "\n      ") + "\n      return;\n";
@@ -934,6 +1135,37 @@ public class TestcaseTemplateService {
         Files.writeString(examTest, source, StandardCharsets.UTF_8);
     }
 
+    /** Chuyển sequence thành các đích gọi để dùng chung một bộ sinh import/dispatcher. */
+    private List<Map<String, Object>> directDispatcherItems(List<Map<String, Object>> items) {
+        List<Map<String, Object>> out = new ArrayList<>();
+        for (Map<String, Object> item : items) {
+            String runner = text(item.get("runner"), "");
+            if ("DIRECT_FUNCTION".equals(runner)) {
+                out.add(item);
+                continue;
+            }
+            if (!"STARTER_CALL_SEQUENCE".equals(runner)) continue;
+            Map<String, Object> params = map(item.get("parameters"));
+            String sourcePath = text(params.get("sourcePath"), "");
+            try {
+                List<Map<String, Object>> steps = mapper.readValue(text(params.get("stepsJson"), "[]"),
+                        new TypeReference<List<Map<String, Object>>>() {});
+                for (Map<String, Object> step : steps) {
+                    Map<String, Object> directParams = new LinkedHashMap<>();
+                    directParams.put("functionPath", sourcePath);
+                    directParams.put("functionName", text(step.get("functionName"), ""));
+                    directParams.put("argumentsJson", mapper.writeValueAsString(
+                            step.getOrDefault("arguments", List.of())));
+                    out.add(Map.of("runner", "DIRECT_FUNCTION", "parameters", directParams));
+                }
+            } catch (Exception e) {
+                throw new IllegalArgumentException("Không sinh được dispatcher STARTER_CALL_SEQUENCE: "
+                        + e.getMessage(), e);
+            }
+        }
+        return out;
+    }
+
     String renderDirectFunctionRunner(String source, List<Map<String, Object>> directItems) {
         StringBuilder imports = new StringBuilder();
         StringBuilder dispatch = new StringBuilder();
@@ -995,6 +1227,8 @@ public class TestcaseTemplateService {
         boolean templateContractLoaded = loadClasspathTemplates(
                 "template-contract-testcase-templates.json", TEMPLATE_CONTRACT_ENGINE);
         boolean todoLoaded = loadClasspathTemplates("todo-user-v12-testcase-templates.json", TODO_USER_ENGINE);
+        loadHybridTemplates();
+        loadHybridReusableCatalog();
         if (!commonLoaded && !templateContractLoaded && !todoLoaded)
             log.error("Cannot load testcase template libraries.");
         loadCustomTemplates();
@@ -1044,7 +1278,7 @@ public class TestcaseTemplateService {
         Map<String, Object> persistence = map(suite.get("persistence"));
         if (bool(persistence.get("enabled"), false)) {
             throw new IllegalArgumentException("Persistence sau reload chưa có runner thực thi; "
-                    + "hãy tắt tùy chọn này hoặc dùng DIRECT_FUNCTION qua grading adapter.");
+                    + "hãy tắt tùy chọn này cho tới khi starter có runner database cách ly theo process.");
         }
         Map<String, Object> golden = map(suite.get("golden"));
         if (bool(golden.get("enabled"), false)) {
@@ -1077,6 +1311,7 @@ public class TestcaseTemplateService {
         suite.put("persistence", normalizePersistence(input.get("persistence")));
         suite.put("golden", normalizeGolden(input.get("golden")));
         suite.put("template_contract", normalizeTemplateContract(input.get("template_contract")));
+        suite.put("key_contract", normalizeKeyContract(input.get("key_contract")));
         suite.put("strict_semantic_keys", bool(input.get("strict_semantic_keys"), hasSuite));
         suite.put("ready_key", optionalSemanticKey(input.get("ready_key"), "ready_key"));
         suite.put("required_keys", semanticKeyList(input.get("required_keys"), "required_keys", 100));
@@ -1101,6 +1336,7 @@ public class TestcaseTemplateService {
         suite.put("persistence", defaultPersistence());
         suite.put("golden", defaultGolden());
         suite.put("template_contract", Map.of());
+        suite.put("key_contract", defaultKeyContract());
         suite.put("strict_semantic_keys", false);
         suite.put("ready_key", "");
         suite.put("required_keys", List.of());
@@ -1108,6 +1344,75 @@ public class TestcaseTemplateService {
         suite.put("step_timeout_ms", 2000);
         suite.put("setup_steps", List.of());
         return suite;
+    }
+
+    /**
+     * Danh mục Key là metadata của Draft để giảng viên chọn đúng Key đã công bố trong
+     * starter. Nó không phải file chấm thứ tư và không bị nhúng vào skills_matrix.
+     */
+    private Map<String, Object> normalizeKeyContract(Object raw) {
+        Map<String, Object> out = defaultKeyContract();
+        if (raw == null) return out;
+        if (!(raw instanceof Map<?, ?>))
+            throw new IllegalArgumentException("key_contract phai la object");
+        Map<String, Object> input = castMap(raw);
+
+        String sourcePath = limitedText(input.get("source_path"), "", 240,
+                "key_contract.source_path").trim().replace('\\', '/');
+        if (!sourcePath.isBlank()
+                && (sourcePath.startsWith("/") || sourcePath.contains("..")
+                || !sourcePath.startsWith("lib/") || !sourcePath.endsWith(".dart"))) {
+            throw new IllegalArgumentException(
+                    "key_contract.source_path phai la file .dart tuong doi trong lib/");
+        }
+        String className = limitedText(input.get("class_name"), "AppKeys", 80,
+                "key_contract.class_name").trim();
+        if (!className.isBlank() && !DART_IDENTIFIER.matcher(className).matches())
+            throw new IllegalArgumentException("key_contract.class_name phai la Dart identifier");
+
+        Object rawKeys = input.get("keys");
+        if (rawKeys != null && !(rawKeys instanceof List<?>))
+            throw new IllegalArgumentException("key_contract.keys phai la mot mang");
+        List<?> keys = rawKeys instanceof List<?> values ? values : List.of();
+        if (keys.size() > 200)
+            throw new IllegalArgumentException("key_contract khong duoc vuot qua 200 key");
+
+        List<Map<String, Object>> normalizedKeys = new ArrayList<>();
+        Set<String> symbols = new LinkedHashSet<>();
+        Set<String> values = new LinkedHashSet<>();
+        for (int index = 0; index < keys.size(); index++) {
+            if (!(keys.get(index) instanceof Map<?, ?>))
+                throw new IllegalArgumentException("key_contract.keys #" + (index + 1) + " phai la object");
+            Map<String, Object> key = castMap(keys.get(index));
+            String symbol = requiredLimitedText(key.get("symbol"), 80,
+                    "key_contract.keys.symbol").trim();
+            if (!DART_IDENTIFIER.matcher(symbol).matches() || !symbols.add(symbol))
+                throw new IllegalArgumentException("Ten bien Key khong hop le hoac bi trung: " + symbol);
+            String value = requiredSemanticKey(key.get("value"), "key_contract.keys.value");
+            if (!values.add(value))
+                throw new IllegalArgumentException("Gia tri semantic Key bi trung: " + value);
+
+            Map<String, Object> normalized = new LinkedHashMap<>();
+            normalized.put("symbol", symbol);
+            normalized.put("value", value);
+            normalized.put("group", limitedText(key.get("group"), "Khác", 80,
+                    "key_contract.keys.group"));
+            normalized.put("description", limitedText(key.get("description"), "", 240,
+                    "key_contract.keys.description"));
+            normalizedKeys.add(normalized);
+        }
+        out.put("source_path", sourcePath);
+        out.put("class_name", className);
+        out.put("keys", normalizedKeys);
+        return out;
+    }
+
+    private Map<String, Object> defaultKeyContract() {
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("source_path", "lib/grading/app_keys.dart");
+        out.put("class_name", "AppKeys");
+        out.put("keys", new ArrayList<>());
+        return out;
     }
 
     private Map<String, Object> normalizeTemplateContract(Object raw) {
@@ -1393,8 +1698,14 @@ public class TestcaseTemplateService {
             if (!ids.add(instanceId)) throw new IllegalArgumentException("Trùng instance_id: " + instanceId);
 
             Map<String, Object> params = parameters(template, input.get("parameters"));
-            if (COMMON_ENGINE.equals(templateEngine)) {
+            String runner = text(template.get("runner"), "").toUpperCase();
+            if (COMMON_ENGINE.equals(templateEngine)
+                    || (HYBRID_STARTER_KEY_ENGINE.equals(templateEngine)
+                    && HYBRID_COMMON_VALIDATED_RUNNERS.contains(runner))) {
                 Set<String> allowed = referenceParameterKeys(text(template.get("runner"), "").toUpperCase());
+                if (HYBRID_STARTER_KEY_ENGINE.equals(templateEngine)) {
+                    allowed = referenceParameterKeys(runner, HYBRID_STARTER_KEY_ENGINE);
+                }
                 for (String parameter : params.keySet()) {
                     if (!allowed.contains(parameter)) {
                         throw new IllegalArgumentException("Tham số " + parameter
@@ -1402,7 +1713,10 @@ public class TestcaseTemplateService {
                     }
                 }
                 validateCommonParameters(text(template.get("runner"), ""), params, instanceId);
-            } else if (TEMPLATE_CONTRACT_ENGINE.equals(templateEngine)) {
+                rejectGradingAdapterPath(templateEngine, runner, params, instanceId);
+            } else if (TEMPLATE_CONTRACT_ENGINE.equals(templateEngine)
+                    || (HYBRID_STARTER_KEY_ENGINE.equals(templateEngine)
+                    && HYBRID_STARTER_RUNNERS.contains(runner))) {
                 validateTemplateContractParameters(text(template.get("runner"), ""), params, instanceId);
             }
             String difficulty = text(input.get("difficulty"));
@@ -1432,7 +1746,8 @@ public class TestcaseTemplateService {
             item.put("order", index++);
             item.put("weight", weight);
             item.put("parameters", params);
-            if (TEMPLATE_CONTRACT_ENGINE.equals(templateEngine)) {
+            if (TEMPLATE_CONTRACT_ENGINE.equals(templateEngine)
+                    || HYBRID_STARTER_KEY_ENGINE.equals(templateEngine)) {
                 LinkedHashSet<String> overrides = new LinkedHashSet<>();
                 Object rawOverrides = input.get("contract_overrides");
                 if (rawOverrides instanceof List<?> values) {
@@ -1463,7 +1778,7 @@ public class TestcaseTemplateService {
             item.put("execution_key", text(template.get("execution_key"), templateId));
             String groupId = text(input.get("group_id"));
             if (groupId != null && !groupId.isBlank()) {
-                if (!COMMON_ENGINE.equals(templateEngine))
+                if (!Set.of(COMMON_ENGINE, HYBRID_STARTER_KEY_ENGINE).contains(templateEngine))
                     throw new IllegalArgumentException("Testcase này không thuộc thư viện dùng chung: " + instanceId);
                 if (!SAFE_INSTANCE_ID.matcher(groupId).matches())
                     throw new IllegalArgumentException("group_id không hợp lệ ở " + instanceId);
@@ -1553,6 +1868,7 @@ public class TestcaseTemplateService {
 
     private String profileId(String engineType) {
         if (TEMPLATE_CONTRACT_ENGINE.equals(engineType)) return "TEMPLATE_CONTRACT_V1";
+        if (HYBRID_STARTER_KEY_ENGINE.equals(engineType)) return "STARTER_KEY_HYBRID_V1";
         return TODO_USER_ENGINE.equals(engineType) ? "TODO_STARTER_V12" : "COMMON_SEMANTIC_V1";
     }
 
@@ -1883,7 +2199,10 @@ public class TestcaseTemplateService {
             case "WIDGET_PADDING" -> validateWidgetPadding(params, instanceId);
             case "WIDGET_TEXT_STYLE" -> validateWidgetTextStyle(params, instanceId);
             case "WIDGET_GAP" -> validateWidgetGap(params, instanceId);
+            case "WIDGET_RELATIONSHIP" -> validateWidgetRelationship(params, instanceId);
+            case "RESPONSIVE_PAIR_LAYOUT" -> validateResponsivePairLayout(params, instanceId);
             case "DIRECT_FUNCTION" -> validateDirectFunction(params, instanceId);
+            case "STARTER_CALL_SEQUENCE" -> validateStarterCallSequence(params, instanceId);
             case "APP_BOOT" -> validateOptionalPositiveInt(params, "readyTimeoutMs", 100, 30000, instanceId);
             default -> throw new IllegalArgumentException("Common runner không tồn tại: " + runner);
         }
@@ -1928,6 +2247,65 @@ public class TestcaseTemplateService {
         if (!Set.of("equals", "contains").contains(matchMode))
             throw new IllegalArgumentException("matchMode khong hop le o " + instanceId);
         validateDirectExpected(params.get("expectedValue"), expectedType, instanceId);
+    }
+
+    private void validateStarterCallSequence(Map<String, Object> params, String instanceId) {
+        String sourcePath = text(params.get("sourcePath"), "").trim().replace('\\', '/');
+        if (sourcePath.isBlank() || sourcePath.startsWith("/") || sourcePath.contains("..")
+                || !sourcePath.startsWith("lib/") || !sourcePath.endsWith(".dart")) {
+            throw new IllegalArgumentException("sourcePath phải là file .dart trong lib/ ở " + instanceId);
+        }
+        params.put("sourcePath", sourcePath);
+        String raw = text(params.get("stepsJson"), "").trim();
+        if (raw.isBlank()) throw new IllegalArgumentException("stepsJson không được để trống ở " + instanceId);
+        try {
+            List<Map<String, Object>> steps = mapper.readValue(raw,
+                    new TypeReference<List<Map<String, Object>>>() {});
+            if (steps.isEmpty() || steps.size() > 20)
+                throw new IllegalArgumentException("stepsJson phải có 1-20 bước ở " + instanceId);
+            for (int index = 0; index < steps.size(); index++) {
+                Map<String, Object> step = steps.get(index);
+                String stepId = instanceId + " bước #" + (index + 1);
+                String functionName = text(step.get("functionName"), "").trim();
+                if (!DART_IDENTIFIER.matcher(functionName).matches())
+                    throw new IllegalArgumentException("functionName không hợp lệ ở " + stepId);
+                Object arguments = step.getOrDefault("arguments", List.of());
+                if (!(arguments instanceof List<?> list) || list.size() > 8)
+                    throw new IllegalArgumentException("arguments phải là mảng tối đa 8 phần tử ở " + stepId);
+                String expectedType = text(step.get("expectedType"), "string").toLowerCase();
+                if (!Set.of("string", "bool", "int", "double", "json", "null").contains(expectedType))
+                    throw new IllegalArgumentException("expectedType không hợp lệ ở " + stepId);
+                String matchMode = text(step.get("matchMode"), "equals").toLowerCase();
+                if (!Set.of("equals", "contains").contains(matchMode))
+                    throw new IllegalArgumentException("matchMode không hợp lệ ở " + stepId);
+                validateSequenceExpected(step.get("expectedValue"), expectedType, stepId);
+            }
+        } catch (IllegalArgumentException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IllegalArgumentException("stepsJson không hợp lệ ở " + instanceId + ": " + e.getMessage());
+        }
+    }
+
+    private void validateSequenceExpected(Object raw, String expectedType, String instanceId) {
+        if ("json".equals(expectedType)) {
+            if (raw == null) throw new IllegalArgumentException("expectedValue JSON bị thiếu ở " + instanceId);
+            return;
+        }
+        validateDirectExpected(raw, expectedType, instanceId);
+    }
+
+    private void rejectGradingAdapterPath(String engineType, String runner,
+                                          Map<String, Object> params, String instanceId) {
+        if (!HYBRID_STARTER_KEY_ENGINE.equals(engineType)
+                || !HYBRID_LOGIC_CALL_RUNNERS.contains(runner)) return;
+        String path = text(params.get("functionPath"), text(params.get("sourcePath"), ""))
+                .replace('\\', '/').toLowerCase();
+        if (path.endsWith("/grading_adapter.dart") || path.contains("grading_adapter")) {
+            throw new IllegalArgumentException(
+                    "Engine hybrid không cho phép grading_adapter.dart ở " + instanceId
+                            + "; hãy gọi API nghiệp vụ công khai trong starter.");
+        }
     }
 
     private void validateDirectExpected(Object raw, String expectedType, String instanceId) {
@@ -2104,6 +2482,37 @@ public class TestcaseTemplateService {
         requireNumber(params, "tolerance", instanceId, 0);
     }
 
+    private void validateWidgetRelationship(Map<String, Object> params, String instanceId) {
+        requireParameter(params, "ancestorKey", instanceId);
+        List<String> descendants = csv(params.get("descendantKeys"));
+        if (descendants.isEmpty())
+            throw new IllegalArgumentException("descendantKeys không được rỗng ở " + instanceId);
+        validateOptionalTargetType(params, "ancestorType", instanceId);
+        List<String> types = csv(params.get("descendantTypes"));
+        if (!types.isEmpty() && types.size() != descendants.size())
+            throw new IllegalArgumentException(
+                    "descendantTypes phải để trống hoặc khớp descendantKeys ở " + instanceId);
+        for (String type : types) {
+            Map<String, Object> one = new LinkedHashMap<>();
+            one.put("type", type);
+            validateOptionalTargetType(one, "type", instanceId);
+        }
+        String axis = text(params.get("orderedAxis"), "none").toLowerCase();
+        if (!Set.of("none", "horizontal", "vertical").contains(axis))
+            throw new IllegalArgumentException("orderedAxis không hợp lệ ở " + instanceId);
+    }
+
+    private void validateResponsivePairLayout(Map<String, Object> params, String instanceId) {
+        requireParameter(params, "firstKey", instanceId);
+        requireParameter(params, "secondKey", instanceId);
+        requireNumber(params, "width", instanceId, 1);
+        requireNumber(params, "height", instanceId, 1);
+        requireNumber(params, "tolerance", instanceId, 0);
+        String alignment = text(params.get("alignment"), "row").toLowerCase();
+        if (!Set.of("row", "column").contains(alignment))
+            throw new IllegalArgumentException("alignment phải là row hoặc column ở " + instanceId);
+    }
+
     private void validateTarget(Map<String, Object> params, String instanceId, Set<String> allowedTypes) {
         requireParameter(params, "targetKey", instanceId);
         requireParameter(params, "targetType", instanceId);
@@ -2175,7 +2584,8 @@ public class TestcaseTemplateService {
         // empty fields and is already persisted in testcaseConfigJson. The generated
         // runner only needs the small runtime subset below, so never publish the whole
         // editor contract in skills_matrix.json.
-        Map<String, Object> publishedSuite = TEMPLATE_CONTRACT_ENGINE.equals(engineType)
+        Map<String, Object> publishedSuite = (TEMPLATE_CONTRACT_ENGINE.equals(engineType)
+                || HYBRID_STARTER_KEY_ENGINE.equals(engineType))
                 ? templateRuntimeSuite(suite)
                 : suite;
         for (Map<String, Object> item : items) {
@@ -2195,10 +2605,12 @@ public class TestcaseTemplateService {
             if (TODO_USER_ENGINE.equals(engineType)) {
                 matrix.put(String.valueOf(item.get("execution_key")), fixedContractRubricRow(item));
             } else {
-                Map<String, Object> rowSuite = TEMPLATE_CONTRACT_ENGINE.equals(engineType)
+                boolean compactSuiteEngine = TEMPLATE_CONTRACT_ENGINE.equals(engineType)
+                        || HYBRID_STARTER_KEY_ENGINE.equals(engineType);
+                Map<String, Object> rowSuite = compactSuiteEngine
                         && templateSuiteEmitted ? Map.of() : publishedSuite;
                 matrix.put(String.valueOf(item.get("instance_id")), commonRubricRow(item, rowSuite));
-                if (TEMPLATE_CONTRACT_ENGINE.equals(engineType)) templateSuiteEmitted = true;
+                if (compactSuiteEngine) templateSuiteEmitted = true;
             }
         }
         return matrix;

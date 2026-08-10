@@ -6,8 +6,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-// Engine template-contract reads the file/class/field/label parameters configured
-// for each exam. It does not require Widget Key or a grading adapter.
+// Engine reads the file/class/field/label and semantic Key parameters configured
+// for each exam. It does not require a grading adapter.
 import '../lib/main.dart' as student_app;
 // __DIRECT_FUNCTION_IMPORTS__
 
@@ -61,6 +61,7 @@ void _registerSelectedCase(
 bool _isDirectMetadata(Map<String, dynamic> metadata) {
   final runner = (metadata['runner'] ?? '').toString();
   if (runner == 'DIRECT_FUNCTION' ||
+      runner == 'STARTER_CALL_SEQUENCE' ||
       runner.startsWith('TEMPLATE_SOURCE_') ||
       runner.startsWith('TEMPLATE_MODEL_') ||
       runner == 'TEMPLATE_SQLITE_SCHEMA' ||
@@ -127,7 +128,7 @@ Future<void> _runCase(
       await _checkTemplateTextVisible(tester, parameters);
       return;
     case 'DIRECT_FUNCTION':
-      await _checkDirectFunction(parameters);
+      await _checkDirectFunction(tester, parameters);
       return;
     case 'APP_BOOT':
       await _checkTemplateAppBoot(tester, parameters);
@@ -175,6 +176,15 @@ Future<void> _runCase(
       return;
     case 'STATE_REACTIVE_FLOW':
       await _checkStateReactiveFlow(tester, parameters);
+      return;
+    case 'WIDGET_RELATIONSHIP':
+      await _checkWidgetRelationship(tester, parameters);
+      return;
+    case 'RESPONSIVE_PAIR_LAYOUT':
+      await _checkResponsivePairLayout(tester, parameters);
+      return;
+    case 'STARTER_CALL_SEQUENCE':
+      await _checkStarterCallSequence(tester, parameters);
       return;
     case 'GROUP':
       await _checkGroup(tester, testId, metadata);
@@ -332,7 +342,10 @@ Map<String, dynamic> _suiteFor(Map<String, dynamic> metadata) {
   return ownSuite.isNotEmpty ? ownSuite : _sharedSuite;
 }
 
-Future<void> _checkDirectFunction(Map<String, dynamic> parameters) async {
+Future<void> _checkDirectFunction(
+  WidgetTester tester,
+  Map<String, dynamic> parameters,
+) async {
   final functionPath = _requiredText(parameters, 'functionPath');
   final functionName = _requiredText(parameters, 'functionName');
   final rawArguments = _text(parameters, 'argumentsJson', '[]');
@@ -344,11 +357,15 @@ Future<void> _checkDirectFunction(Map<String, dynamic> parameters) async {
   }
   if (decoded is! List) fail('argumentsJson phải là một mảng JSON.');
 
-  dynamic actual = _invokeDirectFunction(
-    '$functionPath::$functionName',
-    List<dynamic>.from(decoded as List),
-  );
-  if (actual is Future) actual = await actual;
+  // Invoke inside runAsync. Starting an SQLite Future under WidgetTester's
+  // fake clock and only awaiting it inside runAsync can deadlock indefinitely.
+  final actual = await tester.runAsync<dynamic>(() async {
+    final value = _invokeDirectFunction(
+      '$functionPath::$functionName',
+      List<dynamic>.from(decoded as List),
+    );
+    return value is Future ? await value : value;
+  });
 
   final expectedType = _text(
     parameters,
@@ -396,6 +413,73 @@ dynamic _parseDirectExpected(String value, String type) {
       return null;
     default:
       return value;
+  }
+}
+
+Future<void> _checkStarterCallSequence(
+  WidgetTester tester,
+  Map<String, dynamic> parameters,
+) async {
+  final sourcePath = _requiredText(parameters, 'sourcePath');
+  final raw = _requiredText(parameters, 'stepsJson');
+  dynamic decoded;
+  try {
+    decoded = jsonDecode(raw);
+  } catch (error) {
+    fail('stepsJson không hợp lệ: $error');
+  }
+  if (decoded is! List || decoded.isEmpty) {
+    fail('stepsJson phải là một mảng có ít nhất một bước.');
+  }
+
+  for (var index = 0; index < decoded.length; index++) {
+    final step = _asMap(decoded[index]);
+    final functionName = _requiredText(step, 'functionName');
+    final rawArguments = step['arguments'];
+    final arguments = rawArguments is List
+        ? List<dynamic>.from(rawArguments)
+        : <dynamic>[];
+    final actual = await tester.runAsync<dynamic>(() async {
+      final value = _invokeDirectFunction(
+        '$sourcePath::$functionName',
+        arguments,
+      );
+      return value is Future ? await value : value;
+    });
+
+    final expectedType = _text(step, 'expectedType', 'string').toLowerCase();
+    final expected = _parseSequenceExpected(step['expectedValue'], expectedType);
+    final matchMode = _text(step, 'matchMode', 'equals').toLowerCase();
+    if (matchMode == 'contains') {
+      expect(
+        actual.toString(),
+        contains(expected.toString()),
+        reason: 'Bước #${index + 1} ($functionName) không chứa kết quả mong đợi',
+      );
+    } else {
+      expect(
+        actual,
+        equals(expected),
+        reason: 'Bước #${index + 1} ($functionName) trả về kết quả không đúng',
+      );
+    }
+  }
+}
+
+dynamic _parseSequenceExpected(dynamic value, String type) {
+  switch (type) {
+    case 'bool':
+      return value is bool ? value : value.toString().toLowerCase() == 'true';
+    case 'int':
+      return value is int ? value : int.parse(value.toString());
+    case 'double':
+      return value is num ? value.toDouble() : double.parse(value.toString());
+    case 'json':
+      return value is String ? jsonDecode(value) : value;
+    case 'null':
+      return null;
+    default:
+      return value?.toString() ?? '';
   }
 }
 
@@ -463,8 +547,8 @@ String _classBody(String source, String className, String path) {
 
 String _methodBody(String source, String methodName, String ownerDescription) {
   final signature = RegExp(
-    '\\b${RegExp.escape(methodName)}\\s*\\([^;{}]*\\)\\s*'
-    r'(?:asyncs*)?(?:{|=>)',
+    '\\b${RegExp.escape(methodName)}\\s*\\([^;]*\\)\\s*'
+    r'(?:async\s*)?(?:{|=>)',
     multiLine: true,
   ).firstMatch(source);
   expect(
@@ -494,8 +578,8 @@ String _methodBody(String source, String methodName, String ownerDescription) {
 
 bool _hasMethodDeclaration(String source, String methodName) {
   return RegExp(
-    '\\b${RegExp.escape(methodName)}\\s*\\([^;{}]*\\)\\s*'
-    r'(?:asyncs*)?(?:{|=>|;)',
+    '\\b${RegExp.escape(methodName)}\\s*\\([^;]*\\)\\s*'
+    r'(?:async\s*)?(?:{|=>|;)',
     multiLine: true,
   ).hasMatch(source);
 }
@@ -1271,6 +1355,14 @@ Future<void> _checkTemplateAppBoot(
   Map<String, dynamic> parameters,
 ) async {
   await _boot(tester);
+  final readyKey = _text(parameters, 'readyKey');
+  if (readyKey.isNotEmpty) {
+    await _waitForVisible(
+      tester,
+      readyKey,
+      _number(parameters, 'readyTimeoutMs', 3000).toInt(),
+    );
+  }
   final readyText = _text(parameters, 'readyText');
   if (readyText.isNotEmpty) {
     final timeoutMs = _number(parameters, 'readyTimeoutMs', 3000).toInt();
@@ -1294,6 +1386,231 @@ Future<void> _checkTemplateAppBoot(
   expect(tester.takeException(), isNull);
 }
 
+Future<void> _checkKeyWidgetVisible(
+  WidgetTester tester,
+  Map<String, dynamic> parameters,
+) async {
+  await _boot(tester);
+  final key = _requiredText(parameters, 'widgetKey');
+  final finder = _byKey(key);
+  expect(finder, findsOneWidget, reason: 'Không tìm thấy widget key: $key');
+  final targetType = _text(parameters, 'targetType');
+  if (targetType.isNotEmpty) _assertTargetType(tester, finder, key, targetType);
+}
+
+Future<void> _checkKeyRequiredFields(
+  WidgetTester tester,
+  Map<String, dynamic> parameters,
+) async {
+  await _boot(tester);
+  final fields = _csv(parameters, 'fieldKeys');
+  final errors = _csv(parameters, 'errorKeys');
+  if (fields.isEmpty || errors.isEmpty) {
+    fail('fieldKeys và errorKeys không được để trống.');
+  }
+  final fieldType = _text(parameters, 'fieldType', 'input');
+  for (final key in fields) {
+    final field = _byKey(key);
+    expect(field, findsOneWidget, reason: 'Thiếu field semantic key: $key');
+    _assertTargetType(tester, field, key, fieldType);
+    await tester.enterText(field, '');
+  }
+  final beforeErrors = [for (final key in errors) _visibleKeyCount(key)];
+  final submitKey = _requiredText(parameters, 'submitKey');
+  final submit = _byKey(submitKey);
+  expect(submit, findsOneWidget, reason: 'Thiếu submit key: $submitKey');
+  await _tap(tester, submit, submitKey);
+  await _settle(tester);
+  for (var index = 0; index < errors.length; index++) {
+    final key = errors[index];
+    final after = _visibleKeyCount(key);
+    if (_bool(parameters, 'requireNewErrors', true)) {
+      _expectNewSemanticKey(
+        key,
+        beforeErrors[index],
+        after,
+        'Submit rỗng không tạo đúng một lỗi mới: $key',
+      );
+    } else {
+      expect(after, greaterThanOrEqualTo(1), reason: 'Thiếu error key: $key');
+    }
+  }
+}
+
+Future<void> _checkKeyNavigation(
+  WidgetTester tester,
+  Map<String, dynamic> parameters,
+) async {
+  await _boot(tester);
+  final openKey = _requiredText(parameters, 'openKey');
+  final destinationKey = _requiredText(parameters, 'destinationKey');
+  final before = _visibleKeyCount(destinationKey);
+  await _tap(tester, _byKey(openKey), openKey);
+  await _settle(tester);
+  final after = _visibleKeyCount(destinationKey);
+  if (_bool(parameters, 'requireNewDestination', true)) {
+    _expectNewSemanticKey(
+      destinationKey,
+      before,
+      after,
+      'Bấm $openKey không mở đúng một màn hình mới $destinationKey',
+    );
+  } else {
+    expect(after, greaterThanOrEqualTo(1));
+  }
+  final backKey = _text(parameters, 'backKey');
+  final homeKey = _text(parameters, 'homeKey');
+  if (backKey.isEmpty || homeKey.isEmpty) return;
+  await _tap(tester, _byKey(backKey), backKey);
+  await _settle(tester);
+  expect(
+    _isKeyOnCurrentRoute(homeKey),
+    isTrue,
+    reason: 'Bấm $backKey không quay lại route chứa $homeKey',
+  );
+  if (_bool(parameters, 'hideDestinationAfterBack', true)) {
+    expect(
+      _isKeyOnCurrentRoute(destinationKey),
+      isFalse,
+      reason: '$destinationKey vẫn là route hiện tại sau khi quay lại',
+    );
+  }
+}
+
+Future<void> _checkKeyListVisible(
+  WidgetTester tester,
+  Map<String, dynamic> parameters,
+) async {
+  await _boot(tester);
+  final listKey = _requiredText(parameters, 'listKey');
+  final listFinder = _byKey(listKey);
+  expect(listFinder, findsOneWidget, reason: 'Không tìm thấy list key: $listKey');
+  for (final key in _csv(parameters, 'itemKeys')) {
+    final itemFinder = _exactByKey(key);
+    await _revealLazyItem(tester, listFinder, itemFinder);
+    expect(
+      find.descendant(of: listFinder, matching: itemFinder, matchRoot: true),
+      findsOneWidget,
+      reason: 'Item $key không nằm trong list $listKey',
+    );
+  }
+}
+
+Future<void> _checkKeyButtonAction(
+  WidgetTester tester,
+  Map<String, dynamic> parameters,
+) async {
+  await _boot(tester);
+  final buttonKey = _requiredText(parameters, 'buttonKey');
+  final resultKey = _requiredText(parameters, 'resultKey');
+  final before = _visibleKeyCount(resultKey);
+  await _tap(tester, _byKey(buttonKey), buttonKey);
+  await _settle(tester);
+  final after = _visibleKeyCount(resultKey);
+  if (_bool(parameters, 'requireNewResult', true)) {
+    _expectNewSemanticKey(
+      resultKey,
+      before,
+      after,
+      'Bấm $buttonKey không tạo đúng một $resultKey mới',
+    );
+  } else {
+    expect(after, greaterThanOrEqualTo(1));
+  }
+}
+
+Future<void> _checkWidgetRelationship(
+  WidgetTester tester,
+  Map<String, dynamic> parameters,
+) async {
+  await _boot(tester);
+  final ancestorKey = _requiredText(parameters, 'ancestorKey');
+  final ancestor = _byKey(ancestorKey);
+  expect(ancestor, findsOneWidget, reason: 'Thiếu ancestor key: $ancestorKey');
+  final ancestorType = _text(parameters, 'ancestorType');
+  if (ancestorType.isNotEmpty) {
+    _assertTargetType(tester, ancestor, ancestorKey, ancestorType);
+  }
+
+  final keys = _csv(parameters, 'descendantKeys');
+  final types = _csv(parameters, 'descendantTypes');
+  if (keys.isEmpty) fail('descendantKeys không được để trống.');
+  final finders = <Finder>[];
+  for (var index = 0; index < keys.length; index++) {
+    final key = keys[index];
+    final descendant = find.descendant(
+      of: ancestor,
+      matching: _byKey(key),
+      matchRoot: false,
+    );
+    expect(
+      descendant,
+      findsOneWidget,
+      reason: '$key không nằm bên trong $ancestorKey',
+    );
+    if (types.length == keys.length && types[index].isNotEmpty) {
+      _assertTargetType(tester, descendant, key, types[index]);
+    }
+    finders.add(descendant);
+  }
+
+  final axis = _text(parameters, 'orderedAxis', 'none').toLowerCase();
+  if (axis == 'none' || finders.length < 2) return;
+  for (var index = 1; index < finders.length; index++) {
+    final previous = tester.getCenter(finders[index - 1]);
+    final current = tester.getCenter(finders[index]);
+    final ordered = axis == 'horizontal'
+        ? current.dx > previous.dx
+        : current.dy > previous.dy;
+    expect(
+      ordered,
+      isTrue,
+      reason: '${keys[index - 1]} và ${keys[index]} không đúng thứ tự $axis',
+    );
+  }
+}
+
+Future<void> _checkResponsivePairLayout(
+  WidgetTester tester,
+  Map<String, dynamic> parameters,
+) async {
+  tester.view.devicePixelRatio = 1.0;
+  addTearDown(tester.view.resetPhysicalSize);
+  addTearDown(tester.view.resetDevicePixelRatio);
+  tester.view.physicalSize = Size(
+    _number(parameters, 'width', 390),
+    _number(parameters, 'height', 844),
+  );
+  await _boot(tester);
+  expect(tester.takeException(), isNull);
+
+  final firstKey = _requiredText(parameters, 'firstKey');
+  final secondKey = _requiredText(parameters, 'secondKey');
+  final first = _byKey(firstKey);
+  final second = _byKey(secondKey);
+  expect(first, findsOneWidget, reason: 'Thiếu key responsive: $firstKey');
+  expect(second, findsOneWidget, reason: 'Thiếu key responsive: $secondKey');
+  final firstRect = tester.getRect(first);
+  final secondRect = tester.getRect(second);
+  final tolerance = _number(parameters, 'tolerance', 8).abs();
+  final alignment = _text(parameters, 'alignment', 'row').toLowerCase();
+  if (alignment == 'column') {
+    expect(
+      (firstRect.left - secondRect.left).abs(),
+      lessThanOrEqualTo(tolerance),
+      reason: '$firstKey và $secondKey không cùng cột',
+    );
+    expect(secondRect.top, greaterThan(firstRect.top));
+  } else {
+    expect(
+      (firstRect.top - secondRect.top).abs(),
+      lessThanOrEqualTo(tolerance),
+      reason: '$firstKey và $secondKey không cùng hàng',
+    );
+    expect(secondRect.left, greaterThan(firstRect.left));
+  }
+}
+
 Future<void> _boot(WidgetTester tester) async {
   // Dispose the previous widget tree; unknown static singletons are not
   // pretended to be reset because the common engine cannot inspect them safely.
@@ -1314,20 +1631,22 @@ Future<void> _boot(WidgetTester tester) async {
 }
 
 Future<void> _applySuiteSetup(WidgetTester tester) async {
-  final requiredKeys = _suiteCsv('required_keys');
-  for (final key in requiredKeys) {
-    expect(
-      _byKey(key),
-      findsOneWidget,
-      reason: 'Suite yêu cầu semantic key nhưng không tìm thấy: $key',
-    );
-  }
+  // Required widgets may be rendered only after asynchronous database setup.
+  // Honor the public ready contract before checking the rest of the key tree.
   final readyKey = _suiteText('ready_key');
   if (readyKey.isNotEmpty) {
     await _waitForVisible(
       tester,
       readyKey,
       _suiteNumber('boot_timeout_ms', 3000).toInt(),
+    );
+  }
+  final requiredKeys = _suiteCsv('required_keys');
+  for (final key in requiredKeys) {
+    expect(
+      _byKey(key),
+      findsOneWidget,
+      reason: 'Suite yêu cầu semantic key nhưng không tìm thấy: $key',
     );
   }
   await _runSetupSteps(tester, _asList(_activeSuite['setup_steps']), 'suite');

@@ -165,7 +165,10 @@ Future<void> main() async {
 bool _isDirectMetadata(Map<String, dynamic> metadata) {
   final runner = (metadata['runner'] ?? '').toString();
   if (runner == 'DIRECT_FUNCTION' ||
+      runner == 'DIRECT_FUNCTION_THROWS' ||
+      runner == 'DIRECT_STREAM_EVENTS' ||
       runner == 'STARTER_CALL_SEQUENCE' ||
+      runner == 'PROJECT_FILE_CONTRACT' ||
       runner.startsWith('TEMPLATE_SOURCE_') ||
       runner.startsWith('TEMPLATE_MODEL_') ||
       runner == 'TEMPLATE_SQLITE_SCHEMA' ||
@@ -174,9 +177,16 @@ bool _isDirectMetadata(Map<String, dynamic> metadata) {
   if ((metadata['runner'] ?? '').toString() != 'GROUP') return false;
   final children = metadata['children'];
   if (children is! List || children.isEmpty) return false;
-  return children.every(
-    (child) => (_asMap(child)['runner'] ?? '').toString() == 'DIRECT_FUNCTION',
-  );
+  return children.every((child) {
+    final childRunner = (_asMap(child)['runner'] ?? '').toString();
+    return <String>{
+      'DIRECT_FUNCTION',
+      'DIRECT_FUNCTION_THROWS',
+      'DIRECT_STREAM_EVENTS',
+      'STARTER_CALL_SEQUENCE',
+      'PROJECT_FILE_CONTRACT',
+    }.contains(childRunner);
+  });
 }
 
 bool _isStatefulMetadata(Map<String, dynamic> metadata) {
@@ -185,6 +195,8 @@ bool _isStatefulMetadata(Map<String, dynamic> metadata) {
     'DIALOG_FLOW',
     'FORM_SUBMIT',
     'STATE_REACTIVE_FLOW',
+    'KEY_WORKFLOW',
+    'FORM_FOCUS_FLOW',
     'TEMPLATE_FORM_ACTION',
     'TEMPLATE_FORM_VALIDATION',
     'TEMPLATE_UI_WORKFLOW',

@@ -341,5 +341,238 @@
     "base_template_id": "HYBRID_COMMON_WIDGET_GAP",
     "name": "Khoảng cách render giữa hai control",
     "parameter_defaults": { "fromKey": "field.id", "fromType": "input", "toKey": "field.name", "toType": "input", "axis": "vertical", "expectedGap": 12, "tolerance": 0.5 }
+  },
+  {
+    "template_id": "HYBRID_REUSE_DART_COLLECTION_TRANSFORM",
+    "base_template_id": "HYBRID_COMMON_DIRECT_FUNCTION",
+    "name": "Biến đổi hoặc lọc collection Dart",
+    "description": "Gọi hàm public của starter với List/Map JSON để chấm map, where, sort, spread hoặc business rule mà không cố định domain.",
+    "skill_code": "DART_CONTROL_FLOW",
+    "parameter_defaults": { "functionPath": "lib/domain/collection_rules.dart", "functionName": "transform", "argumentsJson": "[[1,2,3,4]]", "expectedType": "json", "expectedValue": "[4,16]", "matchMode": "equals" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_JSON_PARSE_RESULT",
+    "base_template_id": "HYBRID_COMMON_DIRECT_FUNCTION",
+    "name": "Parse JSON thành dữ liệu chuẩn hóa",
+    "description": "Truyền JSON fixture vào hàm public của starter và so sánh Map/List kết quả; không gọi mạng thật trong sandbox.",
+    "skill_code": "DART_CLASSES_OOP",
+    "parameter_defaults": { "functionPath": "lib/models/item.dart", "functionName": "parseItemFixture", "argumentsJson": "[{\"id\":1,\"name\":\"Demo\"}]", "expectedType": "json", "expectedValue": "{\"id\":1,\"name\":\"Demo\"}", "matchMode": "equals" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_EXCEPTION_RULE",
+    "base_template_id": "HYBRID_CURRICULUM_FUNCTION_THROWS",
+    "name": "Business rule ném exception đúng loại",
+    "parameter_defaults": { "functionPath": "lib/domain/rules.dart", "functionName": "validateOrThrow", "argumentsJson": "[\"invalid\"]", "expectedException": "ArgumentError", "typeMatchMode": "equals", "messageContains": "" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_STREAM_SEQUENCE",
+    "base_template_id": "HYBRID_CURRICULUM_STREAM_EVENTS",
+    "name": "Stream phát event đúng thứ tự",
+    "parameter_defaults": { "functionPath": "lib/domain/event_source.dart", "functionName": "eventsFor", "argumentsJson": "[]", "expectedEventsJson": "[1,2,3]", "timeoutMs": 3000 }
+  },
+  {
+    "template_id": "HYBRID_REUSE_EVENT_LOOP_ORDER",
+    "base_template_id": "HYBRID_COMMON_DIRECT_FUNCTION",
+    "name": "Thứ tự microtask và event queue",
+    "description": "Starter trả về danh sách log từ bài toán event loop; testcase so sánh sâu thứ tự thay vì dựa vào print console.",
+    "skill_code": "ASYNC_EVENT_LOOP",
+    "parameter_defaults": { "functionPath": "lib/domain/event_loop_demo.dart", "functionName": "executionOrder", "argumentsJson": "[]", "expectedType": "json", "expectedValue": "[\"sync\",\"microtask\",\"event\"]", "matchMode": "equals" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_PROJECT_DEPENDENCIES",
+    "base_template_id": "HYBRID_CURRICULUM_PROJECT_FILES",
+    "name": "pubspec có dependency và asset theo đề",
+    "description": "Khai báo chính xác dependency/asset của đề trong requiredTerms; không khóa http, sqflite, provider hoặc package cụ thể.",
+    "skill_code": "PROJ_PUBSPEC_DEPENDENCIES",
+    "parameter_defaults": { "filesJson": "[{\"path\":\"pubspec.yaml\",\"requiredTerms\":[\"dependencies:\",\"flutter:\"],\"forbiddenTerms\":[],\"minBytes\":1}]" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_PROJECT_TEST_FILES",
+    "base_template_id": "HYBRID_CURRICULUM_PROJECT_FILES",
+    "name": "Bài làm có unit/widget test theo contract",
+    "description": "Kiểm tra file test do đề công bố tồn tại và có dấu hiệu test/expect; nội dung pass thực tế vẫn do flutter test của bài làm xác nhận riêng.",
+    "skill_code": "TEST_WIDGET",
+    "parameter_defaults": { "filesJson": "[{\"path\":\"test/unit/domain_test.dart\",\"requiredTerms\":[\"test(\",\"expect(\"],\"forbiddenTerms\":[],\"minBytes\":40},{\"path\":\"test/widget/screen_test.dart\",\"requiredTerms\":[\"testWidgets(\",\"expect(\"],\"forbiddenTerms\":[],\"minBytes\":40}]" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_OOP_PATTERN_TERMS",
+    "base_template_id": "HYBRID_TPL_SOURCE_REQUIRED_TERMS",
+    "name": "OOP pattern trong file starter",
+    "description": "Kiểm tra dấu hiệu abstract/interface/mixin/factory/generic theo đúng file và terms giảng viên chọn; chỉ chấm cấu trúc, hành vi nên ghép thêm direct testcase.",
+    "skill_code": "DART_ENUMS_MIXINS_EXT",
+    "parameter_defaults": { "sourcePath": "lib/domain/contracts.dart", "requiredTerms": "abstract class", "forbiddenTerms": "" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_PASSWORD_OBSCURED",
+    "base_template_id": "HYBRID_CURRICULUM_WIDGET_PROPERTY",
+    "name": "Ô mật khẩu che nội dung",
+    "skill_code": "UI_TEXT_INPUT",
+    "parameter_defaults": { "targetKey": "field.password", "targetType": "input", "property": "obscureText", "expectedType": "bool", "expectedValue": "true", "matchMode": "equals", "tolerance": 0.001 }
+  },
+  {
+    "template_id": "HYBRID_REUSE_INPUT_ACTION",
+    "base_template_id": "HYBRID_CURRICULUM_WIDGET_PROPERTY",
+    "name": "Ô nhập khai báo keyboard action đúng",
+    "skill_code": "UI_TEXT_INPUT",
+    "parameter_defaults": { "targetKey": "field.email", "targetType": "input", "property": "textInputAction", "expectedType": "string", "expectedValue": "next", "matchMode": "equals", "tolerance": 0.001 }
+  },
+  {
+    "template_id": "HYBRID_REUSE_FORM_AUTOVALIDATE",
+    "base_template_id": "HYBRID_CURRICULUM_WIDGET_PROPERTY",
+    "name": "Form dùng đúng chế độ autovalidate",
+    "skill_code": "UI_TEXT_INPUT",
+    "parameter_defaults": { "targetKey": "form.signup", "targetType": "form", "property": "autovalidateMode", "expectedType": "string", "expectedValue": "onUserInteraction", "matchMode": "equals", "tolerance": 0.001 }
+  },
+  {
+    "template_id": "HYBRID_REUSE_SELECTION_VALUE",
+    "base_template_id": "HYBRID_CURRICULUM_WIDGET_PROPERTY",
+    "name": "Checkbox/Switch/Chip có trạng thái đúng",
+    "description": "Đổi targetType/property/expected để dùng cho checkbox, switch, radio, chip, slider hoặc dropdown.",
+    "parameter_defaults": { "targetKey": "filter.active", "targetType": "switch", "property": "value", "expectedType": "bool", "expectedValue": "true", "matchMode": "equals", "tolerance": 0.001 }
+  },
+  {
+    "template_id": "HYBRID_REUSE_SLIDER_RANGE",
+    "base_template_id": "HYBRID_CURRICULUM_WIDGET_PROPERTY",
+    "name": "Slider có min/max/divisions theo đề",
+    "parameter_defaults": { "targetKey": "filter.rating", "targetType": "slider", "property": "max", "expectedType": "double", "expectedValue": "5", "matchMode": "equals", "tolerance": 0.001 }
+  },
+  {
+    "template_id": "HYBRID_REUSE_SCROLL_AXIS",
+    "base_template_id": "HYBRID_CURRICULUM_WIDGET_PROPERTY",
+    "name": "Danh sách cuộn đúng trục",
+    "skill_code": "ADVUI_LISTVIEW",
+    "parameter_defaults": { "targetKey": "list.main", "targetType": "list", "property": "scrollDirection", "expectedType": "string", "expectedValue": "vertical", "matchMode": "equals", "tolerance": 0.001 }
+  },
+  {
+    "template_id": "HYBRID_REUSE_GRID_COLUMN_COUNT",
+    "base_template_id": "HYBRID_CURRICULUM_WIDGET_PROPERTY",
+    "name": "GridView có đúng số cột hiện tại",
+    "skill_code": "ADVUI_GRIDVIEW",
+    "parameter_defaults": { "targetKey": "list.grid", "targetType": "grid", "property": "crossAxisCount", "expectedType": "int", "expectedValue": "2", "matchMode": "equals", "tolerance": 0.001 }
+  },
+  {
+    "template_id": "HYBRID_REUSE_HERO_TAG",
+    "base_template_id": "HYBRID_CURRICULUM_WIDGET_PROPERTY",
+    "name": "Hero dùng tag ổn định",
+    "skill_code": "ANIM_HERO",
+    "parameter_defaults": { "targetKey": "hero.item", "targetType": "hero", "property": "heroTag", "expectedType": "string", "expectedValue": "item-1", "matchMode": "equals", "tolerance": 0.001 }
+  },
+  {
+    "template_id": "HYBRID_REUSE_THEME_MODE",
+    "base_template_id": "HYBRID_CURRICULUM_WIDGET_PROPERTY",
+    "name": "MaterialApp dùng đúng themeMode",
+    "skill_code": "THEME_LIGHT_DARK",
+    "parameter_defaults": { "targetKey": "app.root", "targetType": "materialapp", "property": "themeMode", "expectedType": "string", "expectedValue": "system", "matchMode": "equals", "tolerance": 0.001 }
+  },
+  {
+    "template_id": "HYBRID_REUSE_FORM_FOCUS_SEQUENCE",
+    "base_template_id": "HYBRID_CURRICULUM_FORM_FOCUS",
+    "name": "Next/Done chuyển focus đúng thứ tự",
+    "parameter_defaults": { "fieldKeys": "field.name,field.email,field.password", "actions": "next,next,done", "dismissAfterLast": true, "resultKey": "" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_SEARCH_FILTER_FLOW",
+    "base_template_id": "HYBRID_CURRICULUM_KEY_WORKFLOW",
+    "name": "Nhập từ khóa và lọc danh sách",
+    "description": "Thay field/action/result key và dữ liệu để dùng cho phim, sản phẩm, todo, thời tiết hoặc domain khác.",
+    "parameter_defaults": { "stepsJson": "[{\"type\":\"enter_text\",\"key\":\"field.search\",\"value\":\"demo\"},{\"type\":\"tap\",\"key\":\"action.search\"},{\"type\":\"expect_visible\",\"key\":\"result.demo\"}]" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_SELECTION_REACTIVE_FLOW",
+    "base_template_id": "HYBRID_CURRICULUM_KEY_WORKFLOW",
+    "name": "Chọn filter/switch/chip làm UI cập nhật",
+    "skill_code": "UI_BUTTONS_SELECTION",
+    "parameter_defaults": { "stepsJson": "[{\"type\":\"tap\",\"key\":\"filter.active\"},{\"type\":\"expect_property\",\"key\":\"filter.active\",\"targetType\":\"switch\",\"property\":\"value\",\"expectedType\":\"bool\",\"expected\":true},{\"type\":\"expect_visible\",\"key\":\"state.filtered\"}]" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_ASYNC_LOADING_SUCCESS",
+    "base_template_id": "HYBRID_CURRICULUM_KEY_WORKFLOW",
+    "name": "Async hiển thị loading rồi success",
+    "skill_code": "API_ASYNC_STATES",
+    "parameter_defaults": { "stepsJson": "[{\"type\":\"tap\",\"key\":\"action.load\",\"settle\":false},{\"type\":\"expect_visible\",\"key\":\"state.loading\"},{\"type\":\"expect_enabled\",\"key\":\"action.load\",\"expected\":false},{\"type\":\"wait_for_visible\",\"key\":\"state.loaded\",\"timeoutMs\":3000},{\"type\":\"expect_absent\",\"key\":\"state.loading\"}]" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_ASYNC_ERROR_RETRY",
+    "base_template_id": "HYBRID_CURRICULUM_KEY_WORKFLOW",
+    "name": "Async lỗi thân thiện và retry thành công",
+    "skill_code": "API_ASYNC_STATES",
+    "parameter_defaults": { "stepsJson": "[{\"type\":\"tap\",\"key\":\"action.load\"},{\"type\":\"wait_for_visible\",\"key\":\"state.error\",\"timeoutMs\":3000},{\"type\":\"tap\",\"key\":\"action.retry\"},{\"type\":\"wait_for_visible\",\"key\":\"state.loaded\",\"timeoutMs\":3000},{\"type\":\"expect_absent\",\"key\":\"state.error\"}]" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_SNACKBAR_FEEDBACK",
+    "base_template_id": "HYBRID_CURRICULUM_KEY_WORKFLOW",
+    "name": "Action hiển thị Snackbar/feedback",
+    "skill_code": "UI_DRAWER_SNACKBAR",
+    "parameter_defaults": { "stepsJson": "[{\"type\":\"tap\",\"key\":\"action.save\"},{\"type\":\"expect_visible\",\"key\":\"message.success\"},{\"type\":\"expect_text\",\"key\":\"message.success\",\"expected\":\"Success\",\"matchMode\":\"contains\"}]" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_NAVIGATION_DATA_TRANSFER",
+    "base_template_id": "HYBRID_CURRICULUM_KEY_WORKFLOW",
+    "name": "Navigation truyền đúng dữ liệu sang chi tiết",
+    "skill_code": "NAV_NAVIGATOR_PUSH_POP",
+    "parameter_defaults": { "stepsJson": "[{\"type\":\"tap\",\"key\":\"item.demo.open\",\"listKey\":\"list.main\"},{\"type\":\"expect_visible\",\"key\":\"screen.detail\"},{\"type\":\"expect_text\",\"key\":\"detail.title\",\"expected\":\"Demo\",\"matchMode\":\"equals\"},{\"type\":\"tap\",\"key\":\"action.back\"},{\"type\":\"expect_visible\",\"key\":\"screen.home\"}]" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_API_FIXTURE_RESULT",
+    "base_template_id": "HYBRID_COMMON_DIRECT_FUNCTION",
+    "name": "API service xử lý response fixture",
+    "description": "Starter cung cấp hàm public nhận response JSON/status giả lập; testcase chấm parse/error deterministic, không phụ thuộc internet hoặc endpoint thật.",
+    "skill_code": "API_HTTP_REST",
+    "parameter_defaults": { "functionPath": "lib/services/api_service.dart", "functionName": "handleResponseFixture", "argumentsJson": "[200,\"[{\\\"id\\\":1}]\"]", "expectedType": "json", "expectedValue": "[{\"id\":1}]", "matchMode": "equals" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_STORAGE_CRUD_SEQUENCE",
+    "base_template_id": "HYBRID_STARTER_CALL_SEQUENCE",
+    "name": "Storage CRUD qua API public của starter",
+    "description": "Dùng cho SQLite, JSON file hoặc in-memory fake theo contract đề; đổi sourcePath, hàm, đối số và expected từng bước.",
+    "skill_code": "STORAGE_PERSISTENCE_SYNC",
+    "parameter_defaults": { "sourcePath": "lib/storage/item_store.dart", "stepsJson": "[{\"functionName\":\"resetStore\",\"arguments\":[],\"expectedType\":\"null\",\"expectedValue\":null},{\"functionName\":\"addItem\",\"arguments\":[{\"id\":1,\"name\":\"A\"}],\"expectedType\":\"int\",\"expectedValue\":1},{\"functionName\":\"readAll\",\"arguments\":[],\"expectedType\":\"json\",\"expectedValue\":[{\"id\":1,\"name\":\"A\"}]}]" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_SESSION_SEQUENCE",
+    "base_template_id": "HYBRID_STARTER_CALL_SEQUENCE",
+    "name": "Lưu, đọc và xóa session qua starter",
+    "description": "Chấm session deterministic bằng API public trong starter; backend thật/Firebase được thay bằng fixture hoặc dependency đã khóa trong template.",
+    "skill_code": "AUTH_TOKEN_SESSION",
+    "parameter_defaults": { "sourcePath": "lib/auth/session_contract.dart", "stepsJson": "[{\"functionName\":\"clearSession\",\"arguments\":[],\"expectedType\":\"null\",\"expectedValue\":null},{\"functionName\":\"saveToken\",\"arguments\":[\"token-demo\"],\"expectedType\":\"null\",\"expectedValue\":null},{\"functionName\":\"readToken\",\"arguments\":[],\"expectedType\":\"string\",\"expectedValue\":\"token-demo\"},{\"functionName\":\"clearSession\",\"arguments\":[],\"expectedType\":\"null\",\"expectedValue\":null},{\"functionName\":\"readToken\",\"arguments\":[],\"expectedType\":\"null\",\"expectedValue\":null}]" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_AUTH_UI_FLOW",
+    "base_template_id": "HYBRID_CURRICULUM_KEY_WORKFLOW",
+    "name": "Login/logout hoặc signup flow theo Key",
+    "description": "Thay key, credentials fixture và marker màn hình để chấm mock login, signup, logout hoặc protected route mà không gắn tên domain.",
+    "skill_code": "AUTH_LOGIN_SIGNUP",
+    "parameter_defaults": { "stepsJson": "[{\"type\":\"enter_text\",\"key\":\"field.email\",\"value\":\"demo@example.com\"},{\"type\":\"enter_text\",\"key\":\"field.password\",\"value\":\"Password1\"},{\"type\":\"tap\",\"key\":\"action.login\"},{\"type\":\"wait_for_visible\",\"key\":\"screen.home\",\"timeoutMs\":3000},{\"type\":\"tap\",\"key\":\"action.logout\"},{\"type\":\"expect_visible\",\"key\":\"screen.login\"}]" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_NOTIFICATION_CONTRACT",
+    "base_template_id": "HYBRID_CURRICULUM_PROJECT_FILES",
+    "name": "Notification service và cấu hình nền tảng tồn tại",
+    "description": "Chỉ xác nhận source/config integration theo contract; việc notification hệ thống thực sự xuất hiện cần device/integration test riêng.",
+    "skill_code": "NOTIFICATION_LOCAL",
+    "parameter_defaults": { "filesJson": "[{\"path\":\"pubspec.yaml\",\"requiredTerms\":[\"flutter_local_notifications\"],\"forbiddenTerms\":[],\"minBytes\":1},{\"path\":\"lib/services/notification_service.dart\",\"requiredTerms\":[\"initialize\",\"show\"],\"forbiddenTerms\":[],\"minBytes\":40}]" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_PERFORMANCE_SOURCE_GUARD",
+    "base_template_id": "HYBRID_CURRICULUM_PROJECT_FILES",
+    "name": "Source tuân thủ quy tắc tối ưu đã công bố",
+    "description": "Giảng viên cấu hình required/forbidden terms cho file cụ thể, ví dụ ListView.builder, ValueKey, const hoặc cấm API call trong build; đây là proxy tĩnh, không thay DevTools/profile benchmark.",
+    "skill_code": "PERF_REBUILDS",
+    "parameter_defaults": { "filesJson": "[{\"path\":\"lib/screens/list_screen.dart\",\"requiredTerms\":[\"ListView.builder\",\"ValueKey\"],\"forbiddenTerms\":[],\"minBytes\":80}]" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_RELEASE_CONFIGURATION",
+    "base_template_id": "HYBRID_CURRICULUM_PROJECT_FILES",
+    "name": "Cấu hình version/release theo contract",
+    "description": "Kiểm tra file cấu hình được nộp; APK/AAB, signing và số liệu profile phải được xác minh ở pipeline artifact/manual riêng.",
+    "skill_code": "DEPLOY_SIZE_RELEASE",
+    "parameter_defaults": { "filesJson": "[{\"path\":\"pubspec.yaml\",\"requiredTerms\":[\"version:\"],\"forbiddenTerms\":[],\"minBytes\":1},{\"path\":\"android/app/build.gradle\",\"requiredTerms\":[\"versionCode\",\"versionName\"],\"forbiddenTerms\":[],\"minBytes\":40}]" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_ADAPTIVE_BREAKPOINTS",
+    "base_template_id": "HYBRID_CURRICULUM_RESPONSIVE_CASES",
+    "name": "Adaptive phone/tablet/desktop nhiều breakpoint",
+    "skill_code": "RESPONSIVE_ADAPTIVE_NAV",
+    "parameter_defaults": { "casesJson": "[{\"width\":390,\"height\":844,\"visibleKeys\":[\"nav.bottom\"],\"absentKeys\":[\"nav.rail\"]},{\"width\":800,\"height\":1100,\"visibleKeys\":[\"nav.rail\"],\"absentKeys\":[\"nav.bottom\"],\"gridKey\":\"list.grid\",\"crossAxisCount\":2},{\"width\":1280,\"height\":800,\"visibleKeys\":[\"nav.rail\"],\"absentKeys\":[\"nav.bottom\"],\"gridKey\":\"list.grid\",\"crossAxisCount\":3}]" }
   }
 ]

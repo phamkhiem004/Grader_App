@@ -87,7 +87,7 @@ interface TemplateContractSection {
   fields: TemplateContractField[];
 }
 interface TemplateContractDraft {
-  version: 4;
+  version: 5;
   sections: TemplateContractSection[];
 }
 
@@ -180,6 +180,13 @@ const RUNNER_LABEL: Record<string, string> = {
   STATE_REACTIVE_FLOW: "Kiểm tra cập nhật trạng thái",
   WIDGET_RELATIONSHIP: "Kiểm tra quan hệ và thứ tự widget",
   RESPONSIVE_PAIR_LAYOUT: "Kiểm tra hai vùng responsive",
+  WIDGET_PROPERTY: "Kiểm tra thuộc tính widget",
+  KEY_WORKFLOW: "Chạy workflow nhiều bước theo Key",
+  FORM_FOCUS_FLOW: "Kiểm tra thứ tự focus bàn phím",
+  RESPONSIVE_LAYOUT_CASES: "Kiểm tra nhiều breakpoint adaptive",
+  PROJECT_FILE_CONTRACT: "Kiểm tra file project theo contract",
+  DIRECT_FUNCTION_THROWS: "Kiểm tra hàm ném exception",
+  DIRECT_STREAM_EVENTS: "Kiểm tra chuỗi event của Stream",
   STARTER_CALL_SEQUENCE: "Chạy chuỗi API nghiệp vụ starter",
   GROUP: "Nhóm testcase",
 };
@@ -206,6 +213,27 @@ const SKILL_LABEL: Record<string, string> = {
   DART_CLASSES_OOP: "Lớp và đối tượng trong Dart",
   ASYNC_FUTURE_ASYNC_AWAIT: "Tác vụ bất đồng bộ",
   ASYNC_STREAMS_STREAMBUILDER: "Luồng dữ liệu và StreamBuilder",
+  RESPONSIVE_BREAKPOINTS: "Breakpoint responsive và orientation",
+  RESPONSIVE_ADAPTIVE_NAV: "Điều hướng và bố cục adaptive",
+  FORM_STRUCTURE_VALIDATION: "FormState và validation đồng bộ",
+  FORM_FOCUS_KEYBOARD: "Focus và keyboard action",
+  FORM_ASYNC_VALIDATION: "Async validation và chống submit lặp",
+  API_HTTP_REST: "HTTP và REST request/response",
+  API_JSON_MODEL: "JSON mapping sang model",
+  API_ASYNC_STATES: "Loading, empty, error, retry và data state",
+  API_SERVICE_LAYER: "Service layer cho HTTP",
+  STORAGE_SHARED_PREFERENCES: "SharedPreferences key-value",
+  STORAGE_JSON_FILE: "JSON asset và JSON file local",
+  STORAGE_SQLITE_CRUD: "SQLite schema, query và CRUD",
+  STORAGE_PERSISTENCE_SYNC: "Persistence và offline-first",
+  AUTH_LOGIN_SIGNUP: "Login, signup và protected flow",
+  AUTH_TOKEN_SESSION: "Token, auto-login và logout session",
+  NOTIFICATION_LOCAL: "Local notification",
+  TEST_UNIT: "Unit test",
+  TEST_WIDGET: "Widget test",
+  TEST_INTEGRATION_NAV: "Navigation và integration test",
+  PERF_REBUILDS: "Giảm rebuild và công việc trong build",
+  DEPLOY_SIZE_RELEASE: "Size analysis và release deployment",
 };
 
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -228,6 +256,7 @@ const PARAMETER_ROLE_STYLE: Record<ParameterRole, string> = {
 
 const INPUT_PARAMETER_KEYS = new Set([
   "argumentsJson", "invalidValues", "values", "expectedValues", "inputValues", "stepsJson",
+  "casesJson", "filesJson",
 ]);
 const ASSERTION_PARAMETER_KEYS = new Set([
   "absentKey", "destinationKey", "errorKeys", "expected", "expectedCount", "expectedEnabled",
@@ -240,6 +269,7 @@ const ASSERTION_PARAMETER_KEYS = new Set([
   "landscapeExpectedTexts", "requireNewResult", "requireNewErrors", "requireNewDestination",
   "hideDestinationAfterBack", "requireNewDialog", "requireNewUpdatedState", "requirePrefillTransition",
   "descendantKeys", "secondKey",
+  "expectedEventsJson", "expectedException", "messageContains", "property", "actions",
 ]);
 const OPTION_PARAMETER_KEYS = new Set([
   "axis", "comparison", "dimension", "fieldType", "fromType", "matchMode",
@@ -247,6 +277,7 @@ const OPTION_PARAMETER_KEYS = new Set([
   "resultScopeType", "resultScopeIndex", "resultScopeAnchorText", "textMatchMode",
   "resultTextMatchMode", "errorTextMatchMode", "symbolTypes", "schemaMethod", "readyTimeoutMs",
   "ancestorType", "descendantTypes", "orderedAxis", "alignment", "width", "height",
+  "typeMatchMode", "timeoutMs", "dismissAfterLast",
 ]);
 
 function parameterRole(key: string, runner?: string): ParameterRole {
@@ -292,6 +323,26 @@ function runnerContract(item: TestcaseItem, template?: Template) {
     input: `Giải mã argumentsJson ${formatParam(p.argumentsJson)} và truyền vào hàm ${formatParam(p.functionName)}.`,
     target: `Import ${formatParam(p.functionPath)} và gọi đúng hàm top-level đã khai báo.`,
     pass: `Actual phải ${formatParam(p.matchMode)} expectedValue=${formatParam(p.expectedValue)} (${formatParam(p.expectedType)}).`,
+  };
+  if (runner === "DIRECT_FUNCTION_THROWS") return {
+    input: `Giải mã argumentsJson ${formatParam(p.argumentsJson)} và truyền vào hàm ${formatParam(p.functionName)}.`,
+    target: `Import trực tiếp ${formatParam(p.functionPath)}; không dùng grading adapter.`,
+    pass: `Hàm phải ném ${formatParam(p.expectedException)}${p.messageContains ? ` với message chứa ${formatParam(p.messageContains)}` : ""}.`,
+  };
+  if (runner === "DIRECT_STREAM_EVENTS") return {
+    input: `Gọi ${formatParam(p.functionName)} với ${formatParam(p.argumentsJson)} và lấy số event đúng bằng expectedEventsJson.`,
+    target: `Import trực tiếp ${formatParam(p.functionPath)}; hàm phải trả về Stream.`,
+    pass: `Event phải đúng giá trị và thứ tự ${formatParam(p.expectedEventsJson)} trong ${formatParam(p.timeoutMs)}ms.`,
+  };
+  if (runner === "PROJECT_FILE_CONTRACT") return {
+    input: "filesJson khai báo độc lập path, requiredTerms, forbiddenTerms và minBytes cho từng file.",
+    target: "Chỉ đọc đường dẫn project an toàn đã whitelist; không thực thi source như một bằng chứng hành vi.",
+    pass: "Mọi file phải tồn tại và thỏa toàn bộ terms đã cấu hình.",
+  };
+  if (runner === "KEY_WORKFLOW") return {
+    input: "stepsJson chứa từng bước enter_text/tap/pump/wait; dữ liệu và Key thay đổi theo đề.",
+    target: "Mỗi bước trỏ trực tiếp tới semantic Key công khai, không dò mơ hồ theo vị trí hoặc text.",
+    pass: "Tất cả expect visible/absent/text/enabled/property trong chuỗi phải đạt.",
   };
   if (runner === "STARTER_CALL_SEQUENCE") return {
     input: "Mỗi bước trong stepsJson khai báo functionName, arguments và expected riêng.",
@@ -415,6 +466,18 @@ function testcaseCodePreview(item: TestcaseItem, template?: Template) {
       lines.splice(1, 1);
       lines.push(`  final actual = await ${formatParam(p.functionName)}(...jsonDecode(${dartQuote(p.argumentsJson)}));`, `  expect(actual, ${dartQuote(p.expectedValue)});`);
       break;
+    case "DIRECT_FUNCTION_THROWS":
+      lines.splice(1, 1);
+      lines.push(`  expect(() => ${formatParam(p.functionName)}(...jsonDecode(${dartQuote(p.argumentsJson)})), throwsA(isA<${formatParam(p.expectedException)}>()));`);
+      break;
+    case "DIRECT_STREAM_EVENTS":
+      lines.splice(1, 1);
+      lines.push(`  final events = await ${formatParam(p.functionName)}(...jsonDecode(${dartQuote(p.argumentsJson)})).take(jsonDecode(${dartQuote(p.expectedEventsJson)}).length).toList();`, `  expect(events, jsonDecode(${dartQuote(p.expectedEventsJson)}));`);
+      break;
+    case "PROJECT_FILE_CONTRACT":
+      lines.splice(1, 1);
+      lines.push(`  await verifyProjectFiles(${dartQuote(p.filesJson)});`);
+      break;
     default:
       lines.push(`  await runCommonCase(${dartQuote(runner)}, ${JSON.stringify(p)});`);
   }
@@ -459,7 +522,14 @@ const REQUIRED_RUNNER_PARAMETERS: Record<string, string[]> = {
   BUTTON_ACTION: ["buttonKey", "resultKey"],
   STATE_REACTIVE_FLOW: ["initialKey", "actionKey", "updatedKey", "absentKey"],
   DIRECT_FUNCTION: ["functionPath", "functionName", "argumentsJson", "expectedType", "matchMode"],
+  DIRECT_FUNCTION_THROWS: ["functionPath", "functionName", "argumentsJson", "expectedException", "typeMatchMode"],
+  DIRECT_STREAM_EVENTS: ["functionPath", "functionName", "argumentsJson", "expectedEventsJson", "timeoutMs"],
   STARTER_CALL_SEQUENCE: ["sourcePath", "stepsJson"],
+  PROJECT_FILE_CONTRACT: ["filesJson"],
+  WIDGET_PROPERTY: ["targetKey", "targetType", "property", "expectedType", "expectedValue"],
+  KEY_WORKFLOW: ["stepsJson"],
+  FORM_FOCUS_FLOW: ["fieldKeys", "actions", "dismissAfterLast"],
+  RESPONSIVE_LAYOUT_CASES: ["casesJson"],
   WIDGET_RELATIONSHIP: ["ancestorKey", "descendantKeys", "orderedAxis"],
   RESPONSIVE_PAIR_LAYOUT: ["width", "height", "firstKey", "secondKey", "alignment"],
   RESPONSIVE_NO_OVERFLOW: ["portraitWidth", "portraitHeight", "landscapeWidth", "landscapeHeight"],
@@ -506,12 +576,25 @@ function testcaseProgress(item: TestcaseItem, template?: Template): ItemProgress
       }
     }
   }
-  if (runner === "TEMPLATE_UI_WORKFLOW" && !isBlankParameter(item.parameters.stepsJson)) {
+  if (["TEMPLATE_UI_WORKFLOW", "KEY_WORKFLOW"].includes(runner) && !isBlankParameter(item.parameters.stepsJson)) {
     try {
       const steps = JSON.parse(String(item.parameters.stepsJson));
       if (!Array.isArray(steps) || steps.length === 0) issues.push("Workflow phải có ít nhất một bước");
     } catch {
       issues.push("Workflow chưa phải JSON hợp lệ");
+    }
+  }
+  for (const [runnerName, field, label] of [
+    ["RESPONSIVE_LAYOUT_CASES", "casesJson", "Danh sách viewport"],
+    ["PROJECT_FILE_CONTRACT", "filesJson", "Danh sách file contract"],
+  ] as const) {
+    if (runner === runnerName && !isBlankParameter(item.parameters[field])) {
+      try {
+        const rows = JSON.parse(String(item.parameters[field]));
+        if (!Array.isArray(rows) || rows.length === 0) issues.push(`${label} phải có ít nhất một phần tử`);
+      } catch {
+        issues.push(`${label} chưa phải JSON hợp lệ`);
+      }
     }
   }
   if (runner === "STARTER_CALL_SEQUENCE" && !isBlankParameter(item.parameters.stepsJson)) {
@@ -603,6 +686,9 @@ function runnerUsesStarterContract(engine: EngineMode, runner?: string) {
     || (engine === "STARTER_KEY_HYBRID_V1"
       && (String(runner || "").startsWith("TEMPLATE_")
         || runner === "DIRECT_FUNCTION"
+        || runner === "DIRECT_FUNCTION_THROWS"
+        || runner === "DIRECT_STREAM_EVENTS"
+        || runner === "PROJECT_FILE_CONTRACT"
         || runner === "STARTER_CALL_SEQUENCE"));
 }
 
@@ -620,6 +706,7 @@ const DEFAULT_CONTRACT_SECTIONS: Array<Omit<TemplateContractSection, "fields"> &
     { key: "source.symbolTypes", label: "Loại tương ứng của các symbol", kind: "csv" },
     { key: "source.requiredTerms", label: "Nội dung source bắt buộc", kind: "csv" },
     { key: "source.forbiddenTerms", label: "Nội dung source không được có", kind: "csv" },
+    { key: "project.filesJson", label: "Contract nhiều file project (JSON)", kind: "json" },
   ] },
   { id: "model", name: "Model / dữ liệu", fields: [
     { key: "model.path", label: "File model", kind: "path" },
@@ -677,6 +764,7 @@ const DEFAULT_CONTRACT_SECTIONS: Array<Omit<TemplateContractSection, "fields"> &
     { key: "behavior.requireNewResult", label: "Kết quả phải được tạo mới sau action", kind: "text" },
     { key: "behavior.requireNewErrors", label: "Lỗi phải xuất hiện mới sau submit", kind: "text" },
     { key: "behavior.stepsJson", label: "Các bước luồng (JSON)", kind: "json" },
+    { key: "behavior.keyStepsJson", label: "Các bước luồng theo semantic Key (JSON)", kind: "json" },
   ] },
   { id: "responsive", name: "Responsive", fields: [
     { key: "responsive.portraitWidth", label: "Rộng điện thoại", kind: "number" },
@@ -685,6 +773,7 @@ const DEFAULT_CONTRACT_SECTIONS: Array<Omit<TemplateContractSection, "fields"> &
     { key: "responsive.landscapeHeight", label: "Cao máy tính/tablet", kind: "number" },
     { key: "responsive.portraitExpectedTexts", label: "Nội dung cần thấy ở điện thoại", kind: "csv" },
     { key: "responsive.landscapeExpectedTexts", label: "Nội dung cần thấy ở màn hình rộng", kind: "csv" },
+    { key: "responsive.casesJson", label: "Các breakpoint và marker Key (JSON)", kind: "json" },
   ] },
 ];
 
@@ -692,7 +781,7 @@ const contractId = () => `contract_${Date.now()}_${Math.random().toString(36).sl
 
 function emptyTemplateContract(): TemplateContractDraft {
   return {
-    version: 4,
+    version: 5,
     sections: DEFAULT_CONTRACT_SECTIONS.map((section) => ({
       id: section.id,
       name: section.name,
@@ -711,6 +800,10 @@ const CONTRACT_V3_ADDITION_KEYS = new Set([
 
 const CONTRACT_V4_ADDITION_KEYS = new Set([
   "ui.errorFieldLabels", "ui.errorTextMatchMode",
+]);
+
+const CONTRACT_V5_ADDITION_KEYS = new Set([
+  "project.filesJson", "behavior.keyStepsJson", "responsive.casesJson",
 ]);
 
 const CONTRACT_HYBRID_ADDITION_KEYS = new Set([
@@ -768,6 +861,17 @@ function normalizeTemplateContract(raw: unknown): TemplateContractDraft {
         additions.forEach((field) => existingKeys.add(field.key));
       });
     }
+    if (incomingVersion < 5) {
+      base.sections.forEach((baseSection) => {
+        const additions = baseSection.fields.filter((field) =>
+          CONTRACT_V5_ADDITION_KEYS.has(field.key) && !existingKeys.has(field.key));
+        if (!additions.length) return;
+        const target = sections.find((section) => section.id === baseSection.id);
+        if (target) target.fields.push(...additions);
+        else sections.push({ ...baseSection, fields: additions });
+        additions.forEach((field) => existingKeys.add(field.key));
+      });
+    }
     base.sections.forEach((baseSection) => {
       const additions = baseSection.fields.filter((field) =>
         CONTRACT_HYBRID_ADDITION_KEYS.has(field.key) && !existingKeys.has(field.key));
@@ -777,7 +881,7 @@ function normalizeTemplateContract(raw: unknown): TemplateContractDraft {
       else sections.push({ ...baseSection, fields: additions });
       additions.forEach((field) => existingKeys.add(field.key));
     });
-    return { version: 4, sections };
+    return { version: 5, sections };
   }
   const values = new Map(Object.entries(LEGACY_CONTRACT_KEYS).map(([oldKey, newKey]) => [newKey, String(object[oldKey] || "")]));
   return { ...base, sections: base.sections.map((section) => ({ ...section, fields: section.fields.map((field) => ({ ...field, value: values.get(field.key) || "" })) })) };
@@ -852,17 +956,17 @@ function testcaseGroup(template: Template) {
   }
   const runner = String(template.runner || "").toUpperCase();
   const layer = String(template.layer || "").toUpperCase();
-  if (["APP_BOOT", "NAVIGATION", "BUTTON_ACTION", "WIDGET_ENABLED", "DIALOG_FLOW", "FORM_PREFILL", "FORM_SUBMIT"].includes(runner)) return "BEHAVIOR";
-  if (["FORM_REQUIRED_FIELDS", "FORM_VALIDATE_FIELDS", "LIST_ITEM_COUNT", "STATE_REACTIVE_FLOW"].includes(runner)) return "LOGIC";
+  if (["APP_BOOT", "NAVIGATION", "BUTTON_ACTION", "WIDGET_ENABLED", "DIALOG_FLOW", "FORM_PREFILL", "FORM_SUBMIT", "KEY_WORKFLOW", "FORM_FOCUS_FLOW"].includes(runner)) return "BEHAVIOR";
+  if (["FORM_REQUIRED_FIELDS", "FORM_VALIDATE_FIELDS", "LIST_ITEM_COUNT", "STATE_REACTIVE_FLOW", "PROJECT_FILE_CONTRACT", "DIRECT_FUNCTION_THROWS", "DIRECT_STREAM_EVENTS"].includes(runner)) return "LOGIC";
   if (layer === "RESPONSIVE" || runner.startsWith("WIDGET_") || runner === "LIST_VISIBLE") return "WIDGET";
   return "LOGIC";
 }
 
 const PARAMETER_OPTIONS: Record<string, string[]> = {
-  targetType: ["any", "form", "image", "text", "input", "button", "padding", "container"],
-  fromType: ["any", "form", "image", "text", "input", "button", "padding", "container"],
-  toType: ["any", "form", "image", "text", "input", "button", "padding", "container"],
-  ancestorType: ["any", "form", "image", "text", "input", "button", "padding", "container"],
+  targetType: ["any", "form", "image", "text", "input", "button", "dialog", "icon", "checkbox", "switch", "slider", "radio", "chip", "dropdown", "padding", "container", "list", "grid", "scrollable", "hero", "materialapp", "safearea", "scaffold", "card", "listtile"],
+  fromType: ["any", "form", "image", "text", "input", "button", "padding", "container", "list", "grid", "card", "listtile"],
+  toType: ["any", "form", "image", "text", "input", "button", "padding", "container", "list", "grid", "card", "listtile"],
+  ancestorType: ["any", "form", "image", "text", "input", "button", "padding", "container", "list", "grid", "card", "listtile"],
   dimension: ["height", "width"],
   comparison: ["equals", "at_least", "at_most"],
   axis: ["vertical", "horizontal"],
@@ -871,6 +975,8 @@ const PARAMETER_OPTIONS: Record<string, string[]> = {
   fontWeight: ["w400", "w500", "w600", "w700", "w800"],
   expectedType: ["string", "bool", "int", "double", "json", "null"],
   matchMode: ["equals", "contains"],
+  typeMatchMode: ["equals", "contains"],
+  property: ["enabled", "obscureText", "readOnly", "keyboardType", "textInputAction", "autovalidateMode", "value", "selected", "min", "max", "divisions", "maxLines", "minLines", "maxLength", "scrollDirection", "crossAxisCount", "heroTag", "themeMode"],
   scopeType: ["", "screen", "form", "dialog", "list", "appbar", "bottomsheet"],
   resultScopeType: ["", "screen", "form", "dialog", "list", "appbar", "bottomsheet"],
   textMatchMode: ["contains", "exact"],
@@ -883,6 +989,7 @@ const PARAMETER_OPTIONS: Record<string, string[]> = {
   requireNewDialog: ["true", "false"],
   requireNewUpdatedState: ["true", "false"],
   requirePrefillTransition: ["true", "false"],
+  dismissAfterLast: ["true", "false"],
 };
 
 const PARAMETER_LABELS: Record<string, string> = {
@@ -932,6 +1039,8 @@ const PARAMETER_LABELS: Record<string, string> = {
   portraitExpectedTexts: "Nội dung cần thấy ở điện thoại",
   landscapeExpectedTexts: "Nội dung cần thấy ở màn hình rộng",
   stepsJson: "Các bước workflow (JSON)",
+  casesJson: "Các viewport responsive (JSON)",
+  filesJson: "Các file và contract nội dung (JSON)",
   widgetKey: "Mã thành phần",
   rootKey: "Mã thành phần gốc",
   fieldKeys: "Mã các ô nhập",
@@ -982,6 +1091,14 @@ const PARAMETER_LABELS: Record<string, string> = {
   argumentsJson: "Đối số truyền vào (JSON array)",
   expectedType: "Kiểu output cần nhận",
   expectedValue: "Output chuẩn để pass",
+  expectedEventsJson: "Chuỗi event chuẩn (JSON array)",
+  expectedException: "Tên loại exception mong đợi",
+  typeMatchMode: "Cách so khớp tên exception",
+  messageContains: "Nội dung message phải chứa (tùy chọn)",
+  timeoutMs: "Thời gian chờ tối đa (ms)",
+  property: "Thuộc tính widget cần đọc",
+  actions: "TextInputAction tương ứng từng field",
+  dismissAfterLast: "Đóng focus sau action cuối",
   fieldType: "Loại ô nhập",
   invalidValues: "Dữ liệu không hợp lệ",
   values: "Dữ liệu hợp lệ",
@@ -2261,7 +2378,7 @@ export default function TestcasesPage() {
                         </div>
                       ) : (<>
                       <div>
-                        <div className="mb-2"><p className="text-xs font-semibold text-slate-700">Cấu hình runner</p><p className="mt-0.5 text-[10px] leading-relaxed text-slate-400">{hasContractBindings(templateMap.get(item.template_id)) ? "Nhập contract thật của starter trong đề này: file, class, field, method, label, dữ liệu thử và kết quả cần thấy. Chế độ này không dùng Widget Key." : "Mỗi trường được phân theo vai trò. Semantic key xác định widget trong bài sinh viên; dữ liệu setup chạy trước; điều kiện pass được chuyển thành assertion."}</p></div>
+                        <div className="mb-2"><p className="text-xs font-semibold text-slate-700">Cấu hình runner</p><p className="mt-0.5 text-[10px] leading-relaxed text-slate-400">{runnerUsesStarterContract(engineMode, String(templateMap.get(item.template_id)?.runner || "")) ? "Nhập contract thật của starter trong đề này: file, class, field, method, dữ liệu fixture và kết quả cần nhận. Phần logic không dùng grading adapter." : "Mỗi trường được phân theo vai trò. Semantic key xác định widget trong bài sinh viên; dữ liệu setup chạy trước; điều kiện pass được chuyển thành assertion."}</p></div>
                         {(() => { const contract = runnerContract(item, templateMap.get(item.template_id)); return <div className="mb-3 grid grid-cols-1 gap-2"><div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2"><p className="text-[10px] font-bold text-amber-800">1. Dữ liệu đầu vào</p><p className="mt-0.5 text-[10px] leading-relaxed text-amber-700">{contract.input}</p></div><div className="rounded-lg border border-cyan-200 bg-cyan-50 px-3 py-2"><p className="text-[10px] font-bold text-cyan-800">2. Đối tượng được tìm</p><p className="mt-0.5 text-[10px] leading-relaxed text-cyan-700">{contract.target}</p></div><div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2"><p className="text-[10px] font-bold text-emerald-800">3. Testcase pass khi</p><p className="mt-0.5 text-[10px] leading-relaxed text-emerald-700">{contract.pass}</p></div></div>; })()}
                         <div className="space-y-2">{(["target", "input", "assertion", "option"] as ParameterRole[]).map((role) => {
                           const keys = Object.keys(item.parameters || {}).filter((key) => parameterRole(key, templateMap.get(item.template_id)?.runner) === role);
@@ -2272,11 +2389,12 @@ export default function TestcasesPage() {
                               const template = templateMap.get(item.template_id);
                               const schemaValue = template?.parameters_schema?.[key];
                               const isNumber = typeof schemaValue === "number";
+                              const isJson = key.endsWith("Json");
                               const options = PARAMETER_OPTIONS[key];
                               const semanticKeyField = isSemanticKeyParameter(key);
-                              return <label key={key} className="text-[11px] font-medium">
+                              return <label key={key} className={`text-[11px] font-medium ${isJson ? "sm:col-span-2" : ""}`}>
                                 <span>{PARAMETER_LABELS[key] || key}</span><span className="ml-1 font-mono text-[9px] opacity-60">{key}</span>
-                                {options ? <select value={formatParam(item.parameters[key])} onChange={(e) => updateParameter(item, key, e.target.value)} className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-700">{options.map((option) => <option key={option} value={option}>{option}</option>)}</select> : <input list={semanticKeyField && !isSemanticKeyListParameter(key) ? "semantic-key-options" : undefined} type={isNumber ? "number" : "text"} value={formatParam(item.parameters[key])} onChange={(e) => updateParameter(item, key, e.target.value)} className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-700" />}
+                                {options ? <select value={formatParam(item.parameters[key])} onChange={(e) => updateParameter(item, key, e.target.value)} className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-700">{options.map((option) => <option key={option} value={option}>{option}</option>)}</select> : isJson ? <textarea rows={5} spellCheck={false} value={formatParam(item.parameters[key])} onChange={(e) => updateParameter(item, key, e.target.value)} className="mt-1 w-full resize-y rounded-md border border-slate-200 bg-slate-950 px-2 py-1.5 font-mono text-[10px] leading-relaxed text-slate-100" /> : <input list={semanticKeyField && !isSemanticKeyListParameter(key) ? "semantic-key-options" : undefined} type={isNumber ? "number" : "text"} value={formatParam(item.parameters[key])} onChange={(e) => updateParameter(item, key, e.target.value)} className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-700" />}
                                 {semanticKeyField && <select value="" disabled={semanticKeyCatalog.length === 0} onChange={(event) => chooseSemanticKey(item, key, event.target.value)} className="mt-1 w-full rounded-md border border-indigo-200 bg-indigo-50 px-2 py-1.5 font-mono text-[10px] text-indigo-700 disabled:opacity-50"><option value="">{semanticKeyCatalog.length ? (isSemanticKeyListParameter(key) ? "+ Thêm từ bộ Key starter" : "Chọn từ bộ Key starter") : "Chưa khai báo bộ Key starter"}</option>{semanticKeyCatalog.map((entry) => <option key={entry.value} value={entry.value}>{entry.symbol ? `${entry.symbol} · ` : ""}{entry.value}</option>)}</select>}
                               </label>;
                             })}</div>
@@ -2284,7 +2402,7 @@ export default function TestcasesPage() {
                         })}</div>
                       </div>
                       {usesSemanticKeys(engineMode) && !runnerUsesStarterContract(engineMode, String(templateMap.get(item.template_id)?.runner || "")) && <div className="border-t border-indigo-100 pt-3"><div className="flex items-center justify-between gap-2"><div><p className="text-xs font-semibold text-slate-600">Chuẩn bị dữ liệu và trạng thái</p><p className="text-[10px] leading-relaxed text-slate-400">“Thêm bước” không tạo thêm field cho runner. Key chỉ định widget; riêng bước Nhập text mới dùng Value làm dữ liệu đầu vào. Bước expect cũng có thể làm testcase fail.</p></div><button type="button" onClick={() => addItemSetupStep(item)} className="flex items-center gap-1 rounded-md border border-indigo-200 px-2 py-1 text-[10px] font-semibold text-indigo-600 hover:bg-indigo-50"><Plus size={12} /> Thêm bước</button></div>{(item.setup_steps || []).length > 0 && <div className="mt-2 space-y-2">{(item.setup_steps || []).map((step, index) => <div key={index} className="grid grid-cols-1 gap-2 rounded-md border border-indigo-100 bg-white p-2 md:grid-cols-[150px_minmax(140px,1fr)_minmax(130px,1fr)_auto]"><p className="text-[10px] leading-relaxed text-indigo-600 md:col-span-full">{setupStepHint(step.type)}</p><select value={step.type} onChange={(e) => updateItemSetupStep(item, index, { type: e.target.value as SetupStep["type"] })} className="rounded border border-slate-200 px-1.5 py-1 text-[10px]"><option value="tap">Tap key</option><option value="enter_text">Nhập text</option><option value="expect_visible">Bắt buộc thấy</option><option value="expect_absent">Bắt buộc ẩn</option><option value="wait_for_visible">Chờ xuất hiện</option></select><input list="semantic-key-options" value={step.key} onChange={(e) => updateItemSetupStep(item, index, { key: e.target.value })} placeholder="action.open" className="rounded border border-slate-200 px-1.5 py-1 font-mono text-[10px]" />{step.type === "enter_text" ? <input value={step.value || ""} onChange={(e) => updateItemSetupStep(item, index, { value: e.target.value })} placeholder="Giá trị" className="rounded border border-slate-200 px-1.5 py-1 text-[10px]" /> : <div />}{step.type === "wait_for_visible" ? <input type="number" min={100} max={30000} value={step.timeout_ms || suite.step_timeout_ms} onChange={(e) => updateItemSetupStep(item, index, { timeout_ms: Number(e.target.value) })} className="rounded border border-slate-200 px-1.5 py-1 text-[10px]" /> : <div /> }<button type="button" onClick={() => removeItemSetupStep(item, index)} className="rounded p-1 text-slate-400 hover:bg-rose-50 hover:text-rose-600" title="Xóa bước"><Trash2 size={12} /></button></div>)}</div>}</div>}
-                      <div className="overflow-hidden rounded-lg border border-slate-700 bg-slate-950"><div className="flex items-center justify-between border-b border-slate-700 px-3 py-2"><div><p className="text-[11px] font-bold text-slate-100">Code kiểm tra tương đương</p><p className="mt-0.5 text-[9px] text-slate-400">{hasContractBindings(templateMap.get(item.template_id)) ? "Chỉ đọc, cập nhật theo contract và dữ liệu của đề hiện tại." : "Chỉ đọc, cập nhật ngay khi sửa setup, semantic key, input hoặc expected."}</p></div><span className="rounded bg-slate-800 px-2 py-1 font-mono text-[9px] text-cyan-300">{templateMap.get(item.template_id)?.runner}</span></div><pre className="custom-scrollbar max-h-80 overflow-auto whitespace-pre p-3 text-[10px] leading-relaxed text-slate-100">{testcaseCodePreview(item, templateMap.get(item.template_id))}</pre></div>
+                      <div className="overflow-hidden rounded-lg border border-slate-700 bg-slate-950"><div className="flex items-center justify-between border-b border-slate-700 px-3 py-2"><div><p className="text-[11px] font-bold text-slate-100">Code kiểm tra tương đương</p><p className="mt-0.5 text-[9px] text-slate-400">{runnerUsesStarterContract(engineMode, String(templateMap.get(item.template_id)?.runner || "")) ? "Chỉ đọc, cập nhật theo contract và dữ liệu của đề hiện tại." : "Chỉ đọc, cập nhật ngay khi sửa setup, semantic key, input hoặc expected."}</p></div><span className="rounded bg-slate-800 px-2 py-1 font-mono text-[9px] text-cyan-300">{templateMap.get(item.template_id)?.runner}</span></div><pre className="custom-scrollbar max-h-80 overflow-auto whitespace-pre p-3 text-[10px] leading-relaxed text-slate-100">{testcaseCodePreview(item, templateMap.get(item.template_id))}</pre></div>
                       <p className="text-[10px] text-slate-400">Ô mô tả kết quả chỉ đi vào rubric và báo cáo. Các assertion trong code preview mới quyết định testcase pass/fail.</p>
                       </>)}
                     </div>

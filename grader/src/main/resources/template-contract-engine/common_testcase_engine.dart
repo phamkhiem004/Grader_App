@@ -61,7 +61,10 @@ void _registerSelectedCase(
 bool _isDirectMetadata(Map<String, dynamic> metadata) {
   final runner = (metadata['runner'] ?? '').toString();
   if (runner == 'DIRECT_FUNCTION' ||
+      runner == 'DIRECT_FUNCTION_THROWS' ||
+      runner == 'DIRECT_STREAM_EVENTS' ||
       runner == 'STARTER_CALL_SEQUENCE' ||
+      runner == 'PROJECT_FILE_CONTRACT' ||
       runner.startsWith('TEMPLATE_SOURCE_') ||
       runner.startsWith('TEMPLATE_MODEL_') ||
       runner == 'TEMPLATE_SQLITE_SCHEMA' ||
@@ -70,10 +73,16 @@ bool _isDirectMetadata(Map<String, dynamic> metadata) {
   if ((metadata['runner'] ?? '').toString() != 'GROUP') return false;
   final children = _asList(metadata['children']);
   return children.isNotEmpty &&
-      children.every(
-        (child) =>
-            (_asMap(child)['runner'] ?? '').toString() == 'DIRECT_FUNCTION',
-      );
+      children.every((child) {
+        final childRunner = (_asMap(child)['runner'] ?? '').toString();
+        return <String>{
+          'DIRECT_FUNCTION',
+          'DIRECT_FUNCTION_THROWS',
+          'DIRECT_STREAM_EVENTS',
+          'STARTER_CALL_SEQUENCE',
+          'PROJECT_FILE_CONTRACT',
+        }.contains(childRunner);
+      });
 }
 
 Future<void> _runCase(
@@ -130,6 +139,15 @@ Future<void> _runCase(
     case 'DIRECT_FUNCTION':
       await _checkDirectFunction(tester, parameters);
       return;
+    case 'DIRECT_FUNCTION_THROWS':
+      await _checkDirectFunctionThrows(tester, parameters);
+      return;
+    case 'DIRECT_STREAM_EVENTS':
+      await _checkDirectStreamEvents(tester, parameters);
+      return;
+    case 'PROJECT_FILE_CONTRACT':
+      await _checkProjectFileContract(parameters);
+      return;
     case 'APP_BOOT':
       await _checkTemplateAppBoot(tester, parameters);
       return;
@@ -182,6 +200,18 @@ Future<void> _runCase(
       return;
     case 'RESPONSIVE_PAIR_LAYOUT':
       await _checkResponsivePairLayout(tester, parameters);
+      return;
+    case 'WIDGET_PROPERTY':
+      await _checkWidgetProperty(tester, parameters);
+      return;
+    case 'KEY_WORKFLOW':
+      await _checkKeyWorkflow(tester, parameters);
+      return;
+    case 'FORM_FOCUS_FLOW':
+      await _checkFormFocusFlow(tester, parameters);
+      return;
+    case 'RESPONSIVE_LAYOUT_CASES':
+      await _checkResponsiveLayoutCases(tester, parameters);
       return;
     case 'STARTER_CALL_SEQUENCE':
       await _checkStarterCallSequence(tester, parameters);
@@ -388,6 +418,120 @@ Future<void> _checkDirectFunction(
       equals(expected),
       reason: '$functionName trả về giá trị không đúng',
     );
+  }
+}
+
+Future<void> _checkDirectFunctionThrows(
+  WidgetTester tester,
+  Map<String, dynamic> parameters,
+) async {
+  final functionPath = _requiredText(parameters, 'functionPath');
+  final functionName = _requiredText(parameters, 'functionName');
+  final decoded = jsonDecode(_text(parameters, 'argumentsJson', '[]'));
+  if (decoded is! List) fail('argumentsJson phải là một mảng JSON.');
+
+  Object? thrown;
+  try {
+    await tester.runAsync<dynamic>(() async {
+      final value = _invokeDirectFunction(
+        '$functionPath::$functionName',
+        List<dynamic>.from(decoded),
+      );
+      return value is Future ? await value : value;
+    });
+  } catch (error) {
+    thrown = error;
+  }
+  expect(thrown, isNotNull, reason: '$functionName phải ném exception.');
+  final actualType = thrown.runtimeType.toString();
+  final expectedType = _requiredText(parameters, 'expectedException');
+  final typeMode = _text(parameters, 'typeMatchMode', 'equals').toLowerCase();
+  if (typeMode == 'contains') {
+    expect(actualType, contains(expectedType));
+  } else {
+    expect(actualType, expectedType);
+  }
+  final message = _text(parameters, 'messageContains');
+  if (message.isNotEmpty) {
+    expect(thrown.toString(), contains(message));
+  }
+}
+
+Future<void> _checkDirectStreamEvents(
+  WidgetTester tester,
+  Map<String, dynamic> parameters,
+) async {
+  final functionPath = _requiredText(parameters, 'functionPath');
+  final functionName = _requiredText(parameters, 'functionName');
+  final decodedArguments = jsonDecode(
+    _text(parameters, 'argumentsJson', '[]'),
+  );
+  if (decodedArguments is! List) {
+    fail('argumentsJson phải là một mảng JSON.');
+  }
+  final decodedExpected = jsonDecode(
+    _requiredText(parameters, 'expectedEventsJson'),
+  );
+  if (decodedExpected is! List || decodedExpected.isEmpty) {
+    fail('expectedEventsJson phải là một mảng có phần tử.');
+  }
+  final timeout = Duration(
+    milliseconds: _number(parameters, 'timeoutMs', 3000).toInt(),
+  );
+
+  final actual = await tester.runAsync<List<dynamic>>(() async {
+    final value = _invokeDirectFunction(
+      '$functionPath::$functionName',
+      List<dynamic>.from(decodedArguments),
+    );
+    if (value is! Stream) {
+      fail('$functionName phải trả về Stream.');
+    }
+    return await value
+        .take(decodedExpected.length)
+        .toList()
+        .timeout(timeout);
+  });
+  expect(
+    actual,
+    equals(List<dynamic>.from(decodedExpected)),
+    reason: 'Chuỗi event của $functionName không đúng thứ tự/giá trị.',
+  );
+}
+
+Future<void> _checkProjectFileContract(
+  Map<String, dynamic> parameters,
+) async {
+  final decoded = jsonDecode(_requiredText(parameters, 'filesJson'));
+  if (decoded is! List || decoded.isEmpty) {
+    fail('filesJson phải là một mảng có phần tử.');
+  }
+  for (var index = 0; index < decoded.length; index++) {
+    final spec = _asMap(decoded[index]);
+    final path = _requiredText(spec, 'path').replaceAll('\\', '/');
+    final file = File(path);
+    expect(file.existsSync(), isTrue, reason: 'Không tìm thấy file contract: $path');
+    final minBytes = _number(spec, 'minBytes', 0).toInt();
+    expect(
+      file.lengthSync(),
+      greaterThanOrEqualTo(minBytes),
+      reason: '$path nhỏ hơn minBytes=$minBytes',
+    );
+    final source = file.readAsStringSync();
+    for (final term in _asList(spec['requiredTerms'])) {
+      expect(
+        source,
+        contains(term.toString()),
+        reason: '$path thiếu nội dung contract: $term',
+      );
+    }
+    for (final term in _asList(spec['forbiddenTerms'])) {
+      expect(
+        source,
+        isNot(contains(term.toString())),
+        reason: '$path chứa nội dung bị cấm: $term',
+      );
+    }
   }
 }
 
@@ -1611,6 +1755,373 @@ Future<void> _checkResponsivePairLayout(
   }
 }
 
+Future<void> _checkWidgetProperty(
+  WidgetTester tester,
+  Map<String, dynamic> parameters,
+) async {
+  await _boot(tester);
+  _expectWidgetProperty(tester, parameters);
+}
+
+void _expectWidgetProperty(
+  WidgetTester tester,
+  Map<String, dynamic> parameters,
+) {
+  final key = _requiredText(parameters, 'targetKey');
+  final finder = _byKey(key);
+  expect(finder, findsOneWidget, reason: 'Không tìm thấy target key: $key');
+  final targetType = _text(parameters, 'targetType', 'any');
+  _assertTargetType(tester, finder, key, targetType);
+  final property = _requiredText(parameters, 'property');
+  final actual = _widgetPropertyValue(tester.widget<Widget>(finder), property);
+  final expectedType = _text(parameters, 'expectedType', 'string').toLowerCase();
+  final expected = _parseDirectExpected(
+    _text(parameters, 'expectedValue'),
+    expectedType,
+  );
+  final matchMode = _text(parameters, 'matchMode', 'equals').toLowerCase();
+  if (actual is num && expected is num) {
+    expect(
+      (actual.toDouble() - expected.toDouble()).abs(),
+      lessThanOrEqualTo(_number(parameters, 'tolerance', 0.001)),
+      reason: '$key.$property không đúng',
+    );
+  } else if (matchMode == 'contains') {
+    expect(actual.toString(), contains(expected.toString()));
+  } else {
+    expect(actual, equals(expected), reason: '$key.$property không đúng');
+  }
+}
+
+dynamic _widgetPropertyValue(Widget widget, String property) {
+  switch (property) {
+    case 'enabled':
+      return _enabledState(widget);
+    case 'obscureText':
+      if (widget is TextField) return widget.obscureText;
+      if (widget is TextFormField) return widget.obscureText;
+      break;
+    case 'readOnly':
+      if (widget is TextField) return widget.readOnly;
+      if (widget is TextFormField) return widget.readOnly;
+      break;
+    case 'keyboardType':
+      if (widget is TextField) return _enumTail(widget.keyboardType);
+      if (widget is TextFormField) return _enumTail(widget.keyboardType);
+      break;
+    case 'textInputAction':
+      if (widget is TextField) return _enumTail(widget.textInputAction);
+      if (widget is TextFormField) return _enumTail(widget.textInputAction);
+      break;
+    case 'autovalidateMode':
+      if (widget is Form) return _enumTail(widget.autovalidateMode);
+      if (widget is TextFormField) return _enumTail(widget.autovalidateMode);
+      break;
+    case 'value':
+      if (widget is Checkbox) return widget.value;
+      if (widget is Switch) return widget.value;
+      if (widget is Slider) return widget.value;
+      if (widget is DropdownButton) return widget.value;
+      if (widget is Radio) return widget.value;
+      break;
+    case 'selected':
+      if (widget is FilterChip) return widget.selected;
+      if (widget is ChoiceChip) return widget.selected;
+      if (widget is InputChip) return widget.selected;
+      if (widget is Radio) return widget.value == widget.groupValue;
+      break;
+    case 'min':
+      if (widget is Slider) return widget.min;
+      break;
+    case 'max':
+      if (widget is Slider) return widget.max;
+      break;
+    case 'divisions':
+      if (widget is Slider) return widget.divisions;
+      break;
+    case 'maxLines':
+      if (widget is TextField) return widget.maxLines;
+      if (widget is TextFormField) return widget.maxLines;
+      break;
+    case 'minLines':
+      if (widget is TextField) return widget.minLines;
+      if (widget is TextFormField) return widget.minLines;
+      break;
+    case 'maxLength':
+      if (widget is TextField) return widget.maxLength;
+      if (widget is TextFormField) return widget.maxLength;
+      break;
+    case 'scrollDirection':
+      if (widget is ScrollView) return _enumTail(widget.scrollDirection);
+      break;
+    case 'crossAxisCount':
+      if (widget is GridView &&
+          widget.gridDelegate is SliverGridDelegateWithFixedCrossAxisCount) {
+        return (widget.gridDelegate as SliverGridDelegateWithFixedCrossAxisCount)
+            .crossAxisCount;
+      }
+      break;
+    case 'heroTag':
+      if (widget is Hero) return widget.tag.toString();
+      break;
+    case 'themeMode':
+      if (widget is MaterialApp) return _enumTail(widget.themeMode);
+      break;
+  }
+  fail('Không đọc được property $property từ ${widget.runtimeType}.');
+}
+
+String _enumTail(Object? value) {
+  if (value == null) return '';
+  final text = value.toString();
+  return text.contains('.') ? text.split('.').last : text;
+}
+
+Future<void> _checkKeyWorkflow(
+  WidgetTester tester,
+  Map<String, dynamic> parameters,
+) async {
+  await _boot(tester);
+  final decoded = jsonDecode(_requiredText(parameters, 'stepsJson'));
+  if (decoded is! List || decoded.isEmpty) {
+    fail('stepsJson phải là một JSON array có phần tử.');
+  }
+  for (var index = 0; index < decoded.length; index++) {
+    final step = _asMap(decoded[index]);
+    final type = _requiredText(step, 'type').toLowerCase();
+    final key = _text(step, 'key');
+    final timeoutMs = _number(step, 'timeoutMs', 3000).toInt();
+    switch (type) {
+      case 'tap':
+        final finder = _byKey(key);
+        if (_text(step, 'listKey').isNotEmpty) {
+          await _revealLazyItem(tester, _byKey(_text(step, 'listKey')), finder);
+        }
+        await _tap(tester, finder, key);
+        if (_bool(step, 'settle', true)) await _settle(tester);
+        break;
+      case 'enter_text':
+        final finder = _byKey(key);
+        expect(finder, findsOneWidget, reason: 'Thiếu field key: $key');
+        await tester.enterText(finder, _decodeInput(_text(step, 'value')));
+        if (_bool(step, 'settle', true)) await _settle(tester);
+        break;
+      case 'expect_visible':
+        expect(_visibleByKey(key), findsOneWidget);
+        break;
+      case 'expect_absent':
+        expect(_goneByKey(key), findsNothing);
+        break;
+      case 'expect_text':
+        final actual = _textInsideKey(tester, key);
+        final expected = _text(step, 'expected', _text(step, 'value'));
+        if (_text(step, 'matchMode', 'contains').toLowerCase() == 'equals') {
+          expect(actual, expected, reason: 'Text tại $key không đúng');
+        } else {
+          expect(actual, contains(expected), reason: 'Text tại $key không chứa expected');
+        }
+        break;
+      case 'expect_enabled':
+        final finder = _byKey(key);
+        expect(finder, findsOneWidget);
+        final enabled = _enabledState(tester.widget<Widget>(finder));
+        expect(enabled, _bool(step, 'expected', true));
+        break;
+      case 'expect_property':
+        _expectWidgetProperty(
+          tester,
+          <String, dynamic>{
+            'targetKey': key,
+            'targetType': _text(step, 'targetType', 'any'),
+            'property': _requiredText(step, 'property'),
+            'expectedType': _text(step, 'expectedType', 'string'),
+            'expectedValue': step['expected'],
+            'matchMode': _text(step, 'matchMode', 'equals'),
+            'tolerance': step['tolerance'] ?? 0.001,
+          },
+        );
+        break;
+      case 'wait_for_visible':
+        await _waitForVisible(tester, key, timeoutMs);
+        break;
+      case 'wait_for_absent':
+        await _waitForAbsent(tester, key, timeoutMs);
+        break;
+      case 'scroll_until_visible':
+        final listKey = _requiredText(step, 'listKey');
+        await _revealLazyItem(tester, _byKey(listKey), _exactByKey(key));
+        expect(_visibleByKey(key), findsOneWidget);
+        break;
+      case 'pump':
+        await tester.pump(
+          Duration(milliseconds: _number(step, 'milliseconds', 100).toInt()),
+        );
+        break;
+      default:
+        fail('Workflow step #${index + 1} không hỗ trợ type: $type');
+    }
+    final exception = tester.takeException();
+    if (exception != null) {
+      fail('Workflow step #${index + 1} phát sinh exception: $exception');
+    }
+  }
+}
+
+String _textInsideKey(WidgetTester tester, String key) {
+  final root = _byKey(key);
+  expect(root, findsOneWidget, reason: 'Không tìm thấy key để đọc text: $key');
+  final widget = tester.widget<Widget>(root);
+  if (widget is Text) return widget.data ?? widget.textSpan?.toPlainText() ?? '';
+  final editable = find.descendant(
+    of: root,
+    matching: find.byType(EditableText),
+    matchRoot: true,
+  );
+  if (editable.evaluate().length == 1) {
+    return tester.widget<EditableText>(editable).controller.text;
+  }
+  return find
+      .descendant(of: root, matching: find.byType(Text), matchRoot: true)
+      .evaluate()
+      .map((element) {
+        final text = element.widget as Text;
+        return text.data ?? text.textSpan?.toPlainText() ?? '';
+      })
+      .join(' ');
+}
+
+Future<void> _waitForAbsent(
+  WidgetTester tester,
+  String key,
+  int timeoutMs,
+) async {
+  final deadline = DateTime.now().add(Duration(milliseconds: timeoutMs));
+  while (DateTime.now().isBefore(deadline)) {
+    if (_goneByKey(key).evaluate().isEmpty) return;
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 50)),
+    );
+    await tester.pump();
+  }
+  expect(_goneByKey(key), findsNothing, reason: 'Key không biến mất: $key');
+}
+
+Future<void> _checkFormFocusFlow(
+  WidgetTester tester,
+  Map<String, dynamic> parameters,
+) async {
+  await _boot(tester);
+  final fields = _csv(parameters, 'fieldKeys');
+  final actions = _csv(parameters, 'actions');
+  if (fields.isEmpty || fields.length != actions.length) {
+    fail('fieldKeys và actions phải cùng số phần tử.');
+  }
+  await tester.tap(_byKey(fields.first), warnIfMissed: false);
+  await tester.pump();
+  for (var index = 0; index < fields.length; index++) {
+    final editable = find.descendant(
+      of: _byKey(fields[index]),
+      matching: find.byType(EditableText),
+      matchRoot: true,
+    );
+    expect(editable, findsOneWidget, reason: '${fields[index]} không phải ô nhập.');
+    expect(
+      tester.widget<EditableText>(editable).focusNode.hasFocus,
+      isTrue,
+      reason: '${fields[index]} không nhận focus đúng thứ tự.',
+    );
+    tester.testTextInput.receiveAction(_textInputAction(actions[index]));
+    await tester.pump();
+  }
+  if (_bool(parameters, 'dismissAfterLast', true)) {
+    final lastEditable = find.descendant(
+      of: _byKey(fields.last),
+      matching: find.byType(EditableText),
+      matchRoot: true,
+    );
+    expect(tester.widget<EditableText>(lastEditable).focusNode.hasFocus, isFalse);
+  }
+  final resultKey = _text(parameters, 'resultKey');
+  if (resultKey.isNotEmpty) expect(_visibleByKey(resultKey), findsOneWidget);
+}
+
+TextInputAction _textInputAction(String raw) {
+  switch (raw.toLowerCase()) {
+    case 'next':
+      return TextInputAction.next;
+    case 'previous':
+      return TextInputAction.previous;
+    case 'go':
+      return TextInputAction.go;
+    case 'search':
+      return TextInputAction.search;
+    case 'send':
+      return TextInputAction.send;
+    case 'newline':
+      return TextInputAction.newline;
+    default:
+      return TextInputAction.done;
+  }
+}
+
+Future<void> _checkResponsiveLayoutCases(
+  WidgetTester tester,
+  Map<String, dynamic> parameters,
+) async {
+  final decoded = jsonDecode(_requiredText(parameters, 'casesJson'));
+  if (decoded is! List || decoded.isEmpty) {
+    fail('casesJson phải là JSON array có phần tử.');
+  }
+  tester.view.devicePixelRatio = 1.0;
+  addTearDown(tester.view.resetPhysicalSize);
+  addTearDown(tester.view.resetDevicePixelRatio);
+  for (var index = 0; index < decoded.length; index++) {
+    final one = _asMap(decoded[index]);
+    tester.view.physicalSize = Size(
+      _number(one, 'width', 390),
+      _number(one, 'height', 844),
+    );
+    await _boot(tester);
+    expect(tester.takeException(), isNull, reason: 'Viewport #${index + 1} overflow/lỗi.');
+    for (final raw in _asList(one['visibleKeys'])) {
+      final key = raw.toString();
+      expect(_visibleByKey(key), findsOneWidget, reason: 'Viewport #${index + 1} thiếu $key');
+    }
+    for (final raw in _asList(one['absentKeys'])) {
+      final key = raw.toString();
+      expect(_goneByKey(key), findsNothing, reason: 'Viewport #${index + 1} phải ẩn $key');
+    }
+    final gridKey = _text(one, 'gridKey');
+    if (gridKey.isNotEmpty) {
+      final grid = _byKey(gridKey);
+      expect(grid, findsOneWidget, reason: 'Viewport #${index + 1} thiếu GridView $gridKey');
+      final widget = tester.widget<Widget>(grid);
+      expect(widget, isA<GridView>());
+      final delegate = (widget as GridView).gridDelegate;
+      expect(delegate, isA<SliverGridDelegateWithFixedCrossAxisCount>());
+      expect(
+        (delegate as SliverGridDelegateWithFixedCrossAxisCount).crossAxisCount,
+        _number(one, 'crossAxisCount', 1).toInt(),
+      );
+    }
+    for (final rawPair in _asList(one['pairs'])) {
+      final pair = _asMap(rawPair);
+      final firstKey = _requiredText(pair, 'firstKey');
+      final secondKey = _requiredText(pair, 'secondKey');
+      final first = tester.getRect(_byKey(firstKey));
+      final second = tester.getRect(_byKey(secondKey));
+      final tolerance = _number(pair, 'tolerance', 8).abs();
+      if (_text(pair, 'alignment', 'row').toLowerCase() == 'column') {
+        expect((first.left - second.left).abs(), lessThanOrEqualTo(tolerance));
+        expect(second.top, greaterThan(first.top));
+      } else {
+        expect((first.top - second.top).abs(), lessThanOrEqualTo(tolerance));
+        expect(second.left, greaterThan(first.left));
+      }
+    }
+  }
+}
+
 Future<void> _boot(WidgetTester tester) async {
   // Dispose the previous widget tree; unknown static singletons are not
   // pretended to be reset because the common engine cannot inspect them safely.
@@ -2410,8 +2921,20 @@ void _assertTargetType(
     'icon' => widget is Icon,
     'checkbox' => widget is Checkbox,
     'switch' => widget is Switch,
+    'slider' => widget is Slider,
+    'radio' => widget is Radio,
+    'chip' => widget is FilterChip || widget is ChoiceChip || widget is InputChip,
     'dropdown' => widget is DropdownButton,
     'padding' => widget is Padding,
+    'list' => widget is ListView,
+    'grid' => widget is GridView,
+    'scrollable' => widget is ScrollView,
+    'hero' => widget is Hero,
+    'materialapp' => widget is MaterialApp,
+    'safearea' => widget is SafeArea,
+    'scaffold' => widget is Scaffold,
+    'card' => widget is Card,
+    'listtile' => widget is ListTile,
     // Template dùng key vai trò screen.home có thể fallback vào Scaffold khi
     // bài không gắn ValueKey; README không bắt buộc sinh viên phải dùng key.
     'container' => widget is Container || widget is Scaffold,
@@ -2433,6 +2956,11 @@ bool? _enabledState(Widget widget) {
   if (widget is RawMaterialButton) return widget.onPressed != null;
   if (widget is Checkbox) return widget.onChanged != null;
   if (widget is Switch) return widget.onChanged != null;
+  if (widget is Slider) return widget.onChanged != null;
+  if (widget is Radio) return widget.onChanged != null;
+  if (widget is FilterChip) return widget.onSelected != null;
+  if (widget is ChoiceChip) return widget.onSelected != null;
+  if (widget is InputChip) return widget.onSelected != null;
   if (widget is DropdownButton) return widget.onChanged != null;
   return null;
 }

@@ -44,7 +44,7 @@ class TestcaseTemplateSuiteTest {
         assertEquals(true, suite.get("strict_semantic_keys"));
         assertEquals(List.of("screen.home", "list.items"), suite.get("required_keys"));
         Map<?, ?> dynamicContract = (Map<?, ?>) suite.get("template_contract");
-        assertEquals(4, dynamicContract.get("version"));
+        assertEquals(5, dynamicContract.get("version"));
         List<?> contractSections = (List<?>) dynamicContract.get("sections");
         List<?> contractFields = (List<?>) ((Map<?, ?>) contractSections.get(0)).get("fields");
         assertTrue(contractFields.stream().anyMatch(field -> field instanceof Map<?, ?> value
@@ -603,8 +603,8 @@ class TestcaseTemplateSuiteTest {
                 .filter(row -> "STARTER_KEY_HYBRID_V1".equals(row.get("engine_type")))
                 .toList();
 
-        assertEquals(89, hybrid.size());
-        assertEquals(52, hybrid.stream()
+        assertEquals(128, hybrid.size());
+        assertEquals(84, hybrid.stream()
                 .filter(row -> String.valueOf(row.get("template_id")).startsWith("HYBRID_REUSE_"))
                 .count());
         assertTrue(hybrid.stream().anyMatch(row -> "DIRECT_FUNCTION".equals(row.get("runner"))));

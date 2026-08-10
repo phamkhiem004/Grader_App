@@ -1,5 +1,5 @@
 {
-  "version": "2026.4",
+  "version": "2026.5",
   "subject": {
     "code": "PRM_FLUTTER",
     "name": "Mobile Programming — Flutter/Dart",
@@ -93,6 +93,48 @@
       "competency_label": "Lập trình bất đồng bộ trong Flutter/Dart",
       "order": 9,
       "description": "Chương 10: Lập trình bất đồng bộ trong Flutter/Dart"
+    },
+    {
+      "code": "FORMS_VALIDATION",
+      "name": "Biểu mẫu, validation và trải nghiệm nhập liệu",
+      "competency_label": "Biểu mẫu, validation và trải nghiệm nhập liệu",
+      "order": 10,
+      "description": "Module 7: Form, validation, focus, keyboard và async validation"
+    },
+    {
+      "code": "NETWORKING_API_JSON",
+      "name": "REST API, HTTP và JSON",
+      "competency_label": "REST API, HTTP và JSON",
+      "order": 11,
+      "description": "Module 8: HTTP, REST, JSON model, service layer và trạng thái bất đồng bộ"
+    },
+    {
+      "code": "LOCAL_STORAGE",
+      "name": "Lưu trữ cục bộ và persistence",
+      "competency_label": "Lưu trữ cục bộ và persistence",
+      "order": 12,
+      "description": "Module 9: SharedPreferences, JSON file, SQLite và offline-first"
+    },
+    {
+      "code": "AUTH_NOTIFICATIONS",
+      "name": "Xác thực, session và thông báo",
+      "competency_label": "Xác thực, session và thông báo",
+      "order": 13,
+      "description": "Module 10: login/signup, token/session, Firebase và local notification"
+    },
+    {
+      "code": "TESTING_DEBUGGING",
+      "name": "Kiểm thử và gỡ lỗi Flutter",
+      "competency_label": "Kiểm thử và gỡ lỗi Flutter",
+      "order": 14,
+      "description": "Module 11: unit, widget, navigation, integration test và DevTools"
+    },
+    {
+      "code": "PERFORMANCE_DEPLOYMENT",
+      "name": "Tối ưu hiệu năng và triển khai",
+      "competency_label": "Tối ưu hiệu năng và triển khai",
+      "order": 15,
+      "description": "Module 12: rebuild/list/image optimization, size analysis và release APK/AAB"
     }
   ],
   "skills": [
@@ -612,6 +654,222 @@
       "resources": [
         "Mastering Flutter, Ch.10"
       ]
+    },
+    {
+      "code": "RESPONSIVE_BREAKPOINTS",
+      "category": "ADVANCED_WIDGETS",
+      "name": "Breakpoint responsive và orientation",
+      "default_difficulty": "intermediate",
+      "testable": "auto",
+      "description": "MediaQuery/LayoutBuilder thay đổi bố cục theo kích thước và hướng màn hình.",
+      "resources": ["PRM393 Module 6", "Lab 6"]
+    },
+    {
+      "code": "RESPONSIVE_ADAPTIVE_NAV",
+      "category": "ADVANCED_WIDGETS",
+      "name": "Điều hướng và bố cục adaptive",
+      "default_difficulty": "advanced",
+      "testable": "auto",
+      "description": "Chuyển BottomNavigationBar, NavigationRail, sidebar hoặc số cột theo viewport.",
+      "resources": ["PRM393 Module 6", "Lab 6"]
+    },
+    {
+      "code": "FORM_STRUCTURE_VALIDATION",
+      "category": "FORMS_VALIDATION",
+      "name": "FormState và validation đồng bộ",
+      "default_difficulty": "intermediate",
+      "testable": "auto",
+      "description": "Required, định dạng, biên, regex và cross-field validation bằng Form/TextFormField.",
+      "resources": ["PRM393 Module 7", "Lab 7"]
+    },
+    {
+      "code": "FORM_FOCUS_KEYBOARD",
+      "category": "FORMS_VALIDATION",
+      "name": "Focus và keyboard action",
+      "default_difficulty": "intermediate",
+      "testable": "auto",
+      "description": "FocusNode, Next/Done, chuyển focus, dismiss keyboard và form cuộn an toàn.",
+      "resources": ["PRM393 Module 7", "Lab 7.3"]
+    },
+    {
+      "code": "FORM_ASYNC_VALIDATION",
+      "category": "FORMS_VALIDATION",
+      "name": "Async validation và chống submit lặp",
+      "default_difficulty": "advanced",
+      "testable": "auto",
+      "description": "Trạng thái checking, lỗi server, disable submit và không gửi trùng.",
+      "resources": ["PRM393 Module 7", "Lab 7.4"]
+    },
+    {
+      "code": "API_HTTP_REST",
+      "category": "NETWORKING_API_JSON",
+      "name": "HTTP và REST request/response",
+      "default_difficulty": "intermediate",
+      "testable": "auto_with_fixture",
+      "description": "GET/POST/PUT/DELETE, status code, header/body và error handling; grader dùng fixture/mock thay mạng thật.",
+      "resources": ["PRM393 Module 8", "Lab 8", "Lab 8B"]
+    },
+    {
+      "code": "API_JSON_MODEL",
+      "category": "NETWORKING_API_JSON",
+      "name": "JSON mapping sang model",
+      "default_difficulty": "intermediate",
+      "testable": "auto",
+      "description": "jsonDecode/jsonEncode, fromJson/toJson và mapping List<Model>.",
+      "resources": ["PRM393 Module 8", "Lab 8.2"]
+    },
+    {
+      "code": "API_ASYNC_STATES",
+      "category": "NETWORKING_API_JSON",
+      "name": "Loading, empty, error, retry và data state",
+      "default_difficulty": "advanced",
+      "testable": "auto_with_fixture",
+      "description": "FutureBuilder hoặc state tương đương hiển thị đúng các trạng thái bằng backend giả lập xác định.",
+      "resources": ["PRM393 Module 8", "Lab 8.3", "Lab 8B"]
+    },
+    {
+      "code": "API_SERVICE_LAYER",
+      "category": "NETWORKING_API_JSON",
+      "name": "Service layer và dependency injection cho HTTP",
+      "default_difficulty": "advanced",
+      "testable": "auto_and_static",
+      "description": "Tách API service khỏi UI, cho phép inject client/fixture và không gọi request trong build().",
+      "resources": ["PRM393 Module 8", "Lab 8.4"]
+    },
+    {
+      "code": "STORAGE_SHARED_PREFERENCES",
+      "category": "LOCAL_STORAGE",
+      "name": "SharedPreferences key-value",
+      "default_difficulty": "intermediate",
+      "testable": "auto_with_fixture",
+      "description": "Lưu, đọc, khôi phục và xóa cài đặt/session bằng store được cô lập.",
+      "resources": ["PRM393 Module 9", "PRM393 Module 10"]
+    },
+    {
+      "code": "STORAGE_JSON_FILE",
+      "category": "LOCAL_STORAGE",
+      "name": "JSON asset và JSON file local",
+      "default_difficulty": "intermediate",
+      "testable": "auto_with_fixture",
+      "description": "Đọc asset, encode/decode, ghi file, CRUD/search và xử lý file thiếu/hỏng.",
+      "resources": ["PRM393 Module 9", "Lab 9"]
+    },
+    {
+      "code": "STORAGE_SQLITE_CRUD",
+      "category": "LOCAL_STORAGE",
+      "name": "SQLite schema, query và CRUD",
+      "default_difficulty": "advanced",
+      "testable": "auto_with_isolated_database",
+      "description": "Schema/model mapping, insert/query/update/delete, where/order/limit và database test cô lập.",
+      "resources": ["PRM393 Module 9"]
+    },
+    {
+      "code": "STORAGE_PERSISTENCE_SYNC",
+      "category": "LOCAL_STORAGE",
+      "name": "Persistence và offline-first synchronization",
+      "default_difficulty": "advanced",
+      "testable": "auto_with_process_fixture",
+      "description": "Dữ liệu sống qua reload/process, cache fallback, sync và conflict policy.",
+      "resources": ["PRM393 Module 9", "Lab 9.2", "Lab 9.3"]
+    },
+    {
+      "code": "AUTH_LOGIN_SIGNUP",
+      "category": "AUTH_NOTIFICATIONS",
+      "name": "Login, signup và protected flow",
+      "default_difficulty": "advanced",
+      "testable": "auto_with_fixture",
+      "description": "Validation, loading, auth error, navigation và protected route với mock/fake backend.",
+      "resources": ["PRM393 Module 10", "Lab 10.1", "Lab 10.2"]
+    },
+    {
+      "code": "AUTH_TOKEN_SESSION",
+      "category": "AUTH_NOTIFICATIONS",
+      "name": "Token, auto-login và logout session",
+      "default_difficulty": "advanced",
+      "testable": "auto_with_fixture",
+      "description": "Save/restore/expiry/clear token và Splash → Login/Home routing.",
+      "resources": ["PRM393 Module 10", "Lab 10.3"]
+    },
+    {
+      "code": "AUTH_FIREBASE_GOOGLE",
+      "category": "AUTH_NOTIFICATIONS",
+      "name": "Firebase Authentication và Google Sign-In",
+      "default_difficulty": "advanced",
+      "testable": "manual_and_static",
+      "description": "Firebase config, OAuth flow, profile và sign-out; xác thực end-to-end cần device/account thật.",
+      "resources": ["PRM393 Module 10", "Lab 10.4"]
+    },
+    {
+      "code": "NOTIFICATION_LOCAL",
+      "category": "AUTH_NOTIFICATIONS",
+      "name": "Local notification",
+      "default_difficulty": "advanced",
+      "testable": "manual_and_static",
+      "description": "Plugin/config/permission và trigger notification; hiển thị system notification cần device integration test.",
+      "resources": ["PRM393 Module 10", "Lab 10.5"]
+    },
+    {
+      "code": "TEST_UNIT",
+      "category": "TESTING_DEBUGGING",
+      "name": "Unit test logic và repository",
+      "default_difficulty": "intermediate",
+      "testable": "artifact_and_execution",
+      "description": "AAA unit tests cho model, function và repository.",
+      "resources": ["PRM393 Module 11", "Lab 11.1"]
+    },
+    {
+      "code": "TEST_WIDGET",
+      "category": "TESTING_DEBUGGING",
+      "name": "Widget test giao diện và interaction",
+      "default_difficulty": "intermediate",
+      "testable": "artifact_and_execution",
+      "description": "pumpWidget, enterText, tap, pump và assert UI rebuild.",
+      "resources": ["PRM393 Module 11", "Lab 11.2"]
+    },
+    {
+      "code": "TEST_INTEGRATION_NAV",
+      "category": "TESTING_DEBUGGING",
+      "name": "Navigation và integration flow test",
+      "default_difficulty": "advanced",
+      "testable": "artifact_and_execution",
+      "description": "List-detail data transfer và full user flow nhiều màn hình.",
+      "resources": ["PRM393 Module 11", "Lab 11.3", "Lab 11.4"]
+    },
+    {
+      "code": "DEBUG_DEVTOOLS",
+      "category": "TESTING_DEBUGGING",
+      "name": "DevTools và báo cáo gỡ lỗi",
+      "default_difficulty": "advanced",
+      "testable": "manual_evidence",
+      "description": "Widget Inspector, performance timeline, rebuild/layout diagnosis và báo cáo ảnh chụp.",
+      "resources": ["PRM393 Module 11", "Lab 11.4"]
+    },
+    {
+      "code": "PERF_REBUILDS",
+      "category": "PERFORMANCE_DEPLOYMENT",
+      "name": "Giảm rebuild và công việc trong build",
+      "default_difficulty": "advanced",
+      "testable": "static_and_profile",
+      "description": "const, widget extraction, Selector/fine-grained state và tránh DB/API/sort nặng trong build().",
+      "resources": ["PRM393 Module 12", "Lab 12.1"]
+    },
+    {
+      "code": "PERF_LIST_IMAGE",
+      "category": "PERFORMANCE_DEPLOYMENT",
+      "name": "Tối ưu list, key, image và asset",
+      "default_difficulty": "advanced",
+      "testable": "static_and_profile",
+      "description": "ListView.builder, ValueKey, resize/precache image và loại asset dư.",
+      "resources": ["PRM393 Module 12", "Lab 12.1", "Lab 12.2"]
+    },
+    {
+      "code": "DEPLOY_SIZE_RELEASE",
+      "category": "PERFORMANCE_DEPLOYMENT",
+      "name": "Size analysis và release deployment",
+      "default_difficulty": "advanced",
+      "testable": "pipeline_and_manual_evidence",
+      "description": "Profile mode, analyze-size, versioning, APK/AAB, signing và release verification.",
+      "resources": ["PRM393 Module 12", "Lab 12.3", "Lab 12.4"]
     }
   ]
 }

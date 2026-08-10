@@ -376,11 +376,11 @@
     "difficulty": "advanced",
     "weight_default": 2,
     "parameters_schema": {
-      "fieldKeys": "field.password,field.confirmPassword",
+      "fieldKeys": "field.password,field.confirm_password",
       "fieldType": "input",
       "invalidValues": "secret123,different",
       "submitKey": "action.save",
-      "errorKeys": "error.passwordMismatch",
+      "errorKeys": "error.password_mismatch",
       "requireNewErrors": true
     },
     "expected_template": "Bộ dữ liệu {invalidValues} trong {fieldKeys} phải tạo lỗi đối chiếu {errorKeys}."

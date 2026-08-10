@@ -128,9 +128,10 @@
   {
     "template_id": "HYBRID_REUSE_SQLITE_CRUD_SEQUENCE",
     "base_template_id": "HYBRID_STARTER_CALL_SEQUENCE",
-    "name": "Chuỗi SQLite Add - Read - Remove",
-    "description": "Gọi tuần tự API nghiệp vụ thật trong starter và giữ cùng database/state giữa các bước; không dùng adapter.",
-    "parameter_defaults": { "sourcePath": "lib/database/person_store.dart", "stepsJson": "[{\"functionName\":\"resetStore\",\"arguments\":[],\"expectedType\":\"null\",\"expectedValue\":null},{\"functionName\":\"addPerson\",\"arguments\":[\"SV01\",\"An\",\"Nguyen\"],\"expectedType\":\"int\",\"expectedValue\":1},{\"functionName\":\"readPersons\",\"arguments\":[],\"expectedType\":\"json\",\"expectedValue\":[{\"uid\":\"SV01\",\"firstName\":\"An\",\"lastName\":\"Nguyen\"}]},{\"functionName\":\"removePerson\",\"arguments\":[\"SV01\"],\"expectedType\":\"int\",\"expectedValue\":1},{\"functionName\":\"readPersons\",\"arguments\":[],\"expectedType\":\"json\",\"expectedValue\":[]}]" }
+    "name": "SQLite CRUD trên database cô lập",
+    "description": "Starter khóa factory/path/reset để chạy headless; stepsJson thay bảng, record và expected mà không cần grading adapter.",
+    "skill_code": "STORAGE_SQLITE_CRUD",
+    "parameter_defaults": { "sourcePath": "lib/database/sqlite_contract.dart", "stepsJson": "[{\"functionName\":\"resetDatabase\",\"arguments\":[],\"expectedType\":\"null\",\"expectedValue\":null},{\"functionName\":\"insertRecord\",\"arguments\":[{\"id\":1,\"name\":\"A\"}],\"expectedType\":\"int\",\"expectedValue\":1},{\"functionName\":\"readRecords\",\"arguments\":[],\"expectedType\":\"json\",\"expectedValue\":[{\"id\":1,\"name\":\"A\"}]},{\"functionName\":\"updateRecord\",\"arguments\":[{\"id\":1,\"name\":\"B\"}],\"expectedType\":\"int\",\"expectedValue\":1},{\"functionName\":\"removeRecord\",\"arguments\":[1],\"expectedType\":\"int\",\"expectedValue\":1}]" }
   },
   {
     "template_id": "HYBRID_REUSE_DUPLICATE_ROWS_SEQUENCE",
@@ -522,11 +523,11 @@
   },
   {
     "template_id": "HYBRID_REUSE_STORAGE_CRUD_SEQUENCE",
-    "base_template_id": "HYBRID_STARTER_CALL_SEQUENCE",
-    "name": "Storage CRUD qua API public của starter",
-    "description": "Dùng cho SQLite, JSON file hoặc in-memory fake theo contract đề; đổi sourcePath, hàm, đối số và expected từng bước.",
+    "base_template_id": "HYBRID_CURRICULUM_PROCESS_PERSISTENCE",
+    "name": "Storage còn dữ liệu sau process reload",
+    "description": "Seed và verify chạy ở hai Flutter process; starter dùng GRADER_FIXTURE_ID để cùng mở đúng SQLite/JSON/preferences fixture cô lập.",
     "skill_code": "STORAGE_PERSISTENCE_SYNC",
-    "parameter_defaults": { "sourcePath": "lib/storage/item_store.dart", "stepsJson": "[{\"functionName\":\"resetStore\",\"arguments\":[],\"expectedType\":\"null\",\"expectedValue\":null},{\"functionName\":\"addItem\",\"arguments\":[{\"id\":1,\"name\":\"A\"}],\"expectedType\":\"int\",\"expectedValue\":1},{\"functionName\":\"readAll\",\"arguments\":[],\"expectedType\":\"json\",\"expectedValue\":[{\"id\":1,\"name\":\"A\"}]}]" }
+    "parameter_defaults": { "sourcePath": "lib/storage/item_store.dart", "fixtureNamespace": "item-persistence", "seedStepsJson": "[{\"functionName\":\"resetStore\",\"arguments\":[],\"expectedType\":\"null\",\"expectedValue\":null},{\"functionName\":\"addItem\",\"arguments\":[{\"id\":1,\"name\":\"A\"}],\"expectedType\":\"int\",\"expectedValue\":1}]", "verifyStepsJson": "[{\"functionName\":\"readAll\",\"arguments\":[],\"expectedType\":\"json\",\"expectedValue\":[{\"id\":1,\"name\":\"A\"}]}]" }
   },
   {
     "template_id": "HYBRID_REUSE_SESSION_SEQUENCE",
@@ -574,5 +575,306 @@
     "name": "Adaptive phone/tablet/desktop nhiều breakpoint",
     "skill_code": "RESPONSIVE_ADAPTIVE_NAV",
     "parameter_defaults": { "casesJson": "[{\"width\":390,\"height\":844,\"visibleKeys\":[\"nav.bottom\"],\"absentKeys\":[\"nav.rail\"]},{\"width\":800,\"height\":1100,\"visibleKeys\":[\"nav.rail\"],\"absentKeys\":[\"nav.bottom\"],\"gridKey\":\"list.grid\",\"crossAxisCount\":2},{\"width\":1280,\"height\":800,\"visibleKeys\":[\"nav.rail\"],\"absentKeys\":[\"nav.bottom\"],\"gridKey\":\"list.grid\",\"crossAxisCount\":3}]" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_DART_TYPES_RESULT",
+    "base_template_id": "HYBRID_COMMON_DIRECT_FUNCTION",
+    "name": "Biến, kiểu dữ liệu và collection trả kết quả đúng",
+    "description": "Gọi hàm public trong starter với dữ liệu JSON rồi so sánh kiểu/giá trị; thay đường dẫn, tên hàm, đối số và expected cho từng đề.",
+    "skill_code": "DART_VARIABLES_TYPES",
+    "parameter_defaults": { "functionPath": "lib/domain/exercise_contract.dart", "functionName": "summarizeValues", "argumentsJson": "[[1,2,3]]", "expectedType": "json", "expectedValue": "{\"count\":3,\"sum\":6}", "matchMode": "equals" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_NULL_SAFETY_RESULT",
+    "base_template_id": "HYBRID_COMMON_DIRECT_FUNCTION",
+    "name": "Null safety xử lý giá trị thiếu đúng contract",
+    "description": "Đầu vào null nằm trong argumentsJson và expected được cấu hình, không khóa domain hay cách cài đặt bên trong.",
+    "skill_code": "DART_NULL_SAFETY",
+    "parameter_defaults": { "functionPath": "lib/domain/exercise_contract.dart", "functionName": "displayValue", "argumentsJson": "[null]", "expectedType": "string", "expectedValue": "N/A", "matchMode": "equals" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_DART_FUNCTION_CASE",
+    "base_template_id": "HYBRID_COMMON_DIRECT_FUNCTION",
+    "name": "Hàm Dart trả đúng kết quả cho một test vector",
+    "description": "Một instance là một test vector; giảng viên có thể thêm nhiều instance cho cùng hàm để bao phủ nhánh và biên.",
+    "skill_code": "DART_FUNCTIONS",
+    "parameter_defaults": { "functionPath": "lib/domain/exercise_contract.dart", "functionName": "calculate", "argumentsJson": "[2,3]", "expectedType": "int", "expectedValue": "5", "matchMode": "equals" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_STATEFUL_WIDGET_CONTRACT",
+    "base_template_id": "HYBRID_TPL_SOURCE_REQUIRED_TERMS",
+    "name": "Widget dùng Stateless/Stateful đúng yêu cầu starter",
+    "description": "Giới hạn đúng file màn hình và các term bắt buộc/cấm; không ép toàn bộ ứng dụng dùng một loại widget.",
+    "skill_code": "PROJ_STATELESS_VS_STATEFUL",
+    "parameter_defaults": { "sourcePath": "lib/screens/feature_screen.dart", "requiredTerms": "StatefulWidget,setState", "forbiddenTerms": "" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_ROW_COLUMN_STRUCTURE",
+    "base_template_id": "HYBRID_COMMON_WIDGET_RELATIONSHIP",
+    "name": "Bố cục Container/Row/Column đúng quan hệ",
+    "description": "Key định vị vùng bố cục và các thành phần con; thay ancestorType, descendantTypes và trục để dùng cho giao diện khác.",
+    "skill_code": "UI_CONTAINER_ROW_COLUMN",
+    "parameter_defaults": { "ancestorKey": "layout.main", "ancestorType": "column", "descendantKeys": "field.primary,action.submit", "descendantTypes": "input,button", "orderedAxis": "vertical" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_TEXT_IMAGE_ICON_VISIBLE",
+    "base_template_id": "HYBRID_COMMON_WIDGET_VISIBLE",
+    "name": "Text/Image/Icon xuất hiện đúng vị trí",
+    "description": "Tạo một instance cho từng semantic Key và đổi targetType giữa text, image, icon; không dò theo thứ tự cây widget.",
+    "skill_code": "UI_TEXT_IMAGE_ICON",
+    "parameter_defaults": { "widgetKey": "content.primary", "targetType": "text" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_COLOR_SCHEME_CONTRACT",
+    "base_template_id": "HYBRID_CURRICULUM_PROJECT_FILES",
+    "name": "Theme khai báo ColorScheme theo contract",
+    "description": "Giảng viên đổi file và requiredTerms theo starter; đây là kiểm tra tĩnh nên có thể ghép thêm kiểm tra hiển thị bằng Key.",
+    "skill_code": "THEME_COLORS_COLORSCHEME",
+    "parameter_defaults": { "filesJson": "[{\"path\":\"lib/theme/app_theme.dart\",\"requiredTerms\":[\"ThemeData\",\"ColorScheme\"],\"forbiddenTerms\":[],\"minBytes\":40}]" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_TYPOGRAPHY_CONTRACT",
+    "base_template_id": "HYBRID_CURRICULUM_PROJECT_FILES",
+    "name": "Typography và font được cấu hình đúng file",
+    "description": "Có thể kiểm tra textTheme, fontFamily hoặc package font theo contract cụ thể của đề, không khóa Google Fonts.",
+    "skill_code": "THEME_TYPOGRAPHY_FONTS",
+    "parameter_defaults": { "filesJson": "[{\"path\":\"lib/theme/app_theme.dart\",\"requiredTerms\":[\"textTheme\"],\"forbiddenTerms\":[],\"minBytes\":40},{\"path\":\"pubspec.yaml\",\"requiredTerms\":[\"fonts:\"],\"forbiddenTerms\":[],\"minBytes\":40}]" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_INHERITED_WIDGET_VISIBLE",
+    "base_template_id": "HYBRID_COMMON_WIDGET_VISIBLE",
+    "name": "InheritedWidget tồn tại tại đúng Key",
+    "description": "Xác nhận runtime type tại semantic Key; state thay đổi nên ghép thêm mẫu reactive flow.",
+    "skill_code": "STATE_INHERITED_WIDGET",
+    "parameter_defaults": { "widgetKey": "state.scope", "targetType": "inheritedwidget" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_PROVIDER_WIRING",
+    "base_template_id": "HYBRID_TPL_SOURCE_REQUIRED_TERMS",
+    "name": "Provider được nối vào đúng màn hình",
+    "description": "requiredTerms có thể đổi giữa watch/read/select/Consumer theo contract starter; behavior chấm bằng reactive flow.",
+    "skill_code": "STATE_PROVIDER",
+    "parameter_defaults": { "sourcePath": "lib/screens/feature_screen.dart", "requiredTerms": "Provider,watch", "forbiddenTerms": "" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_BLOC_OR_OTHER_STATE_WIRING",
+    "base_template_id": "HYBRID_TPL_SOURCE_REQUIRED_TERMS",
+    "name": "BLoC/GetIt/Redux/MobX wiring theo starter",
+    "description": "Tên framework và API đều là tham số requiredTerms; mẫu không ép một thư viện state cố định cho mọi đề.",
+    "skill_code": "STATE_BLOC_OTHER",
+    "parameter_defaults": { "sourcePath": "lib/screens/feature_screen.dart", "requiredTerms": "BlocBuilder", "forbiddenTerms": "" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_IMMUTABLE_STATE_CONTRACT",
+    "base_template_id": "HYBRID_TPL_SOURCE_REQUIRED_TERMS",
+    "name": "State bất biến theo contract",
+    "description": "Đổi file và dấu hiệu const/final/copyWith theo model/state starter đang phát; không giả định tên domain.",
+    "skill_code": "STATE_IMMUTABLE",
+    "parameter_defaults": { "sourcePath": "lib/viewmodels/feature_state.dart", "requiredTerms": "final,copyWith", "forbiddenTerms": "" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_STACK_VISIBLE",
+    "base_template_id": "HYBRID_COMMON_WIDGET_VISIBLE",
+    "name": "Stack hoặc IndexedStack đúng vị trí",
+    "description": "Đổi targetType giữa stack và indexedstack, semantic Key vẫn quyết định đúng vùng cần chấm.",
+    "skill_code": "ADVUI_STACK_INDEXEDSTACK",
+    "parameter_defaults": { "widgetKey": "layout.stack", "targetType": "indexedstack" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_LAYOUT_BUILDER_VISIBLE",
+    "base_template_id": "HYBRID_COMMON_WIDGET_VISIBLE",
+    "name": "Expanded hoặc LayoutBuilder đúng vùng layout",
+    "description": "Tạo từng instance với targetType expanded/layoutbuilder và Key khác nhau nếu đề yêu cầu cả hai.",
+    "skill_code": "ADVUI_EXPANDED_LAYOUTBUILDER",
+    "parameter_defaults": { "widgetKey": "layout.responsive", "targetType": "layoutbuilder" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_CARD_CONTENT_STRUCTURE",
+    "base_template_id": "HYBRID_COMMON_WIDGET_RELATIONSHIP",
+    "name": "Card/Table chứa đúng nội dung theo Key",
+    "description": "Kiểm tra quan hệ thay vì index trong cây widget; có thể đổi ancestorType thành table và danh sách key con.",
+    "skill_code": "ADVUI_TABLE_CARD",
+    "parameter_defaults": { "ancestorKey": "item.card", "ancestorType": "card", "descendantKeys": "item.title,item.action", "descendantTypes": "text,button", "orderedAxis": "none" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_BOTTOM_SHEET_FLOW",
+    "base_template_id": "HYBRID_CURRICULUM_KEY_WORKFLOW",
+    "name": "Mở và đóng BottomSheet đúng luồng",
+    "skill_code": "ADVUI_BOTTOMSHEET",
+    "parameter_defaults": { "stepsJson": "[{\"type\":\"tap\",\"key\":\"action.open-sheet\"},{\"type\":\"expect_visible\",\"key\":\"sheet.main\"},{\"type\":\"tap\",\"key\":\"action.close-sheet\"},{\"type\":\"expect_absent\",\"key\":\"sheet.main\"}]" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_SLIVER_STRUCTURE",
+    "base_template_id": "HYBRID_COMMON_WIDGET_RELATIONSHIP",
+    "name": "CustomScrollView chứa đúng Sliver",
+    "description": "Key nằm trực tiếp trên CustomScrollView và Sliver cần chấm; không dựa vào vị trí index.",
+    "skill_code": "ADVUI_SLIVERS",
+    "parameter_defaults": { "ancestorKey": "scroll.main", "ancestorType": "customscrollview", "descendantKeys": "scroll.items", "descendantTypes": "sliverlist", "orderedAxis": "none" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_NAMED_ROUTE_CONTRACT",
+    "base_template_id": "HYBRID_CURRICULUM_PROJECT_FILES",
+    "name": "Named routes được khai báo trong app",
+    "description": "Đổi file và route literal theo starter; nên ghép thêm navigation flow để chứng minh route chạy được.",
+    "skill_code": "NAV_NAMED_ROUTES",
+    "parameter_defaults": { "filesJson": "[{\"path\":\"lib/main.dart\",\"requiredTerms\":[\"routes:\",\"/detail\"],\"forbiddenTerms\":[],\"minBytes\":80}]" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_ROUTER_PACKAGE_CONTRACT",
+    "base_template_id": "HYBRID_CURRICULUM_PROJECT_FILES",
+    "name": "GoRouter/AutoRoute theo contract đề",
+    "description": "Package, file router và terms được thay tự do theo starter; không buộc đề khác phải dùng cùng router.",
+    "skill_code": "NAV_GOROUTER_AUTOROUTE",
+    "parameter_defaults": { "filesJson": "[{\"path\":\"pubspec.yaml\",\"requiredTerms\":[\"go_router\"],\"forbiddenTerms\":[],\"minBytes\":40},{\"path\":\"lib/navigation/app_router.dart\",\"requiredTerms\":[\"GoRouter\"],\"forbiddenTerms\":[],\"minBytes\":40}]" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_BOTTOM_NAVIGATION_FLOW",
+    "base_template_id": "HYBRID_CURRICULUM_KEY_WORKFLOW",
+    "name": "Bottom navigation chuyển đúng tab",
+    "skill_code": "NAV_BOTTOM_NAVIGATION",
+    "parameter_defaults": { "stepsJson": "[{\"type\":\"expect_visible\",\"key\":\"tab.home.content\"},{\"type\":\"tap\",\"key\":\"tab.settings\"},{\"type\":\"expect_visible\",\"key\":\"tab.settings.content\"},{\"type\":\"expect_absent\",\"key\":\"tab.home.content\"}]" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_DEEP_LINK_CONTRACT",
+    "base_template_id": "HYBRID_CURRICULUM_PROJECT_FILES",
+    "name": "Deep link và custom scheme được cấu hình",
+    "description": "Static contract kiểm tra manifest/router; việc mở link thật cần integration/device test riêng.",
+    "skill_code": "NAV_DEEP_LINKING",
+    "parameter_defaults": { "filesJson": "[{\"path\":\"android/app/src/main/AndroidManifest.xml\",\"requiredTerms\":[\"android.intent.action.VIEW\",\"android:scheme\"],\"forbiddenTerms\":[],\"minBytes\":80},{\"path\":\"lib/navigation/app_router.dart\",\"requiredTerms\":[\"uri\"],\"forbiddenTerms\":[],\"minBytes\":40}]" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_IMPLICIT_ANIMATION_VISIBLE",
+    "base_template_id": "HYBRID_COMMON_WIDGET_VISIBLE",
+    "name": "Implicit animation tồn tại tại đúng Key",
+    "description": "Đổi targetType thành animatedcontainer hoặc animatedopacity; trạng thái đầu/cuối ghép bằng Key workflow.",
+    "skill_code": "ANIM_IMPLICIT",
+    "parameter_defaults": { "widgetKey": "animation.target", "targetType": "animatedcontainer" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_TWEEN_CONTRACT",
+    "base_template_id": "HYBRID_TPL_SOURCE_REQUIRED_TERMS",
+    "name": "Tween animation dùng đúng primitive",
+    "skill_code": "ANIM_TWEEN",
+    "parameter_defaults": { "sourcePath": "lib/widgets/animated_feature.dart", "requiredTerms": "Tween,animate", "forbiddenTerms": "" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_EXPLICIT_ANIMATION_CONTRACT",
+    "base_template_id": "HYBRID_TPL_SOURCE_REQUIRED_TERMS",
+    "name": "AnimationController được quản lý đúng vòng đời",
+    "description": "Giảng viên có thể yêu cầu initState/dispose/AnimatedBuilder trong đúng file widget của starter.",
+    "skill_code": "ANIM_EXPLICIT_CONTROLLER",
+    "parameter_defaults": { "sourcePath": "lib/widgets/animated_feature.dart", "requiredTerms": "AnimationController,initState,dispose", "forbiddenTerms": "" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_ANIMATION_PACKAGE_CONTRACT",
+    "base_template_id": "HYBRID_CURRICULUM_PROJECT_FILES",
+    "name": "Package animation và cách dùng theo đề",
+    "description": "Thay dependency và source terms theo flutter_animate hoặc package khác được đề cho phép.",
+    "skill_code": "ANIM_PACKAGES",
+    "parameter_defaults": { "filesJson": "[{\"path\":\"pubspec.yaml\",\"requiredTerms\":[\"flutter_animate\"],\"forbiddenTerms\":[],\"minBytes\":40},{\"path\":\"lib/widgets/animated_feature.dart\",\"requiredTerms\":[\"animate\"],\"forbiddenTerms\":[],\"minBytes\":40}]" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_FUTURE_BUILDER_VISIBLE",
+    "base_template_id": "HYBRID_COMMON_WIDGET_VISIBLE",
+    "name": "FutureBuilder nằm đúng vùng async",
+    "description": "Xác nhận runtime type bằng Key; các trạng thái loading/error/empty/data chấm riêng bằng Key workflow.",
+    "skill_code": "ASYNC_FUTUREBUILDER",
+    "parameter_defaults": { "widgetKey": "async.builder", "targetType": "futurebuilder" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_ISOLATE_CONTRACT",
+    "base_template_id": "HYBRID_TPL_SOURCE_REQUIRED_TERMS",
+    "name": "Tác vụ nặng sử dụng Isolate theo contract",
+    "description": "Static check đúng file và API Isolate.run/compute; kết quả nghiệp vụ nên ghép thêm direct function test.",
+    "skill_code": "ASYNC_ISOLATES",
+    "parameter_defaults": { "sourcePath": "lib/services/background_task.dart", "requiredTerms": "Isolate.run", "forbiddenTerms": "" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_FORM_STRUCTURE_REQUIRED",
+    "base_template_id": "HYBRID_COMMON_FORM_REQUIRED_FIELDS",
+    "name": "FormState và các trường bắt buộc theo Key",
+    "description": "Thay fieldKeys/submitKey/errorKeys cho mọi form; Key loại bỏ nhầm form khi màn hình có nhiều biểu mẫu.",
+    "skill_code": "FORM_STRUCTURE_VALIDATION",
+    "parameter_defaults": { "fieldKeys": "field.name,field.email", "fieldType": "input", "submitKey": "action.submit", "errorKeys": "error.name,error.email", "requireNewErrors": true }
+  },
+  {
+    "template_id": "HYBRID_REUSE_ASYNC_VALIDATION_FLOW",
+    "base_template_id": "HYBRID_CURRICULUM_KEY_WORKFLOW",
+    "name": "Async validation và chống submit lặp",
+    "description": "Workflow xác nhận loading, khóa nút và lỗi/kết quả sau fixture; không gọi mạng thật trong grader.",
+    "skill_code": "FORM_ASYNC_VALIDATION",
+    "parameter_defaults": { "stepsJson": "[{\"type\":\"enter_text\",\"key\":\"field.username\",\"value\":\"existing\"},{\"type\":\"tap\",\"key\":\"action.submit\",\"settle\":false},{\"type\":\"expect_enabled\",\"key\":\"action.submit\",\"expected\":false},{\"type\":\"expect_visible\",\"key\":\"state.validating\"},{\"type\":\"wait_for_visible\",\"key\":\"error.username-taken\",\"timeoutMs\":3000},{\"type\":\"expect_enabled\",\"key\":\"action.submit\",\"expected\":true}]" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_JSON_MODEL_MAPPING_RESULT",
+    "base_template_id": "HYBRID_COMMON_DIRECT_FUNCTION",
+    "name": "JSON mapping trả model đã chuẩn hóa",
+    "description": "Starter công bố hàm top-level nhận JSON và trả Map/List JSON-safe; thay fixture và expected cho domain khác.",
+    "skill_code": "API_JSON_MODEL",
+    "parameter_defaults": { "functionPath": "lib/models/entity.dart", "functionName": "normalizeEntityJson", "argumentsJson": "[{\"id\":1,\"name\":\"A\"}]", "expectedType": "json", "expectedValue": "{\"id\":1,\"name\":\"A\"}", "matchMode": "equals" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_API_SERVICE_CONTRACT",
+    "base_template_id": "HYBRID_TPL_SOURCE_SYMBOLS",
+    "name": "API service có public contract để inject fixture",
+    "description": "Kiểm tra class/service contract trong starter; behavior HTTP/JSON được ghép bằng direct function với response fixture.",
+    "skill_code": "API_SERVICE_LAYER",
+    "parameter_defaults": { "sourcePath": "lib/services/api_service.dart", "symbols": "ApiService", "symbolTypes": "class" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_SHARED_PREFERENCES_SEQUENCE",
+    "base_template_id": "HYBRID_STARTER_CALL_SEQUENCE",
+    "name": "SharedPreferences lưu, đọc và xóa key",
+    "description": "Starter cung cấp API public sử dụng instance đã inject/mock; sequence không truy cập plugin thật ngoài sandbox.",
+    "skill_code": "STORAGE_SHARED_PREFERENCES",
+    "parameter_defaults": { "sourcePath": "lib/storage/preferences_contract.dart", "stepsJson": "[{\"functionName\":\"resetPreferences\",\"arguments\":[],\"expectedType\":\"null\",\"expectedValue\":null},{\"functionName\":\"saveValue\",\"arguments\":[\"theme\",\"dark\"],\"expectedType\":\"null\",\"expectedValue\":null},{\"functionName\":\"readValue\",\"arguments\":[\"theme\"],\"expectedType\":\"string\",\"expectedValue\":\"dark\"},{\"functionName\":\"removeValue\",\"arguments\":[\"theme\"],\"expectedType\":\"bool\",\"expectedValue\":true}]" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_JSON_FILE_SEQUENCE",
+    "base_template_id": "HYBRID_STARTER_CALL_SEQUENCE",
+    "name": "JSON local file ghi, đọc và xóa dữ liệu",
+    "description": "Đường dẫn sandbox và reset API được khóa trong starter; giảng viên chỉ đổi dữ liệu/các bước expected.",
+    "skill_code": "STORAGE_JSON_FILE",
+    "parameter_defaults": { "sourcePath": "lib/storage/json_store_contract.dart", "stepsJson": "[{\"functionName\":\"resetStore\",\"arguments\":[],\"expectedType\":\"null\",\"expectedValue\":null},{\"functionName\":\"writeItems\",\"arguments\":[[{\"id\":1}]],\"expectedType\":\"null\",\"expectedValue\":null},{\"functionName\":\"readItems\",\"arguments\":[],\"expectedType\":\"json\",\"expectedValue\":[{\"id\":1}]},{\"functionName\":\"deleteStore\",\"arguments\":[],\"expectedType\":\"bool\",\"expectedValue\":true}]" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_FIREBASE_GOOGLE_STATIC_CONTRACT",
+    "base_template_id": "HYBRID_CURRICULUM_PROJECT_FILES",
+    "name": "Firebase/Google Sign-In static integration contract",
+    "description": "Chỉ chấm dependency/source/config có thể quan sát trong sandbox; đăng nhập thật vẫn cần emulator/device và tài khoản kiểm thử.",
+    "skill_code": "AUTH_FIREBASE_GOOGLE",
+    "parameter_defaults": { "filesJson": "[{\"path\":\"pubspec.yaml\",\"requiredTerms\":[\"firebase_auth\",\"google_sign_in\"],\"forbiddenTerms\":[],\"minBytes\":40},{\"path\":\"lib/auth/auth_service.dart\",\"requiredTerms\":[\"FirebaseAuth\",\"GoogleSignIn\"],\"forbiddenTerms\":[],\"minBytes\":60}]" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_UNIT_TEST_ARTIFACT",
+    "base_template_id": "HYBRID_CURRICULUM_PROJECT_FILES",
+    "name": "Unit test artifact có testcase thực",
+    "description": "Kiểm tra file test do đề chỉ định có group/test; pipeline vẫn phải chạy file này để chứng minh pass.",
+    "skill_code": "TEST_UNIT",
+    "parameter_defaults": { "filesJson": "[{\"path\":\"test/domain_test.dart\",\"requiredTerms\":[\"test(\",\"expect(\"],\"forbiddenTerms\":[\"skip: true\"],\"minBytes\":80}]" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_INTEGRATION_TEST_ARTIFACT",
+    "base_template_id": "HYBRID_CURRICULUM_PROJECT_FILES",
+    "name": "Integration/navigation test artifact có flow",
+    "description": "Kiểm tra file integration test có testWidgets và thao tác; execution thực tế thuộc pipeline Flutter integration_test.",
+    "skill_code": "TEST_INTEGRATION_NAV",
+    "parameter_defaults": { "filesJson": "[{\"path\":\"integration_test/app_flow_test.dart\",\"requiredTerms\":[\"testWidgets(\",\"tap(\",\"expect(\"],\"forbiddenTerms\":[\"skip: true\"],\"minBytes\":120}]" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_DEVTOOLS_EVIDENCE",
+    "base_template_id": "HYBRID_CURRICULUM_PROJECT_FILES",
+    "name": "Báo cáo DevTools có bằng chứng theo rubric",
+    "description": "Mẫu chỉ kiểm tra artifact văn bản trong test/; giảng viên vẫn duyệt ảnh/profile trace thủ công theo rubric.",
+    "skill_code": "DEBUG_DEVTOOLS",
+    "parameter_defaults": { "filesJson": "[{\"path\":\"test/devtools_report.md\",\"requiredTerms\":[\"Performance\",\"Memory\",\"kết luận\"],\"forbiddenTerms\":[],\"minBytes\":120}]" }
+  },
+  {
+    "template_id": "HYBRID_REUSE_LIST_IMAGE_PERFORMANCE_GUARD",
+    "base_template_id": "HYBRID_CURRICULUM_PROJECT_FILES",
+    "name": "List và image dùng primitive tối ưu",
+    "description": "Static guard cho ListView.builder, Key và asset/cache policy trong file cụ thể; số liệu jank/memory vẫn phải profile.",
+    "skill_code": "PERF_LIST_IMAGE",
+    "parameter_defaults": { "filesJson": "[{\"path\":\"lib/screens/list_screen.dart\",\"requiredTerms\":[\"ListView.builder\",\"Key\"],\"forbiddenTerms\":[\"Image.network('http\"],\"minBytes\":100}]" }
   }
 ]

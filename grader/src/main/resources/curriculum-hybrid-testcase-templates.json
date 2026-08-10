@@ -163,5 +163,29 @@
     "expected_template": "Giao diện phải thỏa toàn bộ breakpoint và bố cục trong casesJson mà không phát sinh overflow/exception.",
     "fixed_contract": false,
     "hybrid_target": "SEMANTIC_KEY"
+  },
+  {
+    "template_id": "HYBRID_CURRICULUM_PROCESS_PERSISTENCE",
+    "template_version": "curriculum-hybrid-v1",
+    "engine_type": "STARTER_KEY_HYBRID_V1",
+    "profile_id": "STARTER_KEY_HYBRID_V1",
+    "runner": "PROCESS_PERSISTENCE_SEQUENCE",
+    "skill_code": "STORAGE_PERSISTENCE_SYNC",
+    "layer": "REPOSITORY",
+    "testcase_group": "LOGIC",
+    "name": "Persistence qua hai Flutter process độc lập",
+    "description": "Process seed reset và ghi fixture; process verify mới chỉ đọc/đối chiếu đúng storage đó. Starter dùng GRADER_FIXTURE_ID để chọn path/database cô lập cho testcase, không dùng grading adapter hoặc singleton test giả.",
+    "difficulty": "advanced",
+    "weight_default": 3,
+    "parameters_schema": {
+      "sourcePath": "lib/storage/persistence_contract.dart",
+      "fixtureNamespace": "persistence-demo",
+      "seedStepsJson": "[{\"functionName\":\"resetStore\",\"arguments\":[],\"expectedType\":\"null\",\"expectedValue\":null},{\"functionName\":\"saveItem\",\"arguments\":[{\"id\":1,\"name\":\"A\"}],\"expectedType\":\"null\",\"expectedValue\":null}]",
+      "verifyStepsJson": "[{\"functionName\":\"readItems\",\"arguments\":[],\"expectedType\":\"json\",\"expectedValue\":[{\"id\":1,\"name\":\"A\"}]}]"
+    },
+    "contract_bindings": {"sourcePath": "storage.path"},
+    "expected_template": "Dữ liệu đã seed phải còn nguyên khi verify trong Flutter process mới với cùng fixture namespace.",
+    "fixed_contract": false,
+    "hybrid_target": "STARTER_CONTRACT"
   }
 ]

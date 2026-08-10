@@ -6,7 +6,9 @@ import org.junit.jupiter.api.io.TempDir;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.Map;
+import java.util.Set;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.lang.reflect.Field;
@@ -529,7 +531,7 @@ class TestcaseTemplateSuiteTest {
         assertTrue(!examTest.contains("_checkTemplateFormAction"),
                 "Hybrid UI phải dùng semantic Key, không ghép runner dò label/text");
         assertTrue(!examTest.contains("grading_adapter.dart"));
-        assertTrue(grader.contains("STARTER_KEY_HYBRID_V1-1.0.0"));
+        assertTrue(grader.contains("STARTER_KEY_HYBRID_V1-1.1.0"));
         assertTrue(!Files.exists(root.resolve("common_testcase_engine.dart")));
     }
 
@@ -592,6 +594,72 @@ class TestcaseTemplateSuiteTest {
     }
 
     @Test
+    void materializesAllCurriculumHybridRunnersWithoutBundlingUnusedEngineCode(@TempDir Path root)
+            throws Exception {
+        service.materializeEngine(root, "STARTER_KEY_HYBRID_V1", List.of(
+                Map.of("enabled", true, "instance_id", "FILES", "runner", "PROJECT_FILE_CONTRACT",
+                        "parameters", Map.of("filesJson",
+                                "[{\"path\":\"pubspec.yaml\",\"requiredTerms\":[\"flutter:\"],\"forbiddenTerms\":[],\"minBytes\":1}]")),
+                Map.of("enabled", true, "instance_id", "THROWS", "runner", "DIRECT_FUNCTION_THROWS",
+                        "parameters", Map.of("functionPath", "lib/domain/contracts.dart",
+                                "functionName", "parseOrThrow", "argumentsJson", "[\"bad\"]",
+                                "expectedException", "FormatException", "typeMatchMode", "equals",
+                                "messageContains", "invalid")),
+                Map.of("enabled", true, "instance_id", "STREAM", "runner", "DIRECT_STREAM_EVENTS",
+                        "parameters", Map.of("functionPath", "lib/domain/contracts.dart",
+                                "functionName", "events", "argumentsJson", "[]",
+                                "expectedEventsJson", "[1,2]", "timeoutMs", 1000)),
+                Map.of("enabled", true, "instance_id", "PROPERTY", "runner", "WIDGET_PROPERTY",
+                        "parameters", Map.of("targetKey", "field.password", "targetType", "input",
+                                "property", "obscureText", "expectedType", "bool",
+                                "expectedValue", "true", "matchMode", "equals", "tolerance", 0.001)),
+                Map.of("enabled", true, "instance_id", "WORKFLOW", "runner", "KEY_WORKFLOW",
+                        "parameters", Map.of("stepsJson",
+                                "[{\"type\":\"tap\",\"key\":\"action.load\"},{\"type\":\"expect_visible\",\"key\":\"state.loaded\"}]")),
+                Map.of("enabled", true, "instance_id", "FOCUS", "runner", "FORM_FOCUS_FLOW",
+                        "parameters", Map.of("fieldKeys", "field.name,field.email",
+                                "actions", "next,done", "dismissAfterLast", true, "resultKey", "")),
+                Map.of("enabled", true, "instance_id", "VIEWPORTS", "runner", "RESPONSIVE_LAYOUT_CASES",
+                        "parameters", Map.of("casesJson",
+                                "[{\"width\":390,\"height\":844,\"visibleKeys\":[\"nav.bottom\"],\"absentKeys\":[\"nav.rail\"]}]")),
+                Map.of("enabled", true, "instance_id", "PERSIST", "runner", "PROCESS_PERSISTENCE_SEQUENCE",
+                        "parameters", Map.of("sourcePath", "lib/storage/persistence_contract.dart",
+                                "fixtureNamespace", "audit-persistence",
+                                "seedStepsJson", "[{\"functionName\":\"resetStore\",\"arguments\":[],\"expectedType\":\"null\",\"expectedValue\":null},{\"functionName\":\"saveItem\",\"arguments\":[1],\"expectedType\":\"null\",\"expectedValue\":null}]",
+                                "verifyStepsJson", "[{\"functionName\":\"readCount\",\"arguments\":[],\"expectedType\":\"int\",\"expectedValue\":1}]"))));
+
+        String source = Files.readString(root.resolve("exam_test.dart"), StandardCharsets.UTF_8);
+        for (String id : List.of("FILES", "THROWS", "STREAM", "PROPERTY", "WORKFLOW", "FOCUS",
+                "VIEWPORTS", "PERSIST")) {
+            assertTrue(source.contains("testWidgets(\"" + id + "\""), "Thiếu testcase sinh ra: " + id);
+        }
+        for (String helper : List.of("_checkProjectFileContract", "_checkDirectFunctionThrows",
+                "_checkDirectStreamEvents", "_checkWidgetProperty", "_checkKeyWorkflow",
+                "_checkFormFocusFlow", "_checkResponsiveLayoutCases",
+                "_checkProcessPersistenceSequence")) {
+            assertTrue(source.contains(helper), "Thiếu helper runner: " + helper);
+        }
+        assertTrue(source.contains("import '../lib/domain/contracts.dart' as direct_0;"));
+        assertTrue(source.contains("case 'lib/domain/contracts.dart::parseOrThrow':"));
+        assertTrue(source.contains("case 'lib/domain/contracts.dart::events':"));
+        assertTrue(source.contains("case 'lib/storage/persistence_contract.dart::resetStore':"));
+        assertTrue(source.contains("case 'lib/storage/persistence_contract.dart::saveItem':"));
+        assertTrue(source.contains("case 'lib/storage/persistence_contract.dart::readCount':"));
+        assertTrue(!source.contains("_checkWidgetTextStyle"),
+                "Runner không chọn không được ghép vào exam_test.dart");
+        assertTrue(!source.contains("grading_adapter.dart"));
+        assertTrue(!Files.exists(root.resolve("common_testcase_engine.dart")));
+        String grader = Files.readString(root.resolve("grader.dart"), StandardCharsets.UTF_8);
+        assertTrue(grader.contains("GRADER_PERSISTENCE_PHASE"));
+        assertTrue(grader.contains("GRADER_FIXTURE_ID"));
+        assertTrue(grader.contains("'${configuredNamespace}_$id'"),
+                "Fixture persistence phải được cô lập theo từng instance testcase");
+        assertTrue(grader.contains("Pha seed persistence thất bại"));
+        assertTrue(!grader.contains("_runFlutter('direct'"),
+                "Direct testcase phải chạy process riêng theo case ID");
+    }
+
+    @Test
     void hybridLibraryContainsOnlyStarterLogicAndKeyUiBlueprints(@TempDir Path root) throws Exception {
         SyllabusService syllabus = mock(SyllabusService.class);
         when(syllabus.skills()).thenReturn(List.of());
@@ -603,12 +671,13 @@ class TestcaseTemplateSuiteTest {
                 .filter(row -> "STARTER_KEY_HYBRID_V1".equals(row.get("engine_type")))
                 .toList();
 
-        assertEquals(128, hybrid.size());
-        assertEquals(84, hybrid.stream()
+        assertEquals(167, hybrid.size());
+        assertEquals(122, hybrid.stream()
                 .filter(row -> String.valueOf(row.get("template_id")).startsWith("HYBRID_REUSE_"))
                 .count());
         assertTrue(hybrid.stream().anyMatch(row -> "DIRECT_FUNCTION".equals(row.get("runner"))));
         assertTrue(hybrid.stream().anyMatch(row -> "STARTER_CALL_SEQUENCE".equals(row.get("runner"))));
+        assertTrue(hybrid.stream().anyMatch(row -> "PROCESS_PERSISTENCE_SEQUENCE".equals(row.get("runner"))));
         assertTrue(hybrid.stream().noneMatch(row -> String.valueOf(row.get("template_id"))
                 .contains("GRADING_ADAPTER")));
         assertTrue(hybrid.stream().noneMatch(row -> "TEMPLATE_FORM_ACTION".equals(row.get("runner"))));
@@ -616,6 +685,132 @@ class TestcaseTemplateSuiteTest {
                 && "STARTER_CONTRACT".equals(row.get("hybrid_target"))));
         assertTrue(hybrid.stream().anyMatch(row -> "FORM_SUBMIT".equals(row.get("runner"))
                 && "SEMANTIC_KEY".equals(row.get("hybrid_target"))));
+    }
+
+    @Test
+    void everySyllabusSkillHasAReusableHybridBlueprintAndEveryDefaultIsValid(@TempDir Path root)
+            throws Exception {
+        SyllabusService syllabus = mock(SyllabusService.class);
+        when(syllabus.skills()).thenReturn(List.of());
+        setField(service, "syllabusService", syllabus);
+        setField(service, "examsDirectory", root.toString());
+        service.loadTemplates();
+
+        List<Map<String, Object>> hybrid = service.listTemplates(null, null, null).stream()
+                .filter(row -> "STARTER_KEY_HYBRID_V1".equals(row.get("engine_type")))
+                .toList();
+        Map<String, Object> syllabusJson = new ObjectMapper().readValue(
+                new ClassPathResource("syllabus.json").getInputStream(),
+                new TypeReference<Map<String, Object>>() {});
+        Set<String> requiredSkills = new LinkedHashSet<>();
+        for (Object raw : (List<?>) syllabusJson.get("skills")) {
+            if (raw instanceof Map<?, ?> skill) requiredSkills.add(String.valueOf(skill.get("code")));
+        }
+        Set<String> coveredSkills = new LinkedHashSet<>();
+        int index = 0;
+        for (Map<String, Object> row : hybrid) {
+            coveredSkills.add(String.valueOf(row.get("skill_code")));
+
+            Map<String, Object> instance = new LinkedHashMap<>(row);
+            instance.put("instance_id", "AUDIT_" + (++index));
+            instance.put("enabled", true);
+            instance.put("weight", row.getOrDefault("weight_default", 1));
+            instance.put("parameters", row.getOrDefault("parameters_schema", Map.of()));
+            try {
+                service.toSkillsMatrix(List.of(instance), "STARTER_KEY_HYBRID_V1", Map.of());
+            } catch (IllegalArgumentException exception) {
+                throw new AssertionError("Invalid reusable hybrid blueprint: "
+                        + row.get("template_id") + " - " + exception.getMessage(), exception);
+            }
+        }
+        Set<String> missing = new LinkedHashSet<>(requiredSkills);
+        missing.removeAll(coveredSkills);
+        assertEquals(Set.of(), missing,
+                "Mọi skill trong syllabus phải có ít nhất một blueprint hybrid tái sử dụng");
+    }
+
+    @Test
+    void curriculumCoverageManifestIncludesAllModulesLabsSkillsAndKnownTemplates() throws Exception {
+        ObjectMapper mapper = new ObjectMapper();
+        Map<String, Object> syllabusJson = mapper.readValue(
+                new ClassPathResource("syllabus.json").getInputStream(),
+                new TypeReference<Map<String, Object>>() {});
+        Map<String, Object> coverage = mapper.readValue(
+                new ClassPathResource("prm393-curriculum-testcase-coverage.json").getInputStream(),
+                new TypeReference<Map<String, Object>>() {});
+        List<Map<String, Object>> catalog = mapper.readValue(
+                new ClassPathResource("hybrid-reusable-testcase-catalog.json").getInputStream(),
+                new TypeReference<List<Map<String, Object>>>() {});
+
+        assertEquals("STARTER_KEY_HYBRID_V1", coverage.get("engine_type"));
+        assertEquals(List.of("exam_test.dart", "skills_matrix.json", "grader.dart"),
+                coverage.get("artifact_contract"));
+
+        Set<String> syllabusSkills = new LinkedHashSet<>();
+        for (Object raw : (List<?>) syllabusJson.get("skills")) {
+            if (raw instanceof Map<?, ?> skill) syllabusSkills.add(String.valueOf(skill.get("code")));
+        }
+        Set<String> knownTemplateIds = new LinkedHashSet<>();
+        for (Map<String, Object> template : catalog) {
+            knownTemplateIds.add(String.valueOf(template.get("template_id")));
+        }
+
+        List<?> modules = (List<?>) coverage.get("modules");
+        assertEquals(12, modules.size());
+        Set<String> moduleIds = new LinkedHashSet<>();
+        Set<String> labs = new LinkedHashSet<>();
+        Set<String> coveredSkills = new LinkedHashSet<>();
+        Set<String> recommendedTemplates = new LinkedHashSet<>();
+        for (Object raw : modules) {
+            Map<?, ?> module = (Map<?, ?>) raw;
+            moduleIds.add(String.valueOf(module.get("id")));
+            for (Object lab : (List<?>) module.get("labs")) labs.add(String.valueOf(lab));
+            for (Object skill : (List<?>) module.get("skill_codes")) coveredSkills.add(String.valueOf(skill));
+            for (Object template : (List<?>) module.get("recommended_template_ids")) {
+                recommendedTemplates.add(String.valueOf(template));
+            }
+        }
+        assertEquals(12, moduleIds.size());
+        assertEquals(13, labs.size());
+        assertEquals(syllabusSkills, coveredSkills,
+                "Coverage Module/Lab phải khớp chính xác toàn bộ syllabus, không thiếu hoặc bịa skill");
+        assertTrue(knownTemplateIds.containsAll(recommendedTemplates),
+                "Mọi template được tài liệu khuyến nghị phải tồn tại trong reusable catalog");
+        assertTrue(String.valueOf(coverage.get("principles")).contains("không dùng grading adapter"));
+    }
+
+    @Test
+    void rejectsUnsafeOrAmbiguousCurriculumRunnerParameters() {
+        assertThrows(IllegalArgumentException.class, () -> service.toSkillsMatrix(List.of(
+                Map.of("instance_id", "BAD_PROPERTY", "runner", "WIDGET_PROPERTY",
+                        "parameters", Map.of("targetKey", "field.name", "targetType", "input",
+                                "property", "executeCode", "expectedType", "string",
+                                "expectedValue", "x", "matchMode", "equals", "tolerance", 0))),
+                "STARTER_KEY_HYBRID_V1", Map.of()));
+        assertThrows(IllegalArgumentException.class, () -> service.toSkillsMatrix(List.of(
+                Map.of("instance_id", "BAD_WORKFLOW", "runner", "KEY_WORKFLOW",
+                        "parameters", Map.of("stepsJson",
+                                "[{\"type\":\"tap\",\"key\":\"not a semantic key\"}]"))),
+                "STARTER_KEY_HYBRID_V1", Map.of()));
+        assertThrows(IllegalArgumentException.class, () -> service.toSkillsMatrix(List.of(
+                Map.of("instance_id", "BAD_FILE", "runner", "PROJECT_FILE_CONTRACT",
+                        "parameters", Map.of("filesJson",
+                                "[{\"path\":\"../secret.txt\",\"requiredTerms\":[],\"forbiddenTerms\":[]}]"))),
+                "STARTER_KEY_HYBRID_V1", Map.of()));
+        assertThrows(IllegalArgumentException.class, () -> service.toSkillsMatrix(List.of(
+                Map.of("instance_id", "BAD_PERSIST", "runner", "PROCESS_PERSISTENCE_SEQUENCE",
+                        "parameters", Map.of("sourcePath", "lib/storage/store.dart",
+                                "fixtureNamespace", "same fixture with spaces",
+                                "seedStepsJson", "[{\"functionName\":\"seed\",\"arguments\":[],\"expectedType\":\"null\",\"expectedValue\":null}]",
+                                "verifyStepsJson", "[]"))),
+                "STARTER_KEY_HYBRID_V1", Map.of()));
+        assertThrows(IllegalArgumentException.class, () -> service.toSkillsMatrix(List.of(
+                Map.of("instance_id", "BAD_ADAPTER_PERSIST", "runner", "PROCESS_PERSISTENCE_SEQUENCE",
+                        "parameters", Map.of("sourcePath", "lib/grading/grading_adapter.dart",
+                                "fixtureNamespace", "fixture",
+                                "seedStepsJson", "[{\"functionName\":\"seed\",\"arguments\":[],\"expectedType\":\"null\",\"expectedValue\":null}]",
+                                "verifyStepsJson", "[{\"functionName\":\"verify\",\"arguments\":[],\"expectedType\":\"bool\",\"expectedValue\":true}]"))),
+                "STARTER_KEY_HYBRID_V1", Map.of()));
     }
 
     @Test

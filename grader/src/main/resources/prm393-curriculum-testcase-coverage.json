@@ -1,0 +1,131 @@
+{
+  "version": "2026.1",
+  "source_archive": "PRM393_Hoc lieu (1).zip",
+  "engine_type": "STARTER_KEY_HYBRID_V1",
+  "artifact_contract": ["exam_test.dart", "skills_matrix.json", "grader.dart"],
+  "principles": [
+    "Logic, model, storage và service được chấm qua public contract có sẵn trong starter; không dùng grading adapter.",
+    "Widget và behavior được định vị bằng semantic ValueKey do starter phát, không dựa vào index hoặc text toàn màn hình.",
+    "Mọi dữ liệu, file, hàm, Key, expected, timeout và viewport đặc thù đề phải nằm trong parameters của testcase instance.",
+    "Tích hợp mạng, Firebase, notification, DevTools và release chỉ tự động hóa phần deterministic; phần phụ thuộc thiết bị/tài khoản/profile được ghi rõ là manual hoặc pipeline evidence."
+  ],
+  "modules": [
+    {
+      "id": "M1",
+      "title": "Introduction to Flutter and project setup",
+      "slide": "Slides/Module1_Introduction_to_Flutter.md",
+      "labs": ["Lab/Lab 1_Setting Up Flutter and Running Your First App.md"],
+      "skill_codes": ["PROJ_PUBSPEC_DEPENDENCIES", "PROJ_FOLDER_STRUCTURE", "PROJ_STATELESS_VS_STATEFUL"],
+      "recommended_template_ids": ["HYBRID_REUSE_PROJECT_DEPENDENCIES", "HYBRID_REUSE_CONTRACT_SCREEN_SYMBOLS", "HYBRID_REUSE_STATEFUL_WIDGET_CONTRACT"],
+      "verification": "static contract plus app boot"
+    },
+    {
+      "id": "M2",
+      "title": "Dart essentials",
+      "slide": "Slides/Module2_Dart_Essentials.md",
+      "labs": ["Lab/Lab 2_Dart Essentials Practice Lab.md"],
+      "skill_codes": ["DART_VARIABLES_TYPES", "DART_NULL_SAFETY", "DART_CONTROL_FLOW", "DART_FUNCTIONS", "DART_CLASSES_OOP"],
+      "recommended_template_ids": ["HYBRID_REUSE_DART_TYPES_RESULT", "HYBRID_REUSE_NULL_SAFETY_RESULT", "HYBRID_REUSE_DART_FUNCTION_CASE", "HYBRID_REUSE_FUNCTION_BOUNDARY_CASE"],
+      "verification": "direct public function test vectors"
+    },
+    {
+      "id": "M3",
+      "title": "Advanced Dart, asynchronous programming and streams",
+      "slide": "Slides/Module3_Advanced_Dart.md",
+      "labs": ["Lab/Lab 3_Advanced Dart Practice Exercises.md"],
+      "skill_codes": ["DART_ENUMS_MIXINS_EXT", "DART_EXCEPTIONS", "ASYNC_FUTURE_ASYNC_AWAIT", "ASYNC_EVENT_LOOP", "ASYNC_STREAMS_STREAMBUILDER", "ASYNC_ISOLATES"],
+      "recommended_template_ids": ["HYBRID_REUSE_OOP_PATTERN_TERMS", "HYBRID_REUSE_EXCEPTION_RULE", "HYBRID_REUSE_ASYNC_FUNCTION_RESULT", "HYBRID_REUSE_EVENT_LOOP_ORDER", "HYBRID_REUSE_STREAM_SEQUENCE", "HYBRID_REUSE_ISOLATE_CONTRACT"],
+      "verification": "direct result, exception, ordered stream and scoped source contract"
+    },
+    {
+      "id": "M4",
+      "title": "Flutter UI fundamentals",
+      "slide": "Slides/Module4_Flutter UI Fundamentals.md",
+      "labs": ["Lab/Lab 4_Flutter UI Fundamentals.md"],
+      "skill_codes": ["UI_SCAFFOLD_APPBAR", "UI_CONTAINER_ROW_COLUMN", "UI_TEXT_IMAGE_ICON", "UI_BUTTONS_SELECTION", "UI_TEXT_INPUT", "UI_DRAWER_SNACKBAR", "THEME_COLORS_COLORSCHEME", "THEME_TYPOGRAPHY_FONTS", "THEME_LIGHT_DARK", "ADVUI_LISTVIEW", "ADVUI_GRIDVIEW", "ADVUI_STACK_INDEXEDSTACK", "ADVUI_EXPANDED_LAYOUTBUILDER", "ADVUI_TABLE_CARD", "ADVUI_BOTTOMSHEET", "ADVUI_SLIVERS"],
+      "recommended_template_ids": ["HYBRID_REUSE_HOME_ROOT", "HYBRID_REUSE_ROW_COLUMN_STRUCTURE", "HYBRID_REUSE_TEXT_IMAGE_ICON_VISIBLE", "HYBRID_REUSE_SELECTION_VALUE", "HYBRID_REUSE_SNACKBAR_FEEDBACK", "HYBRID_REUSE_THEME_MODE", "HYBRID_REUSE_LIST_MULTIPLE_ITEMS", "HYBRID_REUSE_GRID_COLUMN_COUNT", "HYBRID_REUSE_STACK_VISIBLE", "HYBRID_REUSE_LAYOUT_BUILDER_VISIBLE", "HYBRID_REUSE_CARD_CONTENT_STRUCTURE", "HYBRID_REUSE_BOTTOM_SHEET_FLOW", "HYBRID_REUSE_SLIVER_STRUCTURE"],
+      "verification": "semantic Key, runtime widget type, property and relationship"
+    },
+    {
+      "id": "M5",
+      "title": "Navigation, state management and animation",
+      "slide": "Slides/Module5_Navigation & State Management in Flutter.md",
+      "labs": ["Lab/LAB 5_Building A Movie Detail App With Navigation.md"],
+      "skill_codes": ["STATE_SETSTATE_STATEFUL", "STATE_INHERITED_WIDGET", "STATE_PROVIDER", "STATE_RIVERPOD", "STATE_BLOC_OTHER", "STATE_IMMUTABLE", "NAV_NAVIGATOR_PUSH_POP", "NAV_NAMED_ROUTES", "NAV_GOROUTER_AUTOROUTE", "NAV_BOTTOM_NAVIGATION", "NAV_DEEP_LINKING", "ANIM_IMPLICIT", "ANIM_TWEEN", "ANIM_EXPLICIT_CONTROLLER", "ANIM_HERO", "ANIM_PACKAGES"],
+      "recommended_template_ids": ["HYBRID_REUSE_SELECTION_REACTIVE_FLOW", "HYBRID_REUSE_INHERITED_WIDGET_VISIBLE", "HYBRID_REUSE_PROVIDER_WIRING", "HYBRID_REUSE_BLOC_OR_OTHER_STATE_WIRING", "HYBRID_REUSE_IMMUTABLE_STATE_CONTRACT", "HYBRID_REUSE_NAVIGATION_DATA_TRANSFER", "HYBRID_REUSE_NAMED_ROUTE_CONTRACT", "HYBRID_REUSE_ROUTER_PACKAGE_CONTRACT", "HYBRID_REUSE_BOTTOM_NAVIGATION_FLOW", "HYBRID_REUSE_DEEP_LINK_CONTRACT", "HYBRID_REUSE_IMPLICIT_ANIMATION_VISIBLE", "HYBRID_REUSE_EXPLICIT_ANIMATION_CONTRACT", "HYBRID_REUSE_HERO_TAG"],
+      "verification": "keyed state/navigation workflow plus scoped source contract"
+    },
+    {
+      "id": "M6",
+      "title": "Responsive UI and adaptive layouts",
+      "slide": "Slides/Module6_Responsive Ui & Adaptive Layouts.md",
+      "labs": ["Lab/Lab 6_Building a Responsive Movie Genre Browsing Screen.md"],
+      "skill_codes": ["RESPONSIVE_BREAKPOINTS", "RESPONSIVE_ADAPTIVE_NAV"],
+      "recommended_template_ids": ["HYBRID_REUSE_RESPONSIVE_NO_OVERFLOW", "HYBRID_REUSE_ADAPTIVE_BREAKPOINTS", "HYBRID_REUSE_PHONE_ONE_COLUMN", "HYBRID_REUSE_TABLET_ROW"],
+      "verification": "multiple explicit viewport cases with visible/absent keys and grid/layout expectations"
+    },
+    {
+      "id": "M7",
+      "title": "Forms, validation and keyboard UX",
+      "slide": "Slides/Module7_Forms and Validation.md",
+      "labs": ["Lab/Lab 7_Building a Signup Form with Validation & Good UX.md"],
+      "skill_codes": ["FORM_STRUCTURE_VALIDATION", "FORM_FOCUS_KEYBOARD", "FORM_ASYNC_VALIDATION"],
+      "recommended_template_ids": ["HYBRID_REUSE_FORM_STRUCTURE_REQUIRED", "HYBRID_REUSE_FORMAT_VALIDATION", "HYBRID_REUSE_BOUNDARY_VALIDATION", "HYBRID_REUSE_CROSS_FIELD_VALIDATION", "HYBRID_REUSE_FORM_FOCUS_SEQUENCE", "HYBRID_REUSE_ASYNC_VALIDATION_FLOW"],
+      "verification": "keyed fields/errors, data vectors, focus sequence and deterministic async fixture"
+    },
+    {
+      "id": "M8",
+      "title": "RESTful APIs and JSON",
+      "slide": "Slides/Module8_Working with RESTful APIs & JSON in Flutter.md",
+      "labs": ["Lab/LAB 8_Building an API-powered List Screen.md", "Lab/Lab 8B_Practical REST API Integration Turning API Data into Useful Apps.md"],
+      "skill_codes": ["ASYNC_FUTUREBUILDER", "API_HTTP_REST", "API_JSON_MODEL", "API_ASYNC_STATES", "API_SERVICE_LAYER"],
+      "recommended_template_ids": ["HYBRID_REUSE_FUTURE_BUILDER_VISIBLE", "HYBRID_REUSE_API_FIXTURE_RESULT", "HYBRID_REUSE_JSON_MODEL_MAPPING_RESULT", "HYBRID_REUSE_ASYNC_LOADING_SUCCESS", "HYBRID_REUSE_ASYNC_ERROR_RETRY", "HYBRID_REUSE_API_SERVICE_CONTRACT"],
+      "verification": "injected response fixtures only; no live internet dependency"
+    },
+    {
+      "id": "M9",
+      "title": "Local storage and persistence",
+      "slide": "Slides/Module9_Local Storage & Persistence in Flutter.md",
+      "labs": ["Lab/LAB 9_Working With Local JSON Storage.md"],
+      "skill_codes": ["STORAGE_SHARED_PREFERENCES", "STORAGE_JSON_FILE", "STORAGE_SQLITE_CRUD", "STORAGE_PERSISTENCE_SYNC"],
+      "recommended_template_ids": ["HYBRID_REUSE_SHARED_PREFERENCES_SEQUENCE", "HYBRID_REUSE_JSON_FILE_SEQUENCE", "HYBRID_REUSE_SQLITE_SCHEMA", "HYBRID_REUSE_SQLITE_CRUD_SEQUENCE", "HYBRID_REUSE_STORAGE_CRUD_SEQUENCE"],
+      "verification": "starter-owned isolated storage fixture and public call sequence",
+      "manual_limit": "Use PROCESS_PERSISTENCE_SEQUENCE and a starter storage path derived from GRADER_FIXTURE_ID; a same-process STARTER_CALL_SEQUENCE alone must not be reported as restart persistence."
+    },
+    {
+      "id": "M10",
+      "title": "Authentication, sessions and notifications",
+      "slide": "Slides/Module10_Authentication, Session Management & Notifications.md",
+      "labs": ["Lab/LAB 10_Authentication, Session Management & Notifications.md"],
+      "skill_codes": ["AUTH_LOGIN_SIGNUP", "AUTH_TOKEN_SESSION", "AUTH_FIREBASE_GOOGLE", "NOTIFICATION_LOCAL"],
+      "recommended_template_ids": ["HYBRID_REUSE_AUTH_UI_FLOW", "HYBRID_REUSE_SESSION_SEQUENCE", "HYBRID_REUSE_FIREBASE_GOOGLE_STATIC_CONTRACT", "HYBRID_REUSE_NOTIFICATION_CONTRACT"],
+      "verification": "fixture-based auth/session plus static integration contract",
+      "manual_limit": "Real Google/Firebase accounts and OS notification display require emulator/device evidence."
+    },
+    {
+      "id": "M11",
+      "title": "Testing and debugging",
+      "slide": "Slides/Module11_Testing & Debugging in Flutter.md",
+      "labs": ["Lab/LAB 11_Testing & Debugging In Flutter (Taskly App).md"],
+      "skill_codes": ["TEST_UNIT", "TEST_WIDGET", "TEST_INTEGRATION_NAV", "DEBUG_DEVTOOLS"],
+      "recommended_template_ids": ["HYBRID_REUSE_UNIT_TEST_ARTIFACT", "HYBRID_REUSE_PROJECT_TEST_FILES", "HYBRID_REUSE_INTEGRATION_TEST_ARTIFACT", "HYBRID_REUSE_DEVTOOLS_EVIDENCE"],
+      "verification": "artifact contract and pipeline execution",
+      "manual_limit": "DevTools screenshots/traces need rubric review; source-term presence is not proof of debugging quality."
+    },
+    {
+      "id": "M12",
+      "title": "Performance optimization and deployment",
+      "slide": "Slides/Module12_Performance Optimization & App Deployment.md",
+      "labs": ["Lab/LAB 12_Performance Optimization & App Deployment.md"],
+      "skill_codes": ["PERF_REBUILDS", "PERF_LIST_IMAGE", "DEPLOY_SIZE_RELEASE"],
+      "recommended_template_ids": ["HYBRID_REUSE_PERFORMANCE_SOURCE_GUARD", "HYBRID_REUSE_LIST_IMAGE_PERFORMANCE_GUARD", "HYBRID_REUSE_RELEASE_CONFIGURATION"],
+      "verification": "static guard plus profile/build pipeline evidence",
+      "manual_limit": "Jank, memory, APK/AAB size and signing cannot be inferred only from source code."
+    }
+  ],
+  "project": {
+    "source": "PRM393_Project.md",
+    "covered_modules": ["M1", "M2", "M3", "M4", "M5", "M6", "M7", "M8", "M9", "M10", "M11", "M12"],
+    "note": "Chọn testcase theo yêu cầu thật của từng đề; không nạp toàn bộ catalogue vào một đề."
+  }
+}

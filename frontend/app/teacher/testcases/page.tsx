@@ -188,6 +188,7 @@ const RUNNER_LABEL: Record<string, string> = {
   DIRECT_FUNCTION_THROWS: "Kiểm tra hàm ném exception",
   DIRECT_STREAM_EVENTS: "Kiểm tra chuỗi event của Stream",
   STARTER_CALL_SEQUENCE: "Chạy chuỗi API nghiệp vụ starter",
+  PROCESS_PERSISTENCE_SEQUENCE: "Kiểm tra persistence qua process mới",
   GROUP: "Nhóm testcase",
 };
 
@@ -199,20 +200,53 @@ const ENGINE_LABEL: Record<string, string> = {
 };
 
 const SKILL_LABEL: Record<string, string> = {
+  DART_VARIABLES_TYPES: "Biến, kiểu dữ liệu và collection Dart",
+  DART_NULL_SAFETY: "Null safety",
+  DART_CONTROL_FLOW: "Rẽ nhánh và vòng lặp Dart",
+  DART_FUNCTIONS: "Hàm Dart",
+  DART_CLASSES_OOP: "Lớp và đối tượng trong Dart",
+  DART_ENUMS_MIXINS_EXT: "Enum, mixin và extension",
+  DART_EXCEPTIONS: "Ngoại lệ và xử lý lỗi",
+  PROJ_PUBSPEC_DEPENDENCIES: "pubspec và dependency",
+  PROJ_FOLDER_STRUCTURE: "Cấu trúc dự án",
+  PROJ_STATELESS_VS_STATEFUL: "StatelessWidget và StatefulWidget",
   UI_SCAFFOLD_APPBAR: "Khung ứng dụng, thanh tiêu đề và thanh điều hướng",
-  UI_TEXT_INPUT: "Ô nhập dữ liệu và biểu mẫu",
-  UI_BUTTONS_SELECTION: "Nút bấm và lựa chọn",
   UI_CONTAINER_ROW_COLUMN: "Bố cục Container, Row và Column",
   UI_TEXT_IMAGE_ICON: "Chữ, hình ảnh và biểu tượng",
+  UI_BUTTONS_SELECTION: "Nút bấm và lựa chọn",
+  UI_TEXT_INPUT: "Ô nhập dữ liệu và biểu mẫu",
+  UI_DRAWER_SNACKBAR: "Drawer và Snackbar",
+  THEME_COLORS_COLORSCHEME: "Màu sắc và ColorScheme",
+  THEME_TYPOGRAPHY_FONTS: "Typography và font",
+  THEME_LIGHT_DARK: "Theme sáng/tối",
+  STATE_SETSTATE_STATEFUL: "Cập nhật trạng thái bằng setState",
+  STATE_INHERITED_WIDGET: "InheritedWidget",
+  STATE_PROVIDER: "Provider",
+  STATE_RIVERPOD: "Quản lý trạng thái bằng Riverpod",
+  STATE_BLOC_OTHER: "BLoC và thư viện state khác",
+  STATE_IMMUTABLE: "State bất biến",
   ADVUI_LISTVIEW: "Danh sách cuộn",
   ADVUI_GRIDVIEW: "Lưới và bố cục nhiều cột",
+  ADVUI_STACK_INDEXEDSTACK: "Stack và IndexedStack",
   ADVUI_EXPANDED_LAYOUTBUILDER: "Bố cục co giãn theo kích thước màn hình",
+  ADVUI_TABLE_CARD: "Table và Card",
+  ADVUI_BOTTOMSHEET: "BottomSheet",
+  ADVUI_SLIVERS: "Sliver và CustomScrollView",
   NAV_NAVIGATOR_PUSH_POP: "Mở màn hình và quay lại",
-  STATE_SETSTATE_STATEFUL: "Cập nhật trạng thái bằng setState",
-  STATE_RIVERPOD: "Quản lý trạng thái bằng Riverpod",
-  DART_CLASSES_OOP: "Lớp và đối tượng trong Dart",
+  NAV_NAMED_ROUTES: "Named routes",
+  NAV_GOROUTER_AUTOROUTE: "GoRouter và AutoRoute",
+  NAV_BOTTOM_NAVIGATION: "Bottom navigation",
+  NAV_DEEP_LINKING: "Deep linking",
+  ANIM_IMPLICIT: "Implicit animation",
+  ANIM_TWEEN: "Tween animation",
+  ANIM_EXPLICIT_CONTROLLER: "AnimationController",
+  ANIM_HERO: "Hero animation",
+  ANIM_PACKAGES: "Package animation",
   ASYNC_FUTURE_ASYNC_AWAIT: "Tác vụ bất đồng bộ",
+  ASYNC_EVENT_LOOP: "Event loop và microtask",
+  ASYNC_FUTUREBUILDER: "FutureBuilder và AsyncSnapshot",
   ASYNC_STREAMS_STREAMBUILDER: "Luồng dữ liệu và StreamBuilder",
+  ASYNC_ISOLATES: "Isolate và Port",
   RESPONSIVE_BREAKPOINTS: "Breakpoint responsive và orientation",
   RESPONSIVE_ADAPTIVE_NAV: "Điều hướng và bố cục adaptive",
   FORM_STRUCTURE_VALIDATION: "FormState và validation đồng bộ",
@@ -228,11 +262,14 @@ const SKILL_LABEL: Record<string, string> = {
   STORAGE_PERSISTENCE_SYNC: "Persistence và offline-first",
   AUTH_LOGIN_SIGNUP: "Login, signup và protected flow",
   AUTH_TOKEN_SESSION: "Token, auto-login và logout session",
+  AUTH_FIREBASE_GOOGLE: "Firebase và Google Sign-In",
   NOTIFICATION_LOCAL: "Local notification",
   TEST_UNIT: "Unit test",
   TEST_WIDGET: "Widget test",
   TEST_INTEGRATION_NAV: "Navigation và integration test",
+  DEBUG_DEVTOOLS: "DevTools và bằng chứng debug",
   PERF_REBUILDS: "Giảm rebuild và công việc trong build",
+  PERF_LIST_IMAGE: "Tối ưu list và image",
   DEPLOY_SIZE_RELEASE: "Size analysis và release deployment",
 };
 
@@ -256,7 +293,7 @@ const PARAMETER_ROLE_STYLE: Record<ParameterRole, string> = {
 
 const INPUT_PARAMETER_KEYS = new Set([
   "argumentsJson", "invalidValues", "values", "expectedValues", "inputValues", "stepsJson",
-  "casesJson", "filesJson",
+  "casesJson", "filesJson", "seedStepsJson", "verifyStepsJson",
 ]);
 const ASSERTION_PARAMETER_KEYS = new Set([
   "absentKey", "destinationKey", "errorKeys", "expected", "expectedCount", "expectedEnabled",
@@ -277,7 +314,7 @@ const OPTION_PARAMETER_KEYS = new Set([
   "resultScopeType", "resultScopeIndex", "resultScopeAnchorText", "textMatchMode",
   "resultTextMatchMode", "errorTextMatchMode", "symbolTypes", "schemaMethod", "readyTimeoutMs",
   "ancestorType", "descendantTypes", "orderedAxis", "alignment", "width", "height",
-  "typeMatchMode", "timeoutMs", "dismissAfterLast",
+  "typeMatchMode", "timeoutMs", "dismissAfterLast", "fixtureNamespace",
 ]);
 
 function parameterRole(key: string, runner?: string): ParameterRole {
@@ -349,6 +386,11 @@ function runnerContract(item: TestcaseItem, template?: Template) {
     target: `Import trực tiếp ${formatParam(p.sourcePath)} thuộc starter; không gọi grading adapter.`,
     pass: "Các hàm được gọi tuần tự trong cùng testcase và mọi kết quả đều phải đúng.",
   };
+  if (runner === "PROCESS_PERSISTENCE_SEQUENCE") return {
+    input: "seedStepsJson ghi fixture; verifyStepsJson chỉ đọc và đối chiếu ở Flutter process mới.",
+    target: `Import trực tiếp ${formatParam(p.sourcePath)}; starter dùng GRADER_FIXTURE_ID=${formatParam(p.fixtureNamespace)} để chọn storage cô lập.`,
+    pass: "Cả pha seed và pha verify đều phải pass; state singleton/in-memory sẽ không sống sang pha verify.",
+  };
   if (runner === "BUTTON_ACTION") return {
     input: "Không có dữ liệu nhập mặc định; setup có thể tạo trạng thái cần thiết trước khi bấm.",
     target: `Tìm và bấm widget mang key ${formatParam(p.buttonKey)}.`,
@@ -414,6 +456,15 @@ function testcaseCodePreview(item: TestcaseItem, template?: Template) {
     return [
       `test(${dartQuote(item.instance_id)}, () async {`,
       `  await runStarterCallSequence(${dartQuote(p.sourcePath)}, ${dartQuote(p.stepsJson)});`,
+      "});",
+    ].join("\n");
+  }
+  if (runner === "PROCESS_PERSISTENCE_SEQUENCE") {
+    return [
+      `// Grader chạy testcase này hai lần với hai Flutter process độc lập.`,
+      `test(${dartQuote(item.instance_id)}, () async {`,
+      `  final phase = Platform.environment['GRADER_PERSISTENCE_PHASE'];`,
+      `  await runStarterCallSequence(${dartQuote(p.sourcePath)}, phase == 'seed' ? ${dartQuote(p.seedStepsJson)} : ${dartQuote(p.verifyStepsJson)});`,
       "});",
     ].join("\n");
   }
@@ -525,6 +576,7 @@ const REQUIRED_RUNNER_PARAMETERS: Record<string, string[]> = {
   DIRECT_FUNCTION_THROWS: ["functionPath", "functionName", "argumentsJson", "expectedException", "typeMatchMode"],
   DIRECT_STREAM_EVENTS: ["functionPath", "functionName", "argumentsJson", "expectedEventsJson", "timeoutMs"],
   STARTER_CALL_SEQUENCE: ["sourcePath", "stepsJson"],
+  PROCESS_PERSISTENCE_SEQUENCE: ["sourcePath", "fixtureNamespace", "seedStepsJson", "verifyStepsJson"],
   PROJECT_FILE_CONTRACT: ["filesJson"],
   WIDGET_PROPERTY: ["targetKey", "targetType", "property", "expectedType", "expectedValue"],
   KEY_WORKFLOW: ["stepsJson"],
@@ -597,16 +649,21 @@ function testcaseProgress(item: TestcaseItem, template?: Template): ItemProgress
       }
     }
   }
-  if (runner === "STARTER_CALL_SEQUENCE" && !isBlankParameter(item.parameters.stepsJson)) {
-    try {
-      const steps = JSON.parse(String(item.parameters.stepsJson));
-      if (!Array.isArray(steps) || steps.length === 0) {
-        issues.push("Chuỗi API starter phải có ít nhất một bước");
-      } else if (steps.some((step) => !step || typeof step !== "object" || !String(step.functionName || "").trim())) {
-        issues.push("Mỗi bước chuỗi API phải có functionName");
+  if (["STARTER_CALL_SEQUENCE", "PROCESS_PERSISTENCE_SEQUENCE"].includes(runner)) {
+    const fields = runner === "PROCESS_PERSISTENCE_SEQUENCE"
+      ? ["seedStepsJson", "verifyStepsJson"] : ["stepsJson"];
+    for (const field of fields) {
+      if (isBlankParameter(item.parameters[field])) continue;
+      try {
+        const steps = JSON.parse(String(item.parameters[field]));
+        if (!Array.isArray(steps) || steps.length === 0) {
+          issues.push(`${PARAMETER_LABELS[field] || field} phải có ít nhất một bước`);
+        } else if (steps.some((step) => !step || typeof step !== "object" || !String(step.functionName || "").trim())) {
+          issues.push(`Mỗi bước trong ${PARAMETER_LABELS[field] || field} phải có functionName`);
+        }
+      } catch {
+        issues.push(`${PARAMETER_LABELS[field] || field} chưa phải JSON hợp lệ`);
       }
-    } catch {
-      issues.push("Chuỗi API starter chưa phải JSON hợp lệ");
     }
   }
   for (const step of item.setup_steps || []) {
@@ -689,7 +746,8 @@ function runnerUsesStarterContract(engine: EngineMode, runner?: string) {
         || runner === "DIRECT_FUNCTION_THROWS"
         || runner === "DIRECT_STREAM_EVENTS"
         || runner === "PROJECT_FILE_CONTRACT"
-        || runner === "STARTER_CALL_SEQUENCE"));
+        || runner === "STARTER_CALL_SEQUENCE"
+        || runner === "PROCESS_PERSISTENCE_SEQUENCE"));
 }
 
 function hasContractBindings(template?: Template): template is Template {
@@ -957,16 +1015,27 @@ function testcaseGroup(template: Template) {
   const runner = String(template.runner || "").toUpperCase();
   const layer = String(template.layer || "").toUpperCase();
   if (["APP_BOOT", "NAVIGATION", "BUTTON_ACTION", "WIDGET_ENABLED", "DIALOG_FLOW", "FORM_PREFILL", "FORM_SUBMIT", "KEY_WORKFLOW", "FORM_FOCUS_FLOW"].includes(runner)) return "BEHAVIOR";
-  if (["FORM_REQUIRED_FIELDS", "FORM_VALIDATE_FIELDS", "LIST_ITEM_COUNT", "STATE_REACTIVE_FLOW", "PROJECT_FILE_CONTRACT", "DIRECT_FUNCTION_THROWS", "DIRECT_STREAM_EVENTS"].includes(runner)) return "LOGIC";
+  if (["FORM_REQUIRED_FIELDS", "FORM_VALIDATE_FIELDS", "LIST_ITEM_COUNT", "STATE_REACTIVE_FLOW", "PROJECT_FILE_CONTRACT", "DIRECT_FUNCTION_THROWS", "DIRECT_STREAM_EVENTS", "PROCESS_PERSISTENCE_SEQUENCE"].includes(runner)) return "LOGIC";
   if (layer === "RESPONSIVE" || runner.startsWith("WIDGET_") || runner === "LIST_VISIBLE") return "WIDGET";
   return "LOGIC";
 }
 
+const SEMANTIC_TARGET_TYPE_OPTIONS = [
+  "any", "form", "image", "text", "input", "button", "dialog", "icon",
+  "checkbox", "switch", "slider", "radio", "chip", "dropdown", "padding",
+  "container", "list", "grid", "scrollable", "hero", "materialapp", "safearea",
+  "scaffold", "card", "listtile", "row", "column", "stack", "indexedstack",
+  "expanded", "layoutbuilder", "table", "bottomsheet", "customscrollview",
+  "sliverlist", "slivergrid", "bottomnavigationbar", "navigationbar",
+  "futurebuilder", "streambuilder", "animatedcontainer", "animatedopacity",
+  "animatedbuilder", "inheritedwidget",
+];
+
 const PARAMETER_OPTIONS: Record<string, string[]> = {
-  targetType: ["any", "form", "image", "text", "input", "button", "dialog", "icon", "checkbox", "switch", "slider", "radio", "chip", "dropdown", "padding", "container", "list", "grid", "scrollable", "hero", "materialapp", "safearea", "scaffold", "card", "listtile"],
-  fromType: ["any", "form", "image", "text", "input", "button", "padding", "container", "list", "grid", "card", "listtile"],
-  toType: ["any", "form", "image", "text", "input", "button", "padding", "container", "list", "grid", "card", "listtile"],
-  ancestorType: ["any", "form", "image", "text", "input", "button", "padding", "container", "list", "grid", "card", "listtile"],
+  targetType: SEMANTIC_TARGET_TYPE_OPTIONS,
+  fromType: SEMANTIC_TARGET_TYPE_OPTIONS,
+  toType: SEMANTIC_TARGET_TYPE_OPTIONS,
+  ancestorType: SEMANTIC_TARGET_TYPE_OPTIONS,
   dimension: ["height", "width"],
   comparison: ["equals", "at_least", "at_most"],
   axis: ["vertical", "horizontal"],
@@ -1039,6 +1108,9 @@ const PARAMETER_LABELS: Record<string, string> = {
   portraitExpectedTexts: "Nội dung cần thấy ở điện thoại",
   landscapeExpectedTexts: "Nội dung cần thấy ở màn hình rộng",
   stepsJson: "Các bước workflow (JSON)",
+  seedStepsJson: "Các bước reset/ghi ở process seed (JSON)",
+  verifyStepsJson: "Các bước đọc/đối chiếu ở process mới (JSON)",
+  fixtureNamespace: "Mã namespace storage cô lập",
   casesJson: "Các viewport responsive (JSON)",
   filesJson: "Các file và contract nội dung (JSON)",
   widgetKey: "Mã thành phần",

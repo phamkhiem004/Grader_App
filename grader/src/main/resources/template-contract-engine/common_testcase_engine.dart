@@ -64,6 +64,7 @@ bool _isDirectMetadata(Map<String, dynamic> metadata) {
       runner == 'DIRECT_FUNCTION_THROWS' ||
       runner == 'DIRECT_STREAM_EVENTS' ||
       runner == 'STARTER_CALL_SEQUENCE' ||
+      runner == 'PROCESS_PERSISTENCE_SEQUENCE' ||
       runner == 'PROJECT_FILE_CONTRACT' ||
       runner.startsWith('TEMPLATE_SOURCE_') ||
       runner.startsWith('TEMPLATE_MODEL_') ||
@@ -80,6 +81,7 @@ bool _isDirectMetadata(Map<String, dynamic> metadata) {
           'DIRECT_FUNCTION_THROWS',
           'DIRECT_STREAM_EVENTS',
           'STARTER_CALL_SEQUENCE',
+          'PROCESS_PERSISTENCE_SEQUENCE',
           'PROJECT_FILE_CONTRACT',
         }.contains(childRunner);
       });
@@ -147,6 +149,9 @@ Future<void> _runCase(
       return;
     case 'PROJECT_FILE_CONTRACT':
       await _checkProjectFileContract(parameters);
+      return;
+    case 'PROCESS_PERSISTENCE_SEQUENCE':
+      await _checkProcessPersistenceSequence(tester, parameters);
       return;
     case 'APP_BOOT':
       await _checkTemplateAppBoot(tester, parameters);
@@ -608,6 +613,28 @@ Future<void> _checkStarterCallSequence(
       );
     }
   }
+}
+
+Future<void> _checkProcessPersistenceSequence(
+  WidgetTester tester,
+  Map<String, dynamic> parameters,
+) async {
+  final phase = Platform.environment['GRADER_PERSISTENCE_PHASE'] ?? '';
+  final phaseKey = switch (phase) {
+    'seed' => 'seedStepsJson',
+    'verify' => 'verifyStepsJson',
+    _ => '',
+  };
+  if (phaseKey.isEmpty) {
+    fail(
+      'PROCESS_PERSISTENCE_SEQUENCE chỉ được chạy bởi grader với phase seed/verify.',
+    );
+  }
+  final phaseParameters = <String, dynamic>{
+    ...parameters,
+    'stepsJson': _requiredText(parameters, phaseKey),
+  };
+  await _checkStarterCallSequence(tester, phaseParameters);
 }
 
 dynamic _parseSequenceExpected(dynamic value, String type) {
@@ -1773,7 +1800,12 @@ void _expectWidgetProperty(
   final targetType = _text(parameters, 'targetType', 'any');
   _assertTargetType(tester, finder, key, targetType);
   final property = _requiredText(parameters, 'property');
-  final actual = _widgetPropertyValue(tester.widget<Widget>(finder), property);
+  final actual = _widgetPropertyValue(
+    tester,
+    finder,
+    tester.widget<Widget>(finder),
+    property,
+  );
   final expectedType = _text(parameters, 'expectedType', 'string').toLowerCase();
   final expected = _parseDirectExpected(
     _text(parameters, 'expectedValue'),
@@ -1793,25 +1825,39 @@ void _expectWidgetProperty(
   }
 }
 
-dynamic _widgetPropertyValue(Widget widget, String property) {
+dynamic _widgetPropertyValue(
+  WidgetTester tester,
+  Finder finder,
+  Widget widget,
+  String property,
+) {
+  TextField? textField;
+  if (widget is TextField) {
+    textField = widget;
+  } else if (widget is TextFormField) {
+    final nested = find.descendant(
+      of: finder,
+      matching: find.byType(TextField),
+      matchRoot: true,
+    );
+    if (nested.evaluate().length == 1) {
+      textField = tester.widget<TextField>(nested);
+    }
+  }
   switch (property) {
     case 'enabled':
       return _enabledState(widget);
     case 'obscureText':
-      if (widget is TextField) return widget.obscureText;
-      if (widget is TextFormField) return widget.obscureText;
+      if (textField != null) return textField.obscureText;
       break;
     case 'readOnly':
-      if (widget is TextField) return widget.readOnly;
-      if (widget is TextFormField) return widget.readOnly;
+      if (textField != null) return textField.readOnly;
       break;
     case 'keyboardType':
-      if (widget is TextField) return _enumTail(widget.keyboardType);
-      if (widget is TextFormField) return _enumTail(widget.keyboardType);
+      if (textField != null) return _enumTail(textField.keyboardType);
       break;
     case 'textInputAction':
-      if (widget is TextField) return _enumTail(widget.textInputAction);
-      if (widget is TextFormField) return _enumTail(widget.textInputAction);
+      if (textField != null) return _enumTail(textField.textInputAction);
       break;
     case 'autovalidateMode':
       if (widget is Form) return _enumTail(widget.autovalidateMode);
@@ -1840,16 +1886,13 @@ dynamic _widgetPropertyValue(Widget widget, String property) {
       if (widget is Slider) return widget.divisions;
       break;
     case 'maxLines':
-      if (widget is TextField) return widget.maxLines;
-      if (widget is TextFormField) return widget.maxLines;
+      if (textField != null) return textField.maxLines;
       break;
     case 'minLines':
-      if (widget is TextField) return widget.minLines;
-      if (widget is TextFormField) return widget.minLines;
+      if (textField != null) return textField.minLines;
       break;
     case 'maxLength':
-      if (widget is TextField) return widget.maxLength;
-      if (widget is TextFormField) return widget.maxLength;
+      if (textField != null) return textField.maxLength;
       break;
     case 'scrollDirection':
       if (widget is ScrollView) return _enumTail(widget.scrollDirection);
@@ -2935,6 +2978,25 @@ void _assertTargetType(
     'scaffold' => widget is Scaffold,
     'card' => widget is Card,
     'listtile' => widget is ListTile,
+    'row' => widget is Row,
+    'column' => widget is Column,
+    'stack' => widget is Stack,
+    'indexedstack' => widget is IndexedStack,
+    'expanded' => widget is Expanded,
+    'layoutbuilder' => widget is LayoutBuilder,
+    'table' => widget is Table,
+    'bottomsheet' => widget is BottomSheet,
+    'customscrollview' => widget is CustomScrollView,
+    'sliverlist' => widget is SliverList,
+    'slivergrid' => widget is SliverGrid,
+    'bottomnavigationbar' => widget is BottomNavigationBar,
+    'navigationbar' => widget is NavigationBar,
+    'futurebuilder' => widget is FutureBuilder,
+    'streambuilder' => widget is StreamBuilder,
+    'animatedcontainer' => widget is AnimatedContainer,
+    'animatedopacity' => widget is AnimatedOpacity,
+    'animatedbuilder' => widget is AnimatedBuilder,
+    'inheritedwidget' => widget is InheritedWidget,
     // Template dùng key vai trò screen.home có thể fallback vào Scaffold khi
     // bài không gắn ValueKey; README không bắt buộc sinh viên phải dùng key.
     'container' => widget is Container || widget is Scaffold,

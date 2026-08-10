@@ -6,11 +6,24 @@ const kEngineVersion = 'TEMPLATE_CONTRACT_V1-2.6.0';
 
 Future<void> main() async {
   final matrix = _loadMatrix();
-  final directIds = matrix.entries
-      .where((entry) => _isDirectMetadata(_asMap(entry.value)))
+  final persistenceIds = matrix.entries
+      .where((entry) => _isPersistenceMetadata(_asMap(entry.value)))
       .map((entry) => entry.key)
       .toSet();
-  final bootIds = matrix.keys.where((id) => !directIds.contains(id)).toSet();
+  final directIds = matrix.entries
+      .where(
+        (entry) =>
+            _isDirectMetadata(_asMap(entry.value)) &&
+            !persistenceIds.contains(entry.key),
+      )
+      .map((entry) => entry.key)
+      .toSet();
+  final bootIds = matrix.keys
+      .where(
+        (id) =>
+            !directIds.contains(id) && !persistenceIds.contains(id),
+      )
+      .toSet();
   final runs = <String, Map<String, dynamic>>{};
 
   var preflightPassed = bootIds.isEmpty;
@@ -18,7 +31,7 @@ Future<void> main() async {
   if (bootIds.isNotEmpty) {
     final preflight = await _runFlutter(
       'preflight',
-      const Duration(seconds: 20),
+      const Duration(seconds: 30),
     );
     stdout.write(preflight.stdoutText);
     stderr.write(preflight.stderrText);
@@ -39,16 +52,72 @@ Future<void> main() async {
   }
 
   if (directIds.isNotEmpty) {
-    // Logic thuần vẫn được chấm khi UI/DB của app không khởi động được.
-    final direct = await _runFlutter('direct', const Duration(seconds: 30));
-    stdout.write(direct.stdoutText);
-    stderr.write(direct.stderrText);
-    final parsed = _parseReporter(direct.stdoutText);
+    // Mỗi logic testcase có process/timeout riêng để singleton, SQLite hoặc một
+    // Future bị treo không làm nhiễm hay xóa kết quả của testcase khác.
     for (final id in directIds) {
+      final direct = await _runFlutter(
+        'case',
+        const Duration(seconds: 30),
+        caseId: id,
+      );
+      stdout.write(direct.stdoutText);
+      stderr.write(direct.stderrText);
+      final parsed = _parseReporter(direct.stdoutText);
       runs[id] =
           parsed[id] ??
           <String, dynamic>{'passed': false, 'message': _processError(direct)};
     }
+  }
+
+  for (final id in persistenceIds) {
+    final metadata = _asMap(matrix[id]);
+    final parameters = _asMap(metadata['parameters']);
+    final configuredNamespace = (parameters['fixtureNamespace'] ?? '')
+        .toString()
+        .trim();
+    // Luôn gắn instance ID để hai testcase dùng cùng template/namespace không
+    // vô tình đọc chung database hoặc file fixture của nhau.
+    final fixtureId = configuredNamespace.isEmpty
+        ? id
+        : '${configuredNamespace}_$id';
+    final seed = await _runFlutter(
+      'case',
+      const Duration(seconds: 30),
+      caseId: id,
+      extraEnvironment: <String, String>{
+        'GRADER_PERSISTENCE_PHASE': 'seed',
+        'GRADER_FIXTURE_ID': fixtureId,
+      },
+    );
+    stdout.write(seed.stdoutText);
+    stderr.write(seed.stderrText);
+    final seedResult = _parseReporter(seed.stdoutText)[id];
+    if (seedResult?['passed'] != true) {
+      runs[id] = <String, dynamic>{
+        'passed': false,
+        'message': 'Pha seed persistence thất bại: '
+            '${seedResult?['message'] ?? _processError(seed)}',
+      };
+      continue;
+    }
+
+    final verify = await _runFlutter(
+      'case',
+      const Duration(seconds: 30),
+      caseId: id,
+      extraEnvironment: <String, String>{
+        'GRADER_PERSISTENCE_PHASE': 'verify',
+        'GRADER_FIXTURE_ID': fixtureId,
+      },
+    );
+    stdout.write(verify.stdoutText);
+    stderr.write(verify.stderrText);
+    final verifyResult = _parseReporter(verify.stdoutText)[id];
+    runs[id] = verifyResult ??
+        <String, dynamic>{
+          'passed': false,
+          'message': 'Pha verify persistence thất bại: ${_processError(verify)}',
+        };
   }
 
   if (preflightPassed && bootIds.isNotEmpty) {
@@ -59,7 +128,7 @@ Future<void> main() async {
           final id = pending[cursor++];
           final result = await _runFlutter(
             'case',
-            const Duration(seconds: 15),
+            const Duration(seconds: 20),
             caseId: id,
           );
           stdout.write(result.stdoutText);
@@ -168,6 +237,7 @@ bool _isDirectMetadata(Map<String, dynamic> metadata) {
       runner == 'DIRECT_FUNCTION_THROWS' ||
       runner == 'DIRECT_STREAM_EVENTS' ||
       runner == 'STARTER_CALL_SEQUENCE' ||
+      runner == 'PROCESS_PERSISTENCE_SEQUENCE' ||
       runner == 'PROJECT_FILE_CONTRACT' ||
       runner.startsWith('TEMPLATE_SOURCE_') ||
       runner.startsWith('TEMPLATE_MODEL_') ||
@@ -184,9 +254,22 @@ bool _isDirectMetadata(Map<String, dynamic> metadata) {
       'DIRECT_FUNCTION_THROWS',
       'DIRECT_STREAM_EVENTS',
       'STARTER_CALL_SEQUENCE',
+      'PROCESS_PERSISTENCE_SEQUENCE',
       'PROJECT_FILE_CONTRACT',
     }.contains(childRunner);
   });
+}
+
+bool _isPersistenceMetadata(Map<String, dynamic> metadata) {
+  final runner = (metadata['runner'] ?? '').toString();
+  if (runner == 'PROCESS_PERSISTENCE_SEQUENCE') return true;
+  if (runner != 'GROUP') return false;
+  final children = metadata['children'];
+  return children is List &&
+      children.isNotEmpty &&
+      children.every(
+        (child) => _isPersistenceMetadata(_asMap(child)),
+      );
 }
 
 bool _isStatefulMetadata(Map<String, dynamic> metadata) {
@@ -227,6 +310,7 @@ Future<_CommandResult> _runFlutter(
   String mode,
   Duration timeout, {
   String? caseId,
+  Map<String, String> extraEnvironment = const <String, String>{},
 }) async {
   final process = await Process.start(
     Platform.isWindows ? 'flutter.bat' : 'flutter',
@@ -234,6 +318,7 @@ Future<_CommandResult> _runFlutter(
     runInShell: false,
     environment: <String, String>{
       ...Platform.environment,
+      ...extraEnvironment,
       'GRADER_CASE_MODE': mode,
       if (caseId != null) 'GRADER_CASE_ID': caseId,
     },

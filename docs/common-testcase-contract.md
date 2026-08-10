@@ -213,8 +213,51 @@ ElevatedButton(key: const ValueKey('action.add'), onPressed: ...)
 ```
 
 Không đưa Dart code, model, repository hoặc tên provider vào `suite`. Nếu yêu cầu cần seed
-database, API mock hoặc kiểm tra persistence thật, đó là profile testcase riêng chứ không phải
-fixture black-box của common engine.
+database, API mock hoặc kiểm tra persistence thật, hãy chọn runner hybrid tương ứng thay vì
+nhét logic fixture vào `suite` black-box.
 
 Cấu hình testcase cũ không có `suite` vẫn chạy ở chế độ tương thích fallback. Bộ đề mới nên
 bật `strict_semantic_keys` để thiếu key sẽ fail rõ ràng thay vì runner tự đoán theo User CRUD.
+
+## Hybrid starter + semantic Key (không adapter)
+
+Engine `STARTER_KEY_HYBRID_V1` dùng hai ranh giới rõ ràng:
+
+- Logic/model/service/storage: starter phát public contract và các hàm top-level nhỏ để testcase
+  gọi trực tiếp. Sinh viên hoàn thiện TODO bên trong implementation thật.
+- Widget/behavior: starter phát semantic `ValueKey`; sinh viên có thể tự thiết kế cây widget,
+  miễn gắn đúng key vào đối tượng mang vai trò được công bố.
+
+Mỗi direct testcase được grader chạy trong Flutter process riêng. Vì vậy singleton, database
+đã mở hoặc Future treo của testcase trước không được dùng làm trạng thái ngầm cho testcase sau.
+
+### Persistence thật qua process mới
+
+`STARTER_CALL_SEQUENCE` chỉ phù hợp với nhiều bước trong cùng process. Muốn chấm dữ liệu còn
+sau reload, dùng `PROCESS_PERSISTENCE_SEQUENCE`:
+
+```json
+{
+  "runner": "PROCESS_PERSISTENCE_SEQUENCE",
+  "parameters": {
+    "sourcePath": "lib/storage/item_store.dart",
+    "fixtureNamespace": "item-persistence",
+    "seedStepsJson": "[{\"functionName\":\"resetStore\",\"arguments\":[],\"expectedType\":\"null\",\"expectedValue\":null},{\"functionName\":\"saveItem\",\"arguments\":[{\"id\":1}],\"expectedType\":\"null\",\"expectedValue\":null}]",
+    "verifyStepsJson": "[{\"functionName\":\"readAll\",\"arguments\":[],\"expectedType\":\"json\",\"expectedValue\":[{\"id\":1}]}]"
+  }
+}
+```
+
+Grader chạy pha `seed`, hủy process, rồi chạy pha `verify` trong process mới. Cả hai pha nhận
+cùng biến `GRADER_FIXTURE_ID`. Grader ghép namespace đã nhập với `instance_id`, vì vậy hai testcase
+dùng cùng một template vẫn được cô lập. Starter phải dùng giá trị này để tạo tên/path database hoặc file
+cô lập; không được giữ dữ liệu chỉ trong static `List` hay singleton:
+
+```dart
+final fixtureId = Platform.environment['GRADER_FIXTURE_ID'] ?? 'local';
+final databaseName = 'exam_$fixtureId.db';
+```
+
+Đối với SQLite headless, starter phải khóa sẵn factory phù hợp môi trường grader. Testcase không
+tự thay factory hoặc sửa repository của sinh viên, vì làm vậy sẽ chấm nhầm một implementation
+khác với ứng dụng thật.

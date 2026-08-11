@@ -41,12 +41,19 @@ import java.util.regex.Pattern;
 @Slf4j
 public class TestcaseTemplateService {
 
-    private static final String TEMPLATE_VERSION = "2026.1";
+    private static final String TEMPLATE_VERSION = "2026.4";
     private static final String TEMPLATE_CREATED_BY = "system";
     private static final String TEMPLATE_CREATED_AT = "2026-08-02T00:00:00Z";
     private static final String COMMON_ENGINE = "COMMON_V1";
     private static final Pattern SAFE_INSTANCE_ID = Pattern.compile("[A-Za-z0-9_-]{1,60}");
     private static final Pattern TEMPLATE_ID_PATTERN = Pattern.compile("[A-Z0-9_]{3,80}");
+    private static final Pattern DART_CALLABLE = Pattern.compile(
+            "[A-Za-z_$][A-Za-z0-9_$]*(?:\\.[A-Za-z_$][A-Za-z0-9_$]*)*");
+    private static final Pattern SAFE_CONTRACT_PATH = Pattern.compile(
+            "lib/(?:[A-Za-z0-9_-]+/)*[A-Za-z0-9_-]+\\.dart");
+    private static final Pattern SAFE_SOURCE_PATH = Pattern.compile(
+            "(?:lib|test)/(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+\\.dart|"
+                    + "pubspec\\.yaml|analysis_options\\.yaml");
     private static final Set<String> DIFFICULTIES = Set.of("basic", "intermediate", "advanced");
     private static final Set<String> TEMPLATE_LAYERS = Set.of("SCREEN", "BLACKBOX", "RESPONSIVE");
 
@@ -82,144 +89,7 @@ public class TestcaseTemplateService {
     private static final Set<String> LOGIC_RUNNERS = Set.of(
             "FORM_REQUIRED_FIELDS", "FORM_VALIDATE_FIELDS", "LIST_ITEM_COUNT",
             "STATE_REACTIVE_FLOW");
-    /** Tên thân thiện hiển thị cho giáo viên; template_id vẫn giữ nguyên để grader nhận diện. */
-    private static final Map<String, String> FRIENDLY_TEMPLATE_NAMES = Map.ofEntries(
-            Map.entry("COMMON_APP_BOOT", "Mở ứng dụng không bị lỗi"),
-            Map.entry("COMMON_WIDGET_VISIBLE", "Hiển thị đúng thành phần trên màn hình"),
-            Map.entry("COMMON_FORM_REQUIRED_FIELDS", "Kiểm tra các ô bắt buộc trong biểu mẫu"),
-            Map.entry("COMMON_RESPONSIVE_NO_OVERFLOW", "Giao diện không bị tràn ở mọi kích thước"),
-            Map.entry("COMMON_RESPONSIVE_TARGET", "Thành phần giao diện xuất hiện ở cả dọc và ngang"),
-            Map.entry("COMMON_NAVIGATION", "Mở đúng màn hình và quay lại được"),
-            Map.entry("COMMON_LIST_VISIBLE", "Hiển thị danh sách và các mục bên trong"),
-            Map.entry("COMMON_BUTTON_ACTION", "Nút bấm thực hiện đúng thao tác"),
-            Map.entry("COMMON_WIDGET_DIMENSION", "Kích thước thành phần giao diện đúng yêu cầu"),
-            Map.entry("COMMON_WIDGET_PADDING", "Khoảng cách bên trong thành phần đúng yêu cầu"),
-            Map.entry("COMMON_WIDGET_TEXT_STYLE", "Cỡ chữ và kiểu chữ đúng yêu cầu"),
-            Map.entry("COMMON_WIDGET_GAP", "Khoảng cách giữa các thành phần đúng yêu cầu"),
-            Map.entry("COMMON_WIDGET_TYPE_VISIBLE", "Thành phần giao diện đúng loại"),
-            Map.entry("COMMON_WIDGET_TEXT_CONTENT", "Nội dung chữ hiển thị đúng"),
-            Map.entry("COMMON_WIDGET_ENABLED", "Nút hoặc ô nhập có đúng trạng thái bật/tắt"),
-            Map.entry("COMMON_FORM_VALIDATE_FIELDS", "Biểu mẫu hiển thị lỗi khi nhập dữ liệu sai"),
-            Map.entry("COMMON_LIST_ITEM_COUNT", "Danh sách hiển thị đúng số lượng mục"),
-            Map.entry("COMMON_DIALOG_FLOW", "Hộp thoại xác nhận hoạt động đúng"),
-            Map.entry("COMMON_FORM_PREFILL", "Biểu mẫu tự điền đúng dữ liệu khi chỉnh sửa"),
-            Map.entry("COMMON_FORM_SUBMIT", "Gửi biểu mẫu hợp lệ thành công"),
-            Map.entry("COMMON_WIDGET_SEMANTICS_LABEL", "Thành phần có nhãn hỗ trợ người dùng trợ năng"),
-            Map.entry("COMMON_STATE_REACTIVE", "Giao diện cập nhật đúng sau thao tác"),
-            Map.entry("CONTRACT_VALIDATE_INPUT", "Hàm kiểm tra dữ liệu đầu vào hoạt động đúng"),
-            Map.entry("MODEL_CONSTRUCTOR_DEFAULTS", "Đối tượng dữ liệu có giá trị mặc định đúng"),
-            Map.entry("MODEL_JSON_MAPPING", "Đọc và ghi dữ liệu JSON đúng cách"),
-            Map.entry("REPOSITORY_CRUD_CONTRACT", "Kho dữ liệu thực hiện đủ thêm, xem, sửa, xóa"),
-            Map.entry("REPOSITORY_ISOLATED_STATE", "Mỗi kho dữ liệu giữ dữ liệu riêng biệt"),
-            Map.entry("VIEWMODEL_LOADING_ERROR", "Màn hình hiển thị đúng trạng thái tải và lỗi"),
-            Map.entry("VIEWMODEL_ASYNC_RETRY", "Tác vụ tự thử lại khi gặp lỗi"),
-            Map.entry("SCREEN_SCAFFOLD_APPBAR", "Màn hình có thanh tiêu đề và nội dung chính"),
-            Map.entry("SCREEN_FORM_VALIDATION", "Biểu mẫu kiểm tra dữ liệu nhập"),
-            Map.entry("SCREEN_ACCESSIBLE_ACTIONS", "Thao tác trên màn hình có phản hồi đúng"),
-            Map.entry("UI_RESPONSIVE_PORTRAIT", "Giao diện dọc hiển thị một cột"),
-            Map.entry("UI_RESPONSIVE_LANDSCAPE", "Giao diện ngang hiển thị nhiều cột"),
-            Map.entry("BLACKBOX_EMPTY_STATE", "Danh sách rỗng hiển thị thông báo phù hợp"),
-            Map.entry("BLACKBOX_NAVIGATION_FLOW", "Mở màn hình khác và quay lại đúng trạng thái"),
-            Map.entry("CONTRACT_NULL_SAFETY", "Dữ liệu rỗng được xử lý an toàn"),
-            Map.entry("ASYNC_STREAM_STATE", "Luồng dữ liệu cập nhật đúng trạng thái"),
-            Map.entry("CONTRACT_MODEL_SYMBOLS", "Bắt buộc có các Model người dùng"),
-            Map.entry("CONTRACT_REPOSITORY_SYMBOLS", "Bắt buộc có các kho dữ liệu người dùng"),
-            Map.entry("CONTRACT_VIEWMODEL_PROVIDER_SYMBOLS", "Bắt buộc có ViewModel và Provider"),
-            Map.entry("CONTRACT_SCREEN_SYMBOLS", "Bắt buộc có màn hình quản lý người dùng"),
-            Map.entry("MODEL_GRANULAR_FIELDS", "Model có đủ trường dữ liệu"),
-            Map.entry("MODEL_GRANULAR_COPYWITH", "Model tạo bản sao bằng copyWith đúng"),
-            Map.entry("MODEL_GRANULAR_MAPPING", "Model chuyển đổi đúng với SQLite"),
-            Map.entry("REPOSITORY_GRANULAR_ADD_AUTO_ID", "Thêm dữ liệu và tự tăng mã ID"),
-            Map.entry("REPOSITORY_GRANULAR_MAPPING", "Kho dữ liệu chuyển đổi dữ liệu đúng"),
-            Map.entry("REPOSITORY_GRANULAR_DUPLICATE_ROWS", "Kho dữ liệu giữ được các bản ghi trùng"),
-            Map.entry("REPOSITORY_GRANULAR_UPDATE", "Cập nhật đúng bản ghi theo ID"),
-            Map.entry("REPOSITORY_GRANULAR_DELETE", "Xóa đúng bản ghi theo ID"),
-            Map.entry("SQLITE_REPOSITORY_TEMP_DATABASE_CRUD", "Kho dữ liệu thực hiện CRUD với SQLite"),
-            Map.entry("VIEWMODEL_GRANULAR_LOAD_STATE", "Tải dữ liệu và cập nhật trạng thái"),
-            Map.entry("VIEWMODEL_GRANULAR_ADD_AUTO_ID", "Thêm dữ liệu và cập nhật danh sách"),
-            Map.entry("VIEWMODEL_GRANULAR_UPDATE_STATE", "Sửa dữ liệu và cập nhật trạng thái"),
-            Map.entry("VIEWMODEL_GRANULAR_DELETE_STATE", "Xóa dữ liệu và cập nhật trạng thái"),
-            Map.entry("ARCH_MVVM", "Kết nối đúng kiến trúc MVVM"),
-            Map.entry("ARCH_SQLITE", "Kết nối SQLite và lưu trữ dữ liệu đúng"),
-            Map.entry("ARCH_RIVERPOD_GENERATOR", "Cấu hình Riverpod và mã tự sinh đúng"),
-            Map.entry("SCREEN_VALIDATE_EACH_FIELD", "Biểu mẫu kiểm tra lỗi từng ô nhập"),
-            Map.entry("SCREEN_FORM_CONTROLS", "Biểu mẫu có đủ ô nhập và nút thao tác"),
-            Map.entry("SCREEN_GRANULAR_LIST_SINGLE_USER", "Danh sách hiển thị một người dùng"),
-            Map.entry("SCREEN_GRANULAR_LIST_MULTIPLE_USERS", "Danh sách hiển thị nhiều người dùng"),
-            Map.entry("SCREEN_GRANULAR_ADD_REPOSITORY", "Nút thêm gọi đúng kho dữ liệu"),
-            Map.entry("SCREEN_GRANULAR_ADD_LIST_STATE", "Thêm dữ liệu và cập nhật danh sách"),
-            Map.entry("SCREEN_GRANULAR_UPDATE_LOAD", "Màn hình sửa nạp đúng dữ liệu"),
-            Map.entry("SCREEN_GRANULAR_UPDATE_REPOSITORY", "Nút sửa gọi đúng kho dữ liệu"),
-            Map.entry("SCREEN_GRANULAR_DELETE_DIALOG", "Nút xóa mở hộp thoại xác nhận"),
-            Map.entry("SCREEN_GRANULAR_DELETE_REPOSITORY", "Nút xóa gọi đúng kho dữ liệu"),
-            Map.entry("SCREEN_GRANULAR_DETAIL_DATA", "Màn hình chi tiết hiển thị đúng dữ liệu"),
-            Map.entry("SCREEN_GRANULAR_DETAIL_BACK", "Từ chi tiết quay lại đúng màn hình"),
-            Map.entry("UI_BOOT", "Mở ứng dụng không bị lỗi"),
-            Map.entry("UI_CREATE_VALID", "Thêm người dùng hợp lệ"),
-            Map.entry("UI_EDIT_LOAD", "Mở form sửa và nạp đúng dữ liệu"),
-            Map.entry("UI_EDIT_USER", "Sửa thông tin người dùng"),
-            Map.entry("UI_DELETE_DIALOG", "Mở hộp thoại xác nhận xóa"),
-            Map.entry("UI_DELETE_CONFIRM", "Xác nhận xóa người dùng"),
-            Map.entry("UI_DETAIL_OPEN", "Mở màn hình chi tiết"),
-            Map.entry("UI_DETAIL_BACK", "Quay lại từ màn hình chi tiết"),
-            Map.entry("PERSIST_ADD_RELOAD", "Dữ liệu thêm mới vẫn còn sau khi tải lại"),
-            Map.entry("PERSIST_EDIT_RELOAD", "Dữ liệu đã sửa vẫn còn sau khi tải lại"),
-            Map.entry("PERSIST_DELETE_RELOAD", "Dữ liệu đã xóa không xuất hiện sau khi tải lại"),
-            Map.entry("UI_LAYOUT_OVERFLOW", "Giao diện không bị tràn màn hình"),
-            Map.entry("VISUAL_GOLDEN_PORTRAIT", "Giao diện dọc khớp mẫu chuẩn"),
-            Map.entry("VISUAL_GOLDEN_LANDSCAPE", "Giao diện ngang khớp mẫu chuẩn")
-    );
-    /** Mô tả bổ sung cho rubric layered cũ vốn chỉ có name, không có description. */
-    private static final Map<String, String> FRIENDLY_TEMPLATE_DESCRIPTIONS = Map.ofEntries(
-            Map.entry("CONTRACT_MODEL_SYMBOLS", "Xác nhận bài làm có các Model bắt buộc để quản lý dữ liệu người dùng."),
-            Map.entry("CONTRACT_REPOSITORY_SYMBOLS", "Xác nhận bài làm có đủ các kho dữ liệu bắt buộc cho các thao tác chính."),
-            Map.entry("CONTRACT_VIEWMODEL_PROVIDER_SYMBOLS", "Xác nhận bài làm có ViewModel và Provider để quản lý trạng thái ứng dụng."),
-            Map.entry("CONTRACT_SCREEN_SYMBOLS", "Xác nhận bài làm có màn hình chính để hiển thị và thao tác với dữ liệu người dùng."),
-            Map.entry("MODEL_GRANULAR_FIELDS", "Kiểm tra Model có đủ các trường dữ liệu và kiểu dữ liệu cần thiết."),
-            Map.entry("MODEL_GRANULAR_COPYWITH", "Kiểm tra copyWith tạo bản sao mà không làm thay đổi đối tượng ban đầu."),
-            Map.entry("MODEL_GRANULAR_MAPPING", "Kiểm tra Model chuyển đổi đúng giữa đối tượng Dart và dữ liệu SQLite."),
-            Map.entry("REPOSITORY_GRANULAR_ADD_AUTO_ID", "Kiểm tra thêm dữ liệu mới và tự cấp mã ID không bị trùng."),
-            Map.entry("REPOSITORY_GRANULAR_MAPPING", "Kiểm tra kho dữ liệu chuyển đổi đúng dữ liệu khi đọc và ghi."),
-            Map.entry("REPOSITORY_GRANULAR_DUPLICATE_ROWS", "Kiểm tra kho dữ liệu không tự loại bỏ các bản ghi có nội dung trùng nhau."),
-            Map.entry("REPOSITORY_GRANULAR_UPDATE", "Kiểm tra chỉ đúng bản ghi có ID được yêu cầu bị cập nhật."),
-            Map.entry("REPOSITORY_GRANULAR_DELETE", "Kiểm tra chỉ đúng bản ghi có ID được yêu cầu bị xóa."),
-            Map.entry("SQLITE_REPOSITORY_TEMP_DATABASE_CRUD", "Kiểm tra đầy đủ thêm, xem, sửa, xóa trên cơ sở dữ liệu SQLite tạm."),
-            Map.entry("VIEWMODEL_GRANULAR_LOAD_STATE", "Kiểm tra trạng thái tải dữ liệu, thành công và lỗi được cập nhật đúng."),
-            Map.entry("VIEWMODEL_GRANULAR_ADD_AUTO_ID", "Kiểm tra thêm người dùng và cập nhật danh sách trên giao diện."),
-            Map.entry("VIEWMODEL_GRANULAR_UPDATE_STATE", "Kiểm tra sửa người dùng và cập nhật đúng trạng thái giao diện."),
-            Map.entry("VIEWMODEL_GRANULAR_DELETE_STATE", "Kiểm tra xóa người dùng và cập nhật đúng trạng thái giao diện."),
-            Map.entry("ARCH_MVVM", "Kiểm tra các thành phần được kết nối đúng theo kiến trúc MVVM."),
-            Map.entry("ARCH_SQLITE", "Kiểm tra ứng dụng kết nối SQLite và lưu trữ dữ liệu đúng cách."),
-            Map.entry("ARCH_RIVERPOD_GENERATOR", "Kiểm tra cấu hình Riverpod, ProviderScope và mã tự sinh hoạt động đúng."),
-            Map.entry("SCREEN_VALIDATE_EACH_FIELD", "Kiểm tra từng ô nhập hiển thị đúng lỗi khi dữ liệu không hợp lệ."),
-            Map.entry("SCREEN_FORM_CONTROLS", "Kiểm tra biểu mẫu có đủ ô nhập, nút thêm, nút sửa và nút xóa."),
-            Map.entry("SCREEN_GRANULAR_LIST_SINGLE_USER", "Kiểm tra danh sách hiển thị đúng thông tin khi chỉ có một người dùng."),
-            Map.entry("SCREEN_GRANULAR_LIST_MULTIPLE_USERS", "Kiểm tra danh sách hiển thị đúng nhiều người dùng và không bị lặp sai."),
-            Map.entry("SCREEN_GRANULAR_ADD_REPOSITORY", "Kiểm tra nút thêm gọi đúng kho dữ liệu và xử lý kết quả trả về."),
-            Map.entry("SCREEN_GRANULAR_ADD_LIST_STATE", "Kiểm tra sau khi thêm, danh sách trên màn hình được cập nhật ngay."),
-            Map.entry("SCREEN_GRANULAR_UPDATE_LOAD", "Kiểm tra mở form sửa và nạp đúng dữ liệu của người dùng được chọn."),
-            Map.entry("SCREEN_GRANULAR_UPDATE_REPOSITORY", "Kiểm tra nút sửa gọi đúng kho dữ liệu với đúng ID người dùng."),
-            Map.entry("SCREEN_GRANULAR_DELETE_DIALOG", "Kiểm tra nút xóa hiển thị hộp thoại xác nhận trước khi xóa."),
-            Map.entry("SCREEN_GRANULAR_DELETE_REPOSITORY", "Kiểm tra sau khi xác nhận, nút xóa gọi đúng kho dữ liệu."),
-            Map.entry("SCREEN_GRANULAR_DETAIL_DATA", "Kiểm tra màn hình chi tiết hiển thị đúng thông tin người dùng."),
-            Map.entry("SCREEN_GRANULAR_DETAIL_BACK", "Kiểm tra nút quay lại đưa người dùng về đúng màn hình danh sách."),
-            Map.entry("UI_BOOT", "Mở ứng dụng và kiểm tra ứng dụng không phát sinh lỗi ngay từ đầu."),
-            Map.entry("UI_CREATE_VALID", "Nhập dữ liệu hợp lệ, thêm người dùng và kiểm tra người dùng xuất hiện trong danh sách."),
-            Map.entry("UI_EDIT_LOAD", "Chọn sửa và kiểm tra biểu mẫu được điền sẵn đúng dữ liệu cũ."),
-            Map.entry("UI_EDIT_USER", "Sửa thông tin người dùng và kiểm tra dữ liệu mới được hiển thị đúng."),
-            Map.entry("UI_DELETE_DIALOG", "Chọn xóa và kiểm tra hộp thoại xác nhận xuất hiện."),
-            Map.entry("UI_DELETE_CONFIRM", "Xác nhận xóa và kiểm tra người dùng không còn trong danh sách."),
-            Map.entry("UI_DETAIL_OPEN", "Mở màn hình chi tiết và kiểm tra thông tin người dùng được hiển thị."),
-            Map.entry("UI_DETAIL_BACK", "Từ màn hình chi tiết quay lại và kiểm tra danh sách ban đầu vẫn đúng."),
-            Map.entry("PERSIST_ADD_RELOAD", "Thêm người dùng, tải lại ứng dụng và kiểm tra dữ liệu vẫn còn."),
-            Map.entry("PERSIST_EDIT_RELOAD", "Sửa người dùng, tải lại ứng dụng và kiểm tra dữ liệu mới vẫn còn."),
-            Map.entry("PERSIST_DELETE_RELOAD", "Xóa người dùng, tải lại ứng dụng và kiểm tra dữ liệu đã xóa không quay lại."),
-            Map.entry("UI_RESPONSIVE_PORTRAIT", "Kiểm tra giao diện dọc hiển thị đúng bố cục và không bị tràn."),
-            Map.entry("UI_RESPONSIVE_LANDSCAPE", "Kiểm tra giao diện ngang hoặc máy tính bảng hiển thị đúng bố cục."),
-            Map.entry("UI_LAYOUT_OVERFLOW", "Kiểm tra giao diện không bị tràn nội dung ở các kích thước được yêu cầu."),
-            Map.entry("VISUAL_GOLDEN_PORTRAIT", "So sánh giao diện dọc thực tế với hình ảnh mẫu chuẩn."),
-            Map.entry("VISUAL_GOLDEN_LANDSCAPE", "So sánh giao diện ngang thực tế với hình ảnh mẫu chuẩn.")
-    );
+    // Tên/mô tả template nằm trong common-testcase-templates.json hoặc bản ghi DB.
 
     private final ObjectMapper mapper = new ObjectMapper();
     /** Thư viện hiệu lực = template gốc + bản sửa đè + template giáo viên tự thêm. */
@@ -239,9 +109,19 @@ public class TestcaseTemplateService {
         templates.clear();
         builtinTemplates.clear();
         hiddenTemplateIds.clear();
-        if (loadClasspathTemplates("common-testcase-templates.json", COMMON_ENGINE))
-            log.info("✅ Nạp {} testcase dùng chung từ common-testcase-templates.json", templates.size());
-        else log.error("Không nạp được thư viện testcase dùng chung.");
+        boolean commonLoaded = loadClasspathTemplates("common-testcase-templates.json", COMMON_ENGINE);
+        int commonCount = templates.size();
+        boolean curriculumLoaded = loadClasspathTemplates(
+                "prm393-curriculum-testcase-templates.json", COMMON_ENGINE);
+        if (commonLoaded) {
+            log.info("✅ Nạp {} testcase engine chung + {} testcase curriculum tham số hóa",
+                    commonCount, templates.size() - commonCount);
+        } else {
+            log.error("Không nạp được thư viện testcase dùng chung.");
+        }
+        if (!curriculumLoaded) {
+            log.error("Không nạp được thư viện testcase curriculum PRM393.");
+        }
         builtinTemplates.putAll(templates);
         applyStoredTemplates();
     }
@@ -272,6 +152,7 @@ public class TestcaseTemplateService {
             row.put("created_by", text(stored.getCreatedBy(), TEMPLATE_CREATED_BY));
             row.put("created_at", stored.getCreatedAt() == null
                     ? TEMPLATE_CREATED_AT : stored.getCreatedAt().toString());
+            enrichGeneratedTemplateSchema(row);
             return row;
         } catch (Exception e) {
             log.warn("Template {} trong DB bị hỏng, bỏ qua: {}", stored.getTemplateId(), e.getMessage());
@@ -288,7 +169,8 @@ public class TestcaseTemplateService {
                 if (id == null || id.isBlank() || templates.containsKey(id)) continue;
                 Map<String, Object> row = new LinkedHashMap<>(source);
                 row.putIfAbsent("engine_type", engineType);
-                row.put("name", friendlyTemplateName(id, text(source.get("name"), id)));
+                row.putIfAbsent("name", id);
+                enrichGeneratedTemplateSchema(row);
                 templates.put(id, row);
             }
             return !rows.isEmpty();
@@ -513,6 +395,7 @@ public class TestcaseTemplateService {
         // từ màn hình khác không vô tình xóa mất cấu hình nhận diện của đề.
         Map<String, Object> contract = TestcaseContractSupport.normalize(
                 body.containsKey("contract") ? body.get("contract") : oldConfig.get("contract"));
+        validateContractCoversSelectedKeys(items, contract);
 
         int currentVersion = exam.getTestcaseVersion() == null ? 0 : exam.getTestcaseVersion();
         // Draft cũng là một bản cấu hình materialize được, nên không dùng version 0 sau lần lưu đầu.
@@ -826,7 +709,10 @@ public class TestcaseTemplateService {
             if (!ids.add(instanceId)) throw new IllegalArgumentException("Trùng instance_id: " + instanceId);
 
             Map<String, Object> params = parameters(template, input.get("parameters"));
-            if (COMMON_ENGINE.equals(templateEngine)) {
+            boolean generatedCustom = isGeneratedCustomTemplate(template);
+            if (generatedCustom) {
+                validateGeneratedCustomParameters(template, params, instanceId);
+            } else if (COMMON_ENGINE.equals(templateEngine)) {
                 validateCommonParameters(text(template.get("runner"), ""), params, instanceId);
             }
             String difficulty = text(input.get("difficulty"));
@@ -865,10 +751,17 @@ public class TestcaseTemplateService {
                     ? generatedExpected : configuredExpected);
             item.put("expected_custom", expectedCustom);
             item.put("execution_key", text(template.get("execution_key"), templateId));
+            if (generatedCustom) {
+                item.put("generated_custom", true);
+                item.put("custom_code", generateCustomCode(template, params));
+            }
             String groupId = text(input.get("group_id"));
             if (groupId != null && !groupId.isBlank()) {
                 if (!COMMON_ENGINE.equals(templateEngine))
                     throw new IllegalArgumentException("Testcase này không thuộc thư viện dùng chung: " + instanceId);
+                if (generatedCustom)
+                    throw new IllegalArgumentException("Testcase public contract sinh code phải chạy độc lập: "
+                            + instanceId);
                 if (!SAFE_INSTANCE_ID.matcher(groupId).matches())
                     throw new IllegalArgumentException("group_id không hợp lệ ở " + instanceId);
                 item.put("group_id", groupId);
@@ -919,6 +812,83 @@ public class TestcaseTemplateService {
         out.put("difficulties", List.of("basic", "intermediate", "advanced"));
         out.put("testcase_groups", TESTCASE_GROUP_LABELS);
         return out;
+    }
+
+    /**
+     * Khi bật require_keys, mọi key mà runner thật sự dùng phải xuất hiện trong
+     * contract phát cho sinh viên. Nếu không, testcase có thể trỏ đúng key nhưng đề
+     * lại không công bố key đó — một lỗi contract chứ không phải lỗi sinh viên.
+     */
+    private void validateContractCoversSelectedKeys(List<Map<String, Object>> items,
+                                                    Map<String, Object> contract) {
+        if (!Boolean.TRUE.equals(contract.get("require_keys"))) return;
+        Set<String> declared = new LinkedHashSet<>();
+        Object rawRows = contract.get("keys");
+        if (rawRows instanceof List<?> rows) {
+            for (Object raw : rows) {
+                if (!(raw instanceof Map<?, ?>)) continue;
+                String key = text(castMap(raw).get("key"), "");
+                if (!key.isBlank()) declared.add(key);
+            }
+        }
+
+        Set<String> used = new LinkedHashSet<>();
+        for (Map<String, Object> item : items) {
+            if (!bool(item.get("enabled"), true)) continue;
+            Map<String, Object> definition = runnerDefinition(text(item.get("runner"), ""));
+            if (definition == null) continue; // public/source contract không định vị UI bằng key
+            Map<String, Object> parameters = map(item.get("parameters"));
+            Object rawParameters = definition.get("parameters");
+            if (!(rawParameters instanceof List<?> parameterRows)) continue;
+            for (Object rawParameter : parameterRows) {
+                if (!(rawParameter instanceof Map<?, ?>)) continue;
+                Map<String, Object> parameter = castMap(rawParameter);
+                String type = text(parameter.get("type"), "");
+                String name = text(parameter.get("name"), "");
+                if ("semantic_key".equals(type)) {
+                    String key = text(parameters.get(name), "");
+                    if (!key.isBlank()) used.add(key);
+                } else if ("semantic_keys".equals(type)) {
+                    String value = text(parameters.get(name), "");
+                    if (value.isBlank()) continue;
+                    for (String key : value.split(",")) {
+                        if (!key.trim().isEmpty()) used.add(key.trim());
+                    }
+                }
+            }
+        }
+        used.removeAll(declared);
+        if (!used.isEmpty()) {
+            throw new IllegalArgumentException("Contract bật require_keys nhưng chưa công bố "
+                    + "các key testcase đang dùng: " + String.join(", ", used)
+                    + ". Hãy thêm chúng vào Khu vực 0 trước khi lưu.");
+        }
+    }
+
+    /**
+     * Bổ sung schema mới theo kiểu tương thích ngược. Các template source cũ vẫn
+     * dùng ba trường paths/tokens; đề mới có thể dùng sourceChecksJson để gắn token
+     * vào đúng từng file, tránh pass nhầm do token nằm ở file khác.
+     */
+    private void enrichGeneratedTemplateSchema(Map<String, Object> row) {
+        if (!"SOURCE_CONTAINS".equals(text(row.get("code_generator"), ""))) return;
+        Map<String, Object> schema = new LinkedHashMap<>(map(row.get("parameters_schema")));
+        schema.putIfAbsent("sourceChecksJson", "[]");
+        row.put("parameters_schema", schema);
+    }
+
+    /**
+     * Nguồn đối chiếu học liệu → kỹ năng → template tái sử dụng. Đây là dữ liệu hướng dẫn
+     * chọn testcase, không phải một pack để nạp hàng loạt vào mọi đề.
+     */
+    public Map<String, Object> curriculumSource() {
+        try (InputStream in = new ClassPathResource(
+                "prm393-curriculum-testcase-source.json").getInputStream()) {
+            return mapper.readValue(in, new TypeReference<LinkedHashMap<String, Object>>() {});
+        } catch (Exception e) {
+            throw new IllegalStateException("Không đọc được nguồn testcase từ học liệu: "
+                    + e.getMessage(), e);
+        }
     }
 
     public Map<String, Object> createTemplate(Map<String, Object> body, String actor) {
@@ -1045,6 +1015,14 @@ public class TestcaseTemplateService {
 
         String runner = text(body.get("runner"), text(base.get("runner")));
         Map<String, Object> catalog = runnerDefinition(runner);
+        if (catalog == null && isGeneratedCustomTemplate(base)) {
+            catalog = new LinkedHashMap<>();
+            catalog.put("runner", CUSTOM_RUNNER);
+            catalog.put("label", text(base.get("name"), "Public contract logic"));
+            catalog.put("description", text(base.get("description"), ""));
+            catalog.put("layer_default", text(base.get("layer"), "BLACKBOX"));
+            catalog.put("parameters_schema", map(base.get("parameters_schema")));
+        }
         if (catalog == null)
             throw new IllegalArgumentException("Runner không tồn tại trong engine: " + runner);
 
@@ -1079,7 +1057,11 @@ public class TestcaseTemplateService {
         }
         Map<String, Object> parameters = new LinkedHashMap<>(schema);
         parameters.putAll(supplied);
-        validateCommonParameters(runner, parameters, templateId);
+        if (isGeneratedCustomTemplate(base)) {
+            validateGeneratedCustomParameters(base, parameters, templateId);
+        } else {
+            validateCommonParameters(runner, parameters, templateId);
+        }
 
         Map<String, Object> row = new LinkedHashMap<>();
         row.put("template_id", templateId);
@@ -1087,6 +1069,9 @@ public class TestcaseTemplateService {
         row.put("engine_type", COMMON_ENGINE);
         row.put("profile_id", "COMMON_SEMANTIC_V1");
         row.put("runner", runner);
+        if (base.get("code_generator") != null) {
+            row.put("code_generator", base.get("code_generator"));
+        }
         row.put("skill_code", skill.getCode());
         row.put("layer", layer);
         row.put("name", name.trim());
@@ -1138,8 +1123,337 @@ public class TestcaseTemplateService {
     // ════════════════════════════════════════════════════════════════════════════
 
     private boolean isCustomItem(Map<String, Object> input) {
-        return CUSTOM_TEMPLATE_ID.equals(text(input.get("template_id")))
-                || CUSTOM_RUNNER.equals(text(input.get("runner")));
+        String templateId = text(input.get("template_id"));
+        // Template sinh code vẫn dùng runner CUSTOM_CODE ở file cuối, nhưng bản thân nó là
+        // template có schema tham số — không được đẩy nhầm sang form code tay của giáo viên.
+        return CUSTOM_TEMPLATE_ID.equals(templateId)
+                || (CUSTOM_RUNNER.equals(text(input.get("runner")))
+                && (templateId == null || !templates.containsKey(templateId)));
+    }
+
+    private boolean isGeneratedCustomTemplate(Map<String, Object> template) {
+        return CUSTOM_RUNNER.equals(text(template.get("runner")))
+                && text(template.get("code_generator")) != null;
+    }
+
+    /**
+     * Kiểm tra contract của ba mẫu logic sinh tự động. Chúng chỉ gọi public API đã phát sẵn
+     * trong starter qua {@code main.dart}; không cho nhập biểu thức Dart tự do và không tạo
+     * grading adapter.
+     */
+    private void validateGeneratedCustomParameters(Map<String, Object> template,
+                                                     Map<String, Object> params,
+                                                     String instanceId) {
+        String generator = text(template.get("code_generator"), "");
+        if ("SOURCE_CONTAINS".equals(generator)) {
+            Object caseSensitive = params.get("caseSensitive");
+            if (!(caseSensitive instanceof Boolean)
+                    && !Set.of("true", "false").contains(
+                    String.valueOf(caseSensitive).toLowerCase())) {
+                throw new IllegalArgumentException(
+                        "caseSensitive phải là boolean ở " + instanceId);
+            }
+            List<Object> exactChecks = parseJsonList(
+                    params.getOrDefault("sourceChecksJson", "[]"),
+                    "sourceChecksJson", instanceId);
+            if (exactChecks.size() > 12) {
+                throw new IllegalArgumentException(
+                        "sourceChecksJson không được quá 12 file ở " + instanceId);
+            }
+            for (int index = 0; index < exactChecks.size(); index++) {
+                Object raw = exactChecks.get(index);
+                if (!(raw instanceof Map<?, ?>)) {
+                    throw new IllegalArgumentException(
+                            "sourceChecksJson[" + index + "] phải là object ở " + instanceId);
+                }
+                Map<String, Object> check = castMap(raw);
+                validateSafeSourcePath(check.get("path"),
+                        "sourceChecksJson[" + index + "].path", instanceId);
+                List<Object> requiredForFile = nestedSourceTokens(check.get("requiredTokens"),
+                        "sourceChecksJson[" + index + "].requiredTokens", instanceId);
+                List<Object> forbiddenForFile = nestedSourceTokens(check.get("forbiddenTokens"),
+                        "sourceChecksJson[" + index + "].forbiddenTokens", instanceId);
+                if (requiredForFile.isEmpty() && forbiddenForFile.isEmpty()) {
+                    throw new IllegalArgumentException("sourceChecksJson[" + index
+                            + "] phải có requiredTokens hoặc forbiddenTokens ở " + instanceId);
+                }
+            }
+            if (!exactChecks.isEmpty()) return;
+            List<Object> paths = parseJsonList(params.get("sourcePathsJson"),
+                    "sourcePathsJson", instanceId);
+            if (paths.isEmpty() || paths.size() > 12) {
+                throw new IllegalArgumentException(
+                        "sourcePathsJson phải có 1-12 file ở " + instanceId);
+            }
+            for (Object raw : paths) {
+                validateSafeSourcePath(raw, "sourcePathsJson", instanceId);
+            }
+            List<Object> required = parseJsonList(params.get("requiredTokensJson"),
+                    "requiredTokensJson", instanceId);
+            List<Object> forbidden = parseJsonList(params.get("forbiddenTokensJson"),
+                    "forbiddenTokensJson", instanceId);
+            if (required.isEmpty()) {
+                throw new IllegalArgumentException(
+                        "requiredTokensJson phải có ít nhất một token ở " + instanceId);
+            }
+            validateSourceTokens(required, "requiredTokensJson", instanceId);
+            validateSourceTokens(forbidden, "forbiddenTokensJson", instanceId);
+            return;
+        }
+        String contractPath = text(params.get("contractPath"), "").replace('\\', '/');
+        if (!SAFE_CONTRACT_PATH.matcher(contractPath).matches() || contractPath.contains("..")) {
+            throw new IllegalArgumentException("contractPath phải là file .dart an toàn dưới lib/ ở "
+                    + instanceId);
+        }
+        String callable = text(params.get("callable"), "");
+        if (!DART_CALLABLE.matcher(callable).matches()) {
+            throw new IllegalArgumentException("callable không phải tên hàm/static method Dart hợp lệ ở "
+                    + instanceId);
+        }
+        List<Object> arguments = parseJsonList(params.get("argumentsJson"), "argumentsJson", instanceId);
+        if (arguments.size() > 12) {
+            throw new IllegalArgumentException("argumentsJson không được quá 12 đối số ở " + instanceId);
+        }
+        double timeout = number(params.get("timeoutMs"), Double.NaN);
+        if (!Double.isFinite(timeout) || timeout < 100 || timeout > 10000 || timeout != Math.rint(timeout)) {
+            throw new IllegalArgumentException("timeoutMs phải là số nguyên 100-10000 ở " + instanceId);
+        }
+        switch (generator) {
+            case "PUBLIC_FUNCTION_RESULT" -> parseJsonValue(
+                    params.get("expectedJson"), "expectedJson", instanceId);
+            case "PUBLIC_FUNCTION_THROWS" -> {
+                String exceptionType = text(params.get("exceptionType"), "");
+                if (!DART_CALLABLE.matcher(exceptionType).matches()) {
+                    throw new IllegalArgumentException("exceptionType không hợp lệ ở " + instanceId);
+                }
+            }
+            case "PUBLIC_STREAM_EVENTS" -> parseJsonList(
+                    params.get("expectedEventsJson"), "expectedEventsJson", instanceId);
+            default -> throw new IllegalArgumentException(
+                    "code_generator không được hỗ trợ ở " + instanceId + ": " + generator);
+        }
+    }
+
+    private void validateSafeSourcePath(Object raw, String field, String instanceId) {
+        String path = raw instanceof String ? ((String) raw).replace('\\', '/') : "";
+        if (!SAFE_SOURCE_PATH.matcher(path).matches() || path.contains("..")) {
+            throw new IllegalArgumentException(
+                    field + " chứa đường dẫn source không an toàn ở " + instanceId + ": " + raw);
+        }
+    }
+
+    private List<Object> nestedSourceTokens(Object raw, String field, String instanceId) {
+        if (raw == null) return new ArrayList<>();
+        if (!(raw instanceof List<?> list)) {
+            throw new IllegalArgumentException(field + " phải là JSON array ở " + instanceId);
+        }
+        List<Object> tokens = new ArrayList<>(list);
+        validateSourceTokens(tokens, field, instanceId);
+        return tokens;
+    }
+
+    private void validateSourceTokens(List<Object> tokens, String field, String instanceId) {
+        if (tokens.size() > 24) {
+            throw new IllegalArgumentException(field + " không được quá 24 token ở " + instanceId);
+        }
+        for (Object raw : tokens) {
+            if (!(raw instanceof String token) || token.isBlank() || token.length() > 200) {
+                throw new IllegalArgumentException(
+                        field + " chỉ nhận chuỗi 1-200 ký tự ở " + instanceId);
+            }
+        }
+    }
+
+    private String generateCustomCode(Map<String, Object> template, Map<String, Object> params) {
+        String generator = text(template.get("code_generator"), "");
+        if ("SOURCE_CONTAINS".equals(generator)) {
+            List<Object> exactChecks = parseJsonList(
+                    params.getOrDefault("sourceChecksJson", "[]"),
+                    "sourceChecksJson", generator);
+            List<Object> paths = parseJsonList(
+                    params.get("sourcePathsJson"), "sourcePathsJson", generator);
+            List<Object> required = parseJsonList(
+                    params.get("requiredTokensJson"), "requiredTokensJson", generator);
+            List<Object> forbidden = parseJsonList(
+                    params.get("forbiddenTokensJson"), "forbiddenTokensJson", generator);
+            boolean caseSensitive = bool(params.get("caseSensitive"), true);
+            if (!exactChecks.isEmpty()) {
+                StringBuilder exactCode = new StringBuilder();
+                for (int index = 0; index < exactChecks.size(); index++) {
+                    Map<String, Object> check = castMap(exactChecks.get(index));
+                    String path = text(check.get("path"), "").replace('\\', '/');
+                    List<Object> requiredForFile = nestedSourceTokens(check.get("requiredTokens"),
+                            "requiredTokens", generator);
+                    List<Object> forbiddenForFile = nestedSourceTokens(check.get("forbiddenTokens"),
+                            "forbiddenTokens", generator);
+                    String fileVar = "sourceFile" + index;
+                    String sourceVar = "source" + index;
+                    exactCode.append("final ").append(fileVar).append(" = File(")
+                            .append(dartLiteral(path)).append(");\n")
+                            .append("expect(").append(fileVar)
+                            .append(".existsSync(), isTrue, reason: 'Không tìm thấy source contract: ")
+                            .append(path.replace("'", "\\'")).append("');\n")
+                            .append("final ").append(sourceVar).append(" = _sourceWithoutComments(")
+                            .append(fileVar).append(".readAsStringSync(), ")
+                            .append(dartLiteral(path)).append(");\n");
+                    appendSourceAssertions(exactCode, sourceVar, path, requiredForFile,
+                            forbiddenForFile, caseSensitive);
+                }
+                return exactCode.toString().stripTrailing();
+            }
+            StringBuilder code = new StringBuilder()
+                    .append("final sourcePaths = <String>")
+                    .append(dartLiteral(paths)).append(";\n")
+                    .append("final sourceParts = <String>[];\n")
+                    .append("for (final path in sourcePaths) {\n")
+                    .append("  final file = File(path);\n")
+                    .append("  expect(file.existsSync(), isTrue, reason: 'Không tìm thấy source contract: $path');\n")
+                    .append("  sourceParts.add(_sourceWithoutComments(file.readAsStringSync(), path));\n")
+                    .append("}\n")
+                    .append("final source = sourceParts.join('\\n');\n");
+            appendSourceAssertions(code, "source", String.join(", ", paths.stream()
+                    .map(String::valueOf).toList()), required, forbidden, caseSensitive);
+            return code.toString().stripTrailing();
+        }
+        String contractPath = text(params.get("contractPath"), "").replace('\\', '/');
+        String callable = text(params.get("callable"), "");
+        List<Object> arguments = parseJsonList(params.get("argumentsJson"), "argumentsJson", callable);
+        String invocation = "student_app." + callable + "("
+                + arguments.stream().map(this::dartLiteral).reduce((a, b) -> a + ", " + b).orElse("")
+                + ")";
+        int timeoutMs = (int) number(params.get("timeoutMs"), 3000);
+        String timeout = "const Duration(milliseconds: " + timeoutMs + ")";
+        String prelude = "final contractFile = File(" + dartLiteral(contractPath) + ");\n"
+                + "expect(contractFile.existsSync(), isTrue, "
+                + "reason: 'Không tìm thấy public contract: " + contractPath + "');\n";
+        return switch (generator) {
+            case "PUBLIC_FUNCTION_RESULT" -> {
+                String expectedJson = canonicalJson(params.get("expectedJson"), "expectedJson", callable);
+                yield prelude
+                        + "final actual = await Future<dynamic>.sync(() => " + invocation + ")\n"
+                        + "    .timeout(" + timeout + ");\n"
+                        + "final expected = jsonDecode(" + dartLiteral(expectedJson) + ");\n"
+                        + "expect(actual, equals(expected));";
+            }
+            case "PUBLIC_FUNCTION_THROWS" -> {
+                String exceptionType = text(params.get("exceptionType"), "");
+                String message = text(params.get("messageContains"), "");
+                StringBuilder code = new StringBuilder(prelude)
+                        .append("Object? caught;\n")
+                        .append("try {\n")
+                        .append("  await Future<dynamic>.sync(() => ").append(invocation).append(")\n")
+                        .append("      .timeout(").append(timeout).append(");\n")
+                        .append("} catch (error) {\n  caught = error;\n}\n")
+                        .append("expect(caught, isNotNull, reason: 'Hàm phải ném ngoại lệ.');\n")
+                        .append("expect(caught.runtimeType.toString(), ")
+                        .append(dartLiteral(exceptionType)).append(");");
+                if (!message.isBlank()) {
+                    code.append("\nexpect(caught.toString(), contains(")
+                            .append(dartLiteral(message)).append("));");
+                }
+                yield code.toString();
+            }
+            case "PUBLIC_STREAM_EVENTS" -> {
+                List<Object> expectedEvents = parseJsonList(
+                        params.get("expectedEventsJson"), "expectedEventsJson", callable);
+                String expectedJson;
+                try {
+                    expectedJson = mapper.writeValueAsString(expectedEvents);
+                } catch (Exception e) {
+                    throw new IllegalArgumentException("expectedEventsJson không thể chuẩn hóa ở " + callable);
+                }
+                yield prelude
+                        + "final candidate = " + invocation + ";\n"
+                        + "expect(candidate, isA<Stream<dynamic>>());\n"
+                        + "final actual = await (candidate as Stream<dynamic>).take("
+                        + expectedEvents.size() + ").toList()\n"
+                        + "    .timeout(" + timeout + ");\n"
+                        + "final expected = jsonDecode(" + dartLiteral(expectedJson) + ");\n"
+                        + "expect(actual, equals(expected));";
+            }
+            default -> throw new IllegalArgumentException("code_generator không được hỗ trợ: " + generator);
+        };
+    }
+
+    private void appendSourceAssertions(StringBuilder code, String sourceVariable, String path,
+                                        List<Object> required, List<Object> forbidden,
+                                        boolean caseSensitive) {
+        for (Object raw : required) {
+            String token = String.valueOf(raw);
+            String expression = caseSensitive
+                    ? sourceVariable + ".contains(" + dartLiteral(token) + ")"
+                    : sourceVariable + ".toLowerCase().contains("
+                    + dartLiteral(token.toLowerCase()) + ")";
+            code.append("expect(").append(expression)
+                    .append(", isTrue, reason: ")
+                    .append(dartLiteral("Thiếu source token '" + token + "' trong " + path))
+                    .append(");\n");
+        }
+        for (Object raw : forbidden) {
+            String token = String.valueOf(raw);
+            String expression = caseSensitive
+                    ? sourceVariable + ".contains(" + dartLiteral(token) + ")"
+                    : sourceVariable + ".toLowerCase().contains("
+                    + dartLiteral(token.toLowerCase()) + ")";
+            code.append("expect(").append(expression)
+                    .append(", isFalse, reason: ")
+                    .append(dartLiteral("Source " + path + " chứa token bị cấm: " + token))
+                    .append(");\n");
+        }
+    }
+
+    private List<Object> parseJsonList(Object raw, String field, String instanceId) {
+        Object parsed = parseJsonValue(raw, field, instanceId);
+        if (!(parsed instanceof List<?> list)) {
+            throw new IllegalArgumentException(field + " phải là JSON array ở " + instanceId);
+        }
+        return new ArrayList<>(list);
+    }
+
+    private Object parseJsonValue(Object raw, String field, String instanceId) {
+        String json = text(raw, "").trim();
+        if (json.length() > 8000) {
+            throw new IllegalArgumentException(field + " quá dài ở " + instanceId);
+        }
+        try {
+            return mapper.readValue(json, Object.class);
+        } catch (Exception e) {
+            throw new IllegalArgumentException(field + " không phải JSON hợp lệ ở " + instanceId);
+        }
+    }
+
+    private String canonicalJson(Object raw, String field, String instanceId) {
+        try {
+            return mapper.writeValueAsString(parseJsonValue(raw, field, instanceId));
+        } catch (Exception e) {
+            throw new IllegalArgumentException(field + " không thể chuẩn hóa ở " + instanceId);
+        }
+    }
+
+    private String dartLiteral(Object value) {
+        if (value == null) return "null";
+        if (value instanceof String string) {
+            try {
+                return mapper.writeValueAsString(string);
+            } catch (Exception e) {
+                throw new IllegalArgumentException("Không mã hóa được chuỗi tham số Dart.");
+            }
+        }
+        if (value instanceof Boolean || value instanceof Number) return String.valueOf(value);
+        if (value instanceof List<?> list) {
+            return "[" + list.stream().map(this::dartLiteral)
+                    .reduce((a, b) -> a + ", " + b).orElse("") + "]";
+        }
+        if (value instanceof Map<?, ?> map) {
+            List<String> entries = new ArrayList<>();
+            for (Map.Entry<?, ?> entry : map.entrySet()) {
+                entries.add(dartLiteral(String.valueOf(entry.getKey())) + ": "
+                        + dartLiteral(entry.getValue()));
+            }
+            return "{" + String.join(", ", entries) + "}";
+        }
+        throw new IllegalArgumentException("Kiểu JSON không thể chuyển thành Dart literal: "
+                + value.getClass().getSimpleName());
     }
 
     private Map<String, Object> normalizeCustomItem(String examId, Map<String, Object> input, int order,
@@ -1791,17 +2105,6 @@ public class TestcaseTemplateService {
                     .reduce((a, b) -> a + "; " + b).orElse("skill_code không hợp lệ");
             throw new IllegalArgumentException("Cấu hình testcase không hợp lệ: " + detail);
         }
-    }
-
-    private String friendlyTemplateName(String templateId, String fallback) {
-        return FRIENDLY_TEMPLATE_NAMES.getOrDefault(templateId, fallback);
-    }
-
-    private String friendlyTemplateDescription(String templateId, String fallback) {
-        if (fallback != null && !fallback.isBlank()) return fallback;
-        String name = friendlyTemplateName(templateId, templateId);
-        return FRIENDLY_TEMPLATE_DESCRIPTIONS.getOrDefault(templateId,
-                "Mô tả yêu cầu: " + name + ".");
     }
 
     private Map<String, Object> enrichTemplate(Map<String, Object> source) {

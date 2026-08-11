@@ -32,7 +32,10 @@ import 'dart:io';
 /// 2.8.0 — chạy các lô testcase nhỏ trong process riêng, giới hạn cả thời gian mỗi process
 /// lẫn toàn bộ lượt chấm. Một app treo không còn giữ Docker quá bốn phút; lô sau vẫn có cơ
 /// hội chạy mà không phải trả chi phí khởi động Flutter cho từng testcase.
-const String kEngineVersion = 'COMMON_V1-2.8.0';
+/// 2.9.0 — source-contract loại comment Dart/YAML trước khi tìm token và hỗ trợ
+/// sourceChecksJson để gắn assertion vào đúng từng file; không còn pass do comment
+/// hoặc do token nằm nhầm file. UI contract của bộ mới mặc định bắt buộc ValueKey.
+const String kEngineVersion = 'COMMON_V1-2.9.0';
 
 /// PHẢI khớp hằng cùng tên trong `exam_test.dart` — hai chương trình Dart riêng biệt,
 /// không import nhau nên không chia sẻ được hằng số.

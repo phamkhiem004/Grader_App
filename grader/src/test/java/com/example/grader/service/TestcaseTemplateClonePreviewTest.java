@@ -107,6 +107,49 @@ class TestcaseTemplateClonePreviewTest {
     }
 
     @Test
+    void previewsStoredFilesWhenLegacyTemplateNoLongerExists() {
+        String instanceId = "LEGACY_01_item_01";
+        Map<String, Object> legacyItem = Map.ofEntries(
+                Map.entry("instance_id", instanceId),
+                Map.entry("template_id", "REMOVED_LEGACY_TEMPLATE"),
+                Map.entry("runner", "TEMPLATE_MODEL_FIELDS"),
+                Map.entry("skill_code", "DART_CLASSES_OOP"),
+                Map.entry("layer", "LOGIC"),
+                Map.entry("testcase_group", "LOGIC"),
+                Map.entry("name", "Legacy model fields"),
+                Map.entry("description", "Saved snapshot"),
+                Map.entry("difficulty", "basic"),
+                Map.entry("enabled", true),
+                Map.entry("order", 1),
+                Map.entry("weight", 2.0),
+                Map.entry("parameters", Map.of("modelClass", "LedgerEntry")),
+                Map.entry("expected", "Model has required fields"));
+        Exam legacy = sourceExam("LEGACY_01", """
+                {"schema_version":1,"engine_type":"COMMON_V1","items":[{
+                  "instance_id":"LEGACY_01_item_01",
+                  "template_id":"REMOVED_LEGACY_TEMPLATE"
+                }]}
+                """);
+        ExamRepository repository = mock(ExamRepository.class);
+        when(repository.findByExamId("LEGACY_01")).thenReturn(Optional.of(legacy));
+        ExamService examService = mock(ExamService.class);
+        List<Map<String, String>> storedFiles = List.of(
+                Map.of("name", "exam_test.dart", "content", "void main() {}"),
+                Map.of("name", "skills_matrix.json", "content", "{}"),
+                Map.of("name", "grader.dart", "content", "void grade() {}"));
+        when(examService.readExamTestcaseFiles("LEGACY_01")).thenReturn(storedFiles);
+        TestcaseTemplateService service = service(repository, examService);
+
+        Map<String, Object> result = service.preview("LEGACY_01",
+                Map.of("items", List.of(legacyItem)), "local-user");
+
+        assertEquals(false, result.get("live_preview"));
+        assertEquals(storedFiles, result.get("files"));
+        assertTrue(result.get("warning").toString().contains("template cũ"));
+        verify(repository, never()).save(any(Exam.class));
+    }
+
+    @Test
     void copiesStarterStatementAndSolutionWithTheClone() throws Exception {
         ExamRepository repository = mock(ExamRepository.class);
         when(repository.findByExamId("SOURCE_DOCS")).thenReturn(Optional.empty());

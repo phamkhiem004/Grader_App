@@ -990,6 +990,7 @@ function TestcasesEditor() {
   const [previewFile, setPreviewFile] = useState(0);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState("");
+  const [previewNotice, setPreviewNotice] = useState("");
 
   // Nạp bộ testcase đang có khi vào chế độ sửa; hỏng/không có config thì báo ngay
   // thay vì để giáo viên sửa trên form rỗng rồi ghi đè mất bộ cũ.
@@ -1083,6 +1084,7 @@ function TestcasesEditor() {
     const timer = window.setTimeout(async () => {
       setPreviewLoading(true);
       setPreviewError("");
+      setPreviewNotice("");
       try {
         const response = await fetch(`${API_BASE}/exam-setup/${encodeURIComponent(normalizedId)}/testcases/preview`, {
           method: "POST",
@@ -1099,9 +1101,11 @@ function TestcasesEditor() {
         if (!response.ok) throw new Error(data.error || "Không sinh được code xem trước.");
         const files = Array.isArray(data.files) ? data.files as GeneratedFile[] : [];
         setPreviewFiles(files);
+        setPreviewNotice(typeof data.warning === "string" ? data.warning : "");
         setPreviewFile((current) => Math.min(current, Math.max(0, files.length - 1)));
       } catch (error) {
         if (error instanceof DOMException && error.name === "AbortError") return;
+        setPreviewNotice("");
         setPreviewError(error instanceof Error ? error.message : "Không sinh được code xem trước.");
       } finally {
         if (!controller.signal.aborted) setPreviewLoading(false);
@@ -2758,6 +2762,7 @@ function TestcasesEditor() {
                 </div>
               </header>
               {previewError && <div className="flex items-start gap-2 border-b border-rose-200 bg-rose-50 px-5 py-3 text-xs font-semibold text-rose-700"><AlertCircle size={15} className="mt-0.5 shrink-0" /> <span>{previewError}<br /><span className="font-normal">Code hợp lệ gần nhất vẫn được giữ bên dưới để đối chiếu.</span></span></div>}
+              {previewNotice && <div className="flex items-start gap-2 border-b border-amber-200 bg-amber-50 px-5 py-3 text-xs font-semibold text-amber-800"><AlertCircle size={15} className="mt-0.5 shrink-0" /> <span>{previewNotice}<br /><span className="font-normal">Muốn cập nhật theo thời gian thực, hãy thay các testcase cũ bằng template hiện còn trong thư viện.</span></span></div>}
               {previewFiles.length === 0 && previewLoading ? (
                 <div className="flex min-h-80 flex-1 items-center justify-center text-slate-400"><Loader2 size={24} className="animate-spin" /></div>
               ) : previewFiles.length === 0 ? (

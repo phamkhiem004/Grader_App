@@ -437,8 +437,30 @@ public class TestcaseTemplateService {
 
         Exam exam = examRepository.findByExamId(examId).orElse(null);
         Map<String, Object> oldConfig = parseConfig(exam == null ? null : exam.getTestcaseConfigJson());
-        List<Map<String, Object>> items = normalizeItems(
-                examId, body.get("items"), indexItems(oldConfig.get("items")), actor);
+        List<Map<String, Object>> items;
+        try {
+            items = normalizeItems(examId, body.get("items"), indexItems(oldConfig.get("items")), actor);
+        } catch (IllegalArgumentException normalizationError) {
+            // Một số bộ đã publish giữ snapshot testcase đầy đủ nhưng template gốc có thể đã bị
+            // loại khỏi thư viện ở phiên bản sau. Khi đó không thể sinh live an toàn bằng engine
+            // mới; vẫn phải cho giảng viên xem đúng ba file đang được dùng để chấm thay vì modal rỗng.
+            String message = normalizationError.getMessage();
+            List<Map<String, String>> storedFiles = exam == null || message == null
+                    || !message.startsWith("Template không tồn tại:")
+                    ? List.of() : examService.readExamTestcaseFiles(examId);
+            if (storedFiles == null || storedFiles.isEmpty()) throw normalizationError;
+
+            List<Map<String, Object>> storedItems = normalizeExistingItems(body.get("items"));
+            Map<String, Object> fallback = new LinkedHashMap<>();
+            fallback.put("exam_id", examId);
+            fallback.put("files", storedFiles);
+            fallback.put("items", storedItems);
+            fallback.put("total_weight", totalWeight(storedItems));
+            fallback.put("live_preview", false);
+            fallback.put("warning", "Bộ testcase dùng template cũ không còn trong thư viện; "
+                    + "đang hiển thị chính xác bộ file đã lưu và đang dùng để chấm.");
+            return fallback;
+        }
         String engineType = engineType(items);
         if (!COMMON_ENGINE.equals(engineType))
             throw new IllegalStateException("Chưa hỗ trợ xem trước engine: " + engineType);
@@ -459,6 +481,7 @@ public class TestcaseTemplateService {
             out.put("files", files);
             out.put("items", items);
             out.put("total_weight", totalWeight(items));
+            out.put("live_preview", true);
             return out;
         } catch (IllegalArgumentException e) {
             throw e;

@@ -2222,6 +2222,7 @@ function TestcasesEditor() {
         ? `Đang sửa ${editExamId} — bấm Lưu để cập nhật bộ đang dùng để chấm`
         : "Kéo-thả testcase chung theo semantic key → dùng lại cho nhiều bộ testcase Flutter"}
       activePath="/teacher/archive"
+      contentClassName="max-w-[1600px]"
     >
       <div className="space-y-5">
         {/* Cả tạo lẫn sửa đều mở từ trang Kho → luôn có đường quay lại. */}
@@ -2485,7 +2486,7 @@ function TestcasesEditor() {
             )}
         </section>
 
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-[280px_minmax(360px,1fr)_minmax(360px,1fr)]">
+        <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-[280px_minmax(420px,1fr)_minmax(420px,1fr)]">
           {/* Khu vực 1: khung kiến thức */}
           <section className="card overflow-hidden">
             <div className="border-b border-slate-100 bg-slate-50/70 px-4 py-3">
@@ -2630,7 +2631,7 @@ function TestcasesEditor() {
               <div className="mt-3 flex items-center justify-between text-xs"><span className="text-slate-500">Tổng trọng số</span><strong className="text-indigo-700">{totalWeight.toFixed(2)}</strong></div>
             </div>
             <div
-              className="custom-scrollbar max-h-[calc(100vh-295px)] min-h-[360px] space-y-2 overflow-y-auto p-3"
+              className="min-h-[360px] space-y-2 p-3"
               onDragOver={(e) => e.preventDefault()}
               onDrop={(e) => { e.preventDefault(); if (draggedTemplateId) addTemplate(draggedTemplateId); setDraggedTemplateId(null); }}
             >

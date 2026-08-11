@@ -34,7 +34,7 @@ export default function TeacherSetupPage() {
 
   // Gửi dữ liệu lên Spring Boot
   const execute = async () => {
-    if (!examId.trim()) { setError("Vui lòng nhập Mã đề thi."); return; }
+    if (!examId.trim()) { setError("Vui lòng nhập Mã bộ testcase."); return; }
     if (!file) { setError("Vui lòng chọn file cấu hình (.zip)."); return; }
 
     setPhase("uploading");
@@ -54,7 +54,7 @@ export default function TeacherSetupPage() {
 
       if (!res.ok) {
         const data = await res.json();
-        setError(data.error || "Lỗi server khi cấu hình đề thi.");
+        setError(data.error || "Lỗi server khi cấu hình bộ testcase.");
         setPhase("idle");
         return;
       }
@@ -78,7 +78,7 @@ export default function TeacherSetupPage() {
   const isRunning = phase === "uploading";
 
   return (
-    <SidebarLayout title="Cấu hình Đề thi" subtitle="Khởi tạo môi trường chấm điểm cho từng mã đề" activePath="/teacher">
+    <SidebarLayout title="Cấu hình bộ testcase" subtitle="Khởi tạo môi trường chấm điểm cho từng mã bộ testcase" activePath="/teacher">
       <div className="max-w-4xl mx-auto">
         
         {/* Tiêu đề trang */}
@@ -99,11 +99,11 @@ export default function TeacherSetupPage() {
           <div className="card p-6 md:col-span-2">
             <div className="grid md:grid-cols-2 gap-8">
               
-              {/* Bước 1: Mã đề */}
+              {/* Bước 1: Mã bộ testcase */}
               <div className="space-y-4">
                 <div className="flex items-center gap-2 mb-4">
                   <span className="flex items-center justify-center w-6 h-6 rounded-full bg-slate-100 text-slate-600 font-bold text-xs">1</span>
-                  <h3 className="text-sm font-bold text-slate-800">Nhập mã đề thi</h3>
+                  <h3 className="text-sm font-bold text-slate-800">Nhập mã bộ testcase</h3>
                 </div>
                 
                 <div>
@@ -114,10 +114,10 @@ export default function TeacherSetupPage() {
                     placeholder="VD: FLUTTER_PE_01"
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all disabled:opacity-60 font-medium text-slate-800 uppercase"
                   />
-                  <p className="text-xs text-slate-400 mt-2">Mã đề này sẽ được dùng để khớp với bài làm của sinh viên khi chấm tự động.</p>
+                  <p className="text-xs text-slate-400 mt-2">Mã bộ testcase này sẽ được dùng để khớp với bài làm của sinh viên khi chấm tự động.</p>
 
                   <div className="mt-4">
-                    <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500">Tên đề thi <span className="font-normal normal-case text-slate-400">(tuỳ chọn)</span></label>
+                    <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500">Tên bộ testcase <span className="font-normal normal-case text-slate-400">(tuỳ chọn)</span></label>
                     <input
                       value={examName}
                       onChange={e => setExamName(e.target.value)}
@@ -137,7 +137,7 @@ export default function TeacherSetupPage() {
                       placeholder="VD: Bài yêu cầu xây màn hình login, validate form và gọi API giả lập..."
                       className="w-full resize-none rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-800 transition-all focus:border-transparent focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-60"
                     />
-                    <p className="mt-1.5 text-xs text-slate-400">Mô tả ngắn yêu cầu đề — lưu kèm hồ sơ đề để đối chiếu khi xem kết quả.</p>
+                    <p className="mt-1.5 text-xs text-slate-400">Mô tả ngắn yêu cầu đề bài — lưu kèm hồ sơ bộ testcase để đối chiếu khi xem kết quả.</p>
                   </div>
                 </div>
               </div>
@@ -205,7 +205,7 @@ export default function TeacherSetupPage() {
                 <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-8 text-center max-w-lg mx-auto">
                   <Loader2 size={32} className="animate-spin text-indigo-600 mx-auto mb-4" />
                   <h3 className="text-base font-bold text-indigo-900 mb-2">Đang lưu testcase...</h3>
-                  <p className="text-sm text-indigo-700/80">Hệ thống đang giải nén & lưu testcase cho mã đề <strong>{examId}</strong> — gần như tức thì (mount lúc chấm, không build image). <span className="text-indigo-600/70">(Lần đầu trên máy chủ có thể lâu hơn nếu cần dựng ảnh nền.)</span></p>
+                  <p className="text-sm text-indigo-700/80">Hệ thống đang giải nén & lưu testcase cho mã bộ testcase <strong>{examId}</strong> — gần như tức thì (mount lúc chấm, không build image). <span className="text-indigo-600/70">(Lần đầu trên máy chủ có thể lâu hơn nếu cần dựng ảnh nền.)</span></p>
                 </div>
               )}
 
@@ -218,12 +218,12 @@ export default function TeacherSetupPage() {
                     </div>
                     <h3 className="text-lg font-bold text-emerald-800 mb-2">Thành công!</h3>
                     <p className="text-sm text-emerald-700/80">
-                      Môi trường chấm điểm cho đề thi <strong>{examId}</strong> đã sẵn sàng. Bạn có thể quay lại Dashboard để bắt đầu chấm bài sinh viên.
+                      Môi trường chấm điểm cho bộ testcase <strong>{examId}</strong> đã sẵn sàng. Bạn có thể quay lại Dashboard để bắt đầu chấm bài sinh viên.
                     </p>
                   </div>
                   
                   <button onClick={reset} className="text-sm font-semibold text-slate-600 hover:text-slate-800 bg-white border border-slate-200 px-6 py-2.5 rounded-xl transition-all shadow-sm hover:shadow">
-                    Cấu hình mã đề khác
+                    Cấu hình mã bộ testcase khác
                   </button>
                 </div>
               )}

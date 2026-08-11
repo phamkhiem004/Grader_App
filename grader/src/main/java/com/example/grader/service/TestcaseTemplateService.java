@@ -341,6 +341,8 @@ public class TestcaseTemplateService {
             empty.put("template_version", TEMPLATE_VERSION);
             empty.put("items", List.of());
             empty.put("total_weight", 0);
+            empty.put("exam_name", exam != null ? exam.getExamName() : null);
+            empty.put("teacher_note", exam != null ? exam.getTeacherNote() : null);
             return empty;
         }
         try {
@@ -349,6 +351,10 @@ public class TestcaseTemplateService {
             List<Map<String, Object>> items = normalizeExistingItems(config.get("items"));
             config.put("items", items);
             config.put("total_weight", totalWeight(items));
+            // Tên/ghi chú nằm ở bảng exam chứ không trong config → gửi kèm để màn Sửa
+            // nạp lại được đủ form, khỏi phải gọi thêm một API nữa.
+            config.put("exam_name", exam.getExamName());
+            config.put("teacher_note", exam.getTeacherNote());
             return config;
         } catch (Exception e) {
             throw new IllegalStateException("Cấu hình testcase của đề bị hỏng: " + e.getMessage());

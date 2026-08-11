@@ -1,11 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useSearchParams } from "next/navigation";
+import Link from "next/link";
 import SidebarLayout from "@/components/layout/SidebarLayout";
 import { API_BASE } from "@/lib/config";
 import {
-  AlertCircle, CheckCircle2, ChevronRight, Code2, Eye, GripVertical,
+  AlertCircle, CheckCircle2, ChevronLeft, ChevronRight, Code2, Eye, GripVertical,
   Download, Layers, Lightbulb, Loader2, Package, Plus, Save, Settings2, Trash2, UploadCloud, X,
 } from "lucide-react";
 
@@ -375,7 +377,7 @@ const CONTRACT_SNIPPETS: { id: string; label: string; row: ContractKey & { text?
 /** Nghĩa từng trường trong config, hiện ở bảng tra cạnh ô gõ. */
 const CONTRACT_FIELD_HELP: { field: string; desc: string }[] = [
   { field: "key", desc: "Tên định danh, dạng nhom.ten — vd field.email, action.delete" },
-  { field: "label", desc: "Mô tả tiếng Việt, in ra đề thi cho sinh viên đọc" },
+  { field: "label", desc: "Mô tả tiếng Việt, in ra đề bài cho sinh viên đọc" },
   { field: "strategy", desc: "Cách nhận diện thay thế khi bài không gắn ValueKey (xem danh sách bên dưới)" },
   { field: "value", desc: "Tên widget / nhóm icon / chuỗi cần khớp; bọc /…/ để dùng regex" },
   { field: "text", desc: "Chỉ dùng với type_with_text: chữ nằm bên trong widget đó" },
@@ -878,7 +880,12 @@ function PairedValueEditor({ fields, value, options, onChange }: {
   );
 }
 
-export default function TestcasesPage() {
+function TestcasesEditor() {
+  // ?exam=MÃ → mở bộ testcase đã lưu để SỬA; không có tham số = tạo bộ mới.
+  const searchParams = useSearchParams();
+  const editExamId = (searchParams.get("exam") || "").trim().toUpperCase();
+  const isEdit = editExamId.length > 0;
+
   const [templates, setTemplates] = useState<Template[]>([]);
   const [examId, setExamId] = useState("");
   const [examName, setExamName] = useState("");
@@ -937,7 +944,55 @@ export default function TestcasesPage() {
   const [contractJson, setContractJson] = useState("");
   const [contractJsonError, setContractJsonError] = useState("");
 
+  // Nạp bộ testcase đang có khi vào chế độ sửa; hỏng/không có config thì báo ngay
+  // thay vì để giáo viên sửa trên form rỗng rồi ghi đè mất bộ cũ.
+  const [loadingExam, setLoadingExam] = useState(isEdit);
+  const [missingConfig, setMissingConfig] = useState(false);
   useEffect(() => {
+    if (!editExamId) return;
+    setExamId(editExamId);
+    setLoadingExam(true);
+    fetch(`${API_BASE}/exam-setup/${encodeURIComponent(editExamId)}/testcases`)
+      .then(async (r) => {
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(data.error || "Không đọc được bộ testcase này.");
+        return data;
+      })
+      .then((data) => {
+        // schema_version chỉ có ở bộ dựng từ template. Thiếu nó = bộ upload ZIP:
+        // sửa ở đây sẽ bị backend chặn, nên chặn sớm và nói rõ lý do.
+        if (data.schema_version == null) {
+          setMissingConfig(true);
+          setMessage({
+            type: "error",
+            text: `Bộ ${editExamId} không có cấu hình template để mở lại (thường là bộ tải lên bằng file ZIP). `
+              + `Muốn đổi thì upload gói mới ở trang "Cấu hình bộ testcase".`,
+          });
+          return;
+        }
+        setMissingConfig(false);
+        setItems(Array.isArray(data.items) ? data.items as TestcaseItem[] : []);
+        setExamName(typeof data.exam_name === "string" ? data.exam_name : "");
+        setTeacherNote(typeof data.teacher_note === "string" ? data.teacher_note : "");
+        setStatus(typeof data.status === "string" ? data.status : "");
+        setVersion(Number(data.version) || 0);
+        const contract = (data.contract || {}) as { require_keys?: boolean; keys?: ContractKey[] };
+        setRequireKeys(!!contract.require_keys);
+        setContractKeys(Array.isArray(contract.keys) ? contract.keys : []);
+      })
+      .catch((e: unknown) => setMessage({
+        type: "error",
+        text: e instanceof Error ? e.message : "Không đọc được bộ testcase này.",
+      }))
+      .finally(() => setLoadingExam(false));
+  }, [editExamId]);
+
+  useEffect(() => {
+    // Sửa bộ đã có thì mã trùng là chuyện đương nhiên → không chạy kiểm tra trùng mã.
+    if (isEdit) {
+      setExamIdCheck("idle");
+      return;
+    }
     const normalized = examId.trim();
     if (!normalized) {
       setExamIdCheck("idle");
@@ -965,7 +1020,7 @@ export default function TestcasesPage() {
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [examId]);
+  }, [examId, isEdit]);
 
   useEffect(() => {
     fetch(`${API_BASE}/testcase-templates?includeHidden=${showHiddenTemplates}`)
@@ -1125,10 +1180,10 @@ export default function TestcasesPage() {
     setCodeCheck({ state: "idle", message: "" });
     // Giữ lại chủ đề/độ khó để soạn tiếp testcase cùng nhóm cho nhanh.
     setCustomDraft((draft) => ({ ...draft, name: "", description: "", expected: "" }));
-    setMessage({ type: "ok", text: `Đã thêm testcase tự viết "${name}" vào đề (${item.instance_id}).` });
+    setMessage({ type: "ok", text: `Đã thêm testcase tự viết "${name}" vào bộ testcase (${item.instance_id}).` });
   };
 
-  /** Nhờ backend parse thử bằng Dart trong ảnh nền — bắt lỗi cú pháp trước khi Publish. */
+  /** Nhờ backend parse thử bằng Dart trong ảnh nền — bắt lỗi cú pháp trước khi Lưu. */
   const checkCustomCode = async (code: string) => {
     setCodeCheck({ state: "checking", message: "" });
     try {
@@ -1272,7 +1327,7 @@ export default function TestcasesPage() {
       setMessage({
         type: "ok",
         text: `Đã ẩn "${template.name}" khỏi thư viện.`
-          + (used > 0 ? ` ${used} đề đang dùng vẫn chấm bình thường.` : ""),
+          + (used > 0 ? ` ${used} bộ testcase đang dùng vẫn chấm bình thường.` : ""),
       });
     } catch (e) {
       setMessage({ type: "error", text: e instanceof Error ? e.message : "Không ẩn được testcase" });
@@ -1474,7 +1529,7 @@ export default function TestcasesPage() {
     setGroupModalOpen(false);
     setGroupDetailsOpen(false);
     setClearAllModalOpen(false);
-    setMessage({ type: "ok", text: "Đã xóa toàn bộ testcase khỏi đề." });
+    setMessage({ type: "ok", text: "Đã xóa toàn bộ testcase khỏi bộ hiện tại." });
   };
 
   const toggleItemSelection = (instanceId: string) => {
@@ -1566,17 +1621,17 @@ export default function TestcasesPage() {
 
   const save = async (kind: "draft" | "publish") => {
     if (!examId.trim()) {
-      setMessage({ type: "error", text: "Vui lòng nhập mã đề mới trước khi lưu." });
+      setMessage({ type: "error", text: "Vui lòng nhập mã bộ testcase mới trước khi lưu." });
       return;
     }
-    if (examIdCheck !== "available") {
+    if (!isEdit && examIdCheck !== "available") {
       setMessage({ type: "error", text: examIdCheck === "exists"
-        ? "Mã đề đã tồn tại. Vui lòng nhập một mã đề mới."
-        : "Vui lòng chờ kiểm tra mã đề hoàn tất." });
+        ? "Mã bộ testcase đã tồn tại. Vui lòng nhập một mã bộ testcase mới."
+        : "Vui lòng chờ kiểm tra mã bộ testcase hoàn tất." });
       return;
     }
     if (!examName.trim()) {
-      setMessage({ type: "error", text: "Vui lòng nhập tên đề thi trước khi lưu." });
+      setMessage({ type: "error", text: "Vui lòng nhập tên bộ testcase trước khi lưu." });
       return;
     }
     setSaving(kind);
@@ -1598,8 +1653,8 @@ export default function TestcasesPage() {
       setVersion(Number(data.version ?? version));
       setItems(Array.isArray(data.items) ? data.items as TestcaseItem[] : items);
       setMessage({ type: "ok", text: data.warning || (kind === "publish"
-        ? `Đã tạo và Publish bộ code testcase v${data.version}.`
-        : `Đã tạo bộ code testcase Draft v${data.version}.` ) });
+        ? `Đã lưu bộ code testcase v${data.version} — sẵn sàng đem đi chấm.`
+        : `Đã lưu nháp bộ code testcase v${data.version} (chưa dùng để chấm).` ) });
     } catch (e) {
       setMessage({ type: "error", text: e instanceof Error ? e.message : "Không lưu được cấu hình testcase" });
     } finally {
@@ -1759,7 +1814,7 @@ export default function TestcasesPage() {
               </div>
             ))}
           </div>
-          <p className="pt-1 text-[11px] font-bold text-slate-700">Semantic key theo quy ước của đề</p>
+          <p className="pt-1 text-[11px] font-bold text-slate-700">Semantic key theo quy ước của bộ testcase</p>
           <div className="flex flex-wrap gap-1">
             {SEMANTIC_KEYS.map((key) => (
               <code key={key} className="rounded bg-white px-1.5 py-0.5 font-mono text-[10px] text-slate-500">{key}</code>
@@ -1810,7 +1865,7 @@ export default function TestcasesPage() {
           onClick={addCustomItem}
           className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white hover:bg-indigo-700"
         >
-          <Plus size={14} /> Thêm vào đề
+          <Plus size={14} /> Thêm vào bộ testcase
         </button>
       </div>
     </div>
@@ -2061,29 +2116,43 @@ export default function TestcasesPage() {
     );
   };
 
+  // Sửa: chỉ chờ nạp xong; Tạo mới: phải chắc chắn mã chưa tồn tại mới cho lưu.
+  const saveDisabled = !!saving || !examName.trim() || loadingExam || missingConfig
+    || (!isEdit && examIdCheck !== "available");
+
   return (
     <SidebarLayout
-      title="Tạo testcase từ template"
-      subtitle="Kéo-thả testcase chung theo semantic key → dùng lại cho nhiều đề Flutter"
-      activePath="/teacher/testcases"
+      title={isEdit ? "Sửa bộ testcase" : "Tạo testcase từ template"}
+      subtitle={isEdit
+        ? `Đang sửa ${editExamId} — bấm Lưu để cập nhật bộ đang dùng để chấm`
+        : "Kéo-thả testcase chung theo semantic key → dùng lại cho nhiều bộ testcase Flutter"}
+      activePath="/teacher/archive"
     >
       <div className="space-y-5">
+        {/* Cả tạo lẫn sửa đều mở từ trang Kho → luôn có đường quay lại. */}
+        <Link href="/teacher/archive" className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-500 hover:text-indigo-600">
+          <ChevronLeft size={14} /> Kho bộ testcase
+        </Link>
         <div className="card flex flex-wrap items-end gap-4 p-4">
           <div className="min-w-[220px] flex-1">
-            <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500">Mã đề mới</label>
+            <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500">
+              {isEdit ? "Mã bộ testcase" : "Mã bộ testcase mới"}
+            </label>
             <input
               value={examId}
               onChange={(e) => setExamId(e.target.value.toUpperCase().replace(/[^A-Z0-9_-]/g, ""))}
+              readOnly={isEdit}
               placeholder="VD: FLUTTER_PE_30 — chưa tồn tại"
-              className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 font-mono text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+              className={`w-full rounded-lg border border-slate-200 px-3 py-2.5 font-mono text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 ${isEdit ? "cursor-not-allowed bg-slate-100 text-slate-500" : "bg-white"}`}
             />
-            {examIdCheck === "checking" && <p className="mt-1.5 text-[11px] text-slate-400">Đang kiểm tra mã đề…</p>}
-            {examIdCheck === "available" && <p className="mt-1.5 text-[11px] font-semibold text-emerald-600">Mã đề chưa tồn tại, có thể tạo.</p>}
-            {examIdCheck === "exists" && <p className="mt-1.5 text-[11px] font-semibold text-rose-600">Mã đề đã tồn tại, hãy chọn mã khác.</p>}
-            {examIdCheck === "error" && <p className="mt-1.5 text-[11px] font-semibold text-amber-600">Không kiểm tra được mã đề. Vui lòng thử lại.</p>}
+            {isEdit && <p className="mt-1.5 text-[11px] text-slate-400">Không đổi được mã khi sửa — tạo bộ mới nếu cần mã khác.</p>}
+            {!isEdit && examIdCheck === "checking" && <p className="mt-1.5 text-[11px] text-slate-400">Đang kiểm tra mã bộ testcase…</p>}
+            {!isEdit && examIdCheck === "available" && <p className="mt-1.5 text-[11px] font-semibold text-emerald-600">Mã bộ testcase chưa tồn tại, có thể tạo.</p>}
+            {!isEdit && examIdCheck === "exists" && <p className="mt-1.5 text-[11px] font-semibold text-rose-600">Mã bộ testcase đã tồn tại, hãy chọn mã khác.</p>}
+            {!isEdit && examIdCheck === "error" && <p className="mt-1.5 text-[11px] font-semibold text-amber-600">Không kiểm tra được mã bộ testcase. Vui lòng thử lại.</p>}
           </div>
           <div className="min-w-[260px] flex-[1.4]">
-            <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500">Tên đề thi</label>
+            <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500">Tên bộ testcase</label>
             <input
               value={examName}
               onChange={(e) => setExamName(e.target.value)}
@@ -2101,20 +2170,23 @@ export default function TestcasesPage() {
             />
           </div>
           <div className="flex items-center gap-2 pb-0.5 text-xs text-slate-500">
-            {version > 0 ? <>
-              <span className={`rounded-full px-2.5 py-1 font-bold ${status === "PUBLISHED" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>{status}</span>
-              <span>version {version}</span>
-            </> : <span className="text-slate-400">Chưa lưu</span>}
+            {loadingExam ? <span className="flex items-center gap-1.5 text-slate-400"><Loader2 size={13} className="animate-spin" /> Đang nạp bộ testcase…</span>
+              : version > 0 ? <>
+                <span className={`rounded-full px-2.5 py-1 font-bold ${status === "PUBLISHED" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
+                  {status === "PUBLISHED" ? "ĐÃ LƯU" : "BẢN NHÁP"}
+                </span>
+                <span>version {version}</span>
+              </> : <span className="text-slate-400">Chưa lưu</span>}
           </div>
           <div className="ml-auto flex gap-2">
             <button onClick={downloadTestcase} disabled={!examId.trim() || !items.length || !!saving} className="flex items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3.5 py-2.5 text-sm font-semibold text-indigo-700 hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-50">
               <Download size={16} /> Tải ZIP code
             </button>
-            <button onClick={() => save("draft")} disabled={!!saving || examIdCheck !== "available" || !examName.trim()} className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3.5 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50">
-              {saving === "draft" ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />} Lưu Draft
+            <button onClick={() => save("draft")} disabled={saveDisabled} title="Lưu tạm để sửa tiếp — chưa dùng để chấm" className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3.5 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50">
+              {saving === "draft" ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />} Lưu nháp
             </button>
-            <button onClick={() => save("publish")} disabled={!!saving || examIdCheck !== "available" || !examName.trim()} className="flex items-center gap-2 rounded-lg bg-indigo-600 px-3.5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50">
-              {saving === "publish" ? <Loader2 size={16} className="animate-spin" /> : <UploadCloud size={16} />} Publish snapshot
+            <button onClick={() => save("publish")} disabled={saveDisabled} title="Lưu chính thức — bộ testcase này sẽ được dùng để chấm" className="flex items-center gap-2 rounded-lg bg-indigo-600 px-3.5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50">
+              {saving === "publish" ? <Loader2 size={16} className="animate-spin" /> : <UploadCloud size={16} />} Lưu
             </button>
           </div>
         </div>
@@ -2152,7 +2224,7 @@ export default function TestcasesPage() {
                 <span>
                   Backend đang chạy chưa có API <code className="font-mono">/api/testcase-templates/contract-catalog</code>.
                   Hãy <strong>khởi động lại backend</strong> (<code className="font-mono">run</code> hoặc <code className="font-mono">mvnw spring-boot:run</code>) để dùng Khu vực 0.
-                  Đề lưu lúc này vẫn chấm bình thường bằng cách dò mặc định.
+                  Bộ testcase lưu lúc này vẫn chấm bình thường bằng cách dò mặc định.
                 </span>
               </div>
             )}
@@ -2179,7 +2251,7 @@ export default function TestcasesPage() {
                     <strong className="text-slate-700">Bắt buộc sinh viên gắn ValueKey.</strong>{" "}
                     ValueKey là tham số <code className="font-mono">key:</code> đặt trên chính widget
                     (<code className="font-mono">TextFormField(key: const ValueKey(&apos;field.email&apos;))</code>) —
-                    không phải tên class. Chấm chính xác nhất, nhưng phải công bố quy ước key trong đề thi.
+                    không phải tên class. Chấm chính xác nhất, nhưng phải công bố quy ước key trong đề bài.
                     Bật ô này là bỏ toàn bộ cách nhận diện thay thế: thiếu key thì phần đó không được tính điểm.
                   </span>
                 </label>
@@ -2431,7 +2503,7 @@ export default function TestcasesPage() {
                       <button onClick={(e) => { e.stopPropagation(); setTemplateToHide(template); }} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold text-rose-600 hover:bg-rose-50" title="Ẩn khỏi thư viện"><Trash2 size={13} /> Xóa</button>
                     )}
                     {!template.hidden && (
-                      <button onClick={(e) => { e.stopPropagation(); addTemplate(template.template_id); }} className="flex items-center gap-1 rounded-md bg-indigo-600 px-2 py-1 text-xs font-semibold text-white hover:bg-indigo-700"><Plus size={13} /> Thêm vào đề</button>
+                      <button onClick={(e) => { e.stopPropagation(); addTemplate(template.template_id); }} className="flex items-center gap-1 rounded-md bg-indigo-600 px-2 py-1 text-xs font-semibold text-white hover:bg-indigo-700"><Plus size={13} /> Thêm vào bộ testcase</button>
                     )}
                   </div>
                 </div>
@@ -2456,7 +2528,7 @@ export default function TestcasesPage() {
           {/* Khu vực 3: testcase instance của đề */}
           <section className="card min-w-0 overflow-hidden">
             <div className="border-b border-slate-100 bg-slate-50/70 px-4 py-3">
-              <div className="flex flex-wrap items-center justify-between gap-3"><div><p className="eyebrow">Khu vực 3</p><h2 className="mt-1 text-sm font-bold text-slate-800">Testcase trong đề</h2></div><div className="flex items-center gap-2"><span className="rounded-full bg-indigo-100 px-2.5 py-1 text-xs font-bold text-indigo-700">{items.length} mục</span>{supportsGrouping && selectedItemIds.length >= 2 && <button onClick={openGroupModal} className="rounded-lg bg-indigo-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700">Gộp thành testcase lớn</button>}{items.length > 0 && <button onClick={clearAllItems} className="flex items-center gap-1 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-100" title="Xóa toàn bộ testcase"><Trash2 size={13} /> Xóa tất cả</button>}</div></div>
+              <div className="flex flex-wrap items-center justify-between gap-3"><div><p className="eyebrow">Khu vực 3</p><h2 className="mt-1 text-sm font-bold text-slate-800">Testcase trong bộ</h2></div><div className="flex items-center gap-2"><span className="rounded-full bg-indigo-100 px-2.5 py-1 text-xs font-bold text-indigo-700">{items.length} mục</span>{supportsGrouping && selectedItemIds.length >= 2 && <button onClick={openGroupModal} className="rounded-lg bg-indigo-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700">Gộp thành testcase lớn</button>}{items.length > 0 && <button onClick={clearAllItems} className="flex items-center gap-1 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-100" title="Xóa toàn bộ testcase"><Trash2 size={13} /> Xóa tất cả</button>}</div></div>
               <div className="mt-3 flex items-center justify-between text-xs"><span className="text-slate-500">Tổng trọng số</span><strong className="text-indigo-700">{totalWeight.toFixed(2)}</strong></div>
             </div>
             <div
@@ -2468,7 +2540,7 @@ export default function TestcasesPage() {
                 <div className="flex min-h-[330px] flex-col items-center justify-center rounded-xl border-2 border-dashed border-slate-200 p-8 text-center" onDragOver={(e) => e.preventDefault()}>
                   <Package size={28} className="mb-3 text-slate-300" />
                   <p className="text-sm font-semibold text-slate-600">Kéo testcase vào đây</p>
-                  <p className="mt-1 text-xs text-slate-400">Hoặc bấm “Thêm vào đề” để tránh bỏ sót thao tác.</p>
+                  <p className="mt-1 text-xs text-slate-400">Hoặc bấm “Thêm vào bộ testcase” để tránh bỏ sót thao tác.</p>
                 </div>
               ) : items.map((item) => (
                 <div
@@ -2583,7 +2655,7 @@ export default function TestcasesPage() {
                   <main className="custom-scrollbar min-h-0 space-y-4 overflow-y-auto bg-slate-50 p-5">
                     <div>
                       <div className="mb-1.5 flex items-center justify-between gap-2">
-                        <p className="text-xs font-bold text-slate-700">1. Dán vào đề thi</p>
+                        <p className="text-xs font-bold text-slate-700">1. Dán vào đề bài</p>
                         <button onClick={() => navigator.clipboard?.writeText(contractDoc.requirements_text)} className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-600 hover:bg-slate-50">Sao chép</button>
                       </div>
                       <pre className="custom-scrollbar max-h-[280px] overflow-auto rounded-xl border border-slate-200 bg-white p-3 font-mono text-[11px] leading-relaxed text-slate-700">{contractDoc.requirements_text}</pre>
@@ -2602,7 +2674,7 @@ export default function TestcasesPage() {
                       File <code className="font-mono">exam_keys.dart</code> chỉ để sinh viên khỏi gõ sai chính tả tên key —
                       viết thẳng <code className="font-mono">const ValueKey(&apos;field.email&apos;)</code> trong widget cũng được
                       tính điểm như nhau. Hai nội dung trên cũng được ghi kèm bộ testcase
-                      (<code className="font-mono">contract.json</code>, <code className="font-mono">contract.md</code>) khi Lưu Draft hoặc Publish.
+                      (<code className="font-mono">contract.json</code>, <code className="font-mono">contract.md</code>) khi bấm Lưu nháp hoặc Lưu.
                     </p>
                   </main>
                 </div>
@@ -2625,9 +2697,9 @@ export default function TestcasesPage() {
                   </header>
                   <main className="custom-scrollbar min-h-0 space-y-3 overflow-y-auto bg-slate-50 p-5">
                     <div className="rounded-xl border border-indigo-100 bg-indigo-50/60 p-3 text-[11px] leading-relaxed text-indigo-800">
-                      Testcase ở đây dùng lại cho mọi đề. Chọn <strong>loại kiểm tra</strong> rồi khai tham số mặc định —
-                      giáo viên vẫn chỉnh được tham số cho từng đề ở Khu vực 3. Tham số phải qua đúng bộ kiểm tra dùng
-                      khi lưu đề, nên không tạo được testcase hỏng.
+                      Testcase ở đây dùng lại cho mọi bộ testcase. Chọn <strong>loại kiểm tra</strong> rồi khai tham số mặc định —
+                      giáo viên vẫn chỉnh được tham số cho từng bộ testcase ở Khu vực 3. Tham số phải qua đúng bộ kiểm tra dùng
+                      khi lưu bộ testcase, nên không tạo được testcase hỏng.
                     </div>
 
                     <div className="grid grid-cols-2 gap-2">
@@ -2772,7 +2844,7 @@ export default function TestcasesPage() {
                     <div>
                       <h3 className="text-base font-bold text-slate-800">Xóa &quot;{templateToHide.name}&quot; khỏi thư viện?</h3>
                       <p className="mt-1 text-xs leading-relaxed text-slate-500">
-                        Testcase sẽ không còn hiện ở Khu vực 2. Các đề <strong>đã lưu</strong> vẫn giữ và chấm bình thường —
+                        Testcase sẽ không còn hiện ở Khu vực 2. Các bộ testcase <strong>đã lưu</strong> vẫn giữ và chấm bình thường —
                         đây là lý do hệ thống ẩn thay vì xóa hẳn. Bật &quot;Hiện cả mục đã ẩn&quot; để khôi phục.
                       </p>
                     </div>
@@ -2823,10 +2895,10 @@ export default function TestcasesPage() {
               <div className="fixed inset-0 z-[80] flex min-h-screen min-w-full items-center justify-center bg-slate-950/60 p-4 backdrop-blur-[2px]" role="dialog" aria-modal="true" aria-labelledby="clear-all-modal-title" onClick={() => setClearAllModalOpen(false)}>
                 <div className="w-full max-w-md overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
                   <div className="flex items-start justify-between gap-4 p-5">
-                    <div className="flex items-start gap-3"><div className="rounded-xl bg-rose-100 p-2 text-rose-600"><Trash2 size={20} /></div><div><h3 id="clear-all-modal-title" className="text-base font-bold text-slate-800">Xóa toàn bộ testcase?</h3><p className="mt-1 text-xs leading-relaxed text-slate-500">Bạn sắp xóa {items.length} testcase khỏi đề hiện tại.</p></div></div>
+                    <div className="flex items-start gap-3"><div className="rounded-xl bg-rose-100 p-2 text-rose-600"><Trash2 size={20} /></div><div><h3 id="clear-all-modal-title" className="text-base font-bold text-slate-800">Xóa toàn bộ testcase?</h3><p className="mt-1 text-xs leading-relaxed text-slate-500">Bạn sắp xóa {items.length} testcase khỏi bộ testcase hiện tại.</p></div></div>
                     <button onClick={() => setClearAllModalOpen(false)} className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600" aria-label="Đóng"><X size={17} /></button>
                   </div>
-                  <div className="mx-5 rounded-xl border border-rose-100 bg-rose-50 p-3 text-xs leading-relaxed text-rose-700">Thao tác này chỉ xóa danh sách đang chỉnh sửa và chưa ghi đè dữ liệu cho đến khi bạn bấm Lưu Draft hoặc Publish. Bạn có muốn tiếp tục không?</div>
+                  <div className="mx-5 rounded-xl border border-rose-100 bg-rose-50 p-3 text-xs leading-relaxed text-rose-700">Thao tác này chỉ xóa danh sách đang chỉnh sửa và chưa ghi đè dữ liệu cho đến khi bạn bấm Lưu nháp hoặc Lưu. Bạn có muốn tiếp tục không?</div>
                   <div className="flex justify-end gap-2 p-5"><button onClick={() => setClearAllModalOpen(false)} className="rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-50">Hủy</button><button onClick={confirmClearAllItems} className="flex items-center gap-1.5 rounded-xl bg-rose-600 px-3.5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-rose-700"><Trash2 size={15} /> Xóa tất cả</button></div>
                 </div>
               </div>
@@ -2836,5 +2908,23 @@ export default function TestcasesPage() {
         )}
       </div>
     </SidebarLayout>
+  );
+}
+
+/**
+ * useSearchParams bắt buộc nằm dưới một Suspense boundary, nếu không bản build production
+ * sẽ đứt ở bước prerender ("Missing Suspense boundary with useSearchParams").
+ */
+export default function TestcasesPage() {
+  return (
+    <Suspense fallback={
+      <SidebarLayout title="Bộ testcase" subtitle="Đang tải…" activePath="/teacher/archive">
+        <div className="flex items-center justify-center py-20 text-slate-400">
+          <Loader2 size={24} className="animate-spin" />
+        </div>
+      </SidebarLayout>
+    }>
+      <TestcasesEditor />
+    </Suspense>
   );
 }

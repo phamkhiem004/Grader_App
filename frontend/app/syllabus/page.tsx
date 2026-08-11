@@ -90,7 +90,7 @@ export default function SyllabusPage() {
     load();
   };
   const deprecateSkill = async (s: SkillT) => {
-    if (!confirm(`Ẩn (deprecate) skill "${s.code}"? Đề cũ trỏ vào vẫn map được, chỉ ẩn khỏi danh sách chọn.`)) return;
+    if (!confirm(`Ẩn (deprecate) skill "${s.code}"? Bộ testcase cũ trỏ vào vẫn map được, chỉ ẩn khỏi danh sách chọn.`)) return;
     try { await apiJson(`/syllabus/skills/${encodeURIComponent(s.code)}`, "DELETE"); load(); }
     catch (e) { alert((e as Error).message); }
   };
@@ -205,7 +205,7 @@ export default function SyllabusPage() {
         </div>
       )}
 
-      {/* Đánh giá đề theo syllabus — tự phản chiếu khi syllabus đổi (refreshKey) */}
+      {/* Đánh giá bộ testcase theo syllabus — tự phản chiếu khi syllabus đổi (refreshKey) */}
       <div className="mt-8">
         <SyllabusCoverage refreshKey={refreshKey} />
       </div>

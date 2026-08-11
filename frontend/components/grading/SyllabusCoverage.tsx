@@ -48,7 +48,7 @@ export default function SyllabusCoverage({ refreshKey = 0 }: { refreshKey?: numb
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  // Nạp danh sách đề đã cấu hình
+  // Nạp danh sách bộ testcase đã cấu hình
   useEffect(() => {
     fetch(`${API_BASE}/exam-setup/list`)
       .then((r) => r.json())
@@ -83,7 +83,7 @@ export default function SyllabusCoverage({ refreshKey = 0 }: { refreshKey?: numb
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 bg-slate-50/60 px-5 py-4">
         <div className="flex items-center gap-2">
           <Target size={16} className="text-indigo-500" />
-          <h3 className="text-sm font-bold text-slate-700">Đánh giá đề theo syllabus</h3>
+          <h3 className="text-sm font-bold text-slate-700">Đánh giá bộ testcase theo syllabus</h3>
         </div>
         <div className="flex items-center gap-2">
           <select
@@ -91,7 +91,7 @@ export default function SyllabusCoverage({ refreshKey = 0 }: { refreshKey?: numb
             onChange={(e) => setSelected(e.target.value)}
             className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 outline-none focus:border-indigo-400"
           >
-            {exams.length === 0 && <option value="">— chưa có đề cấu hình —</option>}
+            {exams.length === 0 && <option value="">— chưa có bộ testcase —</option>}
             {exams.map((e) => (
               <option key={e.examId} value={e.examId}>
                 {e.examName ? `${e.examId} — ${e.examName}` : e.examId}
@@ -110,7 +110,7 @@ export default function SyllabusCoverage({ refreshKey = 0 }: { refreshKey?: numb
         ) : err ? (
           <div className="rounded-lg border border-rose-100 bg-rose-50 p-4 text-center text-sm text-rose-600">{err}</div>
         ) : !cov || cov.error ? (
-          <div className="py-8 text-center text-sm text-slate-400">{cov?.error || "Chọn một đề đã cấu hình để xem độ phủ."}</div>
+          <div className="py-8 text-center text-sm text-slate-400">{cov?.error || "Chọn một bộ testcase đã cấu hình để xem độ phủ."}</div>
         ) : (
           <div className="space-y-5">
             {/* Tóm tắt */}
@@ -169,7 +169,7 @@ export default function SyllabusCoverage({ refreshKey = 0 }: { refreshKey?: numb
             {cov.gaps.length > 0 && (
               <details className="rounded-lg border border-slate-100 bg-slate-50/60 p-3">
                 <summary className="cursor-pointer text-xs font-bold text-slate-600">
-                  Kỹ năng (auto) CHƯA được đề phủ — {cov.gaps.reduce((s, g) => s + g.missing_skills.length, 0)} skill
+                  Kỹ năng (auto) CHƯA được bộ testcase phủ — {cov.gaps.reduce((s, g) => s + g.missing_skills.length, 0)} skill
                 </summary>
                 <div className="mt-2 space-y-2">
                   {cov.gaps.map((g) => (

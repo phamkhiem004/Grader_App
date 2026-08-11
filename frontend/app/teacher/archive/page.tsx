@@ -8,6 +8,7 @@ import { API_BASE } from "@/lib/config";
 import {
   Archive, RotateCcw, Trash2, Loader2, AlertTriangle, CheckCircle2,
   Database, FileArchive, Pencil, Plus, Hammer, X, UploadCloud, Package, ArrowLeft,
+  Copy, ChevronLeft, ChevronRight,
 } from "lucide-react";
 import ErrorScreen from "@/components/ui/ErrorScreen";
 import { appError, kindOf, messageOf } from "@/lib/errors";
@@ -19,12 +20,14 @@ interface ExamRow {
   testcaseStatus?: string;
   hasTestcase?: boolean;
   resultCount?: number;
+  teacherNote?: string;
   /** true = bộ dựng từ template nên mở lại sửa được; false = bộ upload ZIP, không có config. */
   editable?: boolean;
 }
 interface RegradeState { examId: string; batchId: string; total: number; done: number; error: number; running: boolean; }
 interface SandboxNotice { type: "ok" | "error"; title: string; text: string; }
 type CreatePanel = "choose" | "manual" | null;
+const PAGE_SIZES = [10, 20, 50] as const;
 
 function manualNameFromFile(file: File | null) {
   return file ? file.name.replace(/\.zip$/i, "").trim() : "";
@@ -79,6 +82,14 @@ export default function ArchivePage() {
   const [manualUploading, setManualUploading] = useState(false);
   const [manualDragging, setManualDragging] = useState(false);
   const manualFileRef = useRef<HTMLInputElement | null>(null);
+  const [pageSize, setPageSize] = useState<(typeof PAGE_SIZES)[number]>(10);
+  const [page, setPage] = useState(1);
+  const [cloneSource, setCloneSource] = useState<ExamRow | null>(null);
+  const [cloneExamId, setCloneExamId] = useState("");
+  const [cloneExamName, setCloneExamName] = useState("");
+  const [cloneNote, setCloneNote] = useState("");
+  const [cloneError, setCloneError] = useState<string | null>(null);
+  const [cloning, setCloning] = useState(false);
 
   // Portal modal ra <body> (tránh bị containing-block của .animate-fade-in-up cắt overlay)
   const [mounted, setMounted] = useState(false);
@@ -105,6 +116,13 @@ export default function ArchivePage() {
   }, []);
 
   useEffect(() => { load(); return stopPoll; }, [load]);
+
+  const totalPages = Math.max(1, Math.ceil(exams.length / pageSize));
+  const pageStart = exams.length ? (page - 1) * pageSize : 0;
+  const pageExams = exams.slice(pageStart, pageStart + pageSize);
+  useEffect(() => {
+    setPage((current) => Math.min(Math.max(1, current), totalPages));
+  }, [totalPages]);
 
   const doRegrade = async (examId: string) => {
     setErr(null); setMsg(null);
@@ -250,6 +268,64 @@ export default function ArchivePage() {
     }
   };
 
+  const openClone = (source: ExamRow) => {
+    if (source.editable === false) return;
+    const suffix = "_COPY";
+    const root = `${source.examId.slice(0, 50 - suffix.length)}${suffix}`;
+    let candidate = root;
+    let number = 2;
+    const used = new Set(exams.map((exam) => exam.examId.toUpperCase()));
+    while (used.has(candidate.toUpperCase())) {
+      const numberedSuffix = `_COPY_${number++}`;
+      candidate = `${source.examId.slice(0, 50 - numberedSuffix.length)}${numberedSuffix}`;
+    }
+    setCloneSource(source);
+    setCloneExamId(candidate);
+    setCloneExamName(`${source.examName || source.examId} (Bản sao)`);
+    setCloneNote(source.teacherNote || "");
+    setCloneError(null);
+  };
+
+  const closeClone = () => {
+    if (cloning) return;
+    setCloneSource(null);
+    setCloneError(null);
+  };
+
+  const cloneTestcaseSet = async () => {
+    if (!cloneSource) return;
+    const normalizedId = cloneExamId.trim().toUpperCase();
+    if (!/^[A-Z0-9_-]{1,50}$/.test(normalizedId)) {
+      setCloneError("Mã bộ mới chỉ gồm chữ in hoa, số, _ hoặc - và tối đa 50 ký tự.");
+      return;
+    }
+    if (!cloneExamName.trim()) {
+      setCloneError("Vui lòng nhập tên bộ testcase bản sao.");
+      return;
+    }
+    setCloning(true);
+    setCloneError(null);
+    try {
+      const data = await api(`/exam-setup/${encodeURIComponent(cloneSource.examId)}/clone`, "POST", {
+        exam_id: normalizedId,
+        exam_name: cloneExamName.trim(),
+        teacher_note: cloneNote.trim(),
+      });
+      setCloneSource(null);
+      setPage(1);
+      setSandboxNotice({
+        type: "ok",
+        title: "Clone bộ testcase thành công",
+        text: `Đã tạo ${data.exam_id || normalizedId} từ ${cloneSource.examId}. Bộ mới đang ở trạng thái bản nháp để bạn mở Sửa và kiểm tra trước khi lưu chính thức.`,
+      });
+      await load();
+    } catch (e) {
+      setCloneError((e as Error).message);
+    } finally {
+      setCloning(false);
+    }
+  };
+
   const manualExamName = manualNameFromFile(manualFile);
   const manualExamId = manualIdFromName(manualExamName);
 
@@ -305,7 +381,7 @@ export default function ArchivePage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
-              {exams.map((e) => {
+              {pageExams.map((e) => {
                 const busy = regrade?.examId === e.examId && regrade.running;
                 return (
                   <tr key={e.examId} className="hover:bg-slate-50/60">
@@ -363,6 +439,17 @@ export default function ArchivePage() {
                           disabled={busy} className={btnCls("text-rose-500 hover:bg-rose-50 hover:text-rose-600")}>
                           <Trash2 size={13} /> Xóa
                         </button>
+                        {/* Clone luôn là thao tác cuối; backend cũng kiểm tra editable để không thể clone bộ ZIP. */}
+                        <button
+                          onClick={() => openClone(e)}
+                          disabled={busy || e.editable === false}
+                          title={e.editable === false
+                            ? "Bộ upload ZIP không có cấu hình builder nên không thể clone"
+                            : "Tạo bộ mới chứa toàn bộ testcase, contract và khung code của bộ này"}
+                          className={btnCls("hover:text-violet-600")}
+                        >
+                          <Copy size={13} /> Clone đề
+                        </button>
                       </div>
                       {regrade?.examId === e.examId && (
                         <p className="mt-1 text-right text-[11px] text-blue-600">
@@ -377,6 +464,37 @@ export default function ArchivePage() {
               })}
             </tbody>
           </table>
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 bg-slate-50/60 px-5 py-3">
+            <div className="flex items-center gap-2 text-xs text-slate-500">
+              <span>Hiển thị</span>
+              <select
+                value={pageSize}
+                onChange={(event) => { setPageSize(Number(event.target.value) as (typeof PAGE_SIZES)[number]); setPage(1); }}
+                className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 font-semibold text-slate-700 outline-none focus:border-indigo-400"
+                aria-label="Số bộ testcase trên một trang"
+              >
+                {PAGE_SIZES.map((size) => <option key={size} value={size}>{size}</option>)}
+              </select>
+              <span>bộ/trang · {exams.length ? `${pageStart + 1}–${Math.min(pageStart + pageSize, exams.length)}` : "0"}/{exams.length}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setPage((current) => Math.max(1, current - 1))}
+                disabled={page <= 1}
+                className={btnCls("hover:text-indigo-600")}
+                aria-label="Trang trước"
+              ><ChevronLeft size={14} /> Trước</button>
+              <span className="min-w-24 text-center text-xs font-semibold text-slate-600">Trang {page}/{totalPages}</span>
+              <button
+                type="button"
+                onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
+                disabled={page >= totalPages}
+                className={btnCls("hover:text-indigo-600")}
+                aria-label="Trang sau"
+              >Sau <ChevronRight size={14} /></button>
+            </div>
           </div>
         </div>
       )}
@@ -545,6 +663,41 @@ export default function ArchivePage() {
                 </div>
               </>
             )}
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* Clone chỉ dùng cho bộ có config builder; mã và tên mới được nhập độc lập với thao tác Sửa. */}
+      {mounted && cloneSource && createPortal(
+        <div className="animate-modal-overlay fixed inset-0 z-[58] flex items-center justify-center bg-slate-900/65 p-4 backdrop-blur-sm" onClick={closeClone}>
+          <div role="dialog" aria-modal="true" aria-labelledby="clone-title" className="animate-modal-pop relative w-full max-w-xl rounded-2xl bg-white p-6 text-slate-800 shadow-2xl ring-1 ring-black/5" onClick={(event) => event.stopPropagation()}>
+            <button type="button" onClick={closeClone} disabled={cloning} aria-label="Đóng cửa sổ clone" className="absolute right-4 top-4 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:opacity-40"><X size={18} /></button>
+            <div className="mb-5 flex items-start gap-3">
+              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-violet-100 text-violet-600"><Copy size={22} /></span>
+              <div>
+                <h3 id="clone-title" className="text-xl font-bold">Clone bộ testcase</h3>
+                <p className="mt-1 text-sm leading-6 text-slate-500">Sao chép toàn bộ testcase, contract, code sinh và tài liệu từ <strong className="font-mono text-slate-700">{cloneSource.examId}</strong>. Kết quả là một bộ mới độc lập.</p>
+              </div>
+            </div>
+            <div className="grid gap-4 md:grid-cols-2">
+              <label className="text-xs font-bold uppercase tracking-wider text-slate-500">Mã bộ testcase mới
+                <input value={cloneExamId} maxLength={50} disabled={cloning} onChange={(event) => { setCloneExamId(event.target.value.toUpperCase().replace(/[^A-Z0-9_-]/g, "")); setCloneError(null); }} className="mt-1.5 w-full rounded-xl border border-slate-200 px-3.5 py-3 font-mono text-sm normal-case tracking-normal outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100" />
+              </label>
+              <label className="text-xs font-bold uppercase tracking-wider text-slate-500">Tên bộ testcase mới
+                <input value={cloneExamName} maxLength={200} disabled={cloning} onChange={(event) => { setCloneExamName(event.target.value); setCloneError(null); }} className="mt-1.5 w-full rounded-xl border border-slate-200 px-3.5 py-3 text-sm font-normal normal-case tracking-normal outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100" />
+              </label>
+            </div>
+            <label className="mt-4 block text-xs font-bold uppercase tracking-wider text-slate-500">Mô tả <span className="font-normal normal-case text-slate-400">(có thể sửa cho bộ mới)</span>
+              <textarea value={cloneNote} maxLength={2000} rows={4} disabled={cloning} onChange={(event) => setCloneNote(event.target.value)} className="mt-1.5 w-full resize-none rounded-xl border border-slate-200 px-3.5 py-3 text-sm font-normal normal-case tracking-normal outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100" />
+            </label>
+            {cloneError && <div className="mt-4 flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700"><AlertTriangle size={17} className="mt-0.5 shrink-0" /> {cloneError}</div>}
+            <div className="mt-5 flex justify-end gap-2">
+              <button type="button" onClick={closeClone} disabled={cloning} className="rounded-lg px-4 py-2.5 text-sm font-semibold text-slate-500 hover:bg-slate-100 disabled:opacity-40">Hủy</button>
+              <button type="button" onClick={cloneTestcaseSet} disabled={cloning || !cloneExamId.trim() || !cloneExamName.trim()} className="inline-flex items-center gap-2 rounded-lg bg-violet-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50">
+                {cloning ? <Loader2 size={16} className="animate-spin" /> : <Copy size={16} />}{cloning ? "Đang clone..." : "Tạo bản sao"}
+              </button>
+            </div>
           </div>
         </div>,
         document.body

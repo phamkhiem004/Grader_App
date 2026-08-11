@@ -135,6 +135,11 @@ interface TestcaseItem {
   custom_code?: string;
 }
 
+interface GeneratedFile {
+  name: string;
+  content: string;
+}
+
 interface SkillOption {
   code: string;
   name?: string;
@@ -463,6 +468,43 @@ function cloneParams(template: Template): JsonMap {
 function formatParam(value: unknown) {
   if (typeof value === "object" && value !== null) return JSON.stringify(value);
   return String(value ?? "");
+}
+
+/** Chuyển dữ liệu Draft thành literal Dart để code preview phản ánh đúng giá trị đang nhập. */
+function dartLiteral(value: unknown): string {
+  if (value === null || value === undefined) return "null";
+  if (typeof value === "boolean") return value ? "true" : "false";
+  if (typeof value === "number") return Number.isFinite(value) ? String(value) : "0";
+  if (typeof value === "string") return JSON.stringify(value);
+  if (Array.isArray(value)) return `<dynamic>[${value.map(dartLiteral).join(", ")}]`;
+  if (typeof value === "object") {
+    const entries = Object.entries(value as JsonMap)
+      .map(([key, entry]) => `${JSON.stringify(key)}: ${dartLiteral(entry)}`);
+    return `<String, dynamic>{${entries.length ? `\n    ${entries.join(",\n    ")}\n  ` : ""}}`;
+  }
+  return JSON.stringify(String(value));
+}
+
+/**
+ * Code tương đương mà common engine đăng ký cho một instance. Đây là preview chỉ đọc;
+ * runner và toàn bộ parameters thay đổi ngay trên màn hình khi giảng viên sửa form.
+ */
+function testcaseCodePreview(item: TestcaseItem, template?: Template) {
+  if (isCustomItem(item)) {
+    const body = String(item.custom_code || "").split("\n").map((line) => `  ${line}`).join("\n");
+    return `testWidgets(${JSON.stringify(item.instance_id)}, (tester) async {\n${body}\n});`;
+  }
+  const runner = String(item.runner || template?.runner || "");
+  const expected = String(item.expected || "").replace(/[\r\n]+/g, " ").trim();
+  return [
+    `// Expected trong rubric: ${expected || "(chưa nhập)"}`,
+    `testWidgets(${JSON.stringify(item.instance_id)}, (tester) async {`,
+    `  await _runCase(tester, ${JSON.stringify(item.instance_id)}, <String, dynamic>{`,
+    `    'runner': ${JSON.stringify(runner)},`,
+    `    'parameters': ${dartLiteral(item.parameters || {})},`,
+    "  });",
+    "});",
+  ].join("\n");
 }
 
 function testcaseGroup(template: Template) {
@@ -943,6 +985,11 @@ function TestcasesEditor() {
   const [contractMode, setContractMode] = useState<"form" | "json">("form");
   const [contractJson, setContractJson] = useState("");
   const [contractJsonError, setContractJsonError] = useState("");
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewFiles, setPreviewFiles] = useState<GeneratedFile[]>([]);
+  const [previewFile, setPreviewFile] = useState(0);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState("");
 
   // Nạp bộ testcase đang có khi vào chế độ sửa; hỏng/không có config thì báo ngay
   // thay vì để giáo viên sửa trên form rỗng rồi ghi đè mất bộ cũ.
@@ -1021,6 +1068,50 @@ function TestcasesEditor() {
       controller.abort();
     };
   }, [examId, isEdit]);
+
+  // Xem trước từ chính trạng thái form, không yêu cầu Lưu Draft. Debounce để không gọi backend mỗi phím gõ.
+  useEffect(() => {
+    if (!previewOpen) return;
+    const normalizedId = examId.trim();
+    if (!/^[A-Z0-9_-]{1,60}$/.test(normalizedId)) {
+      setPreviewLoading(false);
+      setPreviewError("Hãy nhập mã bộ testcase hợp lệ để sinh code xem trước.");
+      setPreviewFiles([]);
+      return;
+    }
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      setPreviewLoading(true);
+      setPreviewError("");
+      try {
+        const response = await fetch(`${API_BASE}/exam-setup/${encodeURIComponent(normalizedId)}/testcases/preview`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          signal: controller.signal,
+          body: JSON.stringify({
+            exam_name: examName.trim(),
+            teacher_note: teacherNote.trim(),
+            items,
+            contract: { require_keys: requireKeys, keys: contractKeys },
+          }),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || "Không sinh được code xem trước.");
+        const files = Array.isArray(data.files) ? data.files as GeneratedFile[] : [];
+        setPreviewFiles(files);
+        setPreviewFile((current) => Math.min(current, Math.max(0, files.length - 1)));
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        setPreviewError(error instanceof Error ? error.message : "Không sinh được code xem trước.");
+      } finally {
+        if (!controller.signal.aborted) setPreviewLoading(false);
+      }
+    }, 350);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [previewOpen, examId, examName, teacherNote, items, requireKeys, contractKeys]);
 
   useEffect(() => {
     fetch(`${API_BASE}/testcase-templates?includeHidden=${showHiddenTemplates}`)
@@ -2179,6 +2270,9 @@ function TestcasesEditor() {
               </> : <span className="text-slate-400">Chưa lưu</span>}
           </div>
           <div className="ml-auto flex gap-2">
+            <button onClick={() => { setPreviewOpen(true); setPreviewError(""); }} disabled={!examId.trim() || !!saving} className="flex items-center gap-2 rounded-lg border border-violet-200 bg-violet-50 px-3.5 py-2.5 text-sm font-semibold text-violet-700 hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-50" title="Xem exam_test.dart và matrix đang sinh từ form hiện tại, không cần lưu trước">
+              <Eye size={16} /> Xem code hiện tại
+            </button>
             <button onClick={downloadTestcase} disabled={!examId.trim() || !items.length || !!saving} className="flex items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3.5 py-2.5 text-sm font-semibold text-indigo-700 hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-50">
               <Download size={16} /> Tải ZIP code
             </button>
@@ -2623,6 +2717,18 @@ function TestcasesEditor() {
                             : <input type={isNumber ? "number" : "text"} value={formatParam(item.parameters[key])} onChange={(e) => updateParameter(item, key, e.target.value)} className={cellClass} />}</label>;
                       })}</div></div>
                       )}
+                      {!isCustomItem(item) && (
+                        <div className="overflow-hidden rounded-lg border border-slate-700 bg-slate-950">
+                          <div className="flex items-center justify-between gap-3 border-b border-slate-700 px-3 py-2">
+                            <div>
+                              <p className="text-[11px] font-bold text-slate-100">Code kiểm tra tương đương</p>
+                              <p className="mt-0.5 text-[9px] text-slate-400">Chỉ đọc · cập nhật ngay khi đổi semantic key, input, expected hoặc tham số runner.</p>
+                            </div>
+                            <span className="rounded bg-slate-800 px-2 py-1 font-mono text-[9px] text-cyan-300">{item.runner || templateMap.get(item.template_id)?.runner}</span>
+                          </div>
+                          <pre className="custom-scrollbar max-h-72 overflow-auto whitespace-pre p-3 text-[10px] leading-relaxed text-slate-100">{testcaseCodePreview(item, templateMap.get(item.template_id))}</pre>
+                        </div>
+                      )}
                       <p className="text-[10px] text-slate-400">Expected trên sẽ được lưu vào kết quả chấm; actual chỉ xuất hiện sau khi grader chạy bài sinh viên.</p>
                     </div>
                   )}
@@ -2636,6 +2742,40 @@ function TestcasesEditor() {
         <datalist id="semantic-key-options">
           {keySuggestions.map((row) => <option key={row.key} value={row.key} label={row.label || undefined} />)}
         </datalist>
+
+        {typeof document !== "undefined" && previewOpen && createPortal(
+          <div className="fixed inset-0 z-[82] flex min-h-screen min-w-full items-center justify-center bg-slate-950/65 p-4 backdrop-blur-[2px]" role="dialog" aria-modal="true" aria-labelledby="generated-code-title" onClick={() => setPreviewOpen(false)}>
+            <div className="flex max-h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
+              <header className="flex shrink-0 items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
+                <div>
+                  <p className="eyebrow">Code sinh theo thời gian thực</p>
+                  <h2 id="generated-code-title" className="mt-1 text-lg font-bold text-slate-800">Bộ file chấm hiện tại · {examId.trim()}</h2>
+                  <p className="mt-1 text-xs leading-relaxed text-slate-500">Mặc định hiển thị toàn bộ <code className="font-mono">exam_test.dart</code>. Tham số từng testcase nằm trong <code className="font-mono">skills_matrix.json</code> và cũng cập nhật ngay khi form thay đổi.</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  {previewLoading && <span className="flex items-center gap-1.5 text-xs font-semibold text-indigo-600"><Loader2 size={14} className="animate-spin" /> Đang cập nhật</span>}
+                  <button onClick={() => setPreviewOpen(false)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600" aria-label="Đóng cửa sổ xem code"><X size={18} /></button>
+                </div>
+              </header>
+              {previewError && <div className="flex items-start gap-2 border-b border-rose-200 bg-rose-50 px-5 py-3 text-xs font-semibold text-rose-700"><AlertCircle size={15} className="mt-0.5 shrink-0" /> <span>{previewError}<br /><span className="font-normal">Code hợp lệ gần nhất vẫn được giữ bên dưới để đối chiếu.</span></span></div>}
+              {previewFiles.length === 0 && previewLoading ? (
+                <div className="flex min-h-80 flex-1 items-center justify-center text-slate-400"><Loader2 size={24} className="animate-spin" /></div>
+              ) : previewFiles.length === 0 ? (
+                <div className="flex min-h-80 flex-1 items-center justify-center p-8 text-center text-sm text-slate-500">Chưa có file code hợp lệ để hiển thị.</div>
+              ) : (
+                <div className="flex min-h-0 flex-1 flex-col">
+                  <div className="flex shrink-0 gap-1 overflow-x-auto border-b border-slate-200 bg-slate-50 px-4 py-2">
+                    {previewFiles.map((file, index) => (
+                      <button key={file.name} onClick={() => setPreviewFile(index)} className={`shrink-0 rounded-lg px-3 py-1.5 font-mono text-xs ${index === previewFile ? "bg-indigo-100 font-bold text-indigo-700" : "text-slate-500 hover:bg-white hover:text-slate-700"}`}>{file.name}</button>
+                    ))}
+                  </div>
+                  <pre className="custom-scrollbar min-h-0 flex-1 overflow-auto whitespace-pre bg-slate-950 p-5 text-[11px] leading-relaxed text-slate-100">{previewFiles[previewFile]?.content}</pre>
+                </div>
+              )}
+            </div>
+          </div>,
+          document.body
+        )}
 
         {typeof document !== "undefined" && createPortal(
           <>

@@ -16,7 +16,7 @@ export default function WorkspaceHeader({ student, totalScore, maxTotal }: Works
   return (
     <header className="h-16 bg-white/90 backdrop-blur-md border-b border-slate-200/80 flex items-center justify-between px-4 shrink-0 shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
       <div className="flex items-center gap-4">
-        <Link href="/teacher" className="p-2 hover:bg-slate-100 rounded-md text-slate-500 transition-colors">
+        <Link href="/teacher/archive" className="p-2 hover:bg-slate-100 rounded-md text-slate-500 transition-colors">
           <ArrowLeft size={20} />
         </Link>
         <div className="h-6 w-px bg-slate-200"></div>

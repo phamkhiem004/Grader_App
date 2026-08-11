@@ -443,9 +443,9 @@ public class TestcaseTemplateService {
             Files.writeString(dir.resolve("testcase-config.json"), mapper.writerWithDefaultPrettyPrinter()
                     .writeValueAsString(config), StandardCharsets.UTF_8);
             exam.setTestcasePath(dir.toAbsolutePath().normalize().toString());
-            boolean engineReady = Files.exists(dir.resolve("exam_test.dart"))
-                    && Files.exists(dir.resolve("grader.dart"));
-            exam.setStatus(publish && engineReady ? ExamStatus.READY : ExamStatus.BUILDING);
+            // Publish mới chỉ sinh file. Sandbox chỉ READY sau khi người dùng bấm Build Sandbox
+            // và backend đã kiểm tra file + bảo đảm ảnh nền Docker dùng chung.
+            exam.setStatus(ExamStatus.BUILDING);
 
             exam.setExamId(examId);
             if (isNew || exam.getCreatedBy() == null || exam.getCreatedBy().isBlank()) exam.setCreatedBy(actor);

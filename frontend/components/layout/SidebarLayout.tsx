@@ -4,7 +4,7 @@ import React, { useEffect, useState, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
-  Settings, FileText, FileCode2, CheckSquare, BarChart2, Bell, Search,
+  FileText, FileCode2, CheckSquare, BarChart2, Bell, Search,
   GraduationCap, Loader2, History, PanelLeftClose,
   Clock, CheckCircle2, AlertCircle, BookOpen, Package,
   MessageSquareText, Bot, ChevronDown,
@@ -47,7 +47,6 @@ const PRIMARY_NAV: NavEntry[] = [
     name: 'Chấm bài', icon: CheckSquare, children: [
       { name: 'Chấm tự động', path: '/', icon: Bot },
       { name: 'Chấm thủ công', path: '/teacher/workspace', icon: FileText },
-      { name: 'Cấu hình bộ testcase', path: '/teacher', icon: Settings },
       { name: 'Lịch sử chấm', path: '/history', icon: History },
     ],
   },

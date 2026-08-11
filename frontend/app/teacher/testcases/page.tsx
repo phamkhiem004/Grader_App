@@ -966,7 +966,7 @@ function TestcasesEditor() {
           setMessage({
             type: "error",
             text: `Bộ ${editExamId} không có cấu hình template để mở lại (thường là bộ tải lên bằng file ZIP). `
-              + `Muốn đổi thì upload gói mới ở trang "Cấu hình bộ testcase".`,
+              + `Hãy tạo một bộ testcase mới nếu cần thay đổi.`,
           });
           return;
         }
@@ -1653,7 +1653,7 @@ function TestcasesEditor() {
       setVersion(Number(data.version ?? version));
       setItems(Array.isArray(data.items) ? data.items as TestcaseItem[] : items);
       setMessage({ type: "ok", text: data.warning || (kind === "publish"
-        ? `Đã lưu bộ code testcase v${data.version} — sẵn sàng đem đi chấm.`
+        ? `Đã lưu bộ code testcase v${data.version}. Hãy Build Sandbox tại Kho bộ testcase trước khi chấm.`
         : `Đã lưu nháp bộ code testcase v${data.version} (chưa dùng để chấm).` ) });
     } catch (e) {
       setMessage({ type: "error", text: e instanceof Error ? e.message : "Không lưu được cấu hình testcase" });

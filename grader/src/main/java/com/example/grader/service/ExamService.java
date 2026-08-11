@@ -14,9 +14,12 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.text.Normalizer;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -24,6 +27,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
@@ -40,6 +44,10 @@ import java.util.regex.Pattern;
 @Service
 @Slf4j
 public class ExamService {
+
+    private static final long MAX_TESTCASE_ZIP_BYTES = 20L * 1024 * 1024;
+    private static final long MAX_TESTCASE_UNZIPPED_BYTES = 50L * 1024 * 1024;
+    private static final int MAX_TESTCASE_ZIP_ENTRIES = 200;
 
     @Value("${grader.template-dir:grader-base}")
     private String templateDir;
@@ -411,6 +419,93 @@ public class ExamService {
         return bos.toByteArray();
     }
 
+    /**
+     * Nhập bộ testcase viết thủ công từ ZIP. Tên/mã lấy từ tên file, ZIP chỉ dùng để vận chuyển
+     * rồi bị bỏ; trên đĩa chỉ giữ thư mục ba file để Build Sandbox mount trực tiếp.
+     */
+    public synchronized Map<String, Object> importManualTestcase(
+            String originalFilename, String teacherNote, byte[] zipBytes, String actor) throws Exception {
+        String examName = manualTestcaseName(originalFilename);
+        String examId = manualTestcaseId(examName);
+        if (zipBytes == null || zipBytes.length == 0)
+            throw new IllegalArgumentException("File ZIP testcase đang rỗng.");
+        if (zipBytes.length > MAX_TESTCASE_ZIP_BYTES)
+            throw new IllegalArgumentException("File ZIP testcase vượt quá giới hạn 20 MB.");
+        if (examRepository.findByExamId(examId).isPresent())
+            throw new IllegalStateException("Mã bộ testcase " + examId
+                    + " đã tồn tại. Hãy đổi tên file ZIP rồi thử lại.");
+
+        Path root = examsRoot();
+        Files.createDirectories(root);
+        Path examDir = root.resolve(examId);
+        if (Files.exists(examDir))
+            throw new IllegalStateException("Thư mục của bộ testcase " + examId
+                    + " đã tồn tại. Hãy đổi tên file ZIP hoặc dọn thư mục cũ.");
+
+        Path staging = Files.createTempDirectory(root, "." + examId + "-import-");
+        Path testcaseDir = examDir.resolve("testcase");
+        try {
+            unzip(zipBytes, staging);
+            validateRequiredFiles(staging);
+            validateSkillCodes(staging);
+
+            Files.createDirectories(examDir);
+            try {
+                Files.move(staging, testcaseDir, StandardCopyOption.ATOMIC_MOVE);
+            } catch (AtomicMoveNotSupportedException e) {
+                Files.move(staging, testcaseDir);
+            }
+            Exam exam = new Exam();
+            exam.setExamId(examId);
+            exam.setExamName(examName);
+            exam.setTeacherNote(teacherNote == null ? "" : teacherNote.trim());
+            exam.setTestcasePath(testcaseDir.toAbsolutePath().normalize().toString());
+            exam.setStatus(ExamStatus.BUILDING);
+            exam.setTestcaseStatus("PUBLISHED");
+            exam.setTestcaseVersion(1);
+            exam.setTestcasePublishedAt(Instant.now());
+            exam.setCreatedBy(actor);
+            examRepository.save(exam);
+
+            Map<String, Object> out = new LinkedHashMap<>();
+            out.put("examId", examId);
+            out.put("examName", examName);
+            out.put("status", "BUILDING");
+            out.put("testcaseStatus", "PUBLISHED");
+            out.put("hasTestcase", true);
+            return out;
+        } catch (Exception e) {
+            try { deleteRecursively(staging); } catch (Exception ignored) {}
+            try { deleteRecursively(examDir); } catch (Exception ignored) {}
+            throw e;
+        }
+    }
+
+    private String manualTestcaseName(String originalFilename) {
+        if (originalFilename == null || originalFilename.isBlank())
+            throw new IllegalArgumentException("Không đọc được tên file ZIP.");
+        String filename = originalFilename.replace('\\', '/');
+        filename = filename.substring(filename.lastIndexOf('/') + 1).trim();
+        if (!filename.toLowerCase(Locale.ROOT).endsWith(".zip"))
+            throw new IllegalArgumentException("Chỉ chấp nhận file testcase định dạng .zip.");
+        String name = filename.substring(0, filename.length() - 4).trim();
+        if (name.isBlank()) throw new IllegalArgumentException("Tên file ZIP không hợp lệ.");
+        return name;
+    }
+
+    private String manualTestcaseId(String examName) {
+        String ascii = Normalizer.normalize(examName, Normalizer.Form.NFD)
+                .replaceAll("\\p{M}+", "")
+                .replace('đ', 'd')
+                .replace('Đ', 'D');
+        String id = ascii.toUpperCase(Locale.ROOT)
+                .replaceAll("[^A-Z0-9_-]+", "_")
+                .replaceAll("_+", "_")
+                .replaceAll("^[_-]+|[_-]+$", "");
+        if (id.length() > 60) id = id.substring(0, 60).replaceAll("[_-]+$", "");
+        return safeId(id, "bộ testcase");
+    }
+
     // ── Setup đề: chỉ lưu testcase (mount lúc chấm), KHÔNG build image ──
     public ExamSetupResponse setupExam(String examId, String examName,
                                        String teacherNote, MultipartFile testcaseZip) throws Exception {
@@ -429,13 +524,7 @@ public class ExamService {
         Files.createDirectories(testcaseDir);
 
         unzip(zipBytes, testcaseDir);
-        validateRequiredFiles(testcaseDir);
-        normalizeExamTestNames(testcaseDir);   // Bỏ group wrapper để Flutter trả test name đúng TC_...
-        normalizeGraderRubricKeys(testcaseDir); // Tránh Flutter thêm group prefix làm lệch key rubric.
-        normalizeGraderExecution(testcaseDir); // Tránh retry hàng loạt làm một bài chạm timeout Docker.
-        ensureTestcaseImportsAvailable(testcaseDir); // Tự bổ sung package thiếu vào môi trường chấm nếu có thể
-        validateTestcaseImports(testcaseDir);   // CHẶN package ngoài còn thiếu → tránh 0/0 oan cả lớp
-        validateSkillCodes(testcaseDir);   // skill_code (nếu khai) phải nằm trong syllabus
+        prepareSandboxFiles(testcaseDir);
 
         Exam exam = examRepository.findByExamId(examId).orElse(new Exam());
         exam.setExamId(examId);
@@ -451,6 +540,48 @@ public class ExamService {
 
         log.info("✅ Đề {} sẵn sàng (mount testcase, không build image): {}", examId, testcaseDir);
         return new ExamSetupResponse(examId, baseImage, "READY");
+    }
+
+    /**
+     * Chuẩn bị sandbox trực tiếp từ thư mục testcase đã sinh, không cần nén rồi upload lại ZIP.
+     * Ảnh nền Docker dùng chung được bảo đảm một lần; mỗi đề chỉ lưu đường dẫn thư mục để mount.
+     */
+    public ExamSetupResponse buildSandbox(String rawExamId) throws Exception {
+        String examId = safeId(rawExamId, "bộ testcase");
+        Exam exam = examRepository.findByExamId(examId)
+                .orElseThrow(() -> new IllegalArgumentException("Không tìm thấy bộ testcase: " + examId));
+        if (!"PUBLISHED".equalsIgnoreCase(exam.getTestcaseStatus())) {
+            throw new IllegalStateException(
+                    "Bộ testcase chưa được lưu chính thức. Hãy bấm Lưu trước khi Build Sandbox.");
+        }
+
+        Path testcaseDir = testcaseDirOf(examId);
+        if (testcaseDir == null || !Files.isDirectory(testcaseDir)) {
+            throw new IllegalStateException("Không tìm thấy thư mục testcase của " + examId);
+        }
+
+        // Bắt lỗi bộ chấm trước khi tốn thời gian kiểm tra/build ảnh nền Docker.
+        prepareSandboxFiles(testcaseDir);
+        ensureBaseImage(locateTemplateDir());
+
+        exam.setImageName(baseImage);
+        exam.setTestcasePath(testcaseDir.toAbsolutePath().normalize().toString());
+        exam.setStatus(ExamStatus.READY);
+        examRepository.save(exam);
+
+        log.info("Sandbox của {} đã sẵn sàng từ thư mục {}", examId, testcaseDir);
+        return new ExamSetupResponse(examId, baseImage, "READY");
+    }
+
+    /** Dùng chung một pipeline kiểm tra cho ZIP upload và thư mục do testcase builder sinh ra. */
+    private void prepareSandboxFiles(Path testcaseDir) throws Exception {
+        validateRequiredFiles(testcaseDir);
+        normalizeExamTestNames(testcaseDir);       // Giữ tên test khớp rubric.
+        normalizeGraderRubricKeys(testcaseDir);    // Giữ key kết quả khớp skills_matrix.
+        normalizeGraderExecution(testcaseDir);     // Chặn retry/process treo quá thời gian.
+        ensureTestcaseImportsAvailable(testcaseDir);
+        validateTestcaseImports(testcaseDir);
+        validateSkillCodes(testcaseDir);
     }
 
     // ── Xóa đề: gỡ ảnh legacy + testcase + TOÀN BỘ bài nộp (submissions) + bản ghi đề (DB) ──
@@ -1325,14 +1456,29 @@ Future<ProcessResult> _runProcess(
         try (var zis = new java.util.zip.ZipInputStream(
                 new java.io.ByteArrayInputStream(bytes))) {
             java.util.zip.ZipEntry entry;
+            int entryCount = 0;
+            long totalBytes = 0;
+            byte[] buffer = new byte[8192];
             while ((entry = zis.getNextEntry()) != null) {
+                if (++entryCount > MAX_TESTCASE_ZIP_ENTRIES)
+                    throw new IllegalArgumentException("ZIP có quá nhiều file (tối đa "
+                            + MAX_TESTCASE_ZIP_ENTRIES + ").");
                 Path out = dest.resolve(entry.getName()).normalize();
                 if (!out.startsWith(dest))
                     throw new IllegalArgumentException("Zip Slip: " + entry.getName());
                 if (entry.isDirectory()) { Files.createDirectories(out); }
                 else {
                     Files.createDirectories(out.getParent());
-                    Files.write(out, zis.readAllBytes());
+                    try (var output = Files.newOutputStream(out)) {
+                        int read;
+                        while ((read = zis.read(buffer)) != -1) {
+                            totalBytes += read;
+                            if (totalBytes > MAX_TESTCASE_UNZIPPED_BYTES)
+                                throw new IllegalArgumentException(
+                                        "Nội dung ZIP sau giải nén vượt quá giới hạn 50 MB.");
+                            output.write(buffer, 0, read);
+                        }
+                    }
                 }
             }
         }

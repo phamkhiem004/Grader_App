@@ -46,6 +46,30 @@ class TestcaseEngineRefreshTest {
     }
 
     @Test
+    void refreshKeepsEnabledCustomTestcases(@TempDir Path dir) throws Exception {
+        Files.writeString(dir.resolve("exam_test.dart"), "// engine cũ", StandardCharsets.UTF_8);
+        Files.writeString(dir.resolve("grader.dart"), "// engine cũ", StandardCharsets.UTF_8);
+        String config = """
+                {
+                  "engine_type": "COMMON_V1",
+                  "items": [{
+                    "instance_id": "PE_TEST_custom_01",
+                    "runner": "CUSTOM_CODE",
+                    "enabled": true,
+                    "name": "Kiểm tra code tay",
+                    "custom_code": "expect(1, 1);"
+                  }]
+                }
+                """;
+
+        assertTrue(new TestcaseTemplateService().refreshCommonEngine(exam(dir, config)));
+
+        String generated = Files.readString(dir.resolve("exam_test.dart"), StandardCharsets.UTF_8);
+        assertTrue(generated.contains("case 'PE_TEST_custom_01':"));
+        assertTrue(generated.contains("expect(1, 1);"));
+    }
+
+    @Test
     void leavesLegacyExamAlone(@TempDir Path dir) throws Exception {
         // Đề legacy: giáo viên upload ZIP nên không có testcase-config, engine là của họ.
         Files.writeString(dir.resolve("grader.dart"), "// grader của giáo viên", StandardCharsets.UTF_8);

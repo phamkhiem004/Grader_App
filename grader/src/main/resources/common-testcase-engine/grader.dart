@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -28,34 +29,107 @@ import 'dart:io';
 /// WIDGET_NOT_FOUND. Nay mọi thao tác đi kèm `_failIfActionThrew` (10 chỗ) phát `ACTION_FAILED`
 /// — kind cố ý KHÔNG mang error_code để classifier giữ độ mịn (RANGE_ERROR/NULL_ERROR/
 /// STATE_ERROR). Điểm KHÔNG đổi: lỗi chưa lấy đi vẫn làm flutter_test đánh hỏng test.
-const String kEngineVersion = 'COMMON_V1-2.7.0';
+/// 2.8.0 — chạy các lô testcase nhỏ trong process riêng, giới hạn cả thời gian mỗi process
+/// lẫn toàn bộ lượt chấm. Một app treo không còn giữ Docker quá bốn phút; lô sau vẫn có cơ
+/// hội chạy mà không phải trả chi phí khởi động Flutter cho từng testcase.
+const String kEngineVersion = 'COMMON_V1-2.8.0';
 
 /// PHẢI khớp hằng cùng tên trong `exam_test.dart` — hai chương trình Dart riêng biệt,
 /// không import nhau nên không chia sẻ được hằng số.
 const String kBootFailedMarker = '###GRADER_BOOT_FAILED###';
 const String kObservationMarker = '###GRADER_OBS###';
+const int kProcessTimeoutExitCode = -124;
+const int kDefaultBatchSize = 8;
+const int kDefaultBatchTimeoutSeconds = 60;
+const int kDefaultTotalTimeoutSeconds = 180;
 
 Future<void> main() async {
   final matrix = _loadMatrix();
-  final process = await Process.run(
-    Platform.isWindows ? 'flutter.bat' : 'flutter',
-    // GRADER_MODE để starter tự khởi tạo storage cho môi trường test (vd sqflite ffi);
-    // bài không dùng cờ này thì define thừa cũng vô hại.
-    <String>[
-      'test',
-      '--no-pub',
-      '--dart-define=GRADER_MODE=true',
-      '--reporter=json',
-      'test/exam_test.dart',
-    ],
-    runInShell: false,
+  final runs = <String, Map<String, dynamic>>{};
+  final runnerErrors = <String>[];
+  final batchSize = _positiveEnvInt('GRADER_BATCH_SIZE', kDefaultBatchSize);
+  final batchTimeout = Duration(
+    seconds: _positiveEnvInt(
+      'GRADER_BATCH_TIMEOUT_SECONDS',
+      kDefaultBatchTimeoutSeconds,
+    ),
   );
+  final totalTimeout = Duration(
+    seconds: _positiveEnvInt(
+      'GRADER_TOTAL_TIMEOUT_SECONDS',
+      kDefaultTotalTimeoutSeconds,
+    ),
+  );
+  final totalWatch = Stopwatch()..start();
+  var totalBudgetExceeded = false;
+  final testIds = matrix.keys.toList(growable: false);
 
-  stdout.write(process.stdout);
-  stderr.write(process.stderr);
+  for (var offset = 0; offset < testIds.length; offset += batchSize) {
+    final end = offset + batchSize < testIds.length
+        ? offset + batchSize
+        : testIds.length;
+    final batch = testIds.sublist(offset, end);
+    final remaining = totalTimeout - totalWatch.elapsed;
+    if (remaining <= Duration.zero) {
+      totalBudgetExceeded = true;
+      break;
+    }
+    final limit = remaining < batchTimeout ? remaining : batchTimeout;
+    final process = await _runFlutterBatch(batch, limit);
+    stdout.write(process.stdout);
+    stderr.write(process.stderr);
 
-  final runs = _parseReporter(process.stdout.toString());
+    final parsed = _parseReporter(process.stdout.toString());
+    runs.addAll(parsed);
+    if (process.exitCode == kProcessTimeoutExitCode) {
+      // --concurrency=1 bảo đảm testcase đầu tiên chưa có testDone là testcase đang treo.
+      // Các testcase còn lại trong lô chưa có cơ hội chạy và sẽ được ghi not_run.
+      final missing = batch.where((id) => !runs.containsKey(id)).toList();
+      if (missing.isNotEmpty) {
+        final timedOutId = missing.first;
+        runs[timedOutId] = <String, dynamic>{
+          'passed': false,
+          'bootFailed': false,
+          'observation': <String, dynamic>{
+            'kind': 'PROCESS_TIMEOUT',
+            'timeout_seconds': limit.inSeconds,
+          },
+          'message': 'Testcase vượt quá ${limit.inSeconds} giây và đã bị dừng.',
+        };
+        runnerErrors.add(
+          '$timedOutId: process timeout trong lô sau ${limit.inSeconds}s',
+        );
+      } else {
+        runnerErrors.add(
+          'Lô ${batch.join(',')}: process timeout sau ${limit.inSeconds}s',
+        );
+      }
+      continue;
+    }
+
+    final missing = batch.where((id) => !runs.containsKey(id)).toList();
+    if (missing.isNotEmpty) {
+      final batchLabel = batch.join(',');
+      runnerErrors.add('$batchLabel: ${_shorten(_processError(process), 400)}');
+      if (parsed.isEmpty) {
+        // Lỗi compile/runner dùng chung: chạy lô tiếp theo chỉ lặp lại cùng lỗi.
+        break;
+      }
+    }
+    if (batch.any((id) => runs[id]?['bootFailed'] == true)) {
+      // _boot() là đường chung của toàn bộ runner; thử tiếp chỉ lặp lại cùng lỗi gốc.
+      break;
+    }
+  }
+  totalWatch.stop();
+  if (totalBudgetExceeded) {
+    runnerErrors.add(
+      'GRADER_TOTAL_TIMEOUT after ${totalTimeout.inSeconds}s; các testcase còn lại chưa chạy.',
+    );
+  }
+
   final output = <String, dynamic>{
+    // Giữ nguyên mode để API/report cũ không phải đổi; engine_version cho biết cơ chế cô lập.
     'mode': 'common_semantic_key_v1',
     'test_cases': <Map<String, dynamic>>[],
   };
@@ -64,7 +138,9 @@ Future<void> main() async {
   // Cả bộ test không khởi động được (lib/ không biên dịch, runner crash) thì KHÔNG một
   // testcase nào của matrix có kết quả. Đây là lỗi RUNNER, khác hẳn "bài làm sai".
   final ranAny = matrix.keys.any(runs.containsKey);
-  final runnerError = ranAny ? null : _shorten(_processError(process), 400);
+  final runnerError = runnerErrors.isEmpty
+      ? null
+      : _shorten(runnerErrors.join('\n'), 2000);
   var passed = 0;
   var notRun = 0;
   var earned = 0.0;
@@ -88,7 +164,7 @@ Future<void> main() async {
     // có phán quyết — gắn `not_run` cho nó là nói sai, và làm mất luôn nguyên nhân gốc.
     final bootFailed = result?['bootFailed'] == true;
     final isNotRun =
-        !ok && (!ranAny || (bootFailed && runner != 'APP_BOOT'));
+        !ok && (result == null || (bootFailed && runner != 'APP_BOOT'));
 
     if (ok) {
       passed++;
@@ -105,8 +181,12 @@ Future<void> main() async {
     if (ok) {
       actual = 'Đã đáp ứng yêu cầu';
     } else if (isNotRun) {
-      actual = ranAny
+      actual = bootFailed
           ? 'Chưa chạy: ứng dụng không mở được nên bộ chấm chưa kiểm tới yêu cầu này.'
+          : totalBudgetExceeded
+          ? 'Chưa chạy: bộ chấm đã hết ngân sách thời gian an toàn.'
+          : ranAny
+          ? 'Chưa chạy: runner đã dừng sau một lỗi dùng chung.'
           : 'Chưa chạy: bộ test không khởi động được nên chưa kiểm tới yêu cầu này.';
     } else {
       actual = (result?['message'] ?? 'Test thất bại.').toString();
@@ -130,8 +210,8 @@ Future<void> main() async {
       'observation': ok
           ? null
           : isNotRun
-              ? <String, dynamic>{'kind': ranAny ? 'NOT_RUN_BOOT' : 'NOT_RUN_SUITE'}
-              : result?['observation'],
+          ? <String, dynamic>{'kind': ranAny ? 'NOT_RUN_BOOT' : 'NOT_RUN_SUITE'}
+          : result?['observation'],
     });
   }
 
@@ -141,11 +221,13 @@ Future<void> main() async {
   output['soTestFail'] = cases.length - passed;
   output['tongSoTest'] = cases.length;
   output['chiTiet'] = cases
-      .map((item) => <String, dynamic>{
-            'name': item['test_id'],
-            'status': item['status'] == 'passed' ? 'PASS' : 'FAILED',
-            'message': item['actual'],
-          })
+      .map(
+        (item) => <String, dynamic>{
+          'name': item['test_id'],
+          'status': item['status'] == 'passed' ? 'PASS' : 'FAILED',
+          'message': item['actual'],
+        },
+      )
       .toList();
   output['grading_result'] = <String, dynamic>{
     'score': _round(score),
@@ -173,8 +255,111 @@ Future<void> main() async {
   stdout.writeln('--- GRADE_RESULT_END ---');
 }
 
+Future<ProcessResult> _runFlutterBatch(List<String> testIds, Duration timeout) {
+  final environment = <String, String>{
+    ...Platform.environment,
+    'GRADER_CASE_MODE': 'batch',
+    'GRADER_CASE_IDS': testIds.join(','),
+  };
+  return _runProcess(
+    Platform.isWindows ? 'flutter.bat' : 'flutter',
+    <String>[
+      'test',
+      '--no-pub',
+      '--concurrency=1',
+      '--dart-define=GRADER_MODE=true',
+      '--reporter=json',
+      'test/exam_test.dart',
+    ],
+    environment: environment,
+    timeout: timeout,
+  );
+}
+
+Future<ProcessResult> _runProcess(
+  String executable,
+  List<String> arguments, {
+  required Duration timeout,
+  Map<String, String>? environment,
+}) async {
+  late final Process process;
+  try {
+    process = await Process.start(
+      executable,
+      arguments,
+      environment: environment,
+      // Windows cần shell để thực thi flutter.bat; container Linux chạy binary trực tiếp.
+      runInShell: Platform.isWindows,
+    );
+  } on ProcessException catch (error) {
+    return ProcessResult(
+      0,
+      127,
+      '',
+      'Không khởi động được $executable: $error',
+    );
+  }
+  final stdoutFuture = process.stdout.transform(utf8.decoder).join();
+  final stderrFuture = process.stderr.transform(utf8.decoder).join();
+  try {
+    final exitCode = await process.exitCode.timeout(timeout);
+    return ProcessResult(
+      process.pid,
+      exitCode,
+      await stdoutFuture,
+      await stderrFuture,
+    );
+  } on TimeoutException {
+    await _killProcessTree(process);
+    final out = await stdoutFuture.timeout(
+      const Duration(seconds: 2),
+      onTimeout: () => '',
+    );
+    final err = await stderrFuture.timeout(
+      const Duration(seconds: 2),
+      onTimeout: () => '',
+    );
+    return ProcessResult(
+      process.pid,
+      kProcessTimeoutExitCode,
+      out,
+      '$err\nGRADER_PROCESS_TIMEOUT after ${timeout.inSeconds}s',
+    );
+  }
+}
+
+Future<void> _killProcessTree(Process process) async {
+  if (Platform.isWindows) {
+    try {
+      await Process.run('taskkill', <String>[
+        '/PID',
+        '${process.pid}',
+        '/T',
+        '/F',
+      ], runInShell: false).timeout(const Duration(seconds: 2));
+    } catch (_) {
+      process.kill();
+    }
+  } else {
+    process.kill(ProcessSignal.sigkill);
+  }
+  try {
+    await process.exitCode.timeout(const Duration(seconds: 2));
+  } catch (_) {
+    // Process đã được yêu cầu dừng; không giữ grader chỉ để chờ cleanup của hệ điều hành.
+  }
+}
+
+int _positiveEnvInt(String name, int fallback) {
+  final value = int.tryParse(Platform.environment[name] ?? '');
+  return value != null && value > 0 ? value : fallback;
+}
+
 Map<String, dynamic> _loadMatrix() {
-  for (final path in <String>['test/skills_matrix.json', 'skills_matrix.json']) {
+  for (final path in <String>[
+    'test/skills_matrix.json',
+    'skills_matrix.json',
+  ]) {
     final file = File(path);
     if (!file.existsSync()) continue;
     final value = jsonDecode(file.readAsStringSync());
@@ -235,7 +420,9 @@ Map<String, Map<String, dynamic>> _parseReporter(String output) {
     } else if (type == 'error') {
       final id = (event['testID'] as num?)?.toInt();
       if (id != null) {
-        errorsById.putIfAbsent(id, () => <String>[]).add(event['error']?.toString() ?? '');
+        errorsById
+            .putIfAbsent(id, () => <String>[])
+            .add(event['error']?.toString() ?? '');
       }
     } else if (type == 'testDone') {
       final id = (event['testID'] as num?)?.toInt();
@@ -318,7 +505,9 @@ String _processError(ProcessResult process) {
 
 double _number(Map<String, dynamic> map, String key, double fallback) {
   final value = map[key];
-  return value is num ? value.toDouble() : double.tryParse('$value') ?? fallback;
+  return value is num
+      ? value.toDouble()
+      : double.tryParse('$value') ?? fallback;
 }
 
 double _round(double value) => double.parse(value.toStringAsFixed(2));

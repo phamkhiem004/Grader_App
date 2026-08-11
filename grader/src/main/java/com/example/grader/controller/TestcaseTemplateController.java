@@ -31,6 +31,12 @@ public class TestcaseTemplateController {
         return ResponseEntity.ok(templateService.runnerCatalog());
     }
 
+    /** Mapping học liệu PRM393 sang các họ testcase tham số hóa; không tự nạp cả bộ vào đề. */
+    @GetMapping("/curriculum-source")
+    public ResponseEntity<?> curriculumSource() {
+        return ResponseEntity.ok(templateService.curriculumSource());
+    }
+
     /** Danh mục cách dò + bộ semantic key gợi ý cho Khu vực 0 (hợp đồng bài làm). */
     @GetMapping("/contract-catalog")
     public ResponseEntity<?> contractCatalog() {

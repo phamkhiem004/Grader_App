@@ -121,7 +121,9 @@ final class TestcaseContractSupport {
     static Map<String, Object> normalize(Object raw) {
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("schema_version", SCHEMA_VERSION);
-        out.put("require_keys", false);
+        // Bộ mới đi theo contract hybrid: UI dùng ValueKey để trỏ đúng widget, logic dùng
+        // public starter contract. Đề cũ đã lưu false vẫn giữ nguyên qua nhánh đọc bên dưới.
+        out.put("require_keys", true);
         out.put("keys", List.of());
         if (!(raw instanceof Map<?, ?> map)) return out;
 

@@ -94,6 +94,82 @@ Quy ước:
 Tên nghiệp vụ có thể khác nhau giữa Todo, Expense hoặc Product; semantic key giữ cho
 runner dùng chung không bị phụ thuộc vào tên class/model của từng đề.
 
+Bộ testcase tạo mới mặc định bật `require_keys: true`: các runner UI chỉ nhận đúng
+`ValueKey` đã công bố, không đoán theo thứ tự widget hoặc chữ hiển thị. Giáo viên vẫn có
+thể tắt cho một đề legacy; giá trị `false` đã lưu của đề cũ không bị tự đổi. Logic/SQLite
+không dùng Widget Key mà đi qua public contract cố định trong starter.
+
+Khi thêm testcase UI, màn hình đối chiếu toàn bộ tham số loại `semantic_key`/
+`semantic_keys` với Khu vực 0 và hiện nút **Thêm các key testcase còn thiếu**. Backend kiểm
+lại lần cuối và không cho lưu một contract bật `require_keys` nhưng chưa công bố key đang
+được testcase sử dụng. Nhờ vậy bộ chấm và đề phát cho sinh viên không thể lệch địa chỉ.
+
+## Chấm logic bằng public contract của starter (không dùng adapter)
+
+Logic, parser, mapping và stream không nên bị định vị bằng Widget Key. Với các phần này,
+starter phát một file contract nhỏ dưới `lib/` và export API cần chấm qua `lib/main.dart`:
+
+```dart
+// lib/main.dart
+export 'domain/price_rules.dart';
+
+void main() => runApp(const MyApp());
+```
+
+Giảng viên chọn một trong ba template tham số hóa:
+
+- `COMMON_PUBLIC_FUNCTION_RESULT`: hàm hoặc static method trả về JSON-compatible result.
+- `COMMON_PUBLIC_FUNCTION_THROWS`: dữ liệu lỗi phải ném đúng loại ngoại lệ/nội dung.
+- `COMMON_PUBLIC_STREAM_EVENTS`: Stream phát đúng chuỗi event; engine chỉ lấy đúng số
+  event mong đợi nên không treo với stream chạy liên tục.
+
+Các giá trị thay đổi theo đề đều nhập ở instance: `contractPath`, `callable`,
+`argumentsJson`, expected tương ứng và `timeoutMs`. Ví dụ cùng một template có thể gọi
+`validateTitle` của Todo, `PriceRules.total` của Product hoặc `isValidAmount` của Expense.
+Không có `grading_adapter.dart`, không nhập biểu thức Dart tự do và không phụ thuộc tên
+repository/view model nội bộ của sinh viên.
+
+`contractPath` phải là đường dẫn an toàn dạng `lib/...dart`; `callable` chỉ nhận tên hàm
+top-level hoặc static method. Đối số và kết quả là JSON nên backend kiểm tra được trước khi
+sinh code. Starter phải export callable qua `main.dart`, nếu không Dart sẽ báo lỗi contract
+rõ ràng thay vì testcase đoán tên class của bài làm.
+
+## Kiểm tra source contract mà không pass nhầm
+
+Các template `SOURCE_CONTAINS` chỉ dùng khi đề **bắt buộc kỹ thuật/cấu trúc cụ thể**,
+ví dụ một class phải nằm trong file model hoặc `pubspec.yaml` phải khai báo dependency.
+Chúng không thay thế testcase hành vi runtime. Nếu tiêu chí vừa yêu cầu kỹ thuật vừa yêu
+cầu kết quả chạy, phải ghép thêm testcase Logic/Widget/Behavior tương ứng.
+
+Với một file đơn, ba trường cũ `sourcePathsJson`, `requiredTokensJson` và
+`forbiddenTokensJson` vẫn hoạt động để giữ tương thích đề đã lưu. Với nhiều file, dùng
+`sourceChecksJson` để mỗi token trỏ đúng file thay vì tìm trên phần source đã gộp:
+
+```json
+[
+  {
+    "path": "lib/models/task.dart",
+    "requiredTokens": ["class Task"],
+    "forbiddenTokens": ["dynamic id"]
+  },
+  {
+    "path": "lib/repositories/task_repository.dart",
+    "requiredTokens": ["class TaskRepository"],
+    "forbiddenTokens": []
+  }
+]
+```
+
+Engine loại comment Dart/YAML trước khi tìm token, nhưng giữ nguyên chuỗi ký tự như URL.
+Vì vậy sinh viên không thể làm testcase pass chỉ bằng cách ghi tên class/dependency trong
+comment. Đường dẫn vẫn bị giới hạn ở `lib/*.dart`, `test/*.dart`, `pubspec.yaml` và
+`analysis_options.yaml`; không đọc file bên ngoài bài nộp.
+
+Riêng persistence qua **process mới** cần starter cấp fixture hai pha seed/reload và một
+database path cô lập. Mẫu public-function thông thường chỉ chấm scenario mà contract cung
+cấp; không được mô tả nó là bằng chứng sống qua process nếu fixture chưa thực sự mở lại dữ
+liệu ở pha thứ hai.
+
 ## Khi lưu cấu hình testcase
 
 Chức năng tạo testcase materialize một engine chung thành ba file chạy được:
@@ -181,7 +257,10 @@ duy nhất.
 
 ## Quản lý thư viện testcase (Khu vực 2)
 
-Thư viện gốc nằm ở `grader/src/main/resources/common-testcase-templates.json`. Giáo viên
+Thư viện gồm 25 mẫu engine nền ở
+`grader/src/main/resources/common-testcase-templates.json` và 52 mẫu theo curriculum ở
+`grader/src/main/resources/prm393-curriculum-testcase-templates.json` (tổng 77 mẫu,
+phủ 62/62 kỹ năng có thể chấm tự động). Giáo viên
 thêm/sửa/ẩn template ngay trên trang tạo testcase; phần khác biệt lưu ở bảng
 `testcase_template`, file gốc không bị ghi đè:
 
@@ -202,6 +281,18 @@ tham số kèm `type` (`semantic_key`, `semantic_keys`, `values`, `enum`, `numbe
 Tham số mặc định phải qua đúng `validateCommonParameters` dùng khi lưu đề, nên không tạo
 được template hỏng. `TestcaseRunnerCatalogTest` chốt danh mục này khớp với switch trong
 `exam_test.dart`.
+
+Nguồn học liệu PRM393 được lập chỉ mục riêng, không nhét toàn bộ giáo trình vào database
+runtime. Backend công bố mapping học liệu → skill → template qua
+`GET /api/testcase-templates/curriculum-source` từ
+`grader/src/main/resources/prm393-curriculum-testcase-source.json`. Đây là nguồn gợi ý để
+chọn testcase theo yêu cầu đề, **không phải nút nạp tất cả testcase**. Một template chỉ được
+coi là tái sử dụng khi invariant giữ nguyên và đã chứng minh thay parameters được cho tối
+thiểu ba ngữ cảnh độc lập.
+
+Chín kỹ năng cần thiết bị/tài khoản thật, chạy artifact, DevTools profile hoặc pipeline
+release không được sinh thành testcase tự động giả. Chúng vẫn nằm trong syllabus và nguồn
+học liệu, nhưng phải chấm bằng execution/profile/manual evidence đúng loại.
 
 ## Testcase tự viết code (CUSTOM_CODE)
 

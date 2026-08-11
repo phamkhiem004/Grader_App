@@ -42,6 +42,75 @@ void main() {
 void _registerCustomTestcase(String testId) {}
 // ──────────────────── CUSTOM_TESTCASES_END ────────────────────
 
+/// Bỏ comment trước khi các testcase source-contract tìm token.
+///
+/// Không dùng regex đơn giản vì `//` và `/*` có thể nằm trong chuỗi
+/// (URL là trường hợp phổ biến). State machine này giữ nguyên nội dung chuỗi,
+/// xuống dòng và chỉ loại comment thật. YAML dùng `#` thay cho comment Dart.
+String _sourceWithoutComments(String input, String path) {
+  final yaml = path.endsWith('.yaml') || path.endsWith('.yml');
+  final output = StringBuffer();
+  var inLineComment = false;
+  var inBlockComment = false;
+  var inSingleQuote = false;
+  var inDoubleQuote = false;
+  var escaped = false;
+
+  for (var index = 0; index < input.length; index++) {
+    final current = input[index];
+    final next = index + 1 < input.length ? input[index + 1] : '';
+
+    if (inLineComment) {
+      if (current == '\n') {
+        inLineComment = false;
+        output.write(current);
+      }
+      continue;
+    }
+    if (inBlockComment) {
+      if (current == '*' && next == '/') {
+        inBlockComment = false;
+        index++;
+      } else if (current == '\n') {
+        output.write(current);
+      }
+      continue;
+    }
+    if (inSingleQuote || inDoubleQuote) {
+      output.write(current);
+      if (escaped) {
+        escaped = false;
+      } else if (current == '\\') {
+        escaped = true;
+      } else if (inSingleQuote && current == "'") {
+        inSingleQuote = false;
+      } else if (inDoubleQuote && current == '"') {
+        inDoubleQuote = false;
+      }
+      continue;
+    }
+
+    if (current == "'") {
+      inSingleQuote = true;
+      output.write(current);
+    } else if (current == '"') {
+      inDoubleQuote = true;
+      output.write(current);
+    } else if (yaml && current == '#') {
+      inLineComment = true;
+    } else if (!yaml && current == '/' && next == '/') {
+      inLineComment = true;
+      index++;
+    } else if (!yaml && current == '/' && next == '*') {
+      inBlockComment = true;
+      index++;
+    } else {
+      output.write(current);
+    }
+  }
+  return output.toString();
+}
+
 Future<void> _runCase(
   WidgetTester tester,
   String testId,

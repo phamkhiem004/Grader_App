@@ -34,6 +34,8 @@ interface Template {
   weight_default: number;
   parameters_schema: JsonMap;
   expected_template: string;
+  /** Mẫu logic an toàn do backend sinh code từ parameters, không phải ô nhập Dart tự do. */
+  code_generator?: "PUBLIC_FUNCTION_RESULT" | "PUBLIC_FUNCTION_THROWS" | "PUBLIC_STREAM_EVENTS" | "SOURCE_CONTAINS";
   /** BUILTIN = bản gốc trong hệ thống; OVERRIDE = bản gốc đã sửa; CUSTOM = giáo viên tự thêm. */
   origin?: string;
   hidden?: boolean;
@@ -133,6 +135,7 @@ interface TestcaseItem {
   runner?: string;
   /** Thân testWidgets do giáo viên gõ; chỉ có ở testcase tự viết. */
   custom_code?: string;
+  generated_custom?: boolean;
 }
 
 interface GeneratedFile {
@@ -485,6 +488,111 @@ function dartLiteral(value: unknown): string {
   return JSON.stringify(String(value));
 }
 
+function parseJsonParameter(value: unknown, fallback: unknown) {
+  try {
+    return JSON.parse(String(value ?? ""));
+  } catch {
+    return fallback;
+  }
+}
+
+/** Preview đúng thân code mà backend sinh cho các public-contract template. */
+function generatedContractCode(item: TestcaseItem, template: Template) {
+  const params = item.parameters || {};
+  if (template.code_generator === "SOURCE_CONTAINS") {
+    const paths = parseJsonParameter(params.sourcePathsJson, []);
+    const required = parseJsonParameter(params.requiredTokensJson, []);
+    const forbidden = parseJsonParameter(params.forbiddenTokensJson, []);
+    const exactChecks = parseJsonParameter(params.sourceChecksJson, []);
+    const caseSensitive = String(params.caseSensitive ?? "true") === "true";
+    const containsExpression = (source: string, token: unknown) => caseSensitive
+      ? `${source}.contains(${dartLiteral(String(token))})`
+      : `${source}.toLowerCase().contains(${dartLiteral(String(token).toLowerCase())})`;
+    const assertions = (source: string, path: string, mustHave: unknown, mustNotHave: unknown) => [
+      ...(Array.isArray(mustHave) ? mustHave.map((token) =>
+        `expect(${containsExpression(source, token)}, isTrue, reason: ${dartLiteral(`Thiếu source token '${token}' trong ${path}`)});`) : []),
+      ...(Array.isArray(mustNotHave) ? mustNotHave.map((token) =>
+        `expect(${containsExpression(source, token)}, isFalse, reason: ${dartLiteral(`Source ${path} chứa token bị cấm: ${token}`)});`) : []),
+    ];
+    const exactBody = Array.isArray(exactChecks) && exactChecks.length > 0
+      ? exactChecks.flatMap((raw, index) => {
+        const check = raw && typeof raw === "object" ? raw as JsonMap : {};
+        const path = String(check.path || "");
+        return [
+          `final sourceFile${index} = File(${dartLiteral(path)});`,
+          `expect(sourceFile${index}.existsSync(), isTrue, reason: ${dartLiteral(`Không tìm thấy source contract: ${path}`)});`,
+          `final source${index} = _sourceWithoutComments(sourceFile${index}.readAsStringSync(), ${dartLiteral(path)});`,
+          ...assertions(`source${index}`, path, check.requiredTokens, check.forbiddenTokens),
+        ];
+      })
+      : [];
+    const body = (exactBody.length > 0 ? exactBody : [
+        `final sourcePaths = <String>[${Array.isArray(paths) ? paths.map((path) => dartLiteral(String(path))).join(", ") : ""}];`,
+        "final sourceParts = <String>[];",
+        "for (final path in sourcePaths) {",
+        "  final file = File(path);",
+        "  expect(file.existsSync(), isTrue, reason: 'Không tìm thấy source contract: $path');",
+        "  sourceParts.add(_sourceWithoutComments(file.readAsStringSync(), path));",
+        "}",
+        "final source = sourceParts.join('\\n');",
+        ...assertions("source", Array.isArray(paths) ? paths.join(", ") : "source", required, forbidden),
+      ]).join("\n  ");
+    return [
+      `testWidgets(${JSON.stringify(item.instance_id)}, (tester) async {`,
+      `  ${body}`,
+      "});",
+    ].join("\n");
+  }
+  const callable = String(params.callable || "publicFunction");
+  const args = parseJsonParameter(params.argumentsJson, []);
+  const argList = Array.isArray(args) ? args.map(dartLiteral).join(", ") : "/* argumentsJson không hợp lệ */";
+  const invocation = `student_app.${callable}(${argList})`;
+  const timeout = Number(params.timeoutMs || 3000);
+  const contractPath = String(params.contractPath || "lib/domain/public_contract.dart");
+  const prelude = [
+    `final contractFile = File(${dartLiteral(contractPath)});`,
+    `expect(contractFile.existsSync(), isTrue, reason: 'Không tìm thấy public contract: ${contractPath}');`,
+  ];
+  let body: string;
+  if (template.code_generator === "PUBLIC_FUNCTION_THROWS") {
+    const exceptionType = String(params.exceptionType || "Exception");
+    const message = String(params.messageContains || "");
+    body = [...prelude,
+      "Object? caught;",
+      `try { await Future<dynamic>.sync(() => ${invocation}).timeout(const Duration(milliseconds: ${timeout})); }`,
+      "catch (error) { caught = error; }",
+      "expect(caught, isNotNull);",
+      `expect(caught.runtimeType.toString(), ${dartLiteral(exceptionType)});`,
+      ...(message ? [`expect(caught.toString(), contains(${dartLiteral(message)}));`] : []),
+    ].join("\n  ");
+  } else if (template.code_generator === "PUBLIC_STREAM_EVENTS") {
+    const events = parseJsonParameter(params.expectedEventsJson, []);
+    const count = Array.isArray(events) ? events.length : 0;
+    body = [...prelude,
+      `final candidate = ${invocation};`,
+      "expect(candidate, isA<Stream<dynamic>>());",
+      `final actual = await (candidate as Stream<dynamic>).take(${count}).toList()` ,
+      `    .timeout(const Duration(milliseconds: ${timeout}));`,
+      `final expected = jsonDecode(${dartLiteral(JSON.stringify(events))});`,
+      "expect(actual, equals(expected));",
+    ].join("\n  ");
+  } else {
+    const expected = parseJsonParameter(params.expectedJson, null);
+    body = [...prelude,
+      `final actual = await Future<dynamic>.sync(() => ${invocation})`,
+      `    .timeout(const Duration(milliseconds: ${timeout}));`,
+      `final expected = jsonDecode(${dartLiteral(JSON.stringify(expected))});`,
+      "expect(actual, equals(expected));",
+    ].join("\n  ");
+  }
+  return [
+    `// Public contract: ${contractPath}`,
+    `testWidgets(${JSON.stringify(item.instance_id)}, (tester) async {`,
+    `  ${body}`,
+    "});",
+  ].join("\n");
+}
+
 /**
  * Code tương đương mà common engine đăng ký cho một instance. Đây là preview chỉ đọc;
  * runner và toàn bộ parameters thay đổi ngay trên màn hình khi giảng viên sửa form.
@@ -494,6 +602,7 @@ function testcaseCodePreview(item: TestcaseItem, template?: Template) {
     const body = String(item.custom_code || "").split("\n").map((line) => `  ${line}`).join("\n");
     return `testWidgets(${JSON.stringify(item.instance_id)}, (tester) async {\n${body}\n});`;
   }
+  if (template?.code_generator) return generatedContractCode(item, template);
   const runner = String(item.runner || template?.runner || "");
   const expected = String(item.expected || "").replace(/[\r\n]+/g, " ").trim();
   return [
@@ -551,6 +660,9 @@ const SINGLE_KEY_PARAMS = new Set([
   "absentKey", "dialogKey", "decisionKey", "editKey", "fromKey", "toKey",
 ]);
 
+/** Tham số chứa nhiều semantic key, phân tách bằng dấu phẩy. */
+const MULTI_KEY_PARAMS = new Set(["fieldKeys", "errorKeys", "itemKeys"]);
+
 const splitCsv = (value: unknown) => String(value ?? "").split(",").map((v) => v.trim()).filter(Boolean);
 
 /** Ép một CSV về đúng số phần tử; ô trống được điền mặc định theo vị trí. */
@@ -560,6 +672,19 @@ const resizeCsv = (current: string, count: number, fill: (index: number) => stri
 };
 
 const PARAMETER_LABELS: Record<string, string> = {
+  sourceChecksJson: "Kiểm tra chính xác theo từng file (JSON array, ưu tiên)",
+  sourcePathsJson: "Các file source cần kiểm tra (JSON array)",
+  requiredTokensJson: "Các nội dung bắt buộc phải có (JSON array)",
+  forbiddenTokensJson: "Các nội dung không được có (JSON array)",
+  caseSensitive: "Phân biệt chữ hoa/chữ thường",
+  contractPath: "File public contract trong starter",
+  callable: "Tên hàm hoặc static method công khai",
+  argumentsJson: "Danh sách đối số (JSON array)",
+  expectedJson: "Kết quả mong đợi (JSON)",
+  exceptionType: "Tên loại ngoại lệ",
+  messageContains: "Nội dung ngoại lệ cần chứa",
+  expectedEventsJson: "Chuỗi sự kiện mong đợi (JSON array)",
+  timeoutMs: "Thời gian chờ tối đa (ms)",
   widgetKey: "Mã thành phần",
   rootKey: "Mã thành phần gốc",
   fieldKeys: "Mã các ô nhập",
@@ -830,7 +955,7 @@ function CodeEditor({ value, onChange, rows = 14, bare = false, language = "dart
             />
             {!value && (
               <p className={`pointer-events-none absolute left-3 top-2 font-mono ${EDITOR_FONT} text-slate-400 dark:text-slate-600`} style={{ lineHeight: `${EDITOR_LINE_HEIGHT}px` }}>
-                {language === "json" ? '{ "require_keys": false, "keys": [] }' : "await _boot(tester);"}
+                {language === "json" ? '{ "require_keys": true, "keys": [] }' : "await _boot(tester);"}
               </p>
             )}
             <textarea
@@ -978,7 +1103,9 @@ function TestcasesEditor() {
   // ── Khu vực 0: hợp đồng bài làm (cách nhận diện thành phần giao diện) ──
   const [contractCatalog, setContractCatalog] = useState<ContractCatalog | null>(null);
   const [contractOpen, setContractOpen] = useState(false);
-  const [requireKeys, setRequireKeys] = useState(false);
+  // Bộ mới mặc định dùng hybrid contract: UI định vị bằng ValueKey, logic qua starter.
+  // Khi sửa đề cũ, giá trị đã lưu vẫn được nạp lại ở useEffect bên dưới.
+  const [requireKeys, setRequireKeys] = useState(true);
   const [contractKeys, setContractKeys] = useState<ContractKey[]>([]);
   const [contractDoc, setContractDoc] = useState<{ requirements_text: string; starter_dart: string } | null>(null);
   const [contractBusy, setContractBusy] = useState(false);
@@ -1468,6 +1595,46 @@ function TestcasesEditor() {
     const seen = new Set(declaredKeys.map((row) => row.key));
     return [...declaredKeys, ...SEMANTIC_KEYS.filter((key) => !seen.has(key)).map((key) => ({ key, label: "" }))];
   }, [declaredKeys]);
+
+  /** Key mà các testcase đang bật thực sự dùng; dùng để chặn contract thiếu địa chỉ. */
+  const usedTestcaseKeys = useMemo(() => {
+    const ordered: string[] = [];
+    const seen = new Set<string>();
+    items.filter((item) => item.enabled).forEach((item) => {
+      Object.entries(item.parameters || {}).forEach(([name, raw]) => {
+        const values = SINGLE_KEY_PARAMS.has(name)
+          ? [String(raw ?? "").trim()]
+          : MULTI_KEY_PARAMS.has(name) ? splitCsv(raw) : [];
+        values.filter(Boolean).forEach((key) => {
+          if (!seen.has(key)) { seen.add(key); ordered.push(key); }
+        });
+      });
+    });
+    return ordered;
+  }, [items]);
+
+  const missingContractKeys = useMemo(() => {
+    const declared = new Set(declaredKeys.map((row) => row.key));
+    return requireKeys ? usedTestcaseKeys.filter((key) => !declared.has(key)) : [];
+  }, [declaredKeys, requireKeys, usedTestcaseKeys]);
+
+  /** Thêm đúng các key testcase đang dùng, không nạp cả bộ key mặc định không liên quan. */
+  const addMissingContractKeys = () => {
+    if (!missingContractKeys.length) return;
+    setContractKeys((current) => {
+      const existing = new Set(current.map((row) => row.key));
+      const additions = missingContractKeys.filter((key) => !existing.has(key)).map((key) => {
+        const preset = contractCatalog?.default_keys.find((row) => row.key === key);
+        return preset ? { ...preset, required: true } : {
+          key, label: key, required: true, strategy: "key_only",
+          value: "", text: "", index: 0,
+        } as ContractKey;
+      });
+      return [...current, ...additions];
+    });
+    setContractOpen(true);
+    setMessage({ type: "ok", text: `Đã thêm ${missingContractKeys.length} key mà testcase đang dùng vào contract.` });
+  };
 
   /** Thêm nốt các thành phần chưa khai, giữ nguyên những dòng giáo viên đã chỉnh. */
   const loadDefaultContract = () => {
@@ -2213,6 +2380,7 @@ function TestcasesEditor() {
 
   // Sửa: chỉ chờ nạp xong; Tạo mới: phải chắc chắn mã chưa tồn tại mới cho lưu.
   const saveDisabled = !!saving || !examName.trim() || loadingExam || missingConfig
+    || missingContractKeys.length > 0
     || (!isEdit && examIdCheck !== "available");
 
   return (
@@ -2306,6 +2474,9 @@ function TestcasesEditor() {
                 <h2 className="mt-1 text-sm font-bold text-slate-800">Cấu hình bài làm</h2>
               </div>
               <div className="flex flex-wrap items-center gap-2">
+                {missingContractKeys.length > 0 && <button onClick={addMissingContractKeys} className="rounded-full border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs font-bold text-amber-800 hover:bg-amber-100" title={missingContractKeys.join(", ")}>
+                  + Thêm {missingContractKeys.length} key testcase còn thiếu
+                </button>}
                 <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${contractKeys.length ? "bg-indigo-100 text-indigo-700" : "bg-slate-100 text-slate-500"}`}>
                   {contractKeys.length ? `${contractKeys.length} key` : "Chưa cấu hình"}
                 </span>
@@ -2617,6 +2788,8 @@ function TestcasesEditor() {
                 {(selectedTemplate.runner || selectedTemplate.layer) && <p className="mt-2 text-[11px] text-emerald-700">Loại kiểm tra: {RUNNER_LABEL[selectedTemplate.runner || ""] || LAYER_LABEL[selectedTemplate.layer] || "Kiểm tra theo yêu cầu"}</p>}
                 <p className="mt-1 text-[11px] text-slate-500">Bộ testcase: {ENGINE_LABEL[selectedTemplate.engine_type || ""] || selectedTemplate.engine_type || "Không xác định"}</p>
                 <p className="mt-1 text-[11px] text-slate-500">Chủ đề: {SKILL_LABEL[selectedTemplate.skill_code] || selectedTemplate.skill_name || selectedTemplate.skill_code}</p>
+                {selectedTemplate.code_generator === "SOURCE_CONTAINS" && <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-[11px] leading-relaxed text-amber-800">Mẫu này chỉ xác nhận contract/kỹ thuật trong source. Nếu tiêu chí còn yêu cầu kết quả chạy, hãy ghép thêm testcase Logic, Widget hoặc Behavior. Dùng <span className="font-mono">sourceChecksJson</span> để gắn token vào đúng từng file.</p>}
+                {selectedTemplate.code_generator && selectedTemplate.code_generator !== "SOURCE_CONTAINS" && <p className="mt-2 rounded-lg border border-sky-200 bg-sky-50 p-2 text-[11px] leading-relaxed text-sky-800">Starter phải export public function/static method này qua <span className="font-mono">lib/main.dart</span>. Hãy thay file, callable, input và expected theo đúng contract của đề.</p>}
                 <p className="mt-2 rounded-lg bg-white p-2 text-xs text-slate-600"><span className="font-semibold text-slate-700">Expected tự sinh:</span> {renderExpected(selectedTemplate.expected_template, selectedTemplate.parameters_schema)}</p>
               </div>
             )}
@@ -2694,7 +2867,7 @@ function TestcasesEditor() {
                           </div>
                         </div>
                       ) : (
-                      <div><p className="mb-1 text-xs font-semibold text-slate-600">Thông số template</p><div className="grid grid-cols-2 gap-2">{Object.keys(item.parameters || {}).map((key) => {
+                      <div><p className="mb-1 text-xs font-semibold text-slate-600">Thông số template</p>{templateMap.get(item.template_id)?.code_generator === "SOURCE_CONTAINS" && <p className="mb-2 rounded-md border border-amber-200 bg-amber-50 p-2 text-[10px] leading-relaxed text-amber-800"><span className="font-semibold">Trỏ đúng file:</span> ưu tiên nhập <span className="font-mono">sourceChecksJson</span>, ví dụ <span className="font-mono">{`[{"path":"lib/models/item.dart","requiredTokens":["class Item"],"forbiddenTokens":[]}]`}</span>. Khi mảng này rỗng, hệ thống mới dùng ba trường source cũ.</p>}<div className="grid grid-cols-2 gap-2">{Object.keys(item.parameters || {}).map((key) => {
                         const template = templateMap.get(item.template_id);
                         const schemaValue = template?.parameters_schema?.[key];
                         const isNumber = typeof schemaValue === "number";
@@ -2715,6 +2888,7 @@ function TestcasesEditor() {
                           </div>
                         );
                         const cellClass = "mt-1 w-full rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs";
+                        if (key.endsWith("Json")) return <label key={key} className="col-span-2 text-[11px] text-slate-500">{PARAMETER_LABELS[key] || key}<textarea rows={key === "sourceChecksJson" ? 5 : 3} value={formatParam(item.parameters[key])} onChange={(e) => updateParameter(item, key, e.target.value)} spellCheck={false} className={`${cellClass} resize-y font-mono leading-relaxed`} /></label>;
                         return <label key={key} className="text-[11px] text-slate-500">{PARAMETER_LABELS[key] || key}{options
                           ? <select value={formatParam(item.parameters[key])} onChange={(e) => updateParameter(item, key, e.target.value)} className={cellClass}>{options.map((option) => <option key={option} value={option}>{PARAMETER_OPTION_LABELS[option] || option}</option>)}</select>
                           : SINGLE_KEY_PARAMS.has(key)

@@ -722,11 +722,9 @@ public class BatchGradingService {
     }
 
     // ── Progress cho GV ──────────────────────────────────────────
-    /** Thông báo: các phiên chấm gần đây (của GV nếu có email, không thì toàn hệ thống). */
-    public List<GradingBatch> recentBatches(String createdBy) {
-        return (createdBy == null || createdBy.isBlank())
-                ? batchRepo.findTop10ByOrderByCreatedAtDesc()
-                : batchRepo.findTop10ByCreatedByOrderByCreatedAtDesc(createdBy);
+    /** Thông báo: 10 phiên chấm gần nhất (app một người dùng → không lọc theo người tạo). */
+    public List<GradingBatch> recentBatches() {
+        return batchRepo.findTop10ByOrderByCreatedAtDesc();
     }
 
     /** Đọc các file mã nguồn trong bài nộp (zip đã staged) để hiển thị cho GV chấm tay. */

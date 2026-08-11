@@ -94,22 +94,10 @@ CREATE TABLE IF NOT EXISTS grading_batches (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Lịch sử các lần upload hàng loạt';
 
 
--- ── Bảng 4: Tài khoản giáo viên (đăng nhập) ─────────────────────
-CREATE TABLE IF NOT EXISTS teachers (
-    id              BIGINT AUTO_INCREMENT PRIMARY KEY,
-    full_name       VARCHAR(100)                  COMMENT 'Tên hiển thị',
-    email           VARCHAR(150)  NOT NULL UNIQUE  COMMENT 'Dùng để đăng nhập',
-    password_hash   VARCHAR(100)  NOT NULL         COMMENT 'Mật khẩu băm BCrypt',
-    role            VARCHAR(20)   DEFAULT 'TEACHER',
-    auth_token      VARCHAR(80)                    COMMENT 'Token phiên đăng nhập',
-    token_expires_at TIMESTAMP    NULL             COMMENT 'Hạn token',
-    created_at      TIMESTAMP     DEFAULT CURRENT_TIMESTAMP,
-    updated_at      TIMESTAMP     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-
-    INDEX idx_teacher_token (auth_token)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Tài khoản giáo viên';
--- Lưu ý: tài khoản mẫu (giaovien@fpt.edu.vn / 123456) được seed tại runtime
--- bởi AuthService để mật khẩu được băm BCrypt đúng cách.
+-- ── Bảng 4 (ĐÃ BỎ): teachers ────────────────────────────────────
+-- App không còn đăng nhập/đăng ký/role. DB cũ đã tạo bảng này thì xóa tay:
+--     DROP TABLE IF EXISTS teachers;
+-- Không có FK nào trỏ tới nó (created_by/manual_by chỉ là VARCHAR) nên xóa an toàn.
 
 
 -- ── Bảng 5: Category năng lực (syllabus) ────────────────────────

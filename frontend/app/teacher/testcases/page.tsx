@@ -4,7 +4,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import SidebarLayout from "@/components/layout/SidebarLayout";
 import { API_BASE } from "@/lib/config";
-import { getToken } from "@/lib/auth";
 import {
   AlertCircle, CheckCircle2, ChevronRight, Code2, Eye, GripVertical,
   Download, Layers, Lightbulb, Loader2, Package, Plus, Save, Settings2, Trash2, UploadCloud, X,
@@ -1135,7 +1134,7 @@ export default function TestcasesPage() {
     try {
       const res = await fetch(`${API_BASE}/testcase-templates/custom-code/validate`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ custom_code: code }),
       });
       const data = await res.json().catch(() => ({}));
@@ -1585,7 +1584,7 @@ export default function TestcasesPage() {
     try {
       const res = await fetch(`${API_BASE}/exam-setup/${encodeURIComponent(examId.trim())}/testcases/${kind}`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           exam_name: examName.trim(),
           teacher_note: teacherNote.trim(),
@@ -1611,9 +1610,7 @@ export default function TestcasesPage() {
   const downloadTestcase = async () => {
     if (!examId.trim()) return;
     try {
-      const res = await fetch(`${API_BASE}/exam-setup/${encodeURIComponent(examId.trim())}/download/exam-test`, {
-        headers: { Authorization: `Bearer ${getToken() ?? ""}` },
-      });
+      const res = await fetch(`${API_BASE}/exam-setup/${encodeURIComponent(examId.trim())}/download/exam-test`);
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error || "Không tải được gói testcase");

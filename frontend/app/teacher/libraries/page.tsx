@@ -2,9 +2,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import SidebarLayout from "@/components/layout/SidebarLayout";
-import { useAuth } from "@/components/auth/AuthProvider";
 import { API_BASE } from "@/lib/config";
-import { getToken } from "@/lib/auth";
 import {
   Package, Plus, Trash2, Loader2, Hammer, AlertTriangle, CheckCircle2,
   Info, RotateCcw, Lock,
@@ -16,14 +14,10 @@ interface BuildState {
   message: string; log: string; at: number; building: boolean;
 }
 
-async function authed(path: string, method: string, body?: unknown) {
-  const token = getToken();
+async function apiJson(path: string, method: string, body?: unknown) {
   const res = await fetch(`${API_BASE}${path}`, {
     method,
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
+    headers: { "Content-Type": "application/json" },
     body: body ? JSON.stringify(body) : undefined,
   });
   const data = await res.json().catch(() => ({}));
@@ -34,7 +28,6 @@ async function authed(path: string, method: string, body?: unknown) {
 const nameOk = (s: string) => /^[a-z][a-z0-9_]*$/.test(s);
 
 export default function LibrariesPage() {
-  const { teacher } = useAuth();
   const [protectedPkgs, setProtectedPkgs] = useState<Pkg[]>([]);
   const [editable, setEditable] = useState<Pkg[]>([]);   // danh sách sửa được (cục bộ)
   const [original, setOriginal] = useState<string>("");  // snapshot để biết "đã đổi"
@@ -112,10 +105,9 @@ export default function LibrariesPage() {
 
   const apply = async () => {
     setErr(null);
-    if (!teacher) { setErr("Cần đăng nhập để áp dụng thay đổi."); return; }
     try {
       const payload = { packages: editable.map((p) => ({ name: p.name, version: p.version || "" })) };
-      const data: BuildState = await authed("/grading-env/apply", "POST", payload);
+      const data: BuildState = await apiJson("/grading-env/apply", "POST", payload);
       setBuild(data);
       startPoll();
     } catch (e) {
@@ -233,8 +225,7 @@ export default function LibrariesPage() {
           {/* Áp dụng */}
           <div className="flex items-center justify-between border-t border-slate-100 px-5 py-3.5">
             <div className="text-xs text-slate-500">
-              {!teacher ? "Đăng nhập để chỉnh sửa thư viện."
-                : dirty ? "Có thay đổi chưa áp dụng." : "Chưa có thay đổi."}
+              {dirty ? "Có thay đổi chưa áp dụng." : "Chưa có thay đổi."}
             </div>
             <div className="flex items-center gap-2">
               {dirty && !busy && (
@@ -243,7 +234,7 @@ export default function LibrariesPage() {
                   <RotateCcw size={14} /> Hoàn tác
                 </button>
               )}
-              <button onClick={apply} disabled={!teacher || !dirty || busy}
+              <button onClick={apply} disabled={!dirty || busy}
                 className="flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-all hover:bg-indigo-700 active:scale-95 disabled:opacity-50">
                 {busy ? <Loader2 size={15} className="animate-spin" /> : <Hammer size={15} />} Áp dụng &amp; cập nhật
               </button>

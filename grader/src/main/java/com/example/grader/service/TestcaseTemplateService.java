@@ -508,10 +508,15 @@ public class TestcaseTemplateService {
     /** Chọn engine theo profile, không dùng grader gắn chặt với một đề cho testcase chung. */
     private void materializeEngine(Path dir, String engineType, List<Map<String, Object>> items) throws Exception {
         if (!COMMON_ENGINE.equals(engineType)) return;
-        copyClasspathEngine(dir, "common-testcase-engine/grader.dart", "grader.dart");
         String engine = readClasspathEngine("common-testcase-engine/exam_test.dart");
-        Files.writeString(dir.resolve("exam_test.dart"),
-                injectCustomTestcases(engine, enabledCustomItems(items)), StandardCharsets.UTF_8);
+        String generated = injectCustomTestcases(engine, enabledCustomItems(items));
+        String delimiterError = delimiterProblem(generated);
+        if (delimiterError != null)
+            throw new IllegalStateException("Engine exam_test.dart không hợp lệ: " + delimiterError + ".");
+        // Chỉ ghi hai file sau khi source đã qua chốt kiểm tra, tránh refresh nửa vời:
+        // grader.dart mới nhưng exam_test.dart vẫn là bản cũ.
+        copyClasspathEngine(dir, "common-testcase-engine/grader.dart", "grader.dart");
+        Files.writeString(dir.resolve("exam_test.dart"), generated, StandardCharsets.UTF_8);
     }
 
     /**

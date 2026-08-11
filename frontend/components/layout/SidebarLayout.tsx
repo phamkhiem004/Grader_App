@@ -43,22 +43,19 @@ type NavEntry = NavLeaf | NavGroup;
 const isGroup = (e: NavEntry): e is NavGroup => 'children' in e;
 
 const PRIMARY_NAV: NavEntry[] = [
+  { name: 'Thống kê', path: '/statistics', icon: BarChart2 },
   {
     name: 'Chấm bài', icon: CheckSquare, children: [
-      { name: 'Chấm tự động', path: '/', icon: Bot },
+      { name: 'Chấm tự động', path: '/teacher/grading', icon: Bot },
       { name: 'Chấm thủ công', path: '/teacher/workspace', icon: FileText },
       { name: 'Lịch sử chấm', path: '/history', icon: History },
     ],
   },
+  { name: 'Thư viện chấm', path: '/teacher/libraries', icon: Package },
   // Vào thẳng trang Kho — mọi thao tác (tạo/sửa/xóa/chấm lại) đều là nút trong trang đó.
   { name: 'Quản lý bộ testcase', path: '/teacher/archive', icon: FileCode2 },
   { name: 'Khung năng lực', path: '/syllabus', icon: BookOpen },
-  { name: 'Thư viện chấm', path: '/teacher/libraries', icon: Package },
   { name: 'Nhận xét AI', path: '/teacher/feedback', icon: MessageSquareText },
-];
-
-const SECONDARY_NAV: NavLeaf[] = [
-  { name: 'Thống kê', path: '/statistics', icon: BarChart2 },
 ];
 
 /** Diễn giải trạng thái 1 phiên chấm cho thông báo. */
@@ -308,11 +305,7 @@ export default function SidebarLayout({ children, activePath = '/', title, subti
         </div>
 
         <div className="custom-scrollbar flex-1 overflow-y-auto px-2 py-6">
-          <div className={clsx('mb-3 px-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-600 transition-opacity duration-200', collapsed ? 'opacity-0' : 'opacity-100')}>Quản lý chấm thi</div>
           <nav className="space-y-1">{PRIMARY_NAV.map(renderEntry)}</nav>
-
-          <div className={clsx('mb-3 mt-7 px-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-600 transition-opacity duration-200', collapsed ? 'opacity-0' : 'opacity-100')}>Báo cáo & Dữ liệu</div>
-          <nav className="space-y-1">{SECONDARY_NAV.map((item) => renderLink(item))}</nav>
         </div>
       </aside>
 

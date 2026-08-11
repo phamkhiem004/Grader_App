@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 
-/** URL cấu hình cũ được giữ để bookmark không hỏng; thao tác Sandbox nay nằm tại Kho bộ testcase. */
-export default function TeacherSetupRedirect() {
-  redirect("/teacher/archive");
+/** Trang giáo viên mặc định mở dashboard thống kê. */
+export default function TeacherHomeRedirect() {
+  redirect("/statistics");
 }

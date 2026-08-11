@@ -27,7 +27,7 @@ Grader_App/                  ← repo duy nhất (clone 1 cái là đủ)
 - **Backend only:** `cd grader && .\mvnw.cmd spring-boot:run` (cổng khác: `$env:SERVER_PORT=8090`). Phải chạy **trên host**, không trong container (cần mount docker.sock host để chấm).
 - **Compile backend:** `cd grader && .\mvnw.cmd -q -o compile` (offline, deps đã cache).
 - **Frontend:** `cd frontend && npm run dev`.
-- **Tài khoản test:** `giaovien@fpt.edu.vn` / `123456` (TEACHER), `admin@fpt.edu.vn` / `123456`.
+- **Không có đăng nhập:** mở `http://localhost:3000` là dùng được ngay (xem Gotcha 4).
 
 ## Luồng dữ liệu cốt lõi
 ```
@@ -42,7 +42,7 @@ Trang "Lịch sử" → GET /api/exam/{examId}/results
 1. **Hai phiên bản Jackson cùng classpath.** `com.fasterxml.jackson` (Jackson 2) và `tools.jackson` (Jackson 3, mặc định Spring Boot 4) đều có. **Chia theo TỪNG FILE, không theo tầng** — luôn kiểm import của chính file đang sửa: `SyllabusService` = Jackson 2, còn `BatchGradingService` = **Jackson 3** (`TypeReference` ở `tools.jackson.core.type`).
 2. **skill_code phải có trong syllabus (bảng `skill`).** Upload testcase validate nghiêm (`ExamService.validateSkillCodes` ném lỗi) để giữ taxonomy sạch.
 3. **Cần Docker bật + image `grading-base:latest`** để chấm. Build ảnh: `grader-base/build-base.ps1` (lâu, Flutter SDK).
-4. **POST `/api/**` cần token** (AuthFilter), trừ `/api/auth/*`. GET đa phần mở. FE gửi `Authorization: Bearer <token>` (xem `lib/auth.js`).
+4. **KHÔNG có xác thực.** Đăng nhập/đăng ký/role/bảng `teachers` đã bị gỡ bỏ hoàn toàn — mọi `/api/**` đều mở, đừng thêm code đọc token hay `@RequestAttribute("teacherEmail")`. Các cột audit (`created_by`, `manual_by`) vẫn còn và được điền bằng `AppActor.DEFAULT`. Hệ quả: **chỉ chạy localhost**, đừng expose cổng 8080 ra mạng.
 
 ## Quy ước khi sửa code
 - Comment trong repo bằng tiếng Việt, súc tích, giải thích "tại sao" (theo style sẵn có).

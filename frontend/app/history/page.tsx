@@ -4,7 +4,6 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import SidebarLayout from "@/components/layout/SidebarLayout";
 import { API_BASE, PASS_THRESHOLD } from "@/lib/config";
-import { getToken } from "@/lib/auth";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { Tooltip } from "@/components/ui/Tooltip";
 import CompetencyPanel, { CompetencyItem } from "@/components/grading/CompetencyPanel";
@@ -319,7 +318,7 @@ export default function HistoryPage() {
     setRegradingId(r.studentId);
     setRows((list) => list.map((x) => (x.studentId === r.studentId ? { ...x, status: "GRADING", score: null, errorLog: null } : x)));
     try {
-      const res = await fetch(`${API_BASE}/batch/regrade/${encodeURIComponent(selected)}/${encodeURIComponent(r.studentId)}`, { method: "POST", headers: { Authorization: `Bearer ${getToken() ?? ""}` } });
+      const res = await fetch(`${API_BASE}/batch/regrade/${encodeURIComponent(selected)}/${encodeURIComponent(r.studentId)}`, { method: "POST" });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Chấm lại thất bại");
       const batchId = data.batchId as string;
@@ -353,7 +352,7 @@ export default function HistoryPage() {
     setSelectedIds(new Set());
     try {
       const res = await fetch(`${API_BASE}/batch/regrade-batch/${encodeURIComponent(selected)}`, {
-        method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` }, body: JSON.stringify({ studentIds: ids }),
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ studentIds: ids }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Chấm lại thất bại");

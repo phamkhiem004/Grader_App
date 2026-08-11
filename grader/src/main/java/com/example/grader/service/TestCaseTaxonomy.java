@@ -42,7 +42,14 @@ public final class TestCaseTaxonomy {
             "contract", 0, "unit", 1, "widget", 2,
             "integration", 3, "responsive", 4, "persist", 5);
 
-    /** 23 runner của engine chung COMMON_V1. GROUP là dẫn xuất, xử lý riêng. */
+    /**
+     * Runner "cửa sau" cho testcase giáo viên tự viết code. Có layer như mọi runner khác, nhưng
+     * KHÔNG phải một năng lực của engine (hành vi là do code giáo viên quyết định) nên bị loại
+     * khỏi {@link #commonRunners()} — xem javadoc ở đó.
+     */
+    public static final String CUSTOM_RUNNER = "CUSTOM_CODE";
+
+    /** 24 runner của engine chung COMMON_V1. GROUP là dẫn xuất, xử lý riêng. */
     private static final Map<String, String> RUNNER_LAYER = Map.ofEntries(
             Map.entry("WIDGET_VISIBLE", "widget"),
             Map.entry("WIDGET_TYPE_VISIBLE", "widget"),
@@ -66,7 +73,11 @@ public final class TestCaseTaxonomy {
             Map.entry("FORM_PREFILL", "integration"),
             Map.entry("FORM_SUBMIT", "integration"),
             Map.entry("RESPONSIVE_NO_OVERFLOW", "responsive"),
-            Map.entry("RESPONSIVE_TARGET", "responsive"));
+            Map.entry("RESPONSIVE_TARGET", "responsive"),
+            // Code tay của giáo viên: engine khởi động app thật rồi chạy assert của họ — cùng lý lẽ
+            // với APP_BOOT. Không có "custom" trong enum layer của SPEC, và tầng thật thì không suy
+            // được từ code, nên quy về integration thay vì để rỗng.
+            Map.entry(CUSTOM_RUNNER, "integration"));
 
     /**
      * Suy layer từ tiền tố test_id cho ĐỀ LEGACY (matrix không có runner).
@@ -92,13 +103,20 @@ public final class TestCaseTaxonomy {
     }
 
     /**
-     * Tên mọi runner của engine chung, TRỪ {@code GROUP} (dẫn xuất, tầng lấy theo con).
+     * Tên mọi runner của engine chung, TRỪ {@code GROUP} (dẫn xuất, tầng lấy theo con) và
+     * {@link #CUSTOM_RUNNER}.
      *
      * <p>Để fixture đối chiếu được độ phủ: runner nào chưa có testcase nào trong bộ đo thì nó là
      * năng lực CHƯA TỪNG CHẠY, không được công bố như đã kiểm chứng.
+     *
+     * <p>{@code CUSTOM_CODE} nằm ngoài phép đo đó vì nó không khẳng định điều gì cố định — đạt hay
+     * hỏng là do code giáo viên viết, nên "chứng nhận" nó trên fixture không nói lên điều gì về
+     * engine. Nhánh dispatch của nó trong {@code exam_test.dart} thì vẫn nên có bài đo riêng.
      */
     public static Set<String> commonRunners() {
-        return RUNNER_LAYER.keySet();
+        Set<String> out = new LinkedHashSet<>(RUNNER_LAYER.keySet());
+        out.remove(CUSTOM_RUNNER);
+        return out;
     }
 
     /**

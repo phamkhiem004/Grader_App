@@ -53,8 +53,10 @@ public class TestcaseTemplateService {
     // ── Testcase "tự viết code": giáo viên gõ thân testWidgets, hệ thống bọc và chèn vào engine ──
     /** template_id quy ước cho testcase code tay; không nằm trong thư viện template dùng chung. */
     public static final String CUSTOM_TEMPLATE_ID = "CUSTOM_CODE";
-    private static final String CUSTOM_RUNNER = "CUSTOM_CODE";
-    private static final String CUSTOM_LAYER = "CUSTOM";
+    private static final String CUSTOM_RUNNER = TestCaseTaxonomy.CUSTOM_RUNNER;
+    /** Lấy từ TestCaseTaxonomy để soạn đề và chấm không lệch layer (trước đây ghi "CUSTOM" —
+     *  không có trong enum của SPEC nên bị loại, testcase tay ra layer rỗng). */
+    private static final String CUSTOM_LAYER = TestCaseTaxonomy.layerForRunner(CUSTOM_RUNNER);
     private static final int CUSTOM_CODE_MAX_CHARS = 20000;
     /** Khai báo chỉ hợp lệ ở cấp file — nếu nằm trong thân test sẽ làm hỏng cả exam_test.dart. */
     private static final List<Map.Entry<Pattern, String>> CUSTOM_CODE_BANNED = List.of(
@@ -353,23 +355,23 @@ public class TestcaseTemplateService {
         }
     }
 
-    public Map<String, Object> saveDraft(String examId, Map<String, Object> body, String teacherEmail) {
-        return save(examId, body, teacherEmail, false);
+    public Map<String, Object> saveDraft(String examId, Map<String, Object> body, String actor) {
+        return save(examId, body, actor, false);
     }
 
-    public Map<String, Object> publish(String examId, Map<String, Object> body, String teacherEmail) {
-        return save(examId, body, teacherEmail, true);
+    public Map<String, Object> publish(String examId, Map<String, Object> body, String actor) {
+        return save(examId, body, actor, true);
     }
 
     private Map<String, Object> save(String rawExamId, Map<String, Object> body,
-                                     String teacherEmail, boolean publish) {
+                                     String actor, boolean publish) {
         ensureReferenceTemplatesLoaded();
         String examId = ExamService.safeId(rawExamId, "đề");
         if (body == null) throw new IllegalArgumentException("Thiếu cấu hình testcase");
 
         Exam exam = examRepository.findByExamId(examId).orElseGet(Exam::new);
         boolean isNew = exam.getId() == null;
-        if (!isNew && !isTemplateCreatedExam(exam, teacherEmail)) {
+        if (!isNew && !isTemplateCreatedExam(exam)) {
             throw new IllegalStateException("Mã đề " + examId
                     + " đã tồn tại. Hãy dùng một mã đề mới để tạo testcase.");
         }
@@ -378,7 +380,7 @@ public class TestcaseTemplateService {
             throw new IllegalArgumentException("Vui lòng nhập tên đề thi khi tạo đề mới");
         Map<String, Object> oldConfig = parseConfig(exam.getTestcaseConfigJson());
         Map<String, Map<String, Object>> oldById = indexItems(oldConfig.get("items"));
-        List<Map<String, Object>> items = normalizeItems(examId, body.get("items"), oldById, teacherEmail);
+        List<Map<String, Object>> items = normalizeItems(examId, body.get("items"), oldById, actor);
         String engineType = engineType(items);
         // Hợp đồng bài làm (Khu vực 0): giữ bản cũ nếu request không gửi kèm, để lưu Draft
         // từ màn hình khác không vô tình xóa mất cấu hình nhận diện của đề.
@@ -401,9 +403,9 @@ public class TestcaseTemplateService {
         config.put("profile_id", profileId(engineType));
         config.put("version", version);
         config.put("created_by", text(oldConfig.get("created_by")) != null
-                ? oldConfig.get("created_by") : teacherEmail);
+                ? oldConfig.get("created_by") : actor);
         config.put("created_at", firstCreatedAt);
-        config.put("updated_by", teacherEmail);
+        config.put("updated_by", actor);
         config.put("updated_at", now.toString());
         if (publish) config.put("published_at", now.toString());
         else if (oldConfig.get("published_at") != null) config.put("published_at", oldConfig.get("published_at"));
@@ -440,7 +442,7 @@ public class TestcaseTemplateService {
             exam.setStatus(publish && engineReady ? ExamStatus.READY : ExamStatus.BUILDING);
 
             exam.setExamId(examId);
-            if (isNew || exam.getCreatedBy() == null || exam.getCreatedBy().isBlank()) exam.setCreatedBy(teacherEmail);
+            if (isNew || exam.getCreatedBy() == null || exam.getCreatedBy().isBlank()) exam.setCreatedBy(actor);
             if (examName != null && !examName.isBlank()) exam.setExamName(examName.trim());
             String teacherNote = firstText(body.get("teacher_note"), body.get("teacherNote"));
             if (teacherNote != null) exam.setTeacherNote(teacherNote.trim());
@@ -481,7 +483,10 @@ public class TestcaseTemplateService {
         if (!COMMON_ENGINE.equals(configEngineType(exam))) return false;
         Path dir = Path.of(path);
         if (!Files.isDirectory(dir)) return false;
-        materializeEngine(dir, COMMON_ENGINE);
+        // Phải nạp lại items từ config đã lưu: engine mới CHÈN testcase tay vào exam_test.dart,
+        // refresh mà bỏ items sẽ ghi đè mất phần code tay của đề.
+        materializeEngine(dir, COMMON_ENGINE,
+                normalizeExistingItems(parseConfig(exam.getTestcaseConfigJson()).get("items")));
         log.info("Đã nâng engine dùng chung của đề {} lên bản mới nhất", exam.getExamId());
         return true;
     }
@@ -618,10 +623,13 @@ public class TestcaseTemplateService {
             log.error("Không nạp được thư viện testcase dùng chung.");
     }
 
-    /** Chỉ cho phép tiếp tục đúng đề Draft/Publish được tạo bởi chức năng template này. */
-    private boolean isTemplateCreatedExam(Exam exam, String teacherEmail) {
-        return exam.getTestcaseConfigJson() != null && !exam.getTestcaseConfigJson().isBlank()
-                && exam.getCreatedBy() != null && exam.getCreatedBy().equalsIgnoreCase(teacherEmail);
+    /**
+     * Chỉ cho phép tiếp tục đúng đề Draft/Publish được tạo bởi chức năng template này.
+     * KHÔNG so created_by nữa: app bỏ đăng nhập nên mọi đề (kể cả đề cũ do tài khoản GV
+     * trước đây tạo) đều phải sửa/publish lại được.
+     */
+    private boolean isTemplateCreatedExam(Exam exam) {
+        return exam.getTestcaseConfigJson() != null && !exam.getTestcaseConfigJson().isBlank();
     }
 
     private Map<String, Object> response(Exam exam, Map<String, Object> config,
@@ -650,7 +658,7 @@ public class TestcaseTemplateService {
 
     private List<Map<String, Object>> normalizeItems(String examId, Object rawItems,
                                                        Map<String, Map<String, Object>> oldById,
-                                                       String teacherEmail) {
+                                                       String actor) {
         if (!(rawItems instanceof List<?> list)) throw new IllegalArgumentException("items phải là một mảng testcase");
         List<Map<String, Object>> out = new ArrayList<>();
         Set<String> ids = new LinkedHashSet<>();
@@ -660,7 +668,7 @@ public class TestcaseTemplateService {
             Map<String, Object> input = castMap(raw);
             String templateId = text(input.get("template_id"));
             if (isCustomItem(input)) {
-                out.add(normalizeCustomItem(examId, input, index++, ids, oldById, teacherEmail));
+                out.add(normalizeCustomItem(examId, input, index++, ids, oldById, actor));
                 continue;
             }
             Map<String, Object> template = templates.get(templateId);
@@ -728,7 +736,7 @@ public class TestcaseTemplateService {
                 item.put("group_name", groupName == null || groupName.isBlank() ? groupId : groupName.trim());
             }
             item.put("created_by", previous != null && previous.get("created_by") != null
-                    ? previous.get("created_by") : teacherEmail);
+                    ? previous.get("created_by") : actor);
             item.put("created_at", previous != null && previous.get("created_at") != null
                     ? previous.get("created_at") : Instant.now().toString());
             out.add(item);
@@ -773,7 +781,7 @@ public class TestcaseTemplateService {
         return out;
     }
 
-    public Map<String, Object> createTemplate(Map<String, Object> body, String teacherEmail) {
+    public Map<String, Object> createTemplate(Map<String, Object> body, String actor) {
         ensureReferenceTemplatesLoaded();
         String templateId = text(body == null ? null : body.get("template_id"));
         if (templateId == null || templateId.isBlank())
@@ -790,15 +798,15 @@ public class TestcaseTemplateService {
         TestcaseTemplate stored = new TestcaseTemplate();
         stored.setTemplateId(templateId);
         stored.setOrigin("CUSTOM");
-        stored.setCreatedBy(teacherEmail);
-        stored.setUpdatedBy(teacherEmail);
+        stored.setCreatedBy(actor);
+        stored.setUpdatedBy(actor);
         stored.setPayloadJson(writeJson(row));
         templateRepository.save(stored);
         loadTemplates();
         return getTemplate(templateId);
     }
 
-    public Map<String, Object> updateTemplate(String rawId, Map<String, Object> body, String teacherEmail) {
+    public Map<String, Object> updateTemplate(String rawId, Map<String, Object> body, String actor) {
         ensureReferenceTemplatesLoaded();
         String templateId = rawId == null ? "" : rawId.trim();
         Map<String, Object> current = templates.get(templateId);
@@ -810,11 +818,11 @@ public class TestcaseTemplateService {
             TestcaseTemplate fresh = new TestcaseTemplate();
             fresh.setTemplateId(templateId);
             fresh.setOrigin(builtinTemplates.containsKey(templateId) ? "OVERRIDE" : "CUSTOM");
-            fresh.setCreatedBy(teacherEmail);
+            fresh.setCreatedBy(actor);
             return fresh;
         });
         stored.setPayloadJson(writeJson(row));
-        stored.setUpdatedBy(teacherEmail);
+        stored.setUpdatedBy(actor);
         templateRepository.save(stored);
         loadTemplates();
         return getTemplate(templateId);
@@ -824,7 +832,7 @@ public class TestcaseTemplateService {
      * "Xóa" testcase khỏi Khu vực 2 = ẩn đi, KHÔNG xóa cứng. Đề đã lưu chỉ giữ template_id;
      * xóa hẳn sẽ làm những đề đó không mở/lưu lại được nữa.
      */
-    public Map<String, Object> hideTemplate(String rawId, String teacherEmail) {
+    public Map<String, Object> hideTemplate(String rawId, String actor) {
         ensureReferenceTemplatesLoaded();
         String templateId = rawId == null ? "" : rawId.trim();
         Map<String, Object> current = templates.get(templateId);
@@ -834,12 +842,12 @@ public class TestcaseTemplateService {
             TestcaseTemplate fresh = new TestcaseTemplate();
             fresh.setTemplateId(templateId);
             fresh.setOrigin(builtinTemplates.containsKey(templateId) ? "OVERRIDE" : "CUSTOM");
-            fresh.setCreatedBy(teacherEmail);
+            fresh.setCreatedBy(actor);
             fresh.setPayloadJson(writeJson(current));
             return fresh;
         });
         stored.setHidden(true);
-        stored.setUpdatedBy(teacherEmail);
+        stored.setUpdatedBy(actor);
         templateRepository.save(stored);
         loadTemplates();
 
@@ -852,7 +860,7 @@ public class TestcaseTemplateService {
     }
 
     /** Bỏ ẩn, và với template gốc thì trả luôn nội dung về đúng bản trong classpath. */
-    public Map<String, Object> restoreTemplate(String rawId, String teacherEmail) {
+    public Map<String, Object> restoreTemplate(String rawId, String actor) {
         ensureReferenceTemplatesLoaded();
         String templateId = rawId == null ? "" : rawId.trim();
         TestcaseTemplate stored = templateRepository.findById(templateId).orElse(null);
@@ -865,7 +873,7 @@ public class TestcaseTemplateService {
             templateRepository.delete(stored);   // quay về đúng bản gốc
         } else {
             stored.setHidden(false);
-            stored.setUpdatedBy(teacherEmail);
+            stored.setUpdatedBy(actor);
             templateRepository.save(stored);
         }
         loadTemplates();
@@ -996,7 +1004,7 @@ public class TestcaseTemplateService {
 
     private Map<String, Object> normalizeCustomItem(String examId, Map<String, Object> input, int order,
                                                     Set<String> ids, Map<String, Map<String, Object>> oldById,
-                                                    String teacherEmail) {
+                                                    String actor) {
         String instanceId = text(input.get("instance_id"));
         if (instanceId == null || instanceId.isBlank())
             instanceId = examId + "_custom_" + String.format("%02d", order);
@@ -1052,7 +1060,7 @@ public class TestcaseTemplateService {
         item.put("execution_key", instanceId);
         item.put("custom_code", code);
         item.put("created_by", previous != null && previous.get("created_by") != null
-                ? previous.get("created_by") : teacherEmail);
+                ? previous.get("created_by") : actor);
         item.put("created_at", previous != null && previous.get("created_at") != null
                 ? previous.get("created_at") : Instant.now().toString());
         return item;

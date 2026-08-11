@@ -1,10 +1,8 @@
 package com.example.grader.controller;
 
-import com.example.grader.service.AuthService;
 import com.example.grader.service.SyllabusService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -14,7 +12,7 @@ import java.util.Map;
 /**
  * API SYLLABUS (danh mục năng lực):
  *  - Đọc (GET): mở cho frontend dùng khi ra đề & hiển thị năng lực.
- *  - Ghi (POST/PUT/DELETE): yêu cầu đăng nhập (Authorization: Bearer &lt;token&gt;).
+ *  - Ghi (POST/PUT/DELETE): mở — app chạy cục bộ, không có đăng nhập.
  *  - DELETE = xóa MỀM (category: active=false; skill: deprecated=true).
  */
 @RestController
@@ -23,7 +21,6 @@ import java.util.Map;
 public class SyllabusController {
 
     @Autowired private SyllabusService syllabus;
-    @Autowired private AuthService authService;
 
     private final ObjectMapper mapper = new ObjectMapper();
 
@@ -55,10 +52,7 @@ public class SyllabusController {
 
     // ── Ghi: Category ────────────────────────────────────────────
     @PostMapping("/categories")
-    public ResponseEntity<?> createCategory(@RequestHeader(value = "Authorization", required = false) String authz,
-                                            @RequestBody Map<String, Object> body) {
-        ResponseEntity<?> authErr = checkAuth(authz);
-        if (authErr != null) return authErr;
+    public ResponseEntity<?> createCategory(@RequestBody Map<String, Object> body) {
         try {
             return ResponseEntity.ok(syllabus.categoryToMap(syllabus.saveCategory(body, true)));
         } catch (IllegalArgumentException e) {
@@ -67,11 +61,8 @@ public class SyllabusController {
     }
 
     @PutMapping("/categories/{code}")
-    public ResponseEntity<?> updateCategory(@RequestHeader(value = "Authorization", required = false) String authz,
-                                            @PathVariable String code,
+    public ResponseEntity<?> updateCategory(@PathVariable String code,
                                             @RequestBody Map<String, Object> body) {
-        ResponseEntity<?> authErr = checkAuth(authz);
-        if (authErr != null) return authErr;
         try {
             body.put("code", code);   // path là nguồn quyết định mã
             return ResponseEntity.ok(syllabus.categoryToMap(syllabus.saveCategory(body, false)));
@@ -81,10 +72,7 @@ public class SyllabusController {
     }
 
     @DeleteMapping("/categories/{code}")
-    public ResponseEntity<?> deleteCategory(@RequestHeader(value = "Authorization", required = false) String authz,
-                                            @PathVariable String code) {
-        ResponseEntity<?> authErr = checkAuth(authz);
-        if (authErr != null) return authErr;
+    public ResponseEntity<?> deleteCategory(@PathVariable String code) {
         try {
             syllabus.softDeleteCategory(code.toUpperCase());
             return ResponseEntity.ok(Map.of("ok", true, "code", code.toUpperCase()));
@@ -95,10 +83,7 @@ public class SyllabusController {
 
     // ── Ghi: Skill ───────────────────────────────────────────────
     @PostMapping("/skills")
-    public ResponseEntity<?> createSkill(@RequestHeader(value = "Authorization", required = false) String authz,
-                                         @RequestBody Map<String, Object> body) {
-        ResponseEntity<?> authErr = checkAuth(authz);
-        if (authErr != null) return authErr;
+    public ResponseEntity<?> createSkill(@RequestBody Map<String, Object> body) {
         try {
             return ResponseEntity.ok(syllabus.skillToMap(syllabus.saveSkill(body, true)));
         } catch (IllegalArgumentException e) {
@@ -107,11 +92,8 @@ public class SyllabusController {
     }
 
     @PutMapping("/skills/{code}")
-    public ResponseEntity<?> updateSkill(@RequestHeader(value = "Authorization", required = false) String authz,
-                                         @PathVariable String code,
+    public ResponseEntity<?> updateSkill(@PathVariable String code,
                                          @RequestBody Map<String, Object> body) {
-        ResponseEntity<?> authErr = checkAuth(authz);
-        if (authErr != null) return authErr;
         try {
             body.put("code", code);
             return ResponseEntity.ok(syllabus.skillToMap(syllabus.saveSkill(body, false)));
@@ -121,10 +103,7 @@ public class SyllabusController {
     }
 
     @DeleteMapping("/skills/{code}")
-    public ResponseEntity<?> deleteSkill(@RequestHeader(value = "Authorization", required = false) String authz,
-                                         @PathVariable String code) {
-        ResponseEntity<?> authErr = checkAuth(authz);
-        if (authErr != null) return authErr;
+    public ResponseEntity<?> deleteSkill(@PathVariable String code) {
         try {
             syllabus.softDeleteSkill(code.toUpperCase());
             return ResponseEntity.ok(Map.of("ok", true, "code", code.toUpperCase()));
@@ -143,18 +122,6 @@ public class SyllabusController {
             return ResponseEntity.ok(Map.of("valid", problems.isEmpty(), "problems", problems));
         } catch (Exception e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
-        }
-    }
-
-    // ── Auth helper: null = OK; khác null = 401 ─────────────────
-    private ResponseEntity<?> checkAuth(String authz) {
-        String token = (authz != null && authz.startsWith("Bearer ")) ? authz.substring(7).trim() : null;
-        try {
-            authService.me(token);    // ném IllegalArgumentException nếu chưa/không hợp lệ
-            return null;
-        } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(Map.of("error", "Cần đăng nhập để chỉnh sửa syllabus"));
         }
     }
 }

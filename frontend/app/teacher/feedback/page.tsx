@@ -3,7 +3,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import SidebarLayout from "@/components/layout/SidebarLayout";
 import { API_BASE } from "@/lib/config";
-import { getToken } from "@/lib/auth";
 import {
   MessageSquareText, Play, Square, Download, Loader2, CheckCircle2,
   AlertCircle, XCircle, Sparkles, ShieldAlert, RefreshCw,
@@ -214,7 +213,6 @@ export default function FeedbackPage() {
     }));
     setRows(initial);
 
-    const token = getToken();
     await runPool(students, concurrencyFor(botProvider), () => stopRef.current, async (s, idx) => {
       patchRow(idx, { _state: "loading" });
       try {
@@ -222,7 +220,7 @@ export default function FeedbackPage() {
           `${API_BASE}/feedback/exam/${encodeURIComponent(id)}/${encodeURIComponent(s.studentId)}`,
           {
             method: "POST",
-            headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+            headers: { "Content-Type": "application/json" },
           },
         );
         const data = await res.json().catch(() => ({}));

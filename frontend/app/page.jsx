@@ -3,7 +3,6 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import SidebarLayout from "@/components/layout/SidebarLayout";
 import { API_BASE, PASS_THRESHOLD } from "@/lib/config";
-import { getToken } from "@/lib/auth";
 import ExamCombobox from "@/components/ui/ExamCombobox";
 
 // Khóa lưu phiên chấm đang/ vừa chạy → rời trang rồi quay lại KHÔNG mất kết quả
@@ -124,7 +123,7 @@ export default function DashboardPage() {
     files.forEach(f => form.append("files", f));
 
     try {
-      const res = await fetch(`${API_BASE}/batch/upload`, { method: "POST", headers: { Authorization: `Bearer ${getToken() ?? ""}` }, body: form });
+      const res = await fetch(`${API_BASE}/batch/upload`, { method: "POST", body: form });
       const data = await res.json();
 
       if (!res.ok) { setUploadErr(data.error || "Lỗi server."); setPhase("idle"); return; }

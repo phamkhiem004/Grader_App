@@ -4,7 +4,6 @@ import { useState, useRef, useCallback } from "react";
 import SidebarLayout from "@/components/layout/SidebarLayout";
 import { Settings, UploadCloud, FileJson, FileCode2, Package, Play, CheckCircle, AlertCircle, Loader2 } from "lucide-react";
 import { API_BASE } from "@/lib/config";
-import { getToken } from "@/lib/auth";
 
 export default function TeacherSetupPage() {
   const [examId, setExamId] = useState("");
@@ -50,7 +49,6 @@ export default function TeacherSetupPage() {
     try {
       const res = await fetch(`${API_BASE}/exam-setup/upload-testcase`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${getToken() ?? ""}` },
         body: form
       });
 

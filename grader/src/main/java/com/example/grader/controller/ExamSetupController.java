@@ -1,5 +1,6 @@
 package com.example.grader.controller;
 
+import com.example.grader.config.AppActor;
 import com.example.grader.repository.ExamRepository;
 import com.example.grader.service.ExamService;
 import com.example.grader.service.SyllabusService;
@@ -109,11 +110,9 @@ public class ExamSetupController {
     /** Lưu Draft: chỉ lưu instance/config, không đụng vào bộ testcase đang được chấm. */
     @RequestMapping(path = "/{examId}/testcases/draft", method = {RequestMethod.POST, RequestMethod.PUT})
     public ResponseEntity<?> saveTestcaseDraft(@PathVariable String examId,
-                                                @RequestBody Map<String, Object> body,
-                                                @RequestAttribute(value = "teacherEmail", required = false) String teacherEmail) {
+                                                @RequestBody Map<String, Object> body) {
         try {
-            return ResponseEntity.ok(testcaseTemplateService.saveDraft(examId, body,
-                    teacherEmail != null ? teacherEmail : "unknown"));
+            return ResponseEntity.ok(testcaseTemplateService.saveDraft(examId, body, AppActor.DEFAULT));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         } catch (IllegalStateException e) {
@@ -126,11 +125,9 @@ public class ExamSetupController {
     /** Publish: sinh skills_matrix.json và ghi snapshot cấu hình versioned cho đề. */
     @PostMapping("/{examId}/testcases/publish")
     public ResponseEntity<?> publishTestcases(@PathVariable String examId,
-                                              @RequestBody Map<String, Object> body,
-                                              @RequestAttribute(value = "teacherEmail", required = false) String teacherEmail) {
+                                              @RequestBody Map<String, Object> body) {
         try {
-            return ResponseEntity.ok(testcaseTemplateService.publish(examId, body,
-                    teacherEmail != null ? teacherEmail : "unknown"));
+            return ResponseEntity.ok(testcaseTemplateService.publish(examId, body, AppActor.DEFAULT));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         } catch (IllegalStateException e) {

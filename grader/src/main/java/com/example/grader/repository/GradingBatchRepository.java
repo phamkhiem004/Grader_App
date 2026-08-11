@@ -25,13 +25,6 @@ public interface GradingBatchRepository extends JpaRepository<GradingBatch,Long>
     """)
     void incrementCounts(String batchId, int done, int error);
 
-    // ── Thống kê hồ sơ giáo viên ─────────────────────────────────
-    long countByCreatedBy(String createdBy);
-
-    @Query("SELECT COALESCE(SUM(b.doneCount), 0) FROM GradingBatch b WHERE b.createdBy = :email")
-    long sumDoneByCreatedBy(String email);
-
     // ── Thông báo: các phiên chấm gần đây ────────────────────────
     List<GradingBatch> findTop10ByOrderByCreatedAtDesc();
-    List<GradingBatch> findTop10ByCreatedByOrderByCreatedAtDesc(String createdBy);
 }

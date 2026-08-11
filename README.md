@@ -15,7 +15,7 @@ Hệ thống chấm bài thi thực hành **Flutter/Dart** tự động trong m�
 # Chạy TẤT CẢ bằng 1 lệnh (mở terminal tại thư mục Grader_App)
 .\run                      # = run.cmd: bật MySQL + backend + frontend
 ```
-Mở **http://localhost:3000** → đăng nhập → dùng.
+Mở **http://localhost:3000** → dùng ngay (không cần đăng nhập).
 
 ### Cách B — máy TRỐNG (chưa có Docker/Node/Java)
 Sau khi **clone repo**, chạy **`grader-setup.cmd`** (tự xin quyền admin → winget cài Docker/Node/Java + build ảnh chấm `grading-base`). Xong → chạy **`GraderLauncher.exe`** hoặc **`.\run`** ngay trong repo. Chi tiết: [`installer/README-INSTALLER.md`](installer/README-INSTALLER.md).
@@ -47,7 +47,7 @@ Vì vậy người mới clone repo vẫn chạy được sau khi có Docker, Ja
 | **Theo dõi** | Tiến độ real-time (queued / grading / done / error); **không mất kết quả khi rời trang** (tự khôi phục từ backend) |
 | **Lịch sử chấm** | Xem lại theo từng đề: danh sách bài + điểm + trạng thái; tải JSON từng bài; **xuất CSV** |
 | **Thống kê** | Tổng hợp pass/fail, điểm trung bình, biểu đồ; tối ưu O(log N) bằng Flag Pattern |
-| **Tài khoản GV** | Đăng nhập/đăng ký; token 7 ngày; trang hồ sơ + số liệu chấm theo từng giáo viên |
+| **Truy cập** | Không có đăng nhập/phân quyền — công cụ chạy cục bộ cho một giáo viên; đừng expose cổng 8080 ra mạng |
 | **Giao diện** | Sáng/Tối (dark mode); responsive; xuất CSV & JSON kết quả đầy đủ |
 
 ---
@@ -119,7 +119,7 @@ cd frontend
 npm install
 npm run dev
 ```
-Mở **http://localhost:3000** → đăng nhập → bắt đầu chấm.
+Mở **http://localhost:3000** → bắt đầu chấm.
 
 Nếu chạy bằng `.\run` thì script tự tạo `frontend/.env.local` đúng cổng backend. Nếu chạy thủ công và muốn cấu hình riêng, copy:
 

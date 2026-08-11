@@ -4,8 +4,9 @@ import React, { useEffect, useState, useCallback } from "react";
 import { createPortal } from "react-dom";
 import SidebarLayout from "@/components/layout/SidebarLayout";
 import { API_BASE } from "@/lib/config";
-import { getToken } from "@/lib/auth";
 import SyllabusCoverage from "@/components/grading/SyllabusCoverage";
+import ErrorScreen from "@/components/ui/ErrorScreen";
+import { appError, kindOf, messageOf } from "@/lib/errors";
 import {
   BookOpen, Plus, Pencil, Trash2, Loader2, X, Layers, GraduationCap,
   AlertTriangle, EyeOff,
@@ -32,15 +33,11 @@ interface TreeT { meta: MetaT; categories: CategoryT[]; }
 const DIFFS = ["basic", "intermediate", "advanced"];
 const DIFF_LABEL: Record<string, string> = { basic: "Cơ bản", intermediate: "Trung bình", advanced: "Nâng cao" };
 
-// ── Gọi API có token (cho thao tác ghi) ───────────────────────
-async function authed(path: string, method: string, body?: unknown) {
-  const token = getToken();
+// ── Gọi API cho thao tác ghi ──────────────────────────────────
+async function apiJson(path: string, method: string, body?: unknown) {
   const res = await fetch(`${API_BASE}${path}`, {
     method,
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
+    headers: { "Content-Type": "application/json" },
     body: body ? JSON.stringify(body) : undefined,
   });
   const data = await res.json().catch(() => ({}));
@@ -51,7 +48,7 @@ async function authed(path: string, method: string, body?: unknown) {
 export default function SyllabusPage() {
   const [tree, setTree] = useState<TreeT | null>(null);
   const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState<string | null>(null);
+  const [err, setErr] = useState<unknown>(null);
   // Tăng mỗi khi syllabus được nạp lại (sau CRUD) → coverage tự phản chiếu thay đổi
   const [refreshKey, setRefreshKey] = useState(0);
 
@@ -61,10 +58,17 @@ export default function SyllabusPage() {
 
   const load = useCallback(() => {
     setLoading(true);
+    setErr(null);
     fetch(`${API_BASE}/syllabus?includeInactive=true`)
-      .then((r) => r.json())
-      .then((d: TreeT) => { setTree(d); setRefreshKey((k) => k + 1); })
-      .catch(() => setErr("Không tải được syllabus"))
+      // Phải xem res.ok: backend lỗi vẫn trả JSON, cứ parse thẳng thì lỗi 500
+      // biến thành "tree rỗng" và trang im lặng hiện trống thay vì báo hỏng.
+      .then(async (r) => {
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw appError(d, r.status);
+        return d as TreeT;
+      })
+      .then((d) => { setTree(d); setRefreshKey((k) => k + 1); })
+      .catch((e) => setErr(e))
       .finally(() => setLoading(false));
   }, []);
 
@@ -74,25 +78,25 @@ export default function SyllabusPage() {
 
   // ── Thao tác ghi ────────────────────────────────────────────
   const saveCategory = async (body: Partial<CategoryT>, mode: "create" | "edit") => {
-    if (mode === "create") await authed("/syllabus/categories", "POST", body);
-    else await authed(`/syllabus/categories/${encodeURIComponent(body.code!)}`, "PUT", body);
+    if (mode === "create") await apiJson("/syllabus/categories", "POST", body);
+    else await apiJson(`/syllabus/categories/${encodeURIComponent(body.code!)}`, "PUT", body);
     setCatModal(null);
     load();
   };
   const saveSkill = async (body: Partial<SkillT>, mode: "create" | "edit") => {
-    if (mode === "create") await authed("/syllabus/skills", "POST", body);
-    else await authed(`/syllabus/skills/${encodeURIComponent(body.code!)}`, "PUT", body);
+    if (mode === "create") await apiJson("/syllabus/skills", "POST", body);
+    else await apiJson(`/syllabus/skills/${encodeURIComponent(body.code!)}`, "PUT", body);
     setSkillModal(null);
     load();
   };
   const deprecateSkill = async (s: SkillT) => {
     if (!confirm(`Ẩn (deprecate) skill "${s.code}"? Đề cũ trỏ vào vẫn map được, chỉ ẩn khỏi danh sách chọn.`)) return;
-    try { await authed(`/syllabus/skills/${encodeURIComponent(s.code)}`, "DELETE"); load(); }
+    try { await apiJson(`/syllabus/skills/${encodeURIComponent(s.code)}`, "DELETE"); load(); }
     catch (e) { alert((e as Error).message); }
   };
   const deactivateCategory = async (c: CategoryT) => {
     if (!confirm(`Ẩn category "${c.code}"?`)) return;
-    try { await authed(`/syllabus/categories/${encodeURIComponent(c.code)}`, "DELETE"); load(); }
+    try { await apiJson(`/syllabus/categories/${encodeURIComponent(c.code)}`, "DELETE"); load(); }
     catch (e) { alert((e as Error).message); }
   };
 
@@ -122,7 +126,7 @@ export default function SyllabusPage() {
           <Loader2 size={24} className="animate-spin" />
         </div>
       ) : err ? (
-        <div className="rounded-xl border border-rose-100 bg-rose-50 p-6 text-center text-sm text-rose-600">{err}</div>
+        <ErrorScreen kind={kindOf(err)} detail={messageOf(err)} onRetry={load} />
       ) : (
         <div className="space-y-5">
           {categories.map((c) => (

@@ -4,13 +4,12 @@ import React, { useEffect, useState, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
-  Settings, FileText, FileCode2, CheckSquare, BarChart2, LogOut, Bell, Search,
-  GraduationCap, UserCircle, Loader2, History, PanelLeftClose,
+  Settings, FileText, FileCode2, CheckSquare, BarChart2, Bell, Search,
+  GraduationCap, Loader2, History, PanelLeftClose,
   Clock, CheckCircle2, AlertCircle, BookOpen, Package, Archive,
   MessageSquareText,
 } from 'lucide-react';
 import { clsx } from 'clsx';
-import { useAuth } from '@/components/auth/AuthProvider';
 import { API_BASE } from '@/lib/config';
 import ThemeToggle from '@/components/layout/ThemeToggle';
 
@@ -52,16 +51,7 @@ const PRIMARY_NAV = [
 const SECONDARY_NAV = [
   { name: 'Lịch sử chấm', path: '/history', icon: History },
   { name: 'Thống kê', path: '/statistics', icon: BarChart2 },
-  { name: 'Giáo viên', path: '/profile', icon: UserCircle },
 ];
-
-/** Chữ cái đầu của tên để làm avatar. */
-function initialsOf(name?: string): string {
-  if (!name) return "GV";
-  const parts = name.trim().split(/\s+/);
-  if (parts.length === 1) return parts[0].charAt(0).toUpperCase();
-  return (parts[0].charAt(0) + parts[parts.length - 1].charAt(0)).toUpperCase();
-}
 
 /** Diễn giải trạng thái 1 phiên chấm cho thông báo. */
 function notifStatus(n: BatchNotif) {
@@ -73,7 +63,6 @@ function notifStatus(n: BatchNotif) {
 }
 
 export default function SidebarLayout({ children, activePath = '/', title, subtitle }: SidebarLayoutProps) {
-  const { teacher, loading, logout } = useAuth();
   const router = useRouter();
 
   // ── UI state ──────────────────────────────────────────────────
@@ -94,11 +83,6 @@ export default function SidebarLayout({ children, activePath = '/', title, subti
   const searchRef = useRef<HTMLDivElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchSeq = useRef(0);   // chống response cũ ghi đè response mới
-
-  // Bảo vệ route: chưa đăng nhập → về /login
-  useEffect(() => {
-    if (!loading && !teacher) router.replace("/login");
-  }, [loading, teacher, router]);
 
   // Khôi phục mốc "đã xem thông báo" (collapsed đã đọc ở lazy-init phía trên)
   useEffect(() => {
@@ -187,20 +171,6 @@ export default function SidebarLayout({ children, activePath = '/', title, subti
     else if (q.trim()) { setSearchOpen(false); router.push(`/history?q=${encodeURIComponent(q.trim())}`); }
   };
 
-  const handleLogout = async () => {
-    await logout();
-    router.replace("/login");
-  };
-
-  // Đang kiểm tra phiên hoặc chuẩn bị chuyển hướng → màn chờ (tránh nháy nội dung)
-  if (loading || !teacher) {
-    return (
-      <div className="flex h-screen w-full items-center justify-center bg-[#0b1120]">
-        <Loader2 size={28} className="animate-spin text-indigo-400" />
-      </div>
-    );
-  }
-
   // Vùng icon CỐ ĐỊNH (w-16) → icon luôn ở 1 vị trí, không "nhảy" khi đóng/mở.
   // Chữ luôn render, chỉ fade opacity + bị panel che dần khi thu gọn → trượt mượt.
   const renderLink = (item: { name: string; path: string; icon: React.ElementType }) => {
@@ -272,33 +242,6 @@ export default function SidebarLayout({ children, activePath = '/', title, subti
 
           <div className={clsx('mb-3 mt-7 px-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-600 transition-opacity duration-200', collapsed ? 'opacity-0' : 'opacity-100')}>Báo cáo & Dữ liệu</div>
           <nav className="space-y-1">{SECONDARY_NAV.map(renderLink)}</nav>
-        </div>
-
-        {/* GV đang đăng nhập + đăng xuất */}
-        <div className="shrink-0 overflow-hidden border-t border-white/5 px-2 py-3">
-          <Link
-            href="/profile"
-            title={collapsed ? teacher.fullName : undefined}
-            className="mb-1 flex h-12 items-center overflow-hidden rounded-lg transition-colors hover:bg-slate-800/70"
-          >
-            <span className="flex w-16 shrink-0 items-center justify-center">
-              <span className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 to-blue-600 text-xs font-bold text-white ring-1 ring-white/10">
-                {initialsOf(teacher.fullName)}
-              </span>
-            </span>
-            <div className={clsx('min-w-0 whitespace-nowrap pr-2 leading-tight transition-opacity duration-200', collapsed ? 'opacity-0' : 'opacity-100')}>
-              <div className="truncate text-sm font-semibold text-white">{teacher.fullName}</div>
-              <div className="truncate text-[11px] text-slate-500">{teacher.email}</div>
-            </div>
-          </Link>
-          <button
-            onClick={handleLogout}
-            title={collapsed ? 'Đăng xuất' : undefined}
-            className="flex h-11 w-full items-center overflow-hidden rounded-lg text-sm font-medium text-slate-400 transition-colors hover:bg-slate-800/70 hover:text-white"
-          >
-            <span className="flex w-16 shrink-0 items-center justify-center"><LogOut size={18} /></span>
-            <span className={clsx('whitespace-nowrap transition-opacity duration-200', collapsed ? 'opacity-0' : 'opacity-100')}>Đăng xuất</span>
-          </button>
         </div>
       </aside>
 
@@ -412,15 +355,6 @@ export default function SidebarLayout({ children, activePath = '/', title, subti
               )}
             </div>
 
-            <Link href="/profile" className="flex items-center gap-2.5">
-              <div className="hidden text-right leading-tight sm:block">
-                <div className="text-sm font-semibold text-slate-800">{teacher.fullName}</div>
-                <div className="text-[11px] text-slate-500">Giáo viên</div>
-              </div>
-              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 to-blue-600 text-sm font-semibold text-white shadow-sm ring-2 ring-white">
-                {initialsOf(teacher.fullName)}
-              </div>
-            </Link>
           </div>
         </header>
 

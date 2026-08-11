@@ -18,6 +18,7 @@ interface SidebarLayoutProps {
   activePath?: string;
   title: string;
   subtitle?: string;
+  contentClassName?: string;
 }
 
 interface BatchNotif {
@@ -67,15 +68,13 @@ function notifStatus(n: BatchNotif) {
   return { Icon: AlertCircle, tone: 'text-slate-400', text: `${done + err}/${total}` };
 }
 
-export default function SidebarLayout({ children, activePath = '/', title, subtitle }: SidebarLayoutProps) {
+export default function SidebarLayout({ children, activePath = '/', title, subtitle, contentClassName }: SidebarLayoutProps) {
   const router = useRouter();
 
   // ── UI state ──────────────────────────────────────────────────
-  // Đọc trạng thái thu gọn NGAY khi khởi tạo (tránh render mở rồi mới đóng = giật khi chuyển trang)
-  const [collapsed, setCollapsed] = useState(() => {
-    if (typeof window === "undefined") return false;
-    try { return localStorage.getItem("sidebar_collapsed") === "1"; } catch { return false; }
-  });
+  // Lần render đầu trên server và client phải giống nhau để React hydrate ổn định.
+  // Khôi phục lựa chọn đã lưu sau khi component được mount trong trình duyệt.
+  const [collapsed, setCollapsed] = useState(false);
   // Nhóm menu đang xổ. Mở sẵn nhóm chứa trang hiện tại để chuyển trang không bị "sập" menu.
   const [openGroups, setOpenGroups] = useState<string[]>(() =>
     PRIMARY_NAV.filter((e) => isGroup(e) && e.children.some((c) => c.path === activePath))
@@ -94,9 +93,10 @@ export default function SidebarLayout({ children, activePath = '/', title, subti
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchSeq = useRef(0);   // chống response cũ ghi đè response mới
 
-  // Khôi phục mốc "đã xem thông báo" (collapsed đã đọc ở lazy-init phía trên)
+  // Khôi phục trạng thái chỉ tồn tại trong localStorage sau hydration.
   useEffect(() => {
     try {
+      setCollapsed(localStorage.getItem("sidebar_collapsed") === "1");
       setLastSeen(Number(localStorage.getItem("notif_last_seen") || 0));
     } catch { /* bỏ qua */ }
   }, []);
@@ -424,7 +424,7 @@ export default function SidebarLayout({ children, activePath = '/', title, subti
 
         {/* Page Content */}
         <main className="custom-scrollbar flex-1 overflow-y-auto bg-slate-50 p-8">
-          <div className="mx-auto max-w-6xl animate-fade-in-up">{children}</div>
+          <div className={clsx('mx-auto w-full max-w-6xl animate-fade-in-up', contentClassName)}>{children}</div>
         </main>
       </div>
     </div>

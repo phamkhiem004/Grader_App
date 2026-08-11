@@ -280,7 +280,7 @@ export default function ArchivePage() {
           <h3 className="mb-1 text-base font-bold text-slate-700">Chưa có bộ testcase nào</h3>
           <p className="mb-4 max-w-sm text-sm text-slate-500">Tạo bộ mới từ thư viện testcase, sau đó Build Sandbox trực tiếp tại trang này.</p>
           <button type="button" onClick={() => setCreatePanel("choose")} className={newBtnCls}>
-            <Plus size={15} /> Tạo testcase
+            <Plus size={15} /> Tạo bộ testcase
           </button>
         </div>
       ) : (
@@ -289,7 +289,7 @@ export default function ArchivePage() {
             <Database size={16} className="text-indigo-500" />
             <h3 className="text-sm font-bold text-slate-700">Danh sách bộ testcase ({exams.length})</h3>
             <button type="button" onClick={() => setCreatePanel("choose")} className={`ml-auto ${newBtnCls}`}>
-              <Plus size={15} /> Tạo testcase
+              <Plus size={15} /> Tạo bộ testcase
             </button>
           </div>
           {/* overflow-x-auto: hàng nút nằm trên một dòng nên bảng có thể rộng hơn khung ở màn hẹp */}

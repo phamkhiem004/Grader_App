@@ -41,7 +41,7 @@ export default function StatisticsPage() {
   const [error, setError] = useState<string | null>(null);
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
 
-  // Tải danh sách đề cho dropdown (1 lần) — backend chỉ trả về đề đã chấm
+  // Tải danh sách bộ testcase cho dropdown (1 lần) — backend chỉ trả về bộ testcase đã chấm
   useEffect(() => {
     fetch(`${API_BASE}/statistics/exams`)
       .then(r => r.ok ? r.json() : [])
@@ -74,7 +74,7 @@ export default function StatisticsPage() {
   const hasPassFail = stats ? (stats.passCount + stats.failCount) > 0 : false;
   const isEmpty = stats != null && stats.totalStudents === 0;
   const currentExamName = examId === "ALL"
-    ? "Tất cả đề thi"
+    ? "Tất cả bộ testcase"
     : (exams.find(e => e.examId === examId)?.examName ?? examId);
 
   return (
@@ -106,7 +106,7 @@ export default function StatisticsPage() {
                   onChange={e => setExamId(e.target.value)}
                   className="appearance-none rounded-lg border border-slate-200 bg-slate-50 py-2.5 pl-9 pr-9 text-sm font-medium text-slate-700 shadow-sm transition-all hover:bg-white focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 >
-                  <option value="ALL">Tất cả đề thi</option>
+                  <option value="ALL">Tất cả bộ testcase</option>
                   {exams.map(e => (
                     <option key={e.examId} value={e.examId}>{e.examName} ({e.examId})</option>
                   ))}
@@ -143,7 +143,7 @@ export default function StatisticsPage() {
             </div>
             <h3 className="mb-2 text-base font-bold text-slate-700">Chưa có dữ liệu chấm bài</h3>
             <p className="max-w-sm text-sm text-slate-500">
-              {examId === "ALL" ? "Hãy chấm một vài bài thi để xem thống kê tại đây." : `Đề "${examId}" chưa có bài nào được chấm.`}
+              {examId === "ALL" ? "Hãy chấm một vài bài thi để xem thống kê tại đây." : `Bộ testcase "${examId}" chưa có bài nào được chấm.`}
             </p>
           </div>
         )}

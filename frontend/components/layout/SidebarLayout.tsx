@@ -6,8 +6,8 @@ import { useRouter } from 'next/navigation';
 import {
   Settings, FileText, FileCode2, CheckSquare, BarChart2, Bell, Search,
   GraduationCap, Loader2, History, PanelLeftClose,
-  Clock, CheckCircle2, AlertCircle, BookOpen, Package, Archive,
-  MessageSquareText,
+  Clock, CheckCircle2, AlertCircle, BookOpen, Package,
+  MessageSquareText, Bot, ChevronDown,
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { API_BASE } from '@/lib/config';
@@ -37,19 +37,28 @@ interface SearchRow {
   status: string;
 }
 
-const PRIMARY_NAV = [
-  { name: 'Chấm bài (Batch)', path: '/', icon: CheckSquare },
-  { name: 'Cấu hình Đề thi', path: '/teacher', icon: Settings },
-  { name: 'Kho đề thi', path: '/teacher/archive', icon: Archive },
+interface NavLeaf { name: string; path: string; icon: React.ElementType }
+interface NavGroup { name: string; icon: React.ElementType; children: NavLeaf[] }
+type NavEntry = NavLeaf | NavGroup;
+const isGroup = (e: NavEntry): e is NavGroup => 'children' in e;
+
+const PRIMARY_NAV: NavEntry[] = [
+  {
+    name: 'Chấm bài', icon: CheckSquare, children: [
+      { name: 'Chấm tự động', path: '/', icon: Bot },
+      { name: 'Chấm thủ công', path: '/teacher/workspace', icon: FileText },
+      { name: 'Cấu hình bộ testcase', path: '/teacher', icon: Settings },
+      { name: 'Lịch sử chấm', path: '/history', icon: History },
+    ],
+  },
+  // Vào thẳng trang Kho — mọi thao tác (tạo/sửa/xóa/chấm lại) đều là nút trong trang đó.
+  { name: 'Quản lý bộ testcase', path: '/teacher/archive', icon: FileCode2 },
   { name: 'Khung năng lực', path: '/syllabus', icon: BookOpen },
-  { name: 'Tạo testcase', path: '/teacher/testcases', icon: FileCode2 },
   { name: 'Thư viện chấm', path: '/teacher/libraries', icon: Package },
-  { name: 'Không gian chấm', path: '/teacher/workspace', icon: FileText },
   { name: 'Nhận xét AI', path: '/teacher/feedback', icon: MessageSquareText },
 ];
 
-const SECONDARY_NAV = [
-  { name: 'Lịch sử chấm', path: '/history', icon: History },
+const SECONDARY_NAV: NavLeaf[] = [
   { name: 'Thống kê', path: '/statistics', icon: BarChart2 },
 ];
 
@@ -71,6 +80,11 @@ export default function SidebarLayout({ children, activePath = '/', title, subti
     if (typeof window === "undefined") return false;
     try { return localStorage.getItem("sidebar_collapsed") === "1"; } catch { return false; }
   });
+  // Nhóm menu đang xổ. Mở sẵn nhóm chứa trang hiện tại để chuyển trang không bị "sập" menu.
+  const [openGroups, setOpenGroups] = useState<string[]>(() =>
+    PRIMARY_NAV.filter((e) => isGroup(e) && e.children.some((c) => c.path === activePath))
+      .map((e) => e.name)
+  );
   const [notifOpen, setNotifOpen] = useState(false);
   const [notifs, setNotifs] = useState<BatchNotif[]>([]);
   const [lastSeen, setLastSeen] = useState(0);
@@ -171,9 +185,21 @@ export default function SidebarLayout({ children, activePath = '/', title, subti
     else if (q.trim()) { setSearchOpen(false); router.push(`/history?q=${encodeURIComponent(q.trim())}`); }
   };
 
+  // Bấm nhóm khi menu đang thu gọn thì mở rộng luôn — nếu không, danh sách con xổ ra
+  // sẽ nằm ngoài bề ngang 80px và người dùng không thấy gì.
+  const toggleGroup = (name: string) => {
+    if (collapsed) {
+      setCollapsed(false);
+      try { localStorage.setItem('sidebar_collapsed', '0'); } catch { /* bỏ qua */ }
+      setOpenGroups((g) => (g.includes(name) ? g : [...g, name]));
+      return;
+    }
+    setOpenGroups((g) => (g.includes(name) ? g.filter((x) => x !== name) : [...g, name]));
+  };
+
   // Vùng icon CỐ ĐỊNH (w-16) → icon luôn ở 1 vị trí, không "nhảy" khi đóng/mở.
   // Chữ luôn render, chỉ fade opacity + bị panel che dần khi thu gọn → trượt mượt.
-  const renderLink = (item: { name: string; path: string; icon: React.ElementType }) => {
+  const renderLink = (item: NavLeaf, nested = false) => {
     const isActive = activePath === item.path;
     return (
       <Link
@@ -181,16 +207,17 @@ export default function SidebarLayout({ children, activePath = '/', title, subti
         href={item.path}
         title={collapsed ? item.name : undefined}
         className={clsx(
-          'group relative flex h-11 items-center overflow-hidden rounded-lg text-sm font-medium transition-colors',
+          'group relative flex items-center overflow-hidden rounded-lg font-medium transition-colors',
+          nested ? 'h-10 text-[13px]' : 'h-11 text-sm',
           isActive ? 'bg-indigo-500/10 text-white' : 'text-slate-400 hover:bg-slate-800/70 hover:text-white'
         )}
       >
         {isActive && (
           <span className="absolute left-0 top-1/2 h-5 w-1 -translate-y-1/2 rounded-r-full bg-indigo-400" />
         )}
-        <span className="flex w-16 shrink-0 items-center justify-center">
+        <span className={clsx('flex shrink-0 items-center justify-center', nested ? 'w-11' : 'w-16')}>
           <item.icon
-            size={18}
+            size={nested ? 16 : 18}
             className={clsx('transition-colors', isActive ? 'text-indigo-300' : 'text-slate-500 group-hover:text-slate-300')}
           />
         </span>
@@ -200,6 +227,51 @@ export default function SidebarLayout({ children, activePath = '/', title, subti
       </Link>
     );
   };
+
+  const renderGroup = (group: NavGroup) => {
+    const open = openGroups.includes(group.name);
+    const hasActive = group.children.some((c) => c.path === activePath);
+    return (
+      <div key={group.name}>
+        <button
+          type="button"
+          onClick={() => toggleGroup(group.name)}
+          title={collapsed ? group.name : undefined}
+          aria-expanded={open}
+          className={clsx(
+            'group relative flex h-11 w-full items-center overflow-hidden rounded-lg text-sm font-medium transition-colors',
+            hasActive ? 'text-white' : 'text-slate-400 hover:bg-slate-800/70 hover:text-white',
+            hasActive && !open && 'bg-indigo-500/10'
+          )}
+        >
+          <span className="flex w-16 shrink-0 items-center justify-center">
+            <group.icon
+              size={18}
+              className={clsx('transition-colors', hasActive ? 'text-indigo-300' : 'text-slate-500 group-hover:text-slate-300')}
+            />
+          </span>
+          <span className={clsx('truncate whitespace-nowrap transition-opacity duration-200', collapsed ? 'opacity-0' : 'opacity-100')}>
+            {group.name}
+          </span>
+          <ChevronDown
+            size={15}
+            className={clsx(
+              'ml-auto mr-3 shrink-0 transition-all duration-200',
+              open && 'rotate-180',
+              collapsed ? 'opacity-0' : 'opacity-100'
+            )}
+          />
+        </button>
+        {open && !collapsed && (
+          <div className="mt-1 ml-7 space-y-0.5 border-l border-white/10 pl-1">
+            {group.children.map((child) => renderLink(child, true))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderEntry = (entry: NavEntry) => (isGroup(entry) ? renderGroup(entry) : renderLink(entry));
 
   return (
     <div className="flex h-screen w-full overflow-hidden bg-slate-50 font-sans text-slate-800">
@@ -238,10 +310,10 @@ export default function SidebarLayout({ children, activePath = '/', title, subti
 
         <div className="custom-scrollbar flex-1 overflow-y-auto px-2 py-6">
           <div className={clsx('mb-3 px-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-600 transition-opacity duration-200', collapsed ? 'opacity-0' : 'opacity-100')}>Quản lý chấm thi</div>
-          <nav className="space-y-1">{PRIMARY_NAV.map(renderLink)}</nav>
+          <nav className="space-y-1">{PRIMARY_NAV.map(renderEntry)}</nav>
 
           <div className={clsx('mb-3 mt-7 px-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-600 transition-opacity duration-200', collapsed ? 'opacity-0' : 'opacity-100')}>Báo cáo & Dữ liệu</div>
-          <nav className="space-y-1">{SECONDARY_NAV.map(renderLink)}</nav>
+          <nav className="space-y-1">{SECONDARY_NAV.map((item) => renderLink(item))}</nav>
         </div>
       </aside>
 
@@ -263,7 +335,7 @@ export default function SidebarLayout({ children, activePath = '/', title, subti
                   value={q}
                   onChange={(e) => onSearchChange(e.target.value)}
                   onFocus={() => q.trim() && setSearchOpen(true)}
-                  placeholder="Tìm mã đề, sinh viên..."
+                  placeholder="Tìm mã bộ testcase, sinh viên..."
                   className="w-64 rounded-full border border-transparent bg-slate-100 py-2 pl-9 pr-4 text-sm outline-none transition-all focus:border-indigo-400 focus:bg-white focus:ring-2 focus:ring-indigo-100"
                 />
               </form>

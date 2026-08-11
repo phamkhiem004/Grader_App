@@ -153,6 +153,9 @@ public class ExamService {
             m.put("testcaseStatus", e.getTestcaseStatus() != null ? e.getTestcaseStatus() : "DRAFT");
             m.put("testcaseVersion", e.getTestcaseVersion());
             m.put("hasTestcase", hasTc);
+            // Chỉ bộ testcase dựng từ template mới có config để mở lại trong màn Sửa;
+            // bộ upload bằng ZIP không có → FE ẩn khỏi danh sách chọn để sửa.
+            m.put("editable", e.getTestcaseConfigJson() != null && !e.getTestcaseConfigJson().isBlank());
             byId.put(e.getExamId(), m);
         }
 
@@ -172,6 +175,7 @@ public class ExamService {
                         m.put("status", "ON_DISK");
                         m.put("testcaseStatus", "PUBLISHED");
                         m.put("hasTestcase", true);
+                        m.put("editable", false);   // chỉ có file trên đĩa, không có config
                         byId.put(id, m);
                     }
                 }

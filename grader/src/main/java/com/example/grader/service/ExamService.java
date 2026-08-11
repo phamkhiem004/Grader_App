@@ -157,6 +157,7 @@ public class ExamService {
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("examId", e.getExamId());
             m.put("examName", e.getExamName() != null ? e.getExamName() : e.getExamId());
+            m.put("teacherNote", e.getTeacherNote() != null ? e.getTeacherNote() : "");
             m.put("status", e.getStatus() != null ? e.getStatus().name() : null);
             m.put("testcaseStatus", e.getTestcaseStatus() != null ? e.getTestcaseStatus() : "DRAFT");
             m.put("testcaseVersion", e.getTestcaseVersion());
@@ -311,6 +312,33 @@ public class ExamService {
             if (parent != null) return parent.resolve("handout");
         }
         return examsRoot().resolve(examId).resolve("handout");
+    }
+
+    /**
+     * Sao chép nguyên bộ phát cho sinh viên khi clone một bộ testcase tạo bằng builder.
+     * Testcase/config được sinh lại bởi {@link TestcaseTemplateService}; hàm này chỉ giữ kèm đề bài,
+     * starter và lời giải mẫu nếu bộ nguồn có các tài liệu đó.
+     */
+    public void cloneHandout(String sourceExamId, String targetExamId) throws Exception {
+        safeId(sourceExamId, "bộ testcase nguồn");
+        safeId(targetExamId, "bộ testcase mới");
+        Path source = handoutDirOf(sourceExamId);
+        if (!Files.isDirectory(source)) return;
+
+        Path target = handoutDirOf(targetExamId);
+        if (Files.exists(target)) deleteRecursively(target);
+        try (Stream<Path> walk = Files.walk(source)) {
+            for (Path path : walk.toList()) {
+                Path output = target.resolve(source.relativize(path)).normalize();
+                if (!output.startsWith(target))
+                    throw new IllegalStateException("Đường dẫn handout không hợp lệ khi clone.");
+                if (Files.isDirectory(path)) Files.createDirectories(output);
+                else {
+                    Files.createDirectories(output.getParent());
+                    Files.copy(path, output, StandardCopyOption.REPLACE_EXISTING);
+                }
+            }
+        }
     }
 
     /**

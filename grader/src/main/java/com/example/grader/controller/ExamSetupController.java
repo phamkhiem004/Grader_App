@@ -173,6 +173,36 @@ public class ExamSetupController {
         }
     }
 
+    /** Clone toàn bộ cấu hình builder sang mã/tên mới; bộ nhập ZIP bị service từ chối. */
+    @PostMapping("/{examId}/clone")
+    public ResponseEntity<?> cloneTestcaseSet(@PathVariable String examId,
+                                              @RequestBody Map<String, Object> body) {
+        try {
+            return ResponseEntity.ok(testcaseTemplateService.cloneExam(examId, body, AppActor.DEFAULT));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        } catch (IllegalStateException e) {
+            return ResponseEntity.status(409).body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    /** Sinh code từ trạng thái form hiện tại để xem trước; không ghi file, không tăng version và không sửa DB. */
+    @PostMapping("/{examId}/testcases/preview")
+    public ResponseEntity<?> previewTestcases(@PathVariable String examId,
+                                              @RequestBody Map<String, Object> body) {
+        try {
+            return ResponseEntity.ok(testcaseTemplateService.preview(examId, body, AppActor.DEFAULT));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        } catch (IllegalStateException e) {
+            return ResponseEntity.status(409).body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
+        }
+    }
+
     /** Đọc các file testcase của 1 đề (exam_test.dart, skills_matrix.json, grader.dart) — cho trang Kho đề. */
     @GetMapping("/{examId}/testcase")
     public ResponseEntity<?> testcaseFiles(@PathVariable String examId) {

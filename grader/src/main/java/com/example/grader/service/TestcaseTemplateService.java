@@ -369,6 +369,104 @@ public class TestcaseTemplateService {
         return save(examId, body, actor, true);
     }
 
+    /**
+     * Clone một bộ được tạo bằng builder sang mã mới. Không sao chép bản ghi DB hay file một cách mù quáng:
+     * config nguồn được chuẩn hóa và materialize lại để bộ mới luôn dùng engine hiện hành.
+     */
+    public synchronized Map<String, Object> cloneExam(String rawSourceExamId,
+                                                       Map<String, Object> body,
+                                                       String actor) {
+        String sourceExamId = ExamService.safeId(rawSourceExamId, "bộ testcase nguồn");
+        if (body == null) throw new IllegalArgumentException("Thiếu thông tin bộ testcase bản sao.");
+        String targetExamId = firstText(body.get("exam_id"), body.get("examId"));
+        targetExamId = ExamService.safeId(targetExamId, "bộ testcase mới");
+        if (targetExamId.length() > 50)
+            throw new IllegalArgumentException("Mã bộ testcase mới không được dài quá 50 ký tự.");
+        if (sourceExamId.equalsIgnoreCase(targetExamId))
+            throw new IllegalArgumentException("Mã bộ testcase bản sao phải khác mã bộ nguồn.");
+        if (examRepository.existsByExamId(targetExamId))
+            throw new IllegalStateException("Mã bộ testcase " + targetExamId + " đã tồn tại.");
+
+        Path targetRoot = examService.testcaseDirectoryForConfiguration(targetExamId).getParent();
+        if (targetRoot != null && Files.exists(targetRoot))
+            throw new IllegalStateException("Thư mục của bộ testcase " + targetExamId + " đã tồn tại.");
+
+        Exam source = examRepository.findByExamId(sourceExamId)
+                .orElseThrow(() -> new IllegalArgumentException("Không tìm thấy bộ testcase nguồn: " + sourceExamId));
+        if (!isTemplateCreatedExam(source)) {
+            throw new IllegalStateException("Bộ " + sourceExamId
+                    + " được nhập từ ZIP nên không có cấu hình builder để clone.");
+        }
+        String examName = firstText(body.get("exam_name"), body.get("examName"));
+        if (examName == null || examName.isBlank())
+            throw new IllegalArgumentException("Vui lòng nhập tên bộ testcase bản sao.");
+
+        Map<String, Object> sourceConfig = parseConfig(source.getTestcaseConfigJson());
+        Map<String, Object> cloneBody = new LinkedHashMap<>();
+        cloneBody.put("exam_name", examName.trim());
+        String teacherNote = firstText(body.get("teacher_note"), body.get("teacherNote"));
+        cloneBody.put("teacher_note", teacherNote == null ? "" : teacherNote.trim());
+        cloneBody.put("items", normalizeExistingItems(sourceConfig.get("items")));
+        cloneBody.put("contract", sourceConfig.getOrDefault("contract", Map.of()));
+
+        Map<String, Object> result = saveDraft(targetExamId, cloneBody, actor);
+        try {
+            examService.cloneHandout(sourceExamId, targetExamId);
+        } catch (Exception copyError) {
+            // Bộ đích vừa được tạo mới hoàn toàn nên có thể dọn sạch an toàn nếu clone tài liệu thất bại.
+            try { examService.deleteExam(targetExamId); }
+            catch (Exception cleanupError) { copyError.addSuppressed(cleanupError); }
+            throw new IllegalStateException("Không sao chép được toàn bộ khung của bộ nguồn: "
+                    + copyError.getMessage(), copyError);
+        }
+        result.put("source_exam_id", sourceExamId);
+        result.put("exam_name", examName.trim());
+        result.put("teacher_note", teacherNote == null ? "" : teacherNote.trim());
+        result.put("cloned", true);
+        return result;
+    }
+
+    /**
+     * Sinh trước đúng các file chấm từ trạng thái form hiện tại nhưng không ghi file và không sửa DB.
+     * Frontend gọi API này theo debounce để giảng viên theo dõi exam_test.dart/skills_matrix theo thời gian thực.
+     */
+    public Map<String, Object> preview(String rawExamId, Map<String, Object> body, String actor) {
+        ensureReferenceTemplatesLoaded();
+        String examId = ExamService.safeId(rawExamId, "bộ testcase");
+        if (body == null) throw new IllegalArgumentException("Thiếu cấu hình testcase để xem trước.");
+
+        Exam exam = examRepository.findByExamId(examId).orElse(null);
+        Map<String, Object> oldConfig = parseConfig(exam == null ? null : exam.getTestcaseConfigJson());
+        List<Map<String, Object>> items = normalizeItems(
+                examId, body.get("items"), indexItems(oldConfig.get("items")), actor);
+        String engineType = engineType(items);
+        if (!COMMON_ENGINE.equals(engineType))
+            throw new IllegalStateException("Chưa hỗ trợ xem trước engine: " + engineType);
+
+        try {
+            String examTest = renderEngine(engineType, items);
+            String skillsMatrix = mapper.writerWithDefaultPrettyPrinter()
+                    .writeValueAsString(toSkillsMatrix(items, engineType));
+            validateGeneratedMatrix(skillsMatrix);
+            String grader = readClasspathEngine("common-testcase-engine/grader.dart");
+
+            List<Map<String, String>> files = new ArrayList<>();
+            files.add(Map.of("name", "exam_test.dart", "content", examTest));
+            files.add(Map.of("name", "skills_matrix.json", "content", skillsMatrix));
+            files.add(Map.of("name", "grader.dart", "content", grader));
+            Map<String, Object> out = new LinkedHashMap<>();
+            out.put("exam_id", examId);
+            out.put("files", files);
+            out.put("items", items);
+            out.put("total_weight", totalWeight(items));
+            return out;
+        } catch (IllegalArgumentException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IllegalStateException("Không sinh được code xem trước: " + e.getMessage(), e);
+        }
+    }
+
     private Map<String, Object> save(String rawExamId, Map<String, Object> body,
                                      String actor, boolean publish) {
         ensureReferenceTemplatesLoaded();
@@ -514,15 +612,23 @@ public class TestcaseTemplateService {
     /** Chọn engine theo profile, không dùng grader gắn chặt với một đề cho testcase chung. */
     private void materializeEngine(Path dir, String engineType, List<Map<String, Object>> items) throws Exception {
         if (!COMMON_ENGINE.equals(engineType)) return;
+        String generated = renderEngine(engineType, items);
+        // Chỉ ghi hai file sau khi source đã qua chốt kiểm tra, tránh refresh nửa vời:
+        // grader.dart mới nhưng exam_test.dart vẫn là bản cũ.
+        copyClasspathEngine(dir, "common-testcase-engine/grader.dart", "grader.dart");
+        Files.writeString(dir.resolve("exam_test.dart"), generated, StandardCharsets.UTF_8);
+    }
+
+    /** Sinh source exam_test.dart trong bộ nhớ để Save và Preview dùng đúng cùng một đường code. */
+    private String renderEngine(String engineType, List<Map<String, Object>> items) throws Exception {
+        if (!COMMON_ENGINE.equals(engineType))
+            throw new IllegalStateException("Engine testcase không được hỗ trợ: " + engineType);
         String engine = readClasspathEngine("common-testcase-engine/exam_test.dart");
         String generated = injectCustomTestcases(engine, enabledCustomItems(items));
         String delimiterError = delimiterProblem(generated);
         if (delimiterError != null)
             throw new IllegalStateException("Engine exam_test.dart không hợp lệ: " + delimiterError + ".");
-        // Chỉ ghi hai file sau khi source đã qua chốt kiểm tra, tránh refresh nửa vời:
-        // grader.dart mới nhưng exam_test.dart vẫn là bản cũ.
-        copyClasspathEngine(dir, "common-testcase-engine/grader.dart", "grader.dart");
-        Files.writeString(dir.resolve("exam_test.dart"), generated, StandardCharsets.UTF_8);
+        return generated;
     }
 
     /**

@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Grader — Hệ thống chấm thi Flutter tự động",
   description:
-    "Nền tảng chấm bài thi thực hành Flutter tự động: cấu hình đề, chấm hàng loạt trong môi trường Docker cô lập, thống kê và xuất kết quả.",
+    "Nền tảng chấm bài thi thực hành Flutter tự động: cấu hình bộ testcase, chấm hàng loạt trong môi trường Docker cô lập, thống kê và xuất kết quả.",
   icons: { icon: "/favicon.ico" },
 };
 

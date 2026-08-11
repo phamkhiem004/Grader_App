@@ -23,7 +23,7 @@ export default function DashboardPage() {
   const fileRef = useRef();
   const pollRef = useRef(null);
 
-  // Nạp toàn bộ đề đã tạo để giáo viên chọn nhanh; không giới hạn ở đề đã chấm.
+  // Nạp toàn bộ bộ testcase đã tạo để giáo viên chọn nhanh; không giới hạn ở bộ testcase đã chấm.
   useEffect(() => {
     let cancelled = false;
     fetch(`${API_BASE}/exam-setup/list`)
@@ -114,7 +114,7 @@ export default function DashboardPage() {
   const execute = async () => {
     if (phase === "uploading" || phase === "polling") return;   // chống bấm nhiều lần
     if (!files.length) { setUploadErr("Chưa có file nào để chấm."); return; }
-    if (!examId.trim()) { setUploadErr("Vui lòng nhập mã đề thi."); return; }
+    if (!examId.trim()) { setUploadErr("Vui lòng nhập mã bộ testcase."); return; }
 
     setPhase("uploading"); setUploadErr(null); setParseErrors([]);
 
@@ -209,7 +209,7 @@ export default function DashboardPage() {
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
 
-    // Tạo tên file định dạng: Mã đề thi_YYYY-MM-DD.csv
+    // Tạo tên file định dạng: Mã bộ testcase_YYYY-MM-DD.csv
     const dateStr = new Date().toISOString().split('T')[0];
     a.download = `${examId}_${dateStr}.csv`;
 
@@ -260,7 +260,7 @@ export default function DashboardPage() {
   const totalSize = files.reduce((s, f) => s + f.size, 0);
 
   return (
-    <SidebarLayout title="Chấm bài hàng loạt" subtitle="Chấm tự động bài thi Flutter trong môi trường Docker cô lập" activePath="/">
+    <SidebarLayout title="Chấm bài tự động" subtitle="Chấm tự động bài thi Flutter trong môi trường Docker cô lập" activePath="/">
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
 
         {/* Cột trái: Form cấu hình & Upload */}
@@ -273,25 +273,25 @@ export default function DashboardPage() {
               </div>
               <div>
                 <h2 className="text-sm font-bold text-slate-800">Thiết lập phiên chấm bài</h2>
-                <p className="text-xs text-slate-500">Chọn đề và tải bài nộp</p>
+                <p className="text-xs text-slate-500">Chọn bộ testcase và tải bài nộp</p>
               </div>
             </div>
 
             <div className="space-y-4 p-6">
               <div>
-                <label className="mb-2 block text-xs font-bold uppercase tracking-wider text-slate-500">Mã Đề Thi</label>
+                <label className="mb-2 block text-xs font-bold uppercase tracking-wider text-slate-500">Mã Bộ Testcase</label>
                 <ExamCombobox
                   options={examOptions}
                   value={examId}
                   onChange={setExamId}
                   disabled={isRunning}
-                  ariaLabel="Mã đề thi"
-                  placeholder={examOptionsLoading ? "Đang tải danh sách đề..." : "Nhập hoặc chọn mã đề thi..."}
+                  ariaLabel="Mã bộ testcase"
+                  placeholder={examOptionsLoading ? "Đang tải danh sách bộ testcase..." : "Nhập hoặc chọn mã bộ testcase..."}
                 />
                 <p className="mt-2 text-xs text-slate-400">
                   {examOptions.length > 0
-                    ? `Bấm vào ô để chọn nhanh ${examOptions.length} đề đã tạo, hoặc vẫn có thể nhập mã mới.`
-                    : "Chưa có đề đã tạo; bạn vẫn có thể nhập mã đề thủ công."}
+                    ? `Bấm vào ô để chọn nhanh ${examOptions.length} bộ testcase đã tạo, hoặc vẫn có thể nhập mã mới.`
+                    : "Chưa có bộ testcase đã tạo; bạn vẫn có thể nhập mã bộ testcase thủ công."}
                 </p>
               </div>
 
@@ -579,7 +579,7 @@ export default function DashboardPage() {
                 <BarChart2 size={36} />
               </div>
               <h3 className="mb-2 text-base font-bold text-slate-700">Chưa có phiên chấm bài nào</h3>
-              <p className="max-w-sm text-sm text-slate-500">Cấu hình mã đề và upload các file ZIP bài làm của sinh viên để bắt đầu chấm điểm tự động.</p>
+              <p className="max-w-sm text-sm text-slate-500">Cấu hình mã bộ testcase và upload các file ZIP bài làm của sinh viên để bắt đầu chấm điểm tự động.</p>
             </div>
           )}
         </div>
@@ -609,7 +609,7 @@ function categorizeError(errStr) {
   if (/chỉ nhận|file rỗng|quá 50mb|rỗng/i.test(msg))
     return { file, type: "File không hợp lệ", detail: msg, tone: "rose" };
   if (/duplicate entry|đã có kết quả/i.test(msg))
-    return { file, type: "Đã chấm trước đó", detail: "Mã SV này đã có kết quả cho đề thi (giờ sẽ tự ghi đè khi chấm lại).", tone: "blue" };
+    return { file, type: "Đã chấm trước đó", detail: "Mã SV này đã có kết quả cho bộ testcase (giờ sẽ tự ghi đè khi chấm lại).", tone: "blue" };
   if (/sql|constraint|could not execute|statement|database/i.test(msg))
     return { file, type: "Lỗi hệ thống (DB)", detail: "Lỗi khi lưu vào cơ sở dữ liệu.", tone: "rose" };
   return { file, type: "Lỗi khác", detail: msg || "Không xác định", tone: "slate" };

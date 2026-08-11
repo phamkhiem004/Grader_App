@@ -2,11 +2,12 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import Link from "next/link";
 import SidebarLayout from "@/components/layout/SidebarLayout";
 import { API_BASE } from "@/lib/config";
 import {
   Archive, RotateCcw, Trash2, Loader2, AlertTriangle, CheckCircle2,
-  Database, FileArchive, Lightbulb,
+  Database, FileArchive, Pencil, Plus,
 } from "lucide-react";
 import ErrorScreen from "@/components/ui/ErrorScreen";
 import { appError, kindOf, messageOf } from "@/lib/errors";
@@ -16,11 +17,14 @@ interface ExamRow {
   examName?: string;
   status?: string;
   hasTestcase?: boolean;
-  hasStarter?: boolean;
-  hasSolution?: boolean;
   resultCount?: number;
+  /** true = bộ dựng từ template nên mở lại sửa được; false = bộ upload ZIP, không có config. */
+  editable?: boolean;
 }
 interface RegradeState { examId: string; batchId: string; total: number; done: number; error: number; running: boolean; }
+
+// Nút hành động chính của trang: tạo bộ testcase mới.
+const newBtnCls = "inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-emerald-700";
 
 // Kiểu chung cho mọi nút trong cột Thao tác — để chúng cùng cao, cùng cỡ chữ, ngang hàng nhau.
 const btnCls = (accent: string) =>
@@ -125,7 +129,7 @@ export default function ArchivePage() {
     try {
       await api(`/exam-setup/${encodeURIComponent(examId)}`, "DELETE");
       setConfirmDel(null);
-      setMsg(`Đã xóa đề ${examId} (gỡ testcase + ảnh Docker + bài nộp).`);
+      setMsg(`Đã xóa bộ testcase ${examId} (gỡ testcase + ảnh Docker + bài nộp).`);
       load();
     } catch (e) {
       setErr((e as Error).message);
@@ -136,8 +140,8 @@ export default function ArchivePage() {
 
   return (
     <SidebarLayout
-      title="Kho đề thi"
-      subtitle="Lưu trữ đề + exam_test để chấm lại khi cần; xóa đề cũ để giải phóng dung lượng"
+      title="Kho bộ testcase"
+      subtitle="Lưu trữ bộ testcase + exam_test để chấm lại khi cần; xóa bộ testcase cũ để giải phóng dung lượng"
       activePath="/teacher/archive"
     >
       {err && (
@@ -158,22 +162,28 @@ export default function ArchivePage() {
       ) : exams.length === 0 ? (
         <div className="flex flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-300/70 bg-white/60 p-12 text-center">
           <Archive size={36} className="mb-3 text-slate-300" />
-          <h3 className="mb-1 text-base font-bold text-slate-700">Chưa có đề nào</h3>
-          <p className="max-w-sm text-sm text-slate-500">Tải testcase ở trang <b>Cấu hình Đề thi</b> để bắt đầu.</p>
+          <h3 className="mb-1 text-base font-bold text-slate-700">Chưa có bộ testcase nào</h3>
+          <p className="mb-4 max-w-sm text-sm text-slate-500">Tạo bộ mới từ thư viện testcase, hoặc tải gói ZIP lên ở trang <b>Cấu hình bộ testcase</b>.</p>
+          <Link href="/teacher/testcases" className={newBtnCls}>
+            <Plus size={15} /> Tạo testcase
+          </Link>
         </div>
       ) : (
         <div className="card overflow-hidden">
           <div className="flex items-center gap-2 border-b border-slate-100 bg-slate-50/60 px-5 py-3.5">
             <Database size={16} className="text-indigo-500" />
-            <h3 className="text-sm font-bold text-slate-700">Danh sách đề ({exams.length})</h3>
+            <h3 className="text-sm font-bold text-slate-700">Danh sách bộ testcase ({exams.length})</h3>
+            <Link href="/teacher/testcases" className={`ml-auto ${newBtnCls}`}>
+              <Plus size={15} /> Tạo testcase
+            </Link>
           </div>
           {/* overflow-x-auto: hàng nút nằm trên một dòng nên bảng có thể rộng hơn khung ở màn hẹp */}
           <div className="custom-scrollbar overflow-x-auto">
           <table className="w-full text-left text-sm">
             <thead>
               <tr className="border-b border-slate-100 text-[10px] uppercase tracking-wider text-slate-400">
-                <th className="px-5 py-2.5">Mã đề</th>
-                <th className="px-5 py-2.5">Tên đề</th>
+                <th className="px-5 py-2.5">Mã bộ testcase</th>
+                <th className="px-5 py-2.5">Tên bộ testcase</th>
                 <th className="px-5 py-2.5 text-center">Testcase</th>
                 <th className="px-5 py-2.5 text-center">Số bài</th>
                 <th className="px-5 py-2.5 text-right">Thao tác</th>
@@ -204,21 +214,24 @@ export default function ArchivePage() {
                           className={btnCls("hover:text-indigo-600")}>
                           <FileArchive size={13} /> Testcase
                         </button>
-                        <button onClick={() => doDownload(`/exam-setup/${encodeURIComponent(e.examId)}/download/starter`, `${e.examId}_starter.zip`)}
-                          disabled={!e.hasStarter} title="Tải khung code (lib/) phát cho sinh viên làm"
-                          className={btnCls("hover:text-emerald-600")}>
-                          <FileArchive size={13} /> Starter
-                        </button>
-                        <button onClick={() => doDownload(`/exam-setup/${encodeURIComponent(e.examId)}/download/solution`, `${e.examId}_solution.zip`)}
-                          disabled={!e.hasSolution} title="Tải lời giải mẫu (lib/) — chỉ GV tham khảo, KHÔNG phát cho SV"
-                          className={btnCls("hover:text-amber-600")}>
-                          <Lightbulb size={13} /> Lời giải
-                        </button>
+                        {/* Chỉ bộ dựng từ template mới mở lại builder được; bộ upload ZIP không có config. */}
+                        {e.editable !== false ? (
+                          <Link href={`/teacher/testcases?exam=${encodeURIComponent(e.examId)}`}
+                            title="Mở lại builder để thêm/bớt/xóa testcase trong bộ này"
+                            className={btnCls("hover:text-indigo-600")}>
+                            <Pencil size={13} /> Sửa
+                          </Link>
+                        ) : (
+                          <button disabled title="Bộ này tải lên bằng ZIP nên không mở lại được — upload gói mới ở trang Cấu hình bộ testcase"
+                            className={btnCls("")}>
+                            <Pencil size={13} /> Sửa
+                          </button>
+                        )}
                         <button onClick={() => doRegrade(e.examId)} title="Chấm lại toàn bộ bài đã nộp"
                           disabled={busy || (e.resultCount ?? 0) === 0} className={btnCls("hover:text-blue-600")}>
                           {busy ? <Loader2 size={13} className="animate-spin" /> : <RotateCcw size={13} />} Chấm lại
                         </button>
-                        <button onClick={() => setConfirmDel(e.examId)} title="Xóa đề (giải phóng dung lượng)"
+                        <button onClick={() => setConfirmDel(e.examId)} title="Xóa bộ testcase (giải phóng dung lượng)"
                           disabled={busy} className={btnCls("text-rose-500 hover:bg-rose-50 hover:text-rose-600")}>
                           <Trash2 size={13} /> Xóa
                         </button>
@@ -245,16 +258,16 @@ export default function ArchivePage() {
         <div className="animate-modal-overlay fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm" onClick={() => setConfirmDel(null)}>
           <div className="animate-modal-pop w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl ring-1 ring-black/5" onClick={(e) => e.stopPropagation()}>
             <div className="mb-3 flex items-center gap-2.5 text-rose-600">
-              <AlertTriangle size={20} /> <h3 className="text-base font-bold">Xóa đề {confirmDel}?</h3>
+              <AlertTriangle size={20} /> <h3 className="text-base font-bold">Xóa bộ testcase {confirmDel}?</h3>
             </div>
             <p className="mb-5 text-sm text-slate-600">
-              Sẽ gỡ <b>testcase + ảnh Docker + toàn bộ bài nộp (submissions)</b> của đề để giải phóng dung lượng. <b>Sau khi xóa KHÔNG chấm lại / xem mã nguồn bài nộp được nữa.</b> Điểm đã chấm vẫn lưu ở Lịch sử &amp; Thống kê.
+              Sẽ gỡ <b>testcase + ảnh Docker + toàn bộ bài nộp (submissions)</b> của bộ testcase để giải phóng dung lượng. <b>Sau khi xóa KHÔNG chấm lại / xem mã nguồn bài nộp được nữa.</b> Điểm đã chấm vẫn lưu ở Lịch sử &amp; Thống kê.
             </p>
             <div className="flex justify-end gap-2">
               <button onClick={() => setConfirmDel(null)} className="rounded-lg px-4 py-2 text-sm font-semibold text-slate-500 hover:bg-slate-100">Hủy</button>
               <button onClick={() => doDelete(confirmDel)} disabled={deleting === confirmDel}
                 className="flex items-center gap-2 rounded-lg bg-rose-600 px-4 py-2 text-sm font-semibold text-white hover:bg-rose-700 disabled:opacity-50">
-                {deleting === confirmDel ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />} Xóa đề
+                {deleting === confirmDel ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />} Xóa bộ testcase
               </button>
             </div>
           </div>

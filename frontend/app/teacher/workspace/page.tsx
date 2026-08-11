@@ -48,7 +48,7 @@ export default function WorkspacePage() {
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
 
-  // Nạp danh sách đề đã chấm
+  // Nạp danh sách bộ testcase đã chấm
   useEffect(() => {
     fetch(`${API_BASE}/statistics/exams`)
       .then((r) => r.json())
@@ -208,8 +208,8 @@ export default function WorkspacePage() {
 
   return (
     <SidebarLayout
-      title="Không gian chấm"
-      subtitle="Chọn đề → xem bài làm sinh viên → chấm thủ công theo từng tiêu chí"
+      title="Chấm thủ công"
+      subtitle="Chọn bộ testcase → xem bài làm sinh viên → chấm thủ công theo từng tiêu chí"
       activePath="/teacher/workspace"
     >
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-4">
@@ -217,13 +217,13 @@ export default function WorkspacePage() {
         <div className="xl:col-span-1">
           <div className="card overflow-hidden">
             <div className="border-b border-slate-100 bg-slate-50/60 p-4">
-              <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500">Đề thi</label>
+              <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500">Bộ testcase</label>
               <select
                 value={examId}
                 onChange={(e) => setExamId(e.target.value)}
                 className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-800 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
               >
-                {exams.length === 0 && <option value="">— Chưa có đề đã chấm —</option>}
+                {exams.length === 0 && <option value="">— Chưa có bộ testcase đã chấm —</option>}
                 {exams.map((e) => (
                   <option key={e.examId} value={e.examId}>{e.examName} ({e.examId})</option>
                 ))}
@@ -283,7 +283,7 @@ export default function WorkspacePage() {
                 <ClipboardCheck size={32} />
               </div>
               <h3 className="mb-1 text-base font-bold text-slate-700">Chọn một sinh viên để bắt đầu chấm</h3>
-              <p className="max-w-sm text-sm text-slate-500">Bên trái là danh sách bài nộp của đề. Chọn 1 SV để xem mã nguồn và chấm điểm theo từng tiêu chí.</p>
+              <p className="max-w-sm text-sm text-slate-500">Bên trái là danh sách bài nộp của bộ testcase. Chọn 1 SV để xem mã nguồn và chấm điểm theo từng tiêu chí.</p>
             </div>
           ) : (
             <div className="space-y-5">
@@ -362,7 +362,7 @@ export default function WorkspacePage() {
                       </div>
                     ) : criteria.length === 0 ? (
                       <div className="p-6 text-center text-sm text-slate-400">
-                        Đề này chưa có rubric (skills_matrix.json). Không thể chấm theo tiêu chí.
+                        Bộ testcase này chưa có rubric (skills_matrix.json). Không thể chấm theo tiêu chí.
                       </div>
                     ) : (
                       <div className="space-y-2.5">

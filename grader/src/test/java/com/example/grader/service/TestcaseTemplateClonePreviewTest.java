@@ -53,6 +53,7 @@ class TestcaseTemplateClonePreviewTest {
         assertEquals(true, result.get("cloned"));
         assertEquals("SOURCE_01", result.get("source_exam_id"));
         assertEquals("TARGET_01", result.get("exam_id"));
+        assertEquals("PUBLISHED", result.get("status"));
         assertTrue(Files.exists(target.resolve("exam_test.dart")));
         assertTrue(Files.exists(target.resolve("grader.dart")));
         assertTrue(Files.exists(target.resolve("skills_matrix.json")));
@@ -62,7 +63,7 @@ class TestcaseTemplateClonePreviewTest {
         verify(repository).save(saved.capture());
         assertEquals("TARGET_01", saved.getValue().getExamId());
         assertEquals("Bộ bản sao", saved.getValue().getExamName());
-        assertEquals("DRAFT", saved.getValue().getTestcaseStatus());
+        assertEquals("PUBLISHED", saved.getValue().getTestcaseStatus());
         assertTrue(saved.getValue().getTestcaseConfigJson().contains("require_keys"));
         verify(examService).cloneHandout("SOURCE_01", "TARGET_01");
     }

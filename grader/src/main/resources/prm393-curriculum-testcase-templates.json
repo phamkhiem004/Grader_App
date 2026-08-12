@@ -1149,5 +1149,28 @@
       "errorKeys": "error.email,error.password"
     },
     "expected_template": "Dữ liệu hợp lệ và {submitKey} phải mở {resultKey}."
+  },
+  {
+    "template_id": "CURRICULUM_STATE_RIVERPOD_GENERATOR",
+    "template_version": "curriculum-v1",
+    "engine_type": "COMMON_V1",
+    "profile_id": "COMMON_SEMANTIC_V1",
+    "skill_code": "STATE_RIVERPOD",
+    "layer": "BLACKBOX",
+    "testcase_group": "LOGIC",
+    "name": "Riverpod code generation đúng source contract",
+    "difficulty": "advanced",
+    "weight_default": 2,
+    "runner": "CUSTOM_CODE",
+    "code_generator": "SOURCE_CONTAINS",
+    "description": "Kiểm tra annotation, part file sinh tự động và điểm nối watch/read theo đúng các file do đề khai báo. Mọi đường dẫn và token đều là tham số để dùng lại cho nhiều domain.",
+    "parameters_schema": {
+      "sourcePathsJson": "[\"lib/viewmodels/user_view_model.dart\"]",
+      "requiredTokensJson": "[\"riverpod_annotation\"]",
+      "forbiddenTokensJson": "[]",
+      "caseSensitive": true,
+      "sourceChecksJson": "[]"
+    },
+    "expected_template": "Các file Riverpod phải có annotation, part sinh tự động và được UI sử dụng theo source contract đã cấu hình."
   }
 ]

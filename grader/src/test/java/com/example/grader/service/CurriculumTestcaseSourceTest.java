@@ -73,9 +73,12 @@ class CurriculumTestcaseSourceTest {
         Field templatesField = TestcaseTemplateService.class.getDeclaredField("templates");
         templatesField.setAccessible(true);
         Map<?, ?> loaded = (Map<?, ?>) templatesField.get(service);
-        assertEquals(77, loaded.size());
+        assertEquals(83, loaded.size());
         assertTrue(loaded.containsKey("COMMON_APP_BOOT"));
         assertTrue(loaded.containsKey("CURRICULUM_STORAGE_SQLITE_CRUD"));
+        Map<String, Object> widgetVisible = asMap(loaded.get("COMMON_WIDGET_VISIBLE"));
+        assertTrue(asMap(widgetVisible.get("parameters_schema")).containsKey("targetType"),
+                "COMMON_WIDGET_VISIBLE phải giữ targetType để các bộ đã cấu hình mở và lưu lại được");
     }
 
     @Test
@@ -101,7 +104,7 @@ class CurriculumTestcaseSourceTest {
         assertTrue(coveredSkills.containsAll(expectedSkills),
                 "Skill có thể chấm tự động nhưng chưa có template: "
                         + difference(expectedSkills, coveredSkills));
-        assertEquals(77, ids.size(), "Thư viện phải gồm 25 mẫu chung và 52 mẫu curriculum");
+        assertEquals(83, ids.size(), "Thư viện phải gồm 30 mẫu chung và 53 mẫu curriculum");
     }
 
     @Test

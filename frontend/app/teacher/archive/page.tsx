@@ -9,7 +9,7 @@ import { API_BASE } from "@/lib/config";
 import {
   Archive, RotateCcw, Trash2, Loader2, AlertTriangle, CheckCircle2,
   Database, FileArchive, Pencil, Plus, Hammer, X, UploadCloud, Package, ArrowLeft,
-  Copy, ChevronLeft, ChevronRight,
+  Copy, ChevronLeft, ChevronRight, PenLine,
 } from "lucide-react";
 import ErrorScreen from "@/components/ui/ErrorScreen";
 import { appError, kindOf, messageOf } from "@/lib/errors";
@@ -50,7 +50,7 @@ function manualIdFromName(name: string) {
 // Nút hành động chính của trang: tạo bộ testcase mới.
 const newBtnCls = "inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-emerald-700";
 
-// Kiểu chung cho mọi nút trong cột Thao tác: ô vuông chỉ chứa icon → 6 nút vừa một hàng.
+// Kiểu chung cho mọi nút trong cột Thao tác: ô vuông chỉ chứa icon để bảng không bị tràn ngang.
 const btnCls = (accent: string) =>
   `inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 transition-colors disabled:opacity-40 disabled:hover:bg-white disabled:hover:text-slate-600 ${accent}`;
 
@@ -95,6 +95,11 @@ export default function ArchivePage() {
   const [cloning, setCloning] = useState(false);
   /** Mã bộ vừa clone xong, đang điều hướng sang builder — chỉ để đổi chữ trên nút. */
   const [cloneRedirect, setCloneRedirect] = useState<string | null>(null);
+  const [renameSource, setRenameSource] = useState<ExamRow | null>(null);
+  const [renameExamId, setRenameExamId] = useState("");
+  const [renameExamName, setRenameExamName] = useState("");
+  const [renameError, setRenameError] = useState<string | null>(null);
+  const [renaming, setRenaming] = useState(false);
 
   // Portal modal ra <body> (tránh bị containing-block của .animate-fade-in-up cắt overlay)
   const [mounted, setMounted] = useState(false);
@@ -330,6 +335,57 @@ export default function ArchivePage() {
     }
   };
 
+  const openRename = (source: ExamRow) => {
+    setRenameSource(source);
+    setRenameExamId(source.examId);
+    setRenameExamName(source.examName || source.examId);
+    setRenameError(null);
+  };
+
+  const closeRename = () => {
+    if (renaming) return;
+    setRenameSource(null);
+    setRenameError(null);
+  };
+
+  const renameTestcaseSet = async () => {
+    if (!renameSource) return;
+    const normalizedId = renameExamId.trim().toUpperCase();
+    const normalizedName = renameExamName.trim();
+    if (!/^[A-Z0-9_-]{1,50}$/.test(normalizedId)) {
+      setRenameError("Mã bộ testcase chỉ gồm chữ in hoa, số, _ hoặc - và tối đa 50 ký tự.");
+      return;
+    }
+    if (!normalizedName) {
+      setRenameError("Tên bộ testcase không được để trống.");
+      return;
+    }
+    if (normalizedId === renameSource.examId && normalizedName === (renameSource.examName || renameSource.examId)) {
+      setRenameError("Hãy thay đổi mã hoặc tên bộ testcase trước khi lưu.");
+      return;
+    }
+
+    setRenaming(true);
+    setRenameError(null);
+    try {
+      const data = await api(`/exam-setup/${encodeURIComponent(renameSource.examId)}/rename`, "POST", {
+        new_exam_id: normalizedId,
+        exam_name: normalizedName,
+      });
+      setRenameSource(null);
+      setSandboxNotice({
+        type: "ok",
+        title: "Đổi tên bộ testcase thành công",
+        text: `Bộ ${renameSource.examId} đã được đổi thành ${data.exam_id || normalizedId} — ${data.exam_name || normalizedName}.`,
+      });
+      await load();
+    } catch (e) {
+      setRenameError((e as Error).message);
+    } finally {
+      setRenaming(false);
+    }
+  };
+
   const manualExamName = manualNameFromFile(manualFile);
   const manualExamId = manualIdFromName(manualExamName);
 
@@ -372,8 +428,16 @@ export default function ArchivePage() {
               <Plus size={15} /> Tạo bộ testcase
             </button>
           </div>
-          {/* KHÔNG cuộn ngang: cột Thao tác tự xuống dòng, mã dài tự ngắt → bảng luôn vừa khung. */}
-          <table className="w-full text-left text-sm">
+          {/* Cố định tỷ lệ cột để dữ liệu dài không làm thay đổi bố cục giữa các trang. */}
+          <div className="custom-scrollbar overflow-x-auto">
+          <table className="w-full min-w-[980px] table-fixed text-left text-sm">
+            <colgroup>
+              <col className="w-[28%]" />
+              <col className="w-[28%]" />
+              <col className="w-[10%]" />
+              <col className="w-[8%]" />
+              <col className="w-[26%]" />
+            </colgroup>
             <thead>
               <tr className="border-b border-slate-100 text-[10px] uppercase tracking-wider text-slate-400">
                 <th className="px-5 py-2.5">Mã bộ testcase</th>
@@ -388,24 +452,25 @@ export default function ArchivePage() {
                 const busy = regrade?.examId === e.examId && regrade.running;
                 return (
                   <tr key={e.examId} className="hover:bg-slate-50/60">
-                    {/* break-all chứ không phải break-words: mã là một chuỗi liền, chỉ break-all mới
-                        hạ được min-width của cột — nếu không bảng vẫn đòi rộng và bị cắt (card overflow-hidden). */}
-                    <td className="break-all px-5 py-3 font-mono font-medium text-slate-700">{e.examId}</td>
-                    <td className="break-words px-5 py-3 text-slate-600">{e.examName || "—"}</td>
-                    <td className="px-5 py-3 text-center">
+                    <td className="px-5 py-3 align-middle">
+                      <div title={e.examId} className="truncate font-mono font-medium text-slate-700">{e.examId}</div>
+                    </td>
+                    <td className="px-5 py-3 align-middle">
+                      <div title={e.examName || "—"} className="truncate text-slate-600">{e.examName || "—"}</div>
+                    </td>
+                    <td className="px-5 py-3 text-center align-middle">
                       {e.hasTestcase ? (
                         <span className="inline-flex items-center gap-1 rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700"><CheckCircle2 size={10} /> có</span>
                       ) : (
                         <span className="inline-flex items-center gap-1 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-400">thiếu</span>
                       )}
                     </td>
-                    <td className="px-5 py-3 text-center">
+                    <td className="px-5 py-3 text-center align-middle">
                       <span className="font-mono text-xs text-slate-600">{e.resultCount ?? 0}</span>
                     </td>
-                    <td className="px-5 py-3">
-                      {/* Nút CHỈ CÒN ICON để cả 6 thao tác nằm gọn trên MỘT hàng, không đẩy bảng
-                          rộng quá khung. Tên thao tác nằm ở title (tooltip) + aria-label. */}
-                      <div className="flex items-center justify-end gap-1.5">
+                    <td className="px-5 py-3 align-middle">
+                      {/* Giữ các thao tác trên một hàng; bảng chỉ cuộn ngang khi viewport thực sự hẹp. */}
+                      <div className="flex flex-nowrap items-center justify-end gap-1.5">
                         <button onClick={() => doDownload(`/exam-setup/${encodeURIComponent(e.examId)}/download/exam-test`, `${e.examId}_exam_test.zip`)}
                           disabled={!e.hasTestcase} aria-label="Tải testcase"
                           title="Tải testcase: exam_test.dart + grader.dart + skills_matrix.json"
@@ -416,14 +481,16 @@ export default function ArchivePage() {
                         {e.editable !== false ? (
                           <Link href={`/teacher/testcases?exam=${encodeURIComponent(e.examId)}`}
                             aria-label="Sửa bộ testcase"
-                            title="Sửa — mở lại builder để thêm/bớt/xóa testcase trong bộ này"
+                            title="Sửa — đổi mã, tên hoặc thêm/bớt testcase trong bộ này"
                             className={btnCls("hover:text-indigo-600")}>
                             <Pencil size={15} />
                           </Link>
                         ) : (
-                          <button disabled aria-label="Sửa bộ testcase"
-                            title="Sửa — bộ này được tải lên bằng ZIP nên không có cấu hình để mở lại; hãy tạo một bộ mới nếu cần thay đổi"
-                            className={btnCls("")}>
+                          <button type="button" onClick={() => openRename(e)}
+                            disabled={busy || (renaming && renameSource?.examId === e.examId)}
+                            aria-label="Đổi mã hoặc tên bộ testcase"
+                            title="Đổi mã hoặc tên — bộ upload ZIP không thể sửa nội dung testcase bằng builder"
+                            className={btnCls("hover:text-amber-600")}>
                             <Pencil size={15} />
                           </button>
                         )}
@@ -475,6 +542,7 @@ export default function ArchivePage() {
               })}
             </tbody>
           </table>
+          </div>
           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 bg-slate-50/60 px-5 py-3">
             <div className="flex items-center gap-2 text-xs text-slate-500">
               <span>Hiển thị</span>
@@ -668,6 +736,41 @@ export default function ArchivePage() {
                 </div>
               </>
             )}
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* Bộ ZIP không có cấu hình builder nên nút Sửa chỉ mở phần đổi mã/tên này. */}
+      {mounted && renameSource && createPortal(
+        <div className="animate-modal-overlay fixed inset-0 z-[58] flex items-center justify-center bg-slate-900/65 p-4 backdrop-blur-sm" onClick={closeRename}>
+          <div role="dialog" aria-modal="true" aria-labelledby="rename-title" className="animate-modal-pop relative w-full max-w-xl rounded-2xl bg-white p-6 text-slate-800 shadow-2xl ring-1 ring-black/5" onClick={(event) => event.stopPropagation()}>
+            <button type="button" onClick={closeRename} disabled={renaming} aria-label="Đóng cửa sổ đổi tên" className="absolute right-4 top-4 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:opacity-40"><X size={18} /></button>
+            <div className="mb-5 flex items-start gap-3">
+              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-amber-100 text-amber-600"><PenLine size={22} /></span>
+              <div>
+                <h3 id="rename-title" className="text-xl font-bold">Đổi mã hoặc tên bộ testcase</h3>
+                <p className="mt-1 text-sm leading-6 text-slate-500">
+                  Bộ upload ZIP không thể sửa nội dung bằng builder, nhưng vẫn có thể đổi mã và tên tại đây. Khi đổi mã, thư mục, bài nộp, kết quả và lịch sử chấm cũng được chuyển sang mã mới.
+                </p>
+              </div>
+            </div>
+            <div className="grid gap-4 md:grid-cols-2">
+              <label className="text-xs font-bold uppercase tracking-wider text-slate-500">Mã bộ testcase
+                <input value={renameExamId} maxLength={50} disabled={renaming} onChange={(event) => { setRenameExamId(event.target.value.toUpperCase().replace(/[^A-Z0-9_-]/g, "")); setRenameError(null); }} className="mt-1.5 w-full rounded-xl border border-slate-200 px-3.5 py-3 font-mono text-sm normal-case tracking-normal outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-100" />
+              </label>
+              <label className="text-xs font-bold uppercase tracking-wider text-slate-500">Tên bộ testcase
+                <input value={renameExamName} maxLength={200} disabled={renaming} onChange={(event) => { setRenameExamName(event.target.value); setRenameError(null); }} className="mt-1.5 w-full rounded-xl border border-slate-200 px-3.5 py-3 text-sm font-normal normal-case tracking-normal outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-100" />
+              </label>
+            </div>
+            {renameError && <div className="mt-4 flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700"><AlertTriangle size={17} className="mt-0.5 shrink-0" /> {renameError}</div>}
+            <div className="mt-5 flex justify-end gap-2">
+              <button type="button" onClick={closeRename} disabled={renaming} className="rounded-lg px-4 py-2.5 text-sm font-semibold text-slate-500 hover:bg-slate-100 disabled:opacity-40">Hủy</button>
+              <button type="button" onClick={renameTestcaseSet} disabled={renaming || !renameExamId.trim() || !renameExamName.trim()} className="inline-flex items-center gap-2 rounded-lg bg-amber-500 px-5 py-2.5 text-sm font-semibold text-white hover:bg-amber-600 disabled:cursor-not-allowed disabled:opacity-50">
+                {renaming ? <Loader2 size={16} className="animate-spin" /> : <PenLine size={16} />}
+                {renaming ? "Đang đổi tên..." : "Lưu tên mới"}
+              </button>
+            </div>
           </div>
         </div>,
         document.body

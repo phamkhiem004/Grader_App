@@ -173,13 +173,19 @@ public class ExamSetupController {
         }
     }
 
-    /** Đổi mã bộ testcase (kéo theo thư mục, kết quả, phiên chấm). Bộ đang chấm dở bị từ chối. */
+    /** Đổi mã và/hoặc tên bộ testcase. Khi đổi mã, toàn bộ dữ liệu liên quan được chuyển theo. */
     @PostMapping("/{examId}/rename")
     public ResponseEntity<?> renameTestcaseSet(@PathVariable String examId,
                                                @RequestBody Map<String, Object> body) {
         try {
-            Object raw = body == null ? null : (body.get("new_exam_id") != null ? body.get("new_exam_id") : body.get("newExamId"));
-            return ResponseEntity.ok(examService.renameExam(examId, raw == null ? null : String.valueOf(raw).trim()));
+            Object rawId = body == null ? null
+                    : (body.get("new_exam_id") != null ? body.get("new_exam_id") : body.get("newExamId"));
+            Object rawName = body == null ? null
+                    : (body.get("exam_name") != null ? body.get("exam_name") : body.get("examName"));
+            return ResponseEntity.ok(examService.renameExam(
+                    examId,
+                    rawId == null ? examId : String.valueOf(rawId).trim(),
+                    rawName == null ? null : String.valueOf(rawName).trim()));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         } catch (IllegalStateException e) {

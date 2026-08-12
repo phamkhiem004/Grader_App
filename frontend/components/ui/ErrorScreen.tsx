@@ -46,7 +46,7 @@ export interface ErrorScreenProps {
   detail?: string | null;
   onRetry?: () => void;
   retryLabel?: string;
-  /** Link "về trang chính"; truyền null để ẩn. Mặc định hiện ở biến thể page. */
+  /** Link lối thoát; truyền null để ẩn. Mặc định hiện ở biến thể page. */
   homeHref?: string | null;
   /** page = chiếm cả màn hình (dùng cho error.tsx/not-found.tsx) · inline = nằm trong SidebarLayout. */
   variant?: "page" | "inline";
@@ -66,7 +66,9 @@ export default function ErrorScreen({
   const Icon = ICON[kind];
   const isPage = variant === "page";
   // Trang lỗi độc lập thì luôn cần lối thoát; màn lỗi nhúng đã có sidebar nên không cần.
-  const home = homeHref === undefined ? (isPage ? "/" : null) : homeHref;
+  // Trỏ THẲNG /teacher/grading, không dùng "/": "/" chỉ là redirect sang /statistics,
+  // nên nếu chính /statistics đang hỏng thì bấm nút lại quay về đúng màn lỗi này.
+  const home = homeHref === undefined ? (isPage ? "/teacher/grading" : null) : homeHref;
 
   const card = (
     <div className="card mx-auto w-full max-w-md p-8 text-center">

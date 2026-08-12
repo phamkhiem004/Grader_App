@@ -2,7 +2,7 @@
 
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import SidebarLayout from "@/components/layout/SidebarLayout";
 import { API_BASE } from "@/lib/config";
@@ -1050,15 +1050,23 @@ function PairedValueEditor({ fields, value, options, onChange }: {
 function TestcasesEditor() {
   // ?exam=MÃ → mở bộ testcase đã lưu để SỬA; không có tham số = tạo bộ mới.
   const searchParams = useSearchParams();
+  const router = useRouter();
   const editExamId = (searchParams.get("exam") || "").trim().toUpperCase();
   const isEdit = editExamId.length > 0;
+  /**
+   * Mã bộ testcase ĐANG NẰM TRÊN SERVER. Tách khỏi `editExamId` (lấy từ URL) vì sau khi
+   * đổi mã thành công mà bước lưu config lỗi thì URL vẫn còn mã cũ — lần lưu sau phải
+   * biết bộ đã mang mã mới để không gọi đổi mã lần nữa.
+   */
+  const [savedExamId, setSavedExamId] = useState(editExamId);
+  /** Bật khi CHÍNH trang tự đổi URL sau lúc đổi mã: bỏ qua một lần nạp lại để không mất form. */
+  const skipReloadRef = useRef(false);
 
   const [templates, setTemplates] = useState<Template[]>([]);
   const [examId, setExamId] = useState("");
   const [examName, setExamName] = useState("");
   const [teacherNote, setTeacherNote] = useState("");
   const [items, setItems] = useState<TestcaseItem[]>([]);
-  const [status, setStatus] = useState("");
   const [version, setVersion] = useState(0);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<"draft" | "publish" | null>(null);
@@ -1126,6 +1134,9 @@ function TestcasesEditor() {
   useEffect(() => {
     if (!editExamId) return;
     setExamId(editExamId);
+    setSavedExamId(editExamId);
+    // URL vừa được chính trang này đồng bộ lại sau khi đổi mã → dữ liệu trên form đã đúng.
+    if (skipReloadRef.current) { skipReloadRef.current = false; return; }
     setLoadingExam(true);
     fetch(`${API_BASE}/exam-setup/${encodeURIComponent(editExamId)}/testcases`)
       .then(async (r) => {
@@ -1149,7 +1160,6 @@ function TestcasesEditor() {
         setItems(Array.isArray(data.items) ? data.items as TestcaseItem[] : []);
         setExamName(typeof data.exam_name === "string" ? data.exam_name : "");
         setTeacherNote(typeof data.teacher_note === "string" ? data.teacher_note : "");
-        setStatus(typeof data.status === "string" ? data.status : "");
         setVersion(Number(data.version) || 0);
         const contract = (data.contract || {}) as { require_keys?: boolean; keys?: ContractKey[] };
         setRequireKeys(!!contract.require_keys);
@@ -1163,8 +1173,9 @@ function TestcasesEditor() {
   }, [editExamId]);
 
   useEffect(() => {
-    // Sửa bộ đã có thì mã trùng là chuyện đương nhiên → không chạy kiểm tra trùng mã.
-    if (isEdit) {
+    // Giữ nguyên mã của bộ đang sửa thì trùng là đương nhiên → khỏi kiểm tra.
+    // Gõ mã khác đi = sắp đổi mã, lúc đó vẫn phải kiểm tra trùng như khi tạo mới.
+    if (isEdit && examId.trim() === savedExamId) {
       setExamIdCheck("idle");
       return;
     }
@@ -1195,7 +1206,7 @@ function TestcasesEditor() {
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [examId, isEdit]);
+  }, [examId, isEdit, savedExamId]);
 
   // Xem trước từ chính trạng thái form, không yêu cầu Lưu Draft. Debounce để không gọi backend mỗi phím gõ.
   useEffect(() => {
@@ -1881,12 +1892,17 @@ function TestcasesEditor() {
     setDraggedItemId(null);
   };
 
+  // Đang sửa mà gõ mã khác mã trên server = yêu cầu ĐỔI MÃ; mã mới phải chưa tồn tại,
+  // đúng như lúc tạo bộ mới, nên dùng chung kết quả kiểm tra trùng.
+  const renameTarget = isEdit && examId.trim() && examId.trim() !== savedExamId ? examId.trim() : "";
+  const needsIdCheck = !isEdit || !!renameTarget;
+
   const save = async (kind: "draft" | "publish") => {
     if (!examId.trim()) {
       setMessage({ type: "error", text: "Vui lòng nhập mã bộ testcase mới trước khi lưu." });
       return;
     }
-    if (!isEdit && examIdCheck !== "available") {
+    if (needsIdCheck && examIdCheck !== "available") {
       setMessage({ type: "error", text: examIdCheck === "exists"
         ? "Mã bộ testcase đã tồn tại. Vui lòng nhập một mã bộ testcase mới."
         : "Vui lòng chờ kiểm tra mã bộ testcase hoàn tất." });
@@ -1899,6 +1915,21 @@ function TestcasesEditor() {
     setSaving(kind);
     setMessage(null);
     try {
+      // Đổi mã TRƯỚC khi lưu config: backend kéo theo thư mục/kết quả/phiên chấm, xong xuôi
+      // thì phần lưu bên dưới mới ghi vào đúng bộ mang mã mới.
+      if (renameTarget) {
+        const renameRes = await fetch(`${API_BASE}/exam-setup/${encodeURIComponent(savedExamId)}/rename`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ new_exam_id: renameTarget }),
+        });
+        const renameData = await renameRes.json().catch(() => ({}));
+        if (!renameRes.ok) throw new Error(renameData.error || "Không đổi được mã bộ testcase");
+        setSavedExamId(renameTarget);
+        // Đồng bộ URL ngay để F5 không rơi vào mã cũ (đã biến mất); form giữ nguyên.
+        skipReloadRef.current = true;
+        router.replace(`/teacher/testcases?exam=${encodeURIComponent(renameTarget)}`);
+      }
       const res = await fetch(`${API_BASE}/exam-setup/${encodeURIComponent(examId.trim())}/testcases/${kind}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1911,12 +1942,12 @@ function TestcasesEditor() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Không lưu được cấu hình testcase");
-      setStatus(data.status || (kind === "publish" ? "PUBLISHED" : "DRAFT"));
       setVersion(Number(data.version ?? version));
       setItems(Array.isArray(data.items) ? data.items as TestcaseItem[] : items);
-      setMessage({ type: "ok", text: data.warning || (kind === "publish"
+      const renamed = renameTarget ? `Đã đổi mã bộ testcase thành ${renameTarget}. ` : "";
+      setMessage({ type: "ok", text: renamed + (data.warning || (kind === "publish"
         ? `Đã lưu bộ code testcase v${data.version}. Hãy Build Sandbox tại Kho bộ testcase trước khi chấm.`
-        : `Đã lưu nháp bộ code testcase v${data.version} (chưa dùng để chấm).` ) });
+        : `Đã lưu nháp bộ code testcase v${data.version} (chưa dùng để chấm).` )) });
     } catch (e) {
       setMessage({ type: "error", text: e instanceof Error ? e.message : "Không lưu được cấu hình testcase" });
     } finally {
@@ -2381,7 +2412,20 @@ function TestcasesEditor() {
   // Sửa: chỉ chờ nạp xong; Tạo mới: phải chắc chắn mã chưa tồn tại mới cho lưu.
   const saveDisabled = !!saving || !examName.trim() || loadingExam || missingConfig
     || missingContractKeys.length > 0
-    || (!isEdit && examIdCheck !== "available");
+    || (needsIdCheck && examIdCheck !== "available");
+
+  // Dòng chú thích dưới ô mã: LUÔN chiếm chỗ (kể cả khi rỗng) để 3 ô nhập của hàng
+  // đầu không bị đẩy lệch nhau mỗi lần thông báo hiện/ẩn.
+  const hintCls = "mt-1.5 block min-h-[16px] text-[11px] leading-4";
+  const examIdHint: { text: string; tone: string } = (() => {
+    if (examIdCheck === "checking") return { text: "Đang kiểm tra mã bộ testcase…", tone: "text-slate-400" };
+    if (examIdCheck === "exists") return { text: "Mã bộ testcase đã tồn tại, hãy chọn mã khác.", tone: "font-semibold text-rose-600" };
+    if (examIdCheck === "error") return { text: "Không kiểm tra được mã bộ testcase. Vui lòng thử lại.", tone: "font-semibold text-amber-600" };
+    if (examIdCheck === "available") return renameTarget
+      ? { text: `Bấm Lưu để đổi mã thành ${renameTarget} — thư mục, kết quả và lịch sử chấm đi theo.`, tone: "font-semibold text-emerald-600" }
+      : { text: "Mã bộ testcase chưa tồn tại, có thể tạo.", tone: "font-semibold text-emerald-600" };
+    return { text: "", tone: "text-slate-400" };
+  })();
 
   return (
     <SidebarLayout
@@ -2405,15 +2449,11 @@ function TestcasesEditor() {
             <input
               value={examId}
               onChange={(e) => setExamId(e.target.value.toUpperCase().replace(/[^A-Z0-9_-]/g, ""))}
-              readOnly={isEdit}
+              maxLength={50}
               placeholder="VD: FLUTTER_PE_30 — chưa tồn tại"
-              className={`w-full rounded-lg border border-slate-200 px-3 py-2.5 font-mono text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 ${isEdit ? "cursor-not-allowed bg-slate-100 text-slate-500" : "bg-white"}`}
+              className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 font-mono text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
             />
-            {isEdit && <p className="mt-1.5 text-[11px] text-slate-400">Không đổi được mã khi sửa — tạo bộ mới nếu cần mã khác.</p>}
-            {!isEdit && examIdCheck === "checking" && <p className="mt-1.5 text-[11px] text-slate-400">Đang kiểm tra mã bộ testcase…</p>}
-            {!isEdit && examIdCheck === "available" && <p className="mt-1.5 text-[11px] font-semibold text-emerald-600">Mã bộ testcase chưa tồn tại, có thể tạo.</p>}
-            {!isEdit && examIdCheck === "exists" && <p className="mt-1.5 text-[11px] font-semibold text-rose-600">Mã bộ testcase đã tồn tại, hãy chọn mã khác.</p>}
-            {!isEdit && examIdCheck === "error" && <p className="mt-1.5 text-[11px] font-semibold text-amber-600">Không kiểm tra được mã bộ testcase. Vui lòng thử lại.</p>}
+            <span className={`${hintCls} ${examIdHint.tone}`}>{examIdHint.text}</span>
           </div>
           <div className="min-w-[260px] flex-[1.4]">
             <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500">Tên bộ testcase</label>
@@ -2423,6 +2463,7 @@ function TestcasesEditor() {
               placeholder="VD: Flutter Practical Exam — Responsive UI"
               className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
             />
+            <span className={hintCls} />
           </div>
           <div className="min-w-[260px] flex-[1.2]">
             <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500">Ghi chú <span className="font-normal normal-case text-slate-400">(tuỳ chọn)</span></label>
@@ -2432,25 +2473,20 @@ function TestcasesEditor() {
               placeholder="Mô tả ngắn cho giáo viên"
               className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
             />
+            <span className={hintCls} />
           </div>
-          <div className="flex items-center gap-2 pb-0.5 text-xs text-slate-500">
-            {loadingExam ? <span className="flex items-center gap-1.5 text-slate-400"><Loader2 size={13} className="animate-spin" /> Đang nạp bộ testcase…</span>
-              : version > 0 ? <>
-                <span className={`rounded-full px-2.5 py-1 font-bold ${status === "PUBLISHED" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
-                  {status === "PUBLISHED" ? "ĐÃ LƯU" : "BẢN NHÁP"}
-                </span>
-                <span>version {version}</span>
-              </> : <span className="text-slate-400">Chưa lưu</span>}
-          </div>
+          {/* Chỉ báo đang nạp; KHÔNG hiện trạng thái/version — người dùng không cần biết bản nháp hay đã lưu. */}
+          {loadingExam && (
+            <div className="flex items-center gap-1.5 pb-0.5 text-xs text-slate-400">
+              <Loader2 size={13} className="animate-spin" /> Đang nạp bộ testcase…
+            </div>
+          )}
           <div className="ml-auto flex gap-2">
             <button onClick={() => { setPreviewOpen(true); setPreviewError(""); }} disabled={!examId.trim() || !!saving} className="flex items-center gap-2 rounded-lg border border-violet-200 bg-violet-50 px-3.5 py-2.5 text-sm font-semibold text-violet-700 hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-50" title="Xem exam_test.dart và matrix đang sinh từ form hiện tại, không cần lưu trước">
               <Eye size={16} /> Xem code hiện tại
             </button>
             <button onClick={downloadTestcase} disabled={!examId.trim() || !items.length || !!saving} className="flex items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3.5 py-2.5 text-sm font-semibold text-indigo-700 hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-50">
               <Download size={16} /> Tải ZIP code
-            </button>
-            <button onClick={() => save("draft")} disabled={saveDisabled} title="Lưu tạm để sửa tiếp — chưa dùng để chấm" className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3.5 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50">
-              {saving === "draft" ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />} Lưu nháp
             </button>
             <button onClick={() => save("publish")} disabled={saveDisabled} title="Lưu chính thức — bộ testcase này sẽ được dùng để chấm" className="flex items-center gap-2 rounded-lg bg-indigo-600 px-3.5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50">
               {saving === "publish" ? <Loader2 size={16} className="animate-spin" /> : <UploadCloud size={16} />} Lưu

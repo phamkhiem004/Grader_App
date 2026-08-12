@@ -1,0 +1,17 @@
+{
+  "diem": 8.3,
+  "passed": 21,
+  "failed": 4,
+  "total": 25,
+  "failed_ids": [
+    "TC_DETAIL_NAV",
+    "TC_EDIT_BANNER",
+    "TC_EDIT_PREFILL",
+    "TC_RESPONSIVE_NO_OVERFLOW"
+  ],
+  "not_run_ids": [
+    "TC_EDIT_BANNER",
+    "TC_EDIT_PREFILL",
+    "TC_RESPONSIVE_NO_OVERFLOW"
+  ]
+}

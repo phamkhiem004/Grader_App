@@ -2,11 +2,14 @@ package com.example.grader.service;
 
 import org.junit.jupiter.api.Test;
 
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -211,7 +214,9 @@ class TestObservationRendererTest {
         // Danh sách lấy TỪ CHÍNH lớp đó (`renderableKinds`), không chép tay: chép tay thì thêm
         // `kind` mới mà quên sửa test là test vẫn xanh — đúng lỗ hổng đang muốn bịt.
         Set<String> kinds = TestObservationRenderer.renderableKinds();
-        assertEquals(15, kinds.size(), "SPEC 5.5 khai 15 kind: " + kinds);
+        // 15 → 16: thêm `PROCESS_TIMEOUT` (engine phát từ 4b15334, lớp này trước đó không biết).
+        // Con số này là HỢP ĐỒNG với phía NLP — đổi nó là phải báo qua CHANGELOG_FOR_NLP.
+        assertEquals(16, kinds.size(), "SPEC 5.5 khai 16 kind: " + kinds);
         Set<String> noCode = TestObservationRenderer.kindsWithoutCode();
         for (String kind : kinds) {
             assertNotNull(TestObservationRenderer.render("Yêu cầu X", obs("kind", kind)), kind);
@@ -222,6 +227,57 @@ class TestObservationRendererTest {
                 assertNotNull(TestObservationRenderer.errorCodeOf(obs("kind", kind)),
                         kind + " diễn đạt được nhưng chưa có error_code");
             }
+        }
+    }
+
+    /**
+     * CHIỀU CÒN LẠI: mọi `kind` **ENGINE PHÁT RA** phải diễn đạt được.
+     *
+     * <p>{@link #everyRenderableKindExceptNotRunHasACode} canh chiều *bảng → bảng*: nó xuất phát
+     * từ {@code renderableKinds()}, tức chỉ soi những kind lớp này ĐÃ BIẾT. Engine phát một kind
+     * lạ thì **không gì đỏ cả**: {@code detail()} rơi vào {@code default -> null}, {@code actual}
+     * lặng lẽ rơi về chuỗi thô của engine, {@code actual_source} không được đánh dấu
+     * {@code "observation"}, và {@code error_code} không suy được từ quan sát.
+     *
+     * <p>Đây là ca đã xảy ra THẬT, không phải giả định: nhóm Grader thêm {@code PROCESS_TIMEOUT}
+     * ở commit {@code 4b15334} (chặn thời gian chạy Flutter); engine phát nhãn đó ra
+     * {@code result.json} trong khi lớp render không biết nó — và **118 test vẫn xanh**.
+     *
+     * <p>Cùng hình dạng với {@code TestCaseTaxonomyTest.everyEngineRunnerHasALayer}: quét NGUỒN
+     * engine chứ không chép tay danh sách — chép tay thì engine thêm nhãn mà quên sửa test là test
+     * vẫn xanh, đúng lỗ hổng đang bịt.
+     *
+     * <p><b>Giới hạn đã biết:</b> chỉ bóc được nhãn viết dạng CHUỖI HẰNG. Lời gọi
+     * {@code _observe(bien)} truyền biến thì nằm ngoài tầm — cổng này thu hẹp lỗ hổng chứ không
+     * đóng kín. Chốt chặn số lượng bên dưới để regex hỏng thì đỏ, chứ không âm thầm đạt.
+     */
+    @Test
+    void everyKindTheEngineEmitsIsRenderable() throws Exception {
+        Set<String> emitted = new LinkedHashSet<>();
+        List<Pattern> shapes = List.of(
+                Pattern.compile("_observe\\(\\s*'([A-Z][A-Z_]*)'"),   // exam_test.dart
+                Pattern.compile("'kind'\\s*:\\s*'([A-Z][A-Z_]*)'"));  // grader.dart
+        for (String file : List.of("exam_test.dart", "grader.dart")) {
+            String source;
+            try (InputStream in = getClass().getResourceAsStream("/common-testcase-engine/" + file)) {
+                assertNotNull(in, "Không tìm thấy " + file + " trên classpath");
+                source = new String(in.readAllBytes(), StandardCharsets.UTF_8);
+            }
+            for (Pattern shape : shapes) {
+                Matcher m = shape.matcher(source);
+                while (m.find()) emitted.add(m.group(1));
+            }
+        }
+        // Bóc hỏng ⇒ tập rỗng ⇒ vòng lặp dưới đạt VÔ NGHĨA (bài học A2b).
+        assertTrue(emitted.size() >= 5,
+                "Chỉ bóc được " + emitted.size() + " kind — regex có thể đã hỏng: " + emitted);
+
+        Set<String> renderable = TestObservationRenderer.renderableKinds();
+        for (String kind : emitted) {
+            assertTrue(renderable.contains(kind),
+                    "Engine phát `" + kind + "` nhưng TestObservationRenderer không diễn đạt được"
+                            + " ⇒ `actual` rơi về chuỗi thô của engine, nằm ngoài hợp đồng SPEC 5.5."
+                            + " Thêm nhánh trong detail() và cân xem có gán error_code hay không.");
         }
     }
 

@@ -38,8 +38,17 @@ public class Skill {
     @ColumnDefault("'basic'")
     private String defaultDifficulty = "basic";
 
-    /** auto = chấm tự động được; manual = cần package ngoài/mạng → chấm tay. */
-    @Column(name = "testable", length = 10)
+    /**
+     * Cách kiểm được kỹ năng này: `auto` (chấm tự động), `manual_evidence`,
+     * `auto_with_isolated_database`, `pipeline_and_manual_evidence`… — từ vựng do `syllabus.json`
+     * định nghĩa, KHÔNG phải enum đóng ở đây.
+     *
+     * <p>Trần 32 chứ không phải 10: syllabus 2026.5 mở rộng từ vựng lên 10 giá trị, dài nhất là
+     * `pipeline_and_manual_evidence` (28 ký tự). Để nguyên 10 thì RE-SEED chết ngay dòng đầu với
+     * `Data truncation`, bảng `skill` đứng ở bản cũ, và mọi template dùng skill mới không lưu được
+     * đề (`ExamService.validateSkillCodes` ném lỗi) — đã xảy ra thật lúc merge syllabus 2026.5.
+     */
+    @Column(name = "testable", length = 32)
     @ColumnDefault("'auto'")
     private String testable = "auto";
 

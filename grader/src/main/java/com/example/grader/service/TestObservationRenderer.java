@@ -63,7 +63,16 @@ public final class TestObservationRenderer {
             Map.entry("NUMBER_MISMATCH", "SIZE_MISMATCH"),
             Map.entry("STYLE_MISMATCH", "TEXT_STYLE_MISMATCH"),
             Map.entry("LABEL_MISMATCH", "SEMANTICS_MISMATCH"),
-            Map.entry("ENABLED_MISMATCH", "ENABLED_MISMATCH"));
+            Map.entry("ENABLED_MISMATCH", "ENABLED_MISMATCH"),
+            // Mã RIÊNG, cố ý KHÔNG dùng lại `TIMEOUT` của classifier: mã đó nghĩa là "UI không
+            // lặng" (hoạt ảnh/loading trong bài làm không dứt), còn đây là cả tiến trình chấm bị
+            // giết vì chạm trần thời gian — có thể do bài làm treo, cũng có thể do máy chấm tải
+            // nặng. Hai ca hai cách sửa, gộp mã là đẩy bên đọc tới lời khuyên sai.
+            //
+            // Vì sao PHẢI có mã thay vì để trống (đo trên fixture `hang`): để trống thì mã do
+            // classifier bóc từ log đứng nguyên, và nó ra `ASSERTION_FAILED` — nói rằng khẳng
+            // định của sinh viên hỏng, trong khi test bị giết giữa chừng. Mã sai tệ hơn không mã.
+            Map.entry("PROCESS_TIMEOUT", "PROCESS_TIMEOUT"));
 
     /**
      * Mã lỗi suy từ quan sát; {@code null} khi không suy được — bên gọi giữ giá trị của classifier.
@@ -204,6 +213,16 @@ public final class TestObservationRenderer {
             // Hai ca `not_run`: nêu VÌ SAO chưa chạy, không nêu chẩn đoán (SPEC mục 5.4).
             case "NOT_RUN_BOOT" -> "chưa chạy vì ứng dụng không mở được, bộ chấm chưa kiểm tới đây.";
             case "NOT_RUN_SUITE" -> "chưa chạy vì bộ test không khởi động được.";
+            // Chạm TRẦN THỜI GIAN rồi bị dừng giữa chừng. Câu này cố ý KHÔNG nói vì sao lâu:
+            // quan sát được chỉ là "quá N giây chưa xong", còn nguyên nhân có thể nằm ở bài làm
+            // (vòng lặp/hoạt ảnh không dứt) hoặc ở máy chấm đang tải nặng — hai thứ khác hẳn nhau.
+            case "PROCESS_TIMEOUT" -> {
+                String secs = text(obs.get("timeout_seconds"));
+                yield secs == null
+                        ? "chạy quá lâu nên bộ chấm phải dừng giữa chừng, chưa có kết luận cho yêu cầu này."
+                        : "chạy quá " + secs + " giây nên bộ chấm phải dừng giữa chừng,"
+                                + " chưa có kết luận cho yêu cầu này.";
+            }
             default -> null;
         };
     }

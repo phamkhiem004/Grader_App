@@ -43,7 +43,10 @@ class FixtureResultAssemblyTest {
     private static final Path FIXTURE = Path.of("..", "fixtures", "result-json-v2");
     /** Sáu bài nộp của fixture — khai MỘT chỗ để ba test độ phủ không lệch nhau. */
     private static final List<String> FIXTURE_VARIANTS = List.of(
-            "high", "medium", "sloppy", "unwired", "broken-action", "broken-boot", "broken-compile");
+            "high", "medium", "sloppy", "unwired", "broken-action", "broken-boot", "broken-compile",
+            // `hang` treo cố ý ở màn chi tiết — bài DUY NHẤT ép engine phát `PROCESS_TIMEOUT`,
+            // điều kiện để nhãn đó được công bố ở SPEC 5.5 thay vì chỉ khai suông.
+            "hang");
     /** Từ vựng nội bộ của hệ thống chấm — sinh viên không kiểm chứng được số lượng test. */
     private static final java.util.regex.Pattern INTERNAL_TEST_COUNT =
             java.util.regex.Pattern.compile("\\b\\d+\\s+(assert|testcase|test|phép kiểm)\\b",

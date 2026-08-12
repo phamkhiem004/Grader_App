@@ -24,7 +24,7 @@ to_host_path() {
 
 VARIANTS=("$@")
 if [ ${#VARIANTS[@]} -eq 0 ]; then
-  VARIANTS=(high medium sloppy unwired broken-action broken-boot broken-compile)
+  VARIANTS=(high medium sloppy unwired broken-action broken-boot broken-compile hang)
 fi
 
 # Thư mục testcase = engine chung (grader + exam_test) + matrix của đề fixture.
@@ -46,8 +46,14 @@ for variant in "${VARIANTS[@]}"; do
 
   echo "=== $variant ==="
   raw="$BUILD/out/$variant.log"
+  # Bài `hang` treo CỐ Ý để ép engine phát `PROCESS_TIMEOUT`. Hạ trần thời gian riêng cho nó,
+  # nếu để mặc định 60s thì mỗi lần chạy fixture phải đứng chờ trọn một phút cho một bài.
+  # Các bài còn lại giữ đúng con số mặc định của engine — không đổi hành vi đo của chúng.
+  batch_timeout=60
+  [ "$variant" = "hang" ] && batch_timeout=30
   MSYS_NO_PATHCONV=1 docker run --rm --name "fixture-$variant" \
     --memory 4g --cpus 2 \
+    -e GRADER_BATCH_TIMEOUT_SECONDS="$batch_timeout" \
     -v "$(to_host_path "$lib"):/app/lib" \
     -v "$TEST_HOST:/app/test" \
     "$IMAGE" ./run_grader.sh >"$raw" 2>&1 || true

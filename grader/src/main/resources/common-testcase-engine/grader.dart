@@ -35,16 +35,22 @@ import 'dart:io';
 /// 2.9.0 — source-contract loại comment Dart/YAML trước khi tìm token và hỗ trợ
 /// sourceChecksJson để gắn assertion vào đúng từng file; không còn pass do comment
 /// hoặc do token nằm nhầm file. UI contract của bộ mới mặc định bắt buộc ValueKey.
-const String kEngineVersion = 'COMMON_V1-2.9.0';
+/// 3.0.0 — hỗ trợ lô testcase có thể cấu hình; mặc định gom suite vào một process để Flutter
+/// chỉ compile một lần. GROUP dùng một lần boot để các bước lồng nhau giữ đúng trạng thái.
+/// Thêm các flow CRUD/persistence/responsive tái sử dụng và SQLite FFI không dùng isolate.
+const String kEngineVersion = 'COMMON_V1-3.0.0';
 
 /// PHẢI khớp hằng cùng tên trong `exam_test.dart` — hai chương trình Dart riêng biệt,
 /// không import nhau nên không chia sẻ được hằng số.
 const String kBootFailedMarker = '###GRADER_BOOT_FAILED###';
 const String kObservationMarker = '###GRADER_OBS###';
 const int kProcessTimeoutExitCode = -124;
-const int kDefaultBatchSize = 8;
-const int kDefaultBatchTimeoutSeconds = 60;
-const int kDefaultTotalTimeoutSeconds = 180;
+// Compile Flutter chiếm phần lớn thời gian. Các scenario đã dùng dữ liệu riêng và
+// SQLite noIsolate, nên gom toàn bộ suite vào một process ổn định hơn nhiều so với
+// compile lại 3-4 lần. Có thể override bằng GRADER_BATCH_SIZE khi cần chia lô.
+const int kDefaultBatchSize = 64;
+const int kDefaultBatchTimeoutSeconds = 180;
+const int kDefaultTotalTimeoutSeconds = 210;
 
 Future<void> main() async {
   final matrix = _loadMatrix();

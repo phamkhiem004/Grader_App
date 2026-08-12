@@ -39,7 +39,10 @@ public class Skill {
     private String defaultDifficulty = "basic";
 
     /** auto = chấm tự động được; manual = cần package ngoài/mạng → chấm tay. */
-    @Column(name = "testable", length = 10)
+    // Các mode trong syllabus gồm auto_with_isolated_database,
+    // auto_with_process_fixture, pipeline_and_manual_evidence... nên 10 ký tự
+    // làm quá trình seed dừng giữa chừng và để DB chỉ còn một phần skill.
+    @Column(name = "testable", length = 64)
     @ColumnDefault("'auto'")
     private String testable = "auto";
 

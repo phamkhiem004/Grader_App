@@ -448,5 +448,125 @@
       "landscapeWidth": 1024,
       "landscapeHeight": 768
     }
+  },
+  "TC_FORM_PERSISTENCE": {
+    "instance_id": "TC_FORM_PERSISTENCE",
+    "runner": "FORM_PERSISTENCE_FLOW",
+    "skill_code": "STORAGE_SQLITE_CRUD",
+    "testcase_group": "LOGIC",
+    "group_id": "LUU_TRU",
+    "group_name": "Lưu trữ dữ liệu",
+    "name": "Dữ liệu còn sau khi mở lại",
+    "expected": "Người dùng vừa lưu phải còn trong danh sách sau khi ứng dụng được dựng lại.",
+    "difficulty": "advanced",
+    "weight": 4,
+    "parameters": {
+      "fieldKeys": "field.name,field.email",
+      "fieldType": "input",
+      "values": "Persist User,persist@example.com",
+      "submitKey": "action.save",
+      "resultKey": "item.3"
+    }
+  },
+  "TC_CRUD_EDIT_FLOW": {
+    "instance_id": "TC_CRUD_EDIT_FLOW",
+    "runner": "CRUD_EDIT_FLOW",
+    "skill_code": "STATE_SETSTATE_STATEFUL",
+    "testcase_group": "BEHAVIOR",
+    "group_id": "SUA_USER",
+    "group_name": "Sửa người dùng",
+    "name": "Tạo rồi sửa đúng người dùng",
+    "expected": "Dữ liệu phải được prefill và lưu lại trên đúng item.",
+    "difficulty": "advanced",
+    "weight": 4,
+    "parameters": {
+      "fieldKeys": "field.name,field.email",
+      "fieldType": "input",
+      "seedValues": "Old Fixture,old.fixture@example.com",
+      "submitKey": "action.save",
+      "seedResultKey": "item.3",
+      "itemKey": "item.3",
+      "editKey": "action.edit.3",
+      "expectedPrefillValues": "Old Fixture,old.fixture@example.com",
+      "updatedValues": "New Fixture,new.fixture@example.com",
+      "updatedResultKey": "item.3",
+      "oldResultKey": ""
+    }
+  },
+  "TC_CRUD_DELETE_FLOW": {
+    "instance_id": "TC_CRUD_DELETE_FLOW",
+    "runner": "CRUD_DELETE_FLOW",
+    "skill_code": "UI_BUTTONS_SELECTION",
+    "testcase_group": "BEHAVIOR",
+    "group_id": "XOA_USER",
+    "group_name": "Xoá người dùng",
+    "name": "Hủy rồi xác nhận xóa đúng người dùng",
+    "expected": "Hủy phải giữ item và xác nhận phải xóa đúng item.",
+    "difficulty": "advanced",
+    "weight": 4,
+    "parameters": {
+      "fieldKeys": "field.name,field.email",
+      "fieldType": "input",
+      "seedValues": "Delete Fixture,delete.fixture@example.com",
+      "submitKey": "action.save",
+      "seedResultKey": "item.3",
+      "itemKey": "item.3",
+      "deleteKey": "action.delete.3",
+      "dialogKey": "dialog.delete",
+      "cancelKey": "action.delete.cancel",
+      "confirmKey": "action.delete.confirm"
+    }
+  },
+  "TC_CRUD_DETAIL_FLOW": {
+    "instance_id": "TC_CRUD_DETAIL_FLOW",
+    "runner": "CRUD_DETAIL_FLOW",
+    "skill_code": "NAV_NAVIGATOR_PUSH_POP",
+    "testcase_group": "BEHAVIOR",
+    "group_id": "XEM_CHI_TIET",
+    "group_name": "Xem chi tiết người dùng",
+    "name": "Mở chi tiết đúng người dùng vừa tạo",
+    "expected": "Màn chi tiết phải nhận đúng họ tên và email của item được mở.",
+    "difficulty": "advanced",
+    "weight": 4,
+    "parameters": {
+      "fieldKeys": "field.name,field.email",
+      "fieldType": "input",
+      "seedValues": "Detail Fixture,detail.fixture@example.com",
+      "submitKey": "action.save",
+      "seedResultKey": "item.3",
+      "itemKey": "item.3",
+      "openKey": "action.detail.3",
+      "destinationKey": "screen.detail",
+      "detailTextKeys": "detail.name,detail.email",
+      "expectedDetailValues": "Detail Fixture,detail.fixture@example.com",
+      "detailVisualKey": ""
+    }
+  },
+  "TC_RESPONSIVE_GRID_FLOW": {
+    "instance_id": "TC_RESPONSIVE_GRID_FLOW",
+    "runner": "RESPONSIVE_GRID_FLOW",
+    "skill_code": "ADVUI_GRIDVIEW",
+    "testcase_group": "WIDGET",
+    "group_id": "RESPONSIVE",
+    "group_name": "Bố cục theo kích thước màn hình",
+    "name": "Danh sách đổi một và hai cột",
+    "expected": "Phone dọc phải một cột; Phone ngang và Tablet phải hai cột.",
+    "difficulty": "advanced",
+    "weight": 4,
+    "parameters": {
+      "fieldKeys": "field.name,field.email",
+      "fieldType": "input",
+      "firstValues": "Layout Fixture One,layout.one@example.com",
+      "secondValues": "Layout Fixture Two,layout.two@example.com",
+      "submitKey": "action.save",
+      "firstItemKey": "item.3",
+      "secondItemKey": "item.4",
+      "phoneWidth": 400,
+      "phoneHeight": 900,
+      "landscapeWidth": 700,
+      "landscapeHeight": 400,
+      "tabletWidth": 800,
+      "tabletHeight": 1100
+    }
   }
 }

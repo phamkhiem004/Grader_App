@@ -27,9 +27,13 @@ class UserDetailScreen extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            Text(user.fullName, style: Theme.of(context).textTheme.titleLarge),
+            Text(
+              user.fullName,
+              key: const ValueKey<String>('detail.name'),
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
             const SizedBox(height: 8),
-            Text(user.email),
+            Text(user.email, key: const ValueKey<String>('detail.email')),
           ],
         ),
       ),

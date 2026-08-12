@@ -47,10 +47,6 @@ class MachineExpectedSampleTest {
 
         Path examDir = Path.of("target", "machine-expected-exam");
         Files.createDirectories(examDir);
-        // P6a: harness đòi mọi đề có requirements.txt — mẫu này cùng đề với fixture nên chép nguyên.
-        Files.copy(FIXTURE.resolve("exam").resolve("requirements.txt"),
-                examDir.resolve("requirements.txt"),
-                java.nio.file.StandardCopyOption.REPLACE_EXISTING);
         Set<String> teacherText = new LinkedHashSet<>();
         Map<String, Object> matrix = machineExpectedMatrix(teacherText);
         Files.writeString(examDir.resolve("skills_matrix.json"),

@@ -4,13 +4,12 @@ import React, { useEffect, useState, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
-  Settings, FileText, FileCode2, CheckSquare, BarChart2, LogOut, Bell, Search,
-  GraduationCap, UserCircle, Loader2, History, PanelLeftClose,
-  Clock, CheckCircle2, AlertCircle, BookOpen, Package, Archive,
-  MessageSquareText,
+  FileText, FileCode2, CheckSquare, BarChart2, Bell, Search,
+  GraduationCap, Loader2, History, PanelLeftClose,
+  Clock, CheckCircle2, AlertCircle, BookOpen, Package,
+  MessageSquareText, Bot, ChevronDown,
 } from 'lucide-react';
 import { clsx } from 'clsx';
-import { useAuth } from '@/components/auth/AuthProvider';
 import { API_BASE } from '@/lib/config';
 import ThemeToggle from '@/components/layout/ThemeToggle';
 
@@ -19,6 +18,7 @@ interface SidebarLayoutProps {
   activePath?: string;
   title: string;
   subtitle?: string;
+  contentClassName?: string;
 }
 
 interface BatchNotif {
@@ -38,30 +38,26 @@ interface SearchRow {
   status: string;
 }
 
-const PRIMARY_NAV = [
-  { name: 'Chấm bài (Batch)', path: '/', icon: CheckSquare },
-  { name: 'Cấu hình Đề thi', path: '/teacher', icon: Settings },
-  { name: 'Kho đề thi', path: '/teacher/archive', icon: Archive },
-  { name: 'Khung năng lực', path: '/syllabus', icon: BookOpen },
-  { name: 'Tạo testcase', path: '/teacher/testcases', icon: FileCode2 },
+interface NavLeaf { name: string; path: string; icon: React.ElementType }
+interface NavGroup { name: string; icon: React.ElementType; children: NavLeaf[] }
+type NavEntry = NavLeaf | NavGroup;
+const isGroup = (e: NavEntry): e is NavGroup => 'children' in e;
+
+const PRIMARY_NAV: NavEntry[] = [
+  { name: 'Thống kê', path: '/statistics', icon: BarChart2 },
+  {
+    name: 'Chấm bài', icon: CheckSquare, children: [
+      { name: 'Chấm tự động', path: '/teacher/grading', icon: Bot },
+      { name: 'Chấm thủ công', path: '/teacher/workspace', icon: FileText },
+      { name: 'Lịch sử chấm', path: '/history', icon: History },
+    ],
+  },
   { name: 'Thư viện chấm', path: '/teacher/libraries', icon: Package },
-  { name: 'Không gian chấm', path: '/teacher/workspace', icon: FileText },
+  // Vào thẳng trang Kho — mọi thao tác (tạo/sửa/xóa/chấm lại) đều là nút trong trang đó.
+  { name: 'Quản lý bộ testcase', path: '/teacher/archive', icon: FileCode2 },
+  { name: 'Khung năng lực', path: '/syllabus', icon: BookOpen },
   { name: 'Nhận xét AI', path: '/teacher/feedback', icon: MessageSquareText },
 ];
-
-const SECONDARY_NAV = [
-  { name: 'Lịch sử chấm', path: '/history', icon: History },
-  { name: 'Thống kê', path: '/statistics', icon: BarChart2 },
-  { name: 'Giáo viên', path: '/profile', icon: UserCircle },
-];
-
-/** Chữ cái đầu của tên để làm avatar. */
-function initialsOf(name?: string): string {
-  if (!name) return "GV";
-  const parts = name.trim().split(/\s+/);
-  if (parts.length === 1) return parts[0].charAt(0).toUpperCase();
-  return (parts[0].charAt(0) + parts[parts.length - 1].charAt(0)).toUpperCase();
-}
 
 /** Diễn giải trạng thái 1 phiên chấm cho thông báo. */
 function notifStatus(n: BatchNotif) {
@@ -72,16 +68,18 @@ function notifStatus(n: BatchNotif) {
   return { Icon: AlertCircle, tone: 'text-slate-400', text: `${done + err}/${total}` };
 }
 
-export default function SidebarLayout({ children, activePath = '/', title, subtitle }: SidebarLayoutProps) {
-  const { teacher, loading, logout } = useAuth();
+export default function SidebarLayout({ children, activePath = '/', title, subtitle, contentClassName }: SidebarLayoutProps) {
   const router = useRouter();
 
   // ── UI state ──────────────────────────────────────────────────
-  // Đọc trạng thái thu gọn NGAY khi khởi tạo (tránh render mở rồi mới đóng = giật khi chuyển trang)
-  const [collapsed, setCollapsed] = useState(() => {
-    if (typeof window === "undefined") return false;
-    try { return localStorage.getItem("sidebar_collapsed") === "1"; } catch { return false; }
-  });
+  // Lần render đầu trên server và client phải giống nhau để React hydrate ổn định.
+  // Khôi phục lựa chọn đã lưu sau khi component được mount trong trình duyệt.
+  const [collapsed, setCollapsed] = useState(false);
+  // Nhóm menu đang xổ. Mở sẵn nhóm chứa trang hiện tại để chuyển trang không bị "sập" menu.
+  const [openGroups, setOpenGroups] = useState<string[]>(() =>
+    PRIMARY_NAV.filter((e) => isGroup(e) && e.children.some((c) => c.path === activePath))
+      .map((e) => e.name)
+  );
   const [notifOpen, setNotifOpen] = useState(false);
   const [notifs, setNotifs] = useState<BatchNotif[]>([]);
   const [lastSeen, setLastSeen] = useState(0);
@@ -95,14 +93,10 @@ export default function SidebarLayout({ children, activePath = '/', title, subti
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchSeq = useRef(0);   // chống response cũ ghi đè response mới
 
-  // Bảo vệ route: chưa đăng nhập → về /login
-  useEffect(() => {
-    if (!loading && !teacher) router.replace("/login");
-  }, [loading, teacher, router]);
-
-  // Khôi phục mốc "đã xem thông báo" (collapsed đã đọc ở lazy-init phía trên)
+  // Khôi phục trạng thái chỉ tồn tại trong localStorage sau hydration.
   useEffect(() => {
     try {
+      setCollapsed(localStorage.getItem("sidebar_collapsed") === "1");
       setLastSeen(Number(localStorage.getItem("notif_last_seen") || 0));
     } catch { /* bỏ qua */ }
   }, []);
@@ -187,23 +181,21 @@ export default function SidebarLayout({ children, activePath = '/', title, subti
     else if (q.trim()) { setSearchOpen(false); router.push(`/history?q=${encodeURIComponent(q.trim())}`); }
   };
 
-  const handleLogout = async () => {
-    await logout();
-    router.replace("/login");
+  // Bấm nhóm khi menu đang thu gọn thì mở rộng luôn — nếu không, danh sách con xổ ra
+  // sẽ nằm ngoài bề ngang 80px và người dùng không thấy gì.
+  const toggleGroup = (name: string) => {
+    if (collapsed) {
+      setCollapsed(false);
+      try { localStorage.setItem('sidebar_collapsed', '0'); } catch { /* bỏ qua */ }
+      setOpenGroups((g) => (g.includes(name) ? g : [...g, name]));
+      return;
+    }
+    setOpenGroups((g) => (g.includes(name) ? g.filter((x) => x !== name) : [...g, name]));
   };
-
-  // Đang kiểm tra phiên hoặc chuẩn bị chuyển hướng → màn chờ (tránh nháy nội dung)
-  if (loading || !teacher) {
-    return (
-      <div className="flex h-screen w-full items-center justify-center bg-[#0b1120]">
-        <Loader2 size={28} className="animate-spin text-indigo-400" />
-      </div>
-    );
-  }
 
   // Vùng icon CỐ ĐỊNH (w-16) → icon luôn ở 1 vị trí, không "nhảy" khi đóng/mở.
   // Chữ luôn render, chỉ fade opacity + bị panel che dần khi thu gọn → trượt mượt.
-  const renderLink = (item: { name: string; path: string; icon: React.ElementType }) => {
+  const renderLink = (item: NavLeaf, nested = false) => {
     const isActive = activePath === item.path;
     return (
       <Link
@@ -211,16 +203,17 @@ export default function SidebarLayout({ children, activePath = '/', title, subti
         href={item.path}
         title={collapsed ? item.name : undefined}
         className={clsx(
-          'group relative flex h-11 items-center overflow-hidden rounded-lg text-sm font-medium transition-colors',
+          'group relative flex items-center overflow-hidden rounded-lg font-medium transition-colors',
+          nested ? 'h-10 text-[13px]' : 'h-11 text-sm',
           isActive ? 'bg-indigo-500/10 text-white' : 'text-slate-400 hover:bg-slate-800/70 hover:text-white'
         )}
       >
         {isActive && (
           <span className="absolute left-0 top-1/2 h-5 w-1 -translate-y-1/2 rounded-r-full bg-indigo-400" />
         )}
-        <span className="flex w-16 shrink-0 items-center justify-center">
+        <span className={clsx('flex shrink-0 items-center justify-center', nested ? 'w-11' : 'w-16')}>
           <item.icon
-            size={18}
+            size={nested ? 16 : 18}
             className={clsx('transition-colors', isActive ? 'text-indigo-300' : 'text-slate-500 group-hover:text-slate-300')}
           />
         </span>
@@ -230,6 +223,51 @@ export default function SidebarLayout({ children, activePath = '/', title, subti
       </Link>
     );
   };
+
+  const renderGroup = (group: NavGroup) => {
+    const open = openGroups.includes(group.name);
+    const hasActive = group.children.some((c) => c.path === activePath);
+    return (
+      <div key={group.name}>
+        <button
+          type="button"
+          onClick={() => toggleGroup(group.name)}
+          title={collapsed ? group.name : undefined}
+          aria-expanded={open}
+          className={clsx(
+            'group relative flex h-11 w-full items-center overflow-hidden rounded-lg text-sm font-medium transition-colors',
+            hasActive ? 'text-white' : 'text-slate-400 hover:bg-slate-800/70 hover:text-white',
+            hasActive && !open && 'bg-indigo-500/10'
+          )}
+        >
+          <span className="flex w-16 shrink-0 items-center justify-center">
+            <group.icon
+              size={18}
+              className={clsx('transition-colors', hasActive ? 'text-indigo-300' : 'text-slate-500 group-hover:text-slate-300')}
+            />
+          </span>
+          <span className={clsx('truncate whitespace-nowrap transition-opacity duration-200', collapsed ? 'opacity-0' : 'opacity-100')}>
+            {group.name}
+          </span>
+          <ChevronDown
+            size={15}
+            className={clsx(
+              'ml-auto mr-3 shrink-0 transition-all duration-200',
+              open && 'rotate-180',
+              collapsed ? 'opacity-0' : 'opacity-100'
+            )}
+          />
+        </button>
+        {open && !collapsed && (
+          <div className="mt-1 ml-7 space-y-0.5 border-l border-white/10 pl-1">
+            {group.children.map((child) => renderLink(child, true))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderEntry = (entry: NavEntry) => (isGroup(entry) ? renderGroup(entry) : renderLink(entry));
 
   return (
     <div className="flex h-screen w-full overflow-hidden bg-slate-50 font-sans text-slate-800">
@@ -267,38 +305,7 @@ export default function SidebarLayout({ children, activePath = '/', title, subti
         </div>
 
         <div className="custom-scrollbar flex-1 overflow-y-auto px-2 py-6">
-          <div className={clsx('mb-3 px-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-600 transition-opacity duration-200', collapsed ? 'opacity-0' : 'opacity-100')}>Quản lý chấm thi</div>
-          <nav className="space-y-1">{PRIMARY_NAV.map(renderLink)}</nav>
-
-          <div className={clsx('mb-3 mt-7 px-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-600 transition-opacity duration-200', collapsed ? 'opacity-0' : 'opacity-100')}>Báo cáo & Dữ liệu</div>
-          <nav className="space-y-1">{SECONDARY_NAV.map(renderLink)}</nav>
-        </div>
-
-        {/* GV đang đăng nhập + đăng xuất */}
-        <div className="shrink-0 overflow-hidden border-t border-white/5 px-2 py-3">
-          <Link
-            href="/profile"
-            title={collapsed ? teacher.fullName : undefined}
-            className="mb-1 flex h-12 items-center overflow-hidden rounded-lg transition-colors hover:bg-slate-800/70"
-          >
-            <span className="flex w-16 shrink-0 items-center justify-center">
-              <span className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 to-blue-600 text-xs font-bold text-white ring-1 ring-white/10">
-                {initialsOf(teacher.fullName)}
-              </span>
-            </span>
-            <div className={clsx('min-w-0 whitespace-nowrap pr-2 leading-tight transition-opacity duration-200', collapsed ? 'opacity-0' : 'opacity-100')}>
-              <div className="truncate text-sm font-semibold text-white">{teacher.fullName}</div>
-              <div className="truncate text-[11px] text-slate-500">{teacher.email}</div>
-            </div>
-          </Link>
-          <button
-            onClick={handleLogout}
-            title={collapsed ? 'Đăng xuất' : undefined}
-            className="flex h-11 w-full items-center overflow-hidden rounded-lg text-sm font-medium text-slate-400 transition-colors hover:bg-slate-800/70 hover:text-white"
-          >
-            <span className="flex w-16 shrink-0 items-center justify-center"><LogOut size={18} /></span>
-            <span className={clsx('whitespace-nowrap transition-opacity duration-200', collapsed ? 'opacity-0' : 'opacity-100')}>Đăng xuất</span>
-          </button>
+          <nav className="space-y-1">{PRIMARY_NAV.map(renderEntry)}</nav>
         </div>
       </aside>
 
@@ -320,7 +327,7 @@ export default function SidebarLayout({ children, activePath = '/', title, subti
                   value={q}
                   onChange={(e) => onSearchChange(e.target.value)}
                   onFocus={() => q.trim() && setSearchOpen(true)}
-                  placeholder="Tìm mã đề, sinh viên..."
+                  placeholder="Tìm mã bộ testcase, sinh viên..."
                   className="w-64 rounded-full border border-transparent bg-slate-100 py-2 pl-9 pr-4 text-sm outline-none transition-all focus:border-indigo-400 focus:bg-white focus:ring-2 focus:ring-indigo-100"
                 />
               </form>
@@ -412,21 +419,12 @@ export default function SidebarLayout({ children, activePath = '/', title, subti
               )}
             </div>
 
-            <Link href="/profile" className="flex items-center gap-2.5">
-              <div className="hidden text-right leading-tight sm:block">
-                <div className="text-sm font-semibold text-slate-800">{teacher.fullName}</div>
-                <div className="text-[11px] text-slate-500">Giáo viên</div>
-              </div>
-              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 to-blue-600 text-sm font-semibold text-white shadow-sm ring-2 ring-white">
-                {initialsOf(teacher.fullName)}
-              </div>
-            </Link>
           </div>
         </header>
 
         {/* Page Content */}
         <main className="custom-scrollbar flex-1 overflow-y-auto bg-slate-50 p-8">
-          <div className="mx-auto max-w-6xl animate-fade-in-up">{children}</div>
+          <div className={clsx('mx-auto w-full max-w-6xl animate-fade-in-up', contentClassName)}>{children}</div>
         </main>
       </div>
     </div>

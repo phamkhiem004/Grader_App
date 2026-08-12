@@ -12,10 +12,24 @@ Sổ theo dõi để không mất mạch giữa các phiên. **Đọc file này 
 
 ## Đang ở đâu — 2026-08-08
 
-**P0 → A2c → (c) → P6a xong.** Engine `COMMON_V1-2.7.0` **không đổi từ A2c** — (c) và P6a đều
-nằm ngoài khâu chấm, **không đề nào phải chấm lại**. **85 test xanh** (69 → 85), fixture **25
-testcase / 7 bài nộp**, **0 luật FAIL** trên **8** mẫu — cả 8 nay mang `exam.requirements` thật.
-Việc còn lại DUY NHẤT của plan: **P6b** (một ô nhập FE). Bảng tiến độ chi tiết ở mục *Tiến độ* dưới.
+**P0 → A2c → (c) xong.** Engine `COMMON_V1-2.7.0` **không đổi từ A2c** — (c) nằm ngoài khâu chấm,
+**không đề nào phải chấm lại**. Fixture **25 testcase / 7 bài nộp**. Bảng tiến độ chi tiết ở mục
+*Tiến độ* dưới.
+
+> ### ❌ P6a/P6b (`exam.requirements`) — ĐÃ BỎ HẲN, cả hai
+>
+> Chủ đồ án quyết bỏ toàn bộ tính năng "Yêu cầu của đề" khỏi dự án — **nó sẽ không còn tồn tại**.
+> Lý do: phía tiêu thụ DUY NHẤT (khối "Đề bài yêu cầu" trong nhận xét gửi sinh viên) đã bị phía
+> NLP bỏ hẳn sau khi chấm tay 13 bài — người chấm chê khối đó ở 6/13 bài, và cái lỗ nó sinh ra để
+> lấp hoá ra không tồn tại. Không còn ai đọc thì giữ lại chỉ là chở dữ liệu chết.
+>
+> Đã gỡ: ô nhập FE · `validateRequirements` + hai trần · `splitRequirements` · cột
+> `Exam.requirements` · phần bù `[]` ở `ResultController` · trường `exam.requirements` trong
+> `result.json` · cả file `ExamRequirementsTest`. Đã báo NLP ở `CHANGELOG_FOR_NLP.md`
+> (kèm một câu hỏi mở: bỏ hẳn khoá hay vẫn phát `[]`, vì bỏ hẳn là phá nguyên tắc "khoá luôn có mặt").
+>
+> **Test hiện tại: 118 xanh.** Mọi mô tả P6a/P6b bên dưới giữ nguyên làm ghi chú lịch sử — đừng
+> làm theo.
 
 ## Việc kế tiếp, theo thứ tự
 
@@ -38,8 +52,8 @@ ra, chưa đóng:
   loại hiện vật, không đọc cờ nguồn; cờ không phân biệt được sạch/bẩn; field không ai dùng =
   `kind` không ai phát). Mở lại chỉ khi có chỗ dùng thật.
 
-**2. ~~P6a~~ ✅ XONG 2026-08-08 → còn P6b.** Hình dạng đã thành dữ liệu thật (8/8 mẫu). Những gì
-P6a đã chốt bằng code:
+**2. ~~P6a → P6b~~ — ❌ BỎ HẲN CẢ HAI (xem khung đỏ đầu file).** Toàn bộ phần dưới đây là **ghi
+chú lịch sử**, không còn là việc phải làm và code tương ứng đã gỡ hết. Những gì P6a từng chốt:
 
 - lưu **y nguyên văn** trên cột `exams.requirements` (LONGTEXT, NULL = đề trước P6/legacy);
 - tách dòng ở MỘT chỗ: `BatchGradingService.splitRequirements` — bỏ `\r` cuối dòng + dòng trắng,
@@ -49,7 +63,7 @@ P6a đã chốt bằng code:
 - đường đọc `ResultController.normalizeResultNode` **bù `[]`** cho kết quả lưu trước P6 (bẫy #1);
 - `getExamConfig`/`response` trả `requirements` nguyên văn để P6b prefill.
 
-**P6b — ✅ code xong 2026-08-08, ⚠️ CHƯA chạy thật trên stack.** Textarea "Yêu cầu của đề" trong
+**P6b — ❌ ĐÃ GỠ (ghi chú lịch sử).** Textarea "Yêu cầu của đề" trong
 `frontend/app/teacher/testcases/page.tsx`: gửi `requirements` **nguyên văn không trim**; gương ba
 phép chặn của backend (4000 ký tự / 40 dòng / bắt buộc) + bộ đếm sống `x/4000 ký tự · y/40 yêu
 cầu` (đếm dòng đúng cách backend đếm — dòng trắng không tính); hai nút lưu gạt khi trống. Trang
@@ -99,17 +113,19 @@ viên. Việc của phiên này **chỉ là chất lượng `result.json`** đ�
 
 ### 📌 MÓN NỢ ĐANG TREO Ở SÂN NHÓM KHÁC — phiên sau đừng đánh rơi
 
-**Đường nhập đề (ZIP) không chở `requirements`** ⇒ mọi bài khảo thí chấm ra `exam.requirements = []`.
-Hệ quả ở tầng sản phẩm, không phải tầng dữ liệu: khối *"Đề bài yêu cầu:"* của bot **chưa xuất hiện
-lần nào trên bài thi thật**, và nó là thứ *duy nhất* bot được phép nói với bài gần hoàn hảo — nên
-bài 10 điểm hiện nhận một lời khen chung chung.
+> ~~**Đường nhập đề (ZIP) không chở `requirements`.**~~ ❌ **MÓN NỢ NÀY ĐÃ HUỶ** — tính năng
+> requirements bỏ hẳn nên không còn gì để chở. Lời nhờ nhóm kia sửa đã rút lại trong
+> `HOP_DONG_KHAU_SOAN_DE.md` mục 5.
 
-**Việc của phiên này khi nhóm Grader sửa xong:** báo **MỐC** vào `CHANGELOG_FOR_NLP.md`, **kèm cách
-nhận biết mốc** (không chỉ ghi ngày). Từ mốc đó — và chỉ từ đó — `[]` mới quay lại **một** nghĩa, và
-runbook bàn giao phía NLP mới được đổi khỏi dòng *"tính năng có, nhưng chết trong luồng hai máy"*.
+**Phần CÒN LẠI của món nợ đó vẫn sống:** ZIP không chở `testcase_config_json`, nên
+`refreshCommonEngine` bỏ qua mọi đề nhập bằng ZIP ⇒ **"Chấm lại đề" không bao giờ nâng được engine
+chấm** cho những đề ấy. Đề đã phát cho khảo thí đứng yên ở bản engine lúc xuất ZIP, kể cả khi engine
+sau đó sửa được lỗi chấm sai. Việc này thuộc sân nhóm khác — đã mô tả ở `HOP_DONG_KHAU_SOAN_DE.md`
+mục 5, phiên sau đừng đánh rơi.
 
 **Tự soát: đã vượt ranh 4 chỗ** (đều đã commit, đã liệt kê trong bản bàn giao để nhóm kia quyết giữ
-hay gỡ) — ô nhập requirements trên UI (`eff5c6f`), `group_mode` hai nút + modal (`f133595`), cưỡng
+hay gỡ) — ô nhập requirements trên UI (`eff5c6f`, **nay đã gỡ cùng cả tính năng**), `group_mode`
+hai nút + modal (`f133595`), cưỡng
 chế ngữ pháp khoá lúc lưu đề (`f133595`, **đổi hành vi: đề dùng khoá lạ nay không lưu được**), và
 sửa race `instance_id` phía FE (`6f3d5dc`). Lý do vượt: mỗi cái đều *truy ra được* từ chất lượng
 `result.json` — nhưng "truy ra được" **không đồng nghĩa** "đến lượt mình làm".
@@ -203,8 +219,8 @@ sinh viên.** Mọi tranh cãi thiết kế phân xử bằng nguyên tắc này
 | **A2b** | Tám runner *chỉ từng đạt* phải chạy cả đường **HỎNG** | ✅ **Xong** 2026-08-07 | Fixture → **25 testcase**, bài nộp thứ 6 `unwired`; **22/22 runner đủ hai đường**; bít **hai lỗ hổng kênh quan sát**; `kind` thứ 14 `TYPE_MISMATCH`; **0 test `failed` thiếu `observation`**; điểm 5 bài cũ KHÔNG đổi |
 | **A2c** | Trả nợ hai lỗ hổng NLP phơi ra | ✅ **Xong** 2026-08-07 | Tìm ra ca **CHẨN ĐOÁN SAI LỆCH**; `kind` thứ 15 `ACTION_FAILED`; bài nộp thứ 7 `broken-action`; mã classifier chạy thật **0/9 → 3/9**; 0 luật FAIL trên 7 mẫu |
 | **(c)** | Dọn `expected` MÁY SINH — lần đầu đo **đường soạn đề** | ✅ **Xong** 2026-08-08 | 22/22 template sạch khoá + sạch enum Anh; 7 test mới (**76 xanh**); luật **F4** trong `verify_result.py`; mẫu thứ 8 `latest-machine-expected`; **0 FAIL trên 8 mẫu**; điểm KHÔNG đổi (không đụng engine) |
-| **P6a** | `exam.requirements` — backend + hợp đồng + mẫu | ✅ **Xong** 2026-08-08 | 8/8 mẫu mang 6 yêu cầu thật (2 ca cố ý: đường dẫn trong đề · yêu cầu kiến trúc không kiểm được); trần 4000 ký tự/40 dòng; luật **A11** (thử phá 5 kiểu: 4 đỏ đúng, 1 xanh đúng); **85 test xanh**; SPEC có bảng field khối `exam`; engine KHÔNG đổi |
-| **P6b** | `exam.requirements` — ô nhập FE | ✅ **Code xong** 2026-08-08 | `tsc` xanh; gửi nguyên văn không trim; gương 3 phép chặn + bộ đếm sống; ⚠️ **chưa chạy thật** — stack tắt, đo ở lần bật stack tới |
+| ~~**P6a**~~ | ~~`exam.requirements` — backend + hợp đồng + mẫu~~ | ❌ **BỎ HẲN** | Chủ đồ án quyết bỏ cả tính năng; code đã gỡ sạch (cột DB, hai hàm, trường trong `result.json`, `ExamRequirementsTest`). Đã báo NLP |
+| ~~**P6b**~~ | ~~`exam.requirements` — ô nhập FE~~ | ❌ **BỎ HẲN** | Ô nhập + bộ đếm đã gỡ khỏi màn *Tạo testcase*; `tsc` xanh sau khi gỡ |
 | **NPK** | Ngữ pháp khoá — NLP xin sau P6a | ✅ **Xong** 2026-08-08 | `common-key-grammar.json`: **13 namespace** sinh từ phép đo (attested của NLP thiếu 8; `validation.` là legacy); pin bằng `KeyGrammarContractTest` — thử phá 2 chiều đều đỏ; **86 test xanh**; câu hỏi mở: có cưỡng chế ở khâu nhập không (chờ NLP + chủ đồ án) |
 | **GMODE** | Tách nhãn/gộp — giải (c-nợ-1), chủ đồ án duyệt | ✅ **Xong** 2026-08-08 | `group_mode` label/merge (thiếu = merge, dữ liệu cũ không đổi nghĩa); nhãn ≥1, gộp ≥2, cấm trộn; matrix chỉ gộp khi merge ⇒ hình fixture SẢN XUẤT ĐƯỢC; FE hai nút + hệ quả all-or-nothing ghi thẳng trên modal; **2 bất biến NLP xin đã pin — bất biến (ii) bắt ngay lệch thật: children TC_ADD_USER 4+8≠9, sửa 8→5, 8 mẫu không đổi một byte**; `result.json` không thêm field |
 | **NỢ-KT** | Trả hai nợ E2E phơi ra: `targetType` ngoài schema · race trùng `instance_id` | ✅ **Xong** 2026-08-08 | WIDGET_VISIBLE thêm `targetType: "any"` vào schema (engine + validator vốn ĐÃ có, chỉ thiếu dòng schema ⇒ nhánh validate là code không bao giờ chạy); BUTTON_ACTION thêm schema + validator + ghi rõ nó mô tả KẾT QUẢ. **8/8 mẫu không đổi một byte**. Cổng mới `FixtureIsProducibleTest` — lẽ ra đã bắt được CẢ BA lần fixture trôi khỏi sản phẩm; thử phá đỏ đúng 4 dòng. FE sửa 3 chỗ cùng hình lỗi (ref đếm tiến · order trong updater · groupId trong updater · tên nhóm đếm NHÓM không đếm ITEM); tái hiện trên trình duyệt: trước = 2 item trùng `exam_item_01`, sau = `_01`/`_02`. **97 test xanh** |

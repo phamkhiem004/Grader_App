@@ -34,17 +34,6 @@ public class Exam {
     @Column(name = "teacher_note")
     private String teacherNote;     // ghi chú/đề bài để đối chiếu khi xem kết quả
 
-    /**
-     * Yêu cầu của ĐỀ (P6a) — giảng viên gõ MỘT LẦN lúc soạn đề, lưu Y NGUYÊN VĂN, mỗi dòng một
-     * yêu cầu. Tách thành mảng {@code exam.requirements} lúc ghép result_json bằng
-     * {@code BatchGradingService.splitRequirements} — nguồn tách DUY NHẤT, đừng tự tách lại.
-     * Nằm trên bảng exam chứ không trong testcase-config.json vì đề legacy không có file đó để bù.
-     * NULL = đề trước P6 hoặc đề legacy ⇒ result_json phát {@code []}.
-     */
-    @Lob
-    @Column(name = "requirements", columnDefinition = "LONGTEXT")
-    private String requirements;
-
     @Column(name = "image_name", length = 100)
     private String imageName;
 

@@ -1,5 +1,6 @@
 package com.example.grader.controller;
 
+import com.example.grader.config.AppActor;
 import com.example.grader.repository.ExamRepository;
 import com.example.grader.service.ExamService;
 import com.example.grader.service.SyllabusService;
@@ -49,6 +50,42 @@ public class ExamSetupController {
             // docker build thất bại...
             return ResponseEntity.internalServerError()
                     .body(Map.of("error", "Build image thất bại: " + e.getMessage()));
+        }
+    }
+
+    /**
+     * Nhập bộ testcase viết thủ công. Mã/tên được suy ra từ tên ZIP; ZIP được giải nén rồi bỏ,
+     * bộ nhập theo cách này không có testcase_config_json nên không mở lại bằng builder.
+     */
+    @PostMapping("/import-manual-testcase")
+    public ResponseEntity<?> importManualTestcase(
+            @RequestParam(value = "teacherNote", required = false) String teacherNote,
+            @RequestParam("testcase") MultipartFile zip) {
+        try {
+            return ResponseEntity.ok(examService.importManualTestcase(
+                    zip.getOriginalFilename(), teacherNote, zip.getBytes(), AppActor.DEFAULT));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        } catch (IllegalStateException e) {
+            return ResponseEntity.status(409).body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError()
+                    .body(Map.of("error", "Không nhập được bộ testcase: " + e.getMessage()));
+        }
+    }
+
+    /** Build sandbox trực tiếp từ thư mục testcase đã lưu; không tạo hoặc giải nén ZIP trung gian. */
+    @PostMapping("/{examId}/sandbox")
+    public ResponseEntity<?> buildSandbox(@PathVariable String examId) {
+        try {
+            return ResponseEntity.ok(examService.buildSandbox(examId));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        } catch (IllegalStateException e) {
+            return ResponseEntity.status(409).body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError()
+                    .body(Map.of("error", "Không build được sandbox: " + e.getMessage()));
         }
     }
 
@@ -109,11 +146,9 @@ public class ExamSetupController {
     /** Lưu Draft: chỉ lưu instance/config, không đụng vào bộ testcase đang được chấm. */
     @RequestMapping(path = "/{examId}/testcases/draft", method = {RequestMethod.POST, RequestMethod.PUT})
     public ResponseEntity<?> saveTestcaseDraft(@PathVariable String examId,
-                                                @RequestBody Map<String, Object> body,
-                                                @RequestAttribute(value = "teacherEmail", required = false) String teacherEmail) {
+                                                @RequestBody Map<String, Object> body) {
         try {
-            return ResponseEntity.ok(testcaseTemplateService.saveDraft(examId, body,
-                    teacherEmail != null ? teacherEmail : "unknown"));
+            return ResponseEntity.ok(testcaseTemplateService.saveDraft(examId, body, AppActor.DEFAULT));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         } catch (IllegalStateException e) {
@@ -126,11 +161,39 @@ public class ExamSetupController {
     /** Publish: sinh skills_matrix.json và ghi snapshot cấu hình versioned cho đề. */
     @PostMapping("/{examId}/testcases/publish")
     public ResponseEntity<?> publishTestcases(@PathVariable String examId,
-                                              @RequestBody Map<String, Object> body,
-                                              @RequestAttribute(value = "teacherEmail", required = false) String teacherEmail) {
+                                              @RequestBody Map<String, Object> body) {
         try {
-            return ResponseEntity.ok(testcaseTemplateService.publish(examId, body,
-                    teacherEmail != null ? teacherEmail : "unknown"));
+            return ResponseEntity.ok(testcaseTemplateService.publish(examId, body, AppActor.DEFAULT));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        } catch (IllegalStateException e) {
+            return ResponseEntity.status(409).body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    /** Clone toàn bộ cấu hình builder sang mã/tên mới; bộ nhập ZIP bị service từ chối. */
+    @PostMapping("/{examId}/clone")
+    public ResponseEntity<?> cloneTestcaseSet(@PathVariable String examId,
+                                              @RequestBody Map<String, Object> body) {
+        try {
+            return ResponseEntity.ok(testcaseTemplateService.cloneExam(examId, body, AppActor.DEFAULT));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        } catch (IllegalStateException e) {
+            return ResponseEntity.status(409).body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    /** Sinh code từ trạng thái form hiện tại để xem trước; không ghi file, không tăng version và không sửa DB. */
+    @PostMapping("/{examId}/testcases/preview")
+    public ResponseEntity<?> previewTestcases(@PathVariable String examId,
+                                              @RequestBody Map<String, Object> body) {
+        try {
+            return ResponseEntity.ok(testcaseTemplateService.preview(examId, body, AppActor.DEFAULT));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         } catch (IllegalStateException e) {

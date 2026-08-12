@@ -2,40 +2,60 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import Link from "next/link";
 import SidebarLayout from "@/components/layout/SidebarLayout";
-import { useAuth } from "@/components/auth/AuthProvider";
 import { API_BASE } from "@/lib/config";
-import { getToken } from "@/lib/auth";
 import {
-  Archive, Eye, RotateCcw, Trash2, Loader2, AlertTriangle, CheckCircle2,
-  Info, FileCode, X, Database, Download, FileText, FileArchive, Lightbulb, Printer,
+  Archive, RotateCcw, Trash2, Loader2, AlertTriangle, CheckCircle2,
+  Database, FileArchive, Pencil, Plus, Hammer, X, UploadCloud, Package, ArrowLeft,
+  Copy, ChevronLeft, ChevronRight,
 } from "lucide-react";
-import { openExamPdf } from "@/lib/exam-pdf";
+import ErrorScreen from "@/components/ui/ErrorScreen";
+import { appError, kindOf, messageOf } from "@/lib/errors";
 
 interface ExamRow {
   examId: string;
   examName?: string;
   status?: string;
+  testcaseStatus?: string;
   hasTestcase?: boolean;
-  hasDeBai?: boolean;
-  hasStarter?: boolean;
-  hasSolution?: boolean;
   resultCount?: number;
+  teacherNote?: string;
+  /** true = bộ dựng từ template nên mở lại sửa được; false = bộ upload ZIP, không có config. */
+  editable?: boolean;
 }
-interface CodeFile { name: string; content: string; }
 interface RegradeState { examId: string; batchId: string; total: number; done: number; error: number; running: boolean; }
+interface SandboxNotice { type: "ok" | "error"; title: string; text: string; }
+type CreatePanel = "choose" | "manual" | null;
+const PAGE_SIZES = [10, 20, 50] as const;
 
-function authHeaders(init?: HeadersInit) {
-  const headers = new Headers(init);
-  const token = getToken();
-  if (token && !headers.has("Authorization")) headers.set("Authorization", `Bearer ${token}`);
-  return headers;
+function manualNameFromFile(file: File | null) {
+  return file ? file.name.replace(/\.zip$/i, "").trim() : "";
 }
+
+function manualIdFromName(name: string) {
+  return name.normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[đĐ]/g, (value) => value === "đ" ? "d" : "D")
+    .toUpperCase()
+    .replace(/[^A-Z0-9_-]+/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^[_-]+|[_-]+$/g, "")
+    .slice(0, 60)
+    .replace(/[_-]+$/g, "");
+}
+
+// Nút hành động chính của trang: tạo bộ testcase mới.
+const newBtnCls = "inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-emerald-700";
+
+// Kiểu chung cho mọi nút trong cột Thao tác — để chúng cùng cao, cùng cỡ chữ, ngang hàng nhau.
+const btnCls = (accent: string) =>
+  `inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-600 transition-colors disabled:opacity-40 disabled:hover:bg-white disabled:hover:text-slate-600 ${accent}`;
 
 async function api(path: string, method: string, body?: unknown) {
   const res = await fetch(`${API_BASE}${path}`, {
     method,
-    headers: authHeaders({ "Content-Type": "application/json" }),
+    headers: { "Content-Type": "application/json" },
     body: body ? JSON.stringify(body) : undefined,
   });
   const data = await res.json().catch(() => ({}));
@@ -44,24 +64,32 @@ async function api(path: string, method: string, body?: unknown) {
 }
 
 export default function ArchivePage() {
-  const { teacher, loading: authLoading } = useAuth();
   const [exams, setExams] = useState<ExamRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);          // lỗi của một thao tác → banner
+  const [loadErr, setLoadErr] = useState<unknown>(null);        // lỗi tải danh sách → màn lỗi
   const [msg, setMsg] = useState<string | null>(null);
-
-  // Modal xem đề: mặc định hiện ĐỀ BÀI (de_bai); có tab phụ để xem 3 file testcase khi cần
-  const [viewExam, setViewExam] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<"debai" | "files">("debai");
-  const [deBai, setDeBai] = useState<string | null>(null);
-  const [deBaiMissing, setDeBaiMissing] = useState(false);
-  const [files, setFiles] = useState<CodeFile[]>([]);
-  const [activeFile, setActiveFile] = useState(0);
-  const [viewLoading, setViewLoading] = useState(false);
 
   // Xác nhận xóa
   const [confirmDel, setConfirmDel] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [buildingSandbox, setBuildingSandbox] = useState<string | null>(null);
+  const [sandboxNotice, setSandboxNotice] = useState<SandboxNotice | null>(null);
+  const [createPanel, setCreatePanel] = useState<CreatePanel>(null);
+  const [manualFile, setManualFile] = useState<File | null>(null);
+  const [manualDescription, setManualDescription] = useState("");
+  const [manualError, setManualError] = useState<string | null>(null);
+  const [manualUploading, setManualUploading] = useState(false);
+  const [manualDragging, setManualDragging] = useState(false);
+  const manualFileRef = useRef<HTMLInputElement | null>(null);
+  const [pageSize, setPageSize] = useState<(typeof PAGE_SIZES)[number]>(10);
+  const [page, setPage] = useState(1);
+  const [cloneSource, setCloneSource] = useState<ExamRow | null>(null);
+  const [cloneExamId, setCloneExamId] = useState("");
+  const [cloneExamName, setCloneExamName] = useState("");
+  const [cloneNote, setCloneNote] = useState("");
+  const [cloneError, setCloneError] = useState<string | null>(null);
+  const [cloning, setCloning] = useState(false);
 
   // Portal modal ra <body> (tránh bị containing-block của .animate-fade-in-up cắt overlay)
   const [mounted, setMounted] = useState(false);
@@ -73,74 +101,31 @@ export default function ArchivePage() {
   const stopPoll = () => { if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; } };
 
   const load = useCallback(async () => {
-    if (authLoading) return;
-    if (!teacher) { setLoading(false); return; }
+    setLoadErr(null);
     try {
-      const res = await fetch(`${API_BASE}/exam-setup/list`, { headers: authHeaders() });
+      const res = await fetch(`${API_BASE}/exam-setup/list`);
       const d = await res.json().catch(() => []);
-      if (!res.ok) throw new Error(d.error || "Không tải được danh sách đề.");
+      if (!res.ok) throw appError(d, res.status);
       setExams(Array.isArray(d) ? d : []);
     } catch (e) {
-      setErr((e as Error).message || "Không tải được danh sách đề.");
+      // Tải danh sách hỏng = trang không còn gì để hiện → màn lỗi, không phải banner.
+      setLoadErr(e);
     } finally {
       setLoading(false);
     }
-  }, [authLoading, teacher]);
+  }, []);
 
   useEffect(() => { load(); return stopPoll; }, [load]);
 
-  // Khóa cuộn nền khi mở modal
+  const totalPages = Math.max(1, Math.ceil(exams.length / pageSize));
+  const pageStart = exams.length ? (page - 1) * pageSize : 0;
+  const pageExams = exams.slice(pageStart, pageStart + pageSize);
   useEffect(() => {
-    if (!viewExam) return;
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => { document.body.style.overflow = prev; };
-  }, [viewExam]);
-
-  // Mở modal xem đề: ưu tiên ĐỀ BÀI; đề upload ở Cấu hình Đề thi thì mở thẳng testcase.
-  const openView = (examId: string, hasDeBai?: boolean, hasTestcase?: boolean) => {
-    setViewExam(examId); setDeBai(null); setDeBaiMissing(false);
-    setFiles([]); setActiveFile(0);
-    if (hasDeBai) { setViewMode("debai"); loadDeBai(examId); }
-    else if (hasTestcase) { setViewMode("files"); loadFiles(examId); }
-    else { setViewMode("files"); }
-  };
-
-  // Đọc ĐỀ BÀI (de_bai.md) để hiển thị — tái dùng endpoint tải, bỏ BOM nếu có.
-  const loadDeBai = async (examId: string) => {
-    setViewLoading(true);
-    try {
-      const res = await fetch(`${API_BASE}/exam-setup/${encodeURIComponent(examId)}/download/de-bai`, {
-        headers: authHeaders(),
-      });
-      if (res.ok) {
-        const txt = await res.text();
-        setDeBai(txt.charCodeAt(0) === 0xFEFF ? txt.slice(1) : txt);   // bỏ BOM (U+FEFF) nếu có
-      } else setDeBaiMissing(true);
-    } catch { setDeBaiMissing(true); }
-    finally { setViewLoading(false); }
-  };
-
-  // Đọc 3 file testcase (exam_test.dart, grader.dart, skills_matrix.json) — tải khi cần.
-  const loadFiles = async (examId: string) => {
-    setViewLoading(true);
-    try {
-      const res = await fetch(`${API_BASE}/exam-setup/${encodeURIComponent(examId)}/testcase`, {
-        headers: authHeaders(),
-      });
-      const d = await res.json().catch(() => []);
-      if (!res.ok) throw new Error();
-      setFiles(Array.isArray(d) ? d : []);
-    } catch { setFiles([]); }
-    finally { setViewLoading(false); }
-  };
-
-  const showDeBai = () => { setViewMode("debai"); if (deBai === null && !deBaiMissing) loadDeBai(viewExam!); };
-  const showFiles = () => { setViewMode("files"); if (files.length === 0) loadFiles(viewExam!); };
+    setPage((current) => Math.min(Math.max(1, current), totalPages));
+  }, [totalPages]);
 
   const doRegrade = async (examId: string) => {
     setErr(null); setMsg(null);
-    if (!teacher) { setErr("Cần đăng nhập để chấm lại."); return; }
     try {
       const d = await api(`/batch/regrade-exam/${encodeURIComponent(examId)}`, "POST");
       const skipped = Array.isArray(d.skipped) ? d.skipped.length : 0;
@@ -165,11 +150,11 @@ export default function ArchivePage() {
     }, 3000);
   };
 
-  // Tải file của đề (đề bài .md / exam_test .zip / starter .zip) — backend gắn sẵn tên file.
+  // Tải file của đề (exam_test .zip / starter .zip / solution .zip) — backend gắn sẵn tên file.
   const doDownload = async (path: string, filename: string) => {
     setErr(null); setMsg(null);
     try {
-      const res = await fetch(`${API_BASE}${path}`, { headers: authHeaders() });
+      const res = await fetch(`${API_BASE}${path}`);
       if (!res.ok) {
         const d = await res.json().catch(() => ({}));
         setErr(d.error || "Không tải được file.");
@@ -185,26 +170,12 @@ export default function ArchivePage() {
     }
   };
 
-  // Xuất ĐỀ BÀI ra PDF: tải nội dung de_bai (bỏ BOM nếu có) rồi mở hộp thoại in của trình duyệt (Lưu thành PDF).
-  const exportPdf = async (examId: string, examName?: string) => {
-    setErr(null); setMsg(null);
-    try {
-      const res = await fetch(`${API_BASE}/exam-setup/${encodeURIComponent(examId)}/download/de-bai`, {
-        headers: authHeaders(),
-      });
-      if (!res.ok) { setErr("Không tải được đề bài để xuất PDF."); return; }
-      let txt = await res.text();
-      if (txt.charCodeAt(0) === 0xFEFF) txt = txt.slice(1);   // bỏ BOM (U+FEFF) nếu có
-      openExamPdf({ examId, examName, markdown: txt });
-    } catch { setErr("Không xuất được PDF."); }
-  };
-
   const doDelete = async (examId: string) => {
     setErr(null); setMsg(null); setDeleting(examId);
     try {
       await api(`/exam-setup/${encodeURIComponent(examId)}`, "DELETE");
       setConfirmDel(null);
-      setMsg(`Đã xóa đề ${examId} (gỡ testcase + ảnh Docker + bài nộp).`);
+      setMsg(`Đã xóa bộ testcase ${examId} (gỡ testcase + ảnh Docker + bài nộp).`);
       load();
     } catch (e) {
       setErr((e as Error).message);
@@ -213,21 +184,157 @@ export default function ArchivePage() {
     }
   };
 
+  const buildSandbox = async (examId: string) => {
+    setErr(null); setMsg(null); setBuildingSandbox(examId);
+    try {
+      const data = await api(`/exam-setup/${encodeURIComponent(examId)}/sandbox`, "POST");
+      setSandboxNotice({
+        type: "ok",
+        title: "Build Sandbox thành công",
+        text: `Build Sandbox cho ${examId} thành công — trạng thái ${data.status || "READY"}.`,
+      });
+      await load();
+    } catch (e) {
+      setSandboxNotice({
+        type: "error",
+        title: "Build Sandbox thất bại",
+        text: (e as Error).message,
+      });
+    } finally {
+      setBuildingSandbox(null);
+    }
+  };
+
+  const resetManualForm = () => {
+    setManualFile(null);
+    setManualDescription("");
+    setManualError(null);
+    setManualUploading(false);
+    setManualDragging(false);
+    if (manualFileRef.current) manualFileRef.current.value = "";
+  };
+
+  const closeCreatePanel = () => {
+    if (manualUploading) return;
+    setCreatePanel(null);
+    resetManualForm();
+  };
+
+  const acceptManualFile = (files: FileList | null) => {
+    const file = files?.[0] || null;
+    if (!file || !file.name.toLowerCase().endsWith(".zip")) {
+      setManualFile(null);
+      setManualError("Vui lòng chọn đúng một file ZIP testcase.");
+      return;
+    }
+    if (file.size > 20 * 1024 * 1024) {
+      setManualFile(null);
+      setManualError("File ZIP testcase vượt quá giới hạn 20 MB.");
+      return;
+    }
+    setManualFile(file);
+    setManualError(null);
+  };
+
+  const importManualTestcase = async () => {
+    if (!manualFile) {
+      setManualError("Vui lòng chọn file ZIP testcase.");
+      return;
+    }
+    setManualUploading(true);
+    setManualError(null);
+    const form = new FormData();
+    form.append("testcase", manualFile);
+    form.append("teacherNote", manualDescription.trim());
+    try {
+      const res = await fetch(`${API_BASE}/exam-setup/import-manual-testcase`, {
+        method: "POST",
+        body: form,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Không nhập được bộ testcase thủ công.");
+      setCreatePanel(null);
+      resetManualForm();
+      setSandboxNotice({
+        type: "ok",
+        title: "Tạo bộ testcase thành công",
+        text: `Đã giải nén bộ ${data.examId} thành thư mục testcase. Hãy bấm Build Sandbox trước khi chấm.`,
+      });
+      await load();
+    } catch (e) {
+      setManualError((e as Error).message);
+    } finally {
+      setManualUploading(false);
+    }
+  };
+
+  const openClone = (source: ExamRow) => {
+    if (source.editable === false) return;
+    const suffix = "_COPY";
+    const root = `${source.examId.slice(0, 50 - suffix.length)}${suffix}`;
+    let candidate = root;
+    let number = 2;
+    const used = new Set(exams.map((exam) => exam.examId.toUpperCase()));
+    while (used.has(candidate.toUpperCase())) {
+      const numberedSuffix = `_COPY_${number++}`;
+      candidate = `${source.examId.slice(0, 50 - numberedSuffix.length)}${numberedSuffix}`;
+    }
+    setCloneSource(source);
+    setCloneExamId(candidate);
+    setCloneExamName(`${source.examName || source.examId} (Bản sao)`);
+    setCloneNote(source.teacherNote || "");
+    setCloneError(null);
+  };
+
+  const closeClone = () => {
+    if (cloning) return;
+    setCloneSource(null);
+    setCloneError(null);
+  };
+
+  const cloneTestcaseSet = async () => {
+    if (!cloneSource) return;
+    const normalizedId = cloneExamId.trim().toUpperCase();
+    if (!/^[A-Z0-9_-]{1,50}$/.test(normalizedId)) {
+      setCloneError("Mã bộ mới chỉ gồm chữ in hoa, số, _ hoặc - và tối đa 50 ký tự.");
+      return;
+    }
+    if (!cloneExamName.trim()) {
+      setCloneError("Vui lòng nhập tên bộ testcase bản sao.");
+      return;
+    }
+    setCloning(true);
+    setCloneError(null);
+    try {
+      const data = await api(`/exam-setup/${encodeURIComponent(cloneSource.examId)}/clone`, "POST", {
+        exam_id: normalizedId,
+        exam_name: cloneExamName.trim(),
+        teacher_note: cloneNote.trim(),
+      });
+      setCloneSource(null);
+      setPage(1);
+      setSandboxNotice({
+        type: "ok",
+        title: "Clone bộ testcase thành công",
+        text: `Đã tạo ${data.exam_id || normalizedId} từ ${cloneSource.examId}. Bộ mới đang ở trạng thái bản nháp để bạn mở Sửa và kiểm tra trước khi lưu chính thức.`,
+      });
+      await load();
+    } catch (e) {
+      setCloneError((e as Error).message);
+    } finally {
+      setCloning(false);
+    }
+  };
+
+  const manualExamName = manualNameFromFile(manualFile);
+  const manualExamId = manualIdFromName(manualExamName);
+
   return (
     <SidebarLayout
-      title="Kho đề thi"
-      subtitle="Lưu trữ đề + exam_test để chấm lại khi cần; xóa đề cũ để giải phóng dung lượng"
+      title="Kho bộ testcase"
+      subtitle="Lưu trữ bộ testcase + exam_test để chấm lại khi cần; xóa bộ testcase cũ để giải phóng dung lượng"
       activePath="/teacher/archive"
     >
-      <div className="mb-5 flex items-start gap-2.5 rounded-xl border border-indigo-100 bg-indigo-50/60 p-4 text-xs text-indigo-700">
-        <Info size={16} className="mt-0.5 shrink-0" />
-        <div className="space-y-1">
-          <p>Mỗi đề lưu sẵn <span className="font-mono">exam_test.dart</span>, <span className="font-mono">skills_matrix.json</span>, <span className="font-mono">grader.dart</span> trên đĩa — bấm <b>Xem</b> để mở đề bài nếu có, hoặc xem trực tiếp testcase của đề upload từ <b>Cấu hình Đề thi</b>.</p>
-          <p className="text-indigo-600/80">Nhóm nút <b>Tải</b> cho phép tải <b>Testcase</b> (ZIP 3 file để dùng/upload lại), <b>Đề bài</b> (de_bai.md), <b>starter</b> và <b>lời giải</b> nếu đề có lưu kèm.</p>
-          <p className="text-indigo-600/80"><b>Xóa đề</b> sẽ gỡ testcase + ảnh Docker để giải phóng dung lượng — sau khi xóa sẽ KHÔNG chấm lại được đề đó nữa.</p>
-        </div>
-      </div>
-
       {err && (
         <div className="mb-4 flex items-center gap-2 rounded-lg border border-rose-100 bg-rose-50 p-3 text-sm text-rose-600">
           <AlertTriangle size={15} /> {err}
@@ -241,33 +348,41 @@ export default function ArchivePage() {
 
       {loading ? (
         <div className="flex items-center justify-center py-20 text-slate-400"><Loader2 size={24} className="animate-spin" /></div>
+      ) : loadErr ? (
+        <ErrorScreen kind={kindOf(loadErr)} detail={messageOf(loadErr)} onRetry={() => { setLoading(true); load(); }} />
       ) : exams.length === 0 ? (
         <div className="flex flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-300/70 bg-white/60 p-12 text-center">
           <Archive size={36} className="mb-3 text-slate-300" />
-          <h3 className="mb-1 text-base font-bold text-slate-700">Chưa có đề nào</h3>
-          <p className="max-w-sm text-sm text-slate-500">Tải testcase ở trang <b>Cấu hình Đề thi</b> để bắt đầu.</p>
+          <h3 className="mb-1 text-base font-bold text-slate-700">Chưa có bộ testcase nào</h3>
+          <p className="mb-4 max-w-sm text-sm text-slate-500">Tạo bộ mới từ thư viện testcase, sau đó Build Sandbox trực tiếp tại trang này.</p>
+          <button type="button" onClick={() => setCreatePanel("choose")} className={newBtnCls}>
+            <Plus size={15} /> Tạo bộ testcase
+          </button>
         </div>
       ) : (
         <div className="card overflow-hidden">
           <div className="flex items-center gap-2 border-b border-slate-100 bg-slate-50/60 px-5 py-3.5">
             <Database size={16} className="text-indigo-500" />
-            <h3 className="text-sm font-bold text-slate-700">Danh sách đề ({exams.length})</h3>
+            <h3 className="text-sm font-bold text-slate-700">Danh sách bộ testcase ({exams.length})</h3>
+            <button type="button" onClick={() => setCreatePanel("choose")} className={`ml-auto ${newBtnCls}`}>
+              <Plus size={15} /> Tạo bộ testcase
+            </button>
           </div>
+          {/* overflow-x-auto: hàng nút nằm trên một dòng nên bảng có thể rộng hơn khung ở màn hẹp */}
+          <div className="custom-scrollbar overflow-x-auto">
           <table className="w-full text-left text-sm">
             <thead>
               <tr className="border-b border-slate-100 text-[10px] uppercase tracking-wider text-slate-400">
-                <th className="px-5 py-2.5">Mã đề</th>
-                <th className="px-5 py-2.5">Tên đề</th>
+                <th className="px-5 py-2.5">Mã bộ testcase</th>
+                <th className="px-5 py-2.5">Tên bộ testcase</th>
                 <th className="px-5 py-2.5 text-center">Testcase</th>
                 <th className="px-5 py-2.5 text-center">Số bài</th>
                 <th className="px-5 py-2.5 text-right">Thao tác</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
-              {exams.map((e) => {
+              {pageExams.map((e) => {
                 const busy = regrade?.examId === e.examId && regrade.running;
-                const canView = Boolean(e.hasDeBai || e.hasTestcase);
-                const viewLabel = e.hasDeBai ? "Xem đề" : "Xem testcase";
                 return (
                   <tr key={e.examId} className="hover:bg-slate-50/60">
                     <td className="px-5 py-3 font-mono font-medium text-slate-700">{e.examId}</td>
@@ -283,50 +398,57 @@ export default function ArchivePage() {
                       <span className="font-mono text-xs text-slate-600">{e.resultCount ?? 0}</span>
                     </td>
                     <td className="px-5 py-3">
-                      <div className="flex flex-wrap items-center justify-end gap-1.5">
-                        {/* Tải về: đề bài (.md) · exam_test (zip 3 file) · starter (zip khung lib/) */}
-                        <div className="inline-flex items-center overflow-hidden rounded-lg border border-slate-200 bg-white text-[11px] font-semibold">
-                          <span className="px-1.5 py-1.5 text-slate-400" title="Tải về"><Download size={12} /></span>
-                          <button onClick={() => doDownload(`/exam-setup/${encodeURIComponent(e.examId)}/download/de-bai`, `${e.examId}_de_bai.md`)}
-                            disabled={!e.hasDeBai} title="Tải đề bài (de_bai.md) phát cho sinh viên"
-                            className="flex items-center gap-1 border-l border-slate-200 px-2 py-1.5 text-slate-600 transition-colors hover:bg-indigo-50 hover:text-indigo-600 disabled:opacity-30 disabled:hover:bg-white disabled:hover:text-slate-600">
-                            <FileText size={12} /> Đề bài
+                      {/* Mọi nút cùng một kiểu, nằm ngang hàng trên một dòng (không bọc nhóm) */}
+                      <div className="flex items-center justify-end gap-1.5 whitespace-nowrap">
+                        <button onClick={() => doDownload(`/exam-setup/${encodeURIComponent(e.examId)}/download/exam-test`, `${e.examId}_exam_test.zip`)}
+                          disabled={!e.hasTestcase} title="Tải testcase: exam_test.dart + grader.dart + skills_matrix.json"
+                          className={btnCls("hover:text-indigo-600")}>
+                          <FileArchive size={13} /> Testcase
+                        </button>
+                        {/* Chỉ bộ dựng từ template mới mở lại builder được; bộ upload ZIP không có config. */}
+                        {e.editable !== false ? (
+                          <Link href={`/teacher/testcases?exam=${encodeURIComponent(e.examId)}`}
+                            title="Mở lại builder để thêm/bớt/xóa testcase trong bộ này"
+                            className={btnCls("hover:text-indigo-600")}>
+                            <Pencil size={13} /> Sửa
+                          </Link>
+                        ) : (
+                          <button disabled title="Bộ này được tải lên bằng ZIP nên không có cấu hình để mở lại; hãy tạo một bộ mới nếu cần thay đổi"
+                            className={btnCls("")}>
+                            <Pencil size={13} /> Sửa
                           </button>
-                          <button onClick={() => exportPdf(e.examId, e.examName)}
-                            disabled={!e.hasDeBai} title="Xuất đề bài ra PDF (mở hộp thoại in → chọn Lưu thành PDF)"
-                            className="flex items-center gap-1 border-l border-slate-200 px-2 py-1.5 text-slate-600 transition-colors hover:bg-indigo-50 hover:text-indigo-600 disabled:opacity-30 disabled:hover:bg-white disabled:hover:text-slate-600">
-                            <Printer size={12} /> PDF
-                          </button>
-                          <button onClick={() => doDownload(`/exam-setup/${encodeURIComponent(e.examId)}/download/exam-test`, `${e.examId}_exam_test.zip`)}
-                            disabled={!e.hasTestcase} title="Tải testcase: exam_test.dart + grader.dart + skills_matrix.json"
-                            className="flex items-center gap-1 border-l border-slate-200 px-2 py-1.5 text-slate-600 transition-colors hover:bg-indigo-50 hover:text-indigo-600 disabled:opacity-30 disabled:hover:bg-white disabled:hover:text-slate-600">
-                            <FileArchive size={12} /> Testcase
-                          </button>
-                          <button onClick={() => doDownload(`/exam-setup/${encodeURIComponent(e.examId)}/download/starter`, `${e.examId}_starter.zip`)}
-                            disabled={!e.hasStarter} title="Tải khung code (lib/) phát cho sinh viên làm"
-                            className="flex items-center gap-1 border-l border-slate-200 px-2 py-1.5 text-slate-600 transition-colors hover:bg-emerald-50 hover:text-emerald-600 disabled:opacity-30 disabled:hover:bg-white disabled:hover:text-slate-600">
-                            <FileArchive size={12} /> starter
-                          </button>
-                          <button onClick={() => doDownload(`/exam-setup/${encodeURIComponent(e.examId)}/download/solution`, `${e.examId}_solution.zip`)}
-                            disabled={!e.hasSolution} title="Tải lời giải mẫu (lib/) — chỉ GV tham khảo, KHÔNG phát cho SV"
-                            className="flex items-center gap-1 border-l border-slate-200 px-2 py-1.5 text-slate-600 transition-colors hover:bg-amber-50 hover:text-amber-600 disabled:opacity-30 disabled:hover:bg-white disabled:hover:text-slate-600">
-                            <Lightbulb size={12} /> lời giải
-                          </button>
-                        </div>
-                        <button onClick={() => openView(e.examId, e.hasDeBai, e.hasTestcase)} title={e.hasDeBai ? "Xem đề bài và testcase" : "Xem testcase của đề"}
-                          disabled={!canView}
-                          className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-600 transition-colors hover:text-indigo-600 disabled:opacity-40">
-                          <Eye size={13} /> {viewLabel}
+                        )}
+                        <button
+                          onClick={() => buildSandbox(e.examId)}
+                          disabled={!e.hasTestcase || e.testcaseStatus !== "PUBLISHED" || buildingSandbox === e.examId || busy}
+                          title={e.testcaseStatus !== "PUBLISHED"
+                            ? "Hãy mở bộ testcase và bấm Lưu trước khi Build Sandbox"
+                            : "Kiểm tra bộ chấm và chuẩn bị ảnh nền Docker trực tiếp từ thư mục testcase"}
+                          className={btnCls("hover:text-emerald-600")}
+                        >
+                          {buildingSandbox === e.examId
+                            ? <Loader2 size={13} className="animate-spin" />
+                            : <Hammer size={13} />}
+                          Build Sandbox
                         </button>
                         <button onClick={() => doRegrade(e.examId)} title="Chấm lại toàn bộ bài đã nộp"
-                          disabled={!teacher || busy || (e.resultCount ?? 0) === 0}
-                          className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-600 transition-colors hover:text-blue-600 disabled:opacity-40">
+                          disabled={busy || e.status !== "READY" || (e.resultCount ?? 0) === 0} className={btnCls("hover:text-blue-600")}>
                           {busy ? <Loader2 size={13} className="animate-spin" /> : <RotateCcw size={13} />} Chấm lại
                         </button>
-                        <button onClick={() => setConfirmDel(e.examId)} title="Xóa đề (giải phóng dung lượng)"
-                          disabled={!teacher || busy}
-                          className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-rose-50 hover:text-rose-600 disabled:opacity-40">
-                          <Trash2 size={14} />
+                        <button onClick={() => setConfirmDel(e.examId)} title="Xóa bộ testcase (giải phóng dung lượng)"
+                          disabled={busy} className={btnCls("text-rose-500 hover:bg-rose-50 hover:text-rose-600")}>
+                          <Trash2 size={13} /> Xóa
+                        </button>
+                        {/* Clone luôn là thao tác cuối; backend cũng kiểm tra editable để không thể clone bộ ZIP. */}
+                        <button
+                          onClick={() => openClone(e)}
+                          disabled={busy || e.editable === false}
+                          title={e.editable === false
+                            ? "Bộ upload ZIP không có cấu hình builder nên không thể clone"
+                            : "Tạo bộ mới chứa toàn bộ testcase, contract và khung code của bộ này"}
+                          className={btnCls("hover:text-violet-600")}
+                        >
+                          <Copy size={13} /> Clone đề
                         </button>
                       </div>
                       {regrade?.examId === e.examId && (
@@ -342,63 +464,290 @@ export default function ArchivePage() {
               })}
             </tbody>
           </table>
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 bg-slate-50/60 px-5 py-3">
+            <div className="flex items-center gap-2 text-xs text-slate-500">
+              <span>Hiển thị</span>
+              <select
+                value={pageSize}
+                onChange={(event) => { setPageSize(Number(event.target.value) as (typeof PAGE_SIZES)[number]); setPage(1); }}
+                className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 font-semibold text-slate-700 outline-none focus:border-indigo-400"
+                aria-label="Số bộ testcase trên một trang"
+              >
+                {PAGE_SIZES.map((size) => <option key={size} value={size}>{size}</option>)}
+              </select>
+              <span>bộ/trang · {exams.length ? `${pageStart + 1}–${Math.min(pageStart + pageSize, exams.length)}` : "0"}/{exams.length}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setPage((current) => Math.max(1, current - 1))}
+                disabled={page <= 1}
+                className={btnCls("hover:text-indigo-600")}
+                aria-label="Trang trước"
+              ><ChevronLeft size={14} /> Trước</button>
+              <span className="min-w-24 text-center text-xs font-semibold text-slate-600">Trang {page}/{totalPages}</span>
+              <button
+                type="button"
+                onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
+                disabled={page >= totalPages}
+                className={btnCls("hover:text-indigo-600")}
+                aria-label="Trang sau"
+              >Sau <ChevronRight size={14} /></button>
+            </div>
+          </div>
         </div>
       )}
 
-      {/* Modal xem đề — mặc định ĐỀ BÀI; đổi tab để xem 3 file testcase. Portal ra <body>. */}
-      {mounted && viewExam && createPortal(
-        <div className="animate-modal-overlay fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm" onClick={() => setViewExam(null)}>
-          <div className="animate-modal-pop flex max-h-[85vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-black/5" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3.5">
-              <h3 className="flex items-center gap-2 text-sm font-bold text-slate-700">
-                <FileText size={16} className="text-indigo-500" /> Đề <span className="font-mono">{viewExam}</span>
-              </h3>
-              <button onClick={() => setViewExam(null)} className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"><X size={18} /></button>
-            </div>
+      {/* Tạo bộ testcase — chọn import thủ công hoặc builder từ thư viện. */}
+      {mounted && createPanel && createPortal(
+        <div
+          className="animate-modal-overlay fixed inset-0 z-50 flex items-center justify-center bg-slate-900/65 p-4 backdrop-blur-sm"
+          onClick={closeCreatePanel}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="create-testcase-title"
+            className="animate-modal-pop relative w-full max-w-2xl rounded-2xl bg-white p-6 text-slate-800 shadow-2xl ring-1 ring-black/5"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <button
+              type="button"
+              onClick={closeCreatePanel}
+              disabled={manualUploading}
+              aria-label="Đóng cửa sổ tạo testcase"
+              className="absolute right-4 top-4 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:opacity-40"
+            >
+              <X size={18} />
+            </button>
 
-            {/* Tab: Đề bài | Testcase (3 file) */}
-            <div className="flex shrink-0 items-center gap-1 border-b border-slate-100 bg-slate-50/60 px-3 py-2">
-              <button onClick={showDeBai}
-                className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${viewMode === "debai" ? "bg-indigo-50 text-indigo-700" : "text-slate-500 hover:bg-slate-100"}`}>
-                <FileText size={13} /> Đề bài
-              </button>
-              <button onClick={showFiles}
-                className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${viewMode === "files" ? "bg-indigo-50 text-indigo-700" : "text-slate-500 hover:bg-slate-100"}`}>
-                <FileCode size={13} /> Testcase (3 file)
-              </button>
-            </div>
-
-            {viewLoading ? (
-              <div className="flex items-center justify-center py-20 text-slate-400"><Loader2 size={22} className="animate-spin" /></div>
-            ) : viewMode === "debai" ? (
-              deBai ? (
-                <pre className="custom-scrollbar flex-1 overflow-auto whitespace-pre-wrap p-5 text-sm leading-relaxed text-slate-700">{deBai}</pre>
-              ) : (
-                <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-16 text-center">
-                  <FileText size={30} className="text-slate-300" />
-                  <p className="max-w-sm text-sm text-slate-500">Đề này chưa có <b>đề bài</b> (de_bai.md). Bạn vẫn có thể xem 3 file testcase của đề.</p>
-                  <button onClick={showFiles} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 hover:text-indigo-600">
-                    <FileCode size={13} /> Xem 3 file testcase
+            {createPanel === "choose" ? (
+              <>
+                <h3 id="create-testcase-title" className="mb-2 text-xl font-bold">Chọn cách tạo bộ testcase</h3>
+                <p className="mb-6 text-sm text-slate-500">Mỗi cách tạo có quy trình chỉnh sửa khác nhau.</p>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <button
+                    type="button"
+                    onClick={() => setCreatePanel("manual")}
+                    className="group rounded-2xl border border-slate-200 p-5 text-left transition hover:border-indigo-300 hover:bg-indigo-50/60 hover:shadow-md"
+                  >
+                    <span className="mb-4 flex h-11 w-11 items-center justify-center rounded-xl bg-indigo-100 text-indigo-600">
+                      <UploadCloud size={23} />
+                    </span>
+                    <span className="mb-2 block text-base font-bold text-slate-800">Tạo bộ testcase thủ công</span>
+                    <span className="block text-sm leading-6 text-slate-500">
+                      Upload ZIP đã có sẵn testcase. Hệ thống tự lấy tên file, giải nén thành thư mục và không cho sửa bằng builder.
+                    </span>
                   </button>
+
+                  <Link
+                    href="/teacher/testcases"
+                    onClick={closeCreatePanel}
+                    className="group rounded-2xl border border-slate-200 p-5 text-left transition hover:border-emerald-300 hover:bg-emerald-50/60 hover:shadow-md"
+                  >
+                    <span className="mb-4 flex h-11 w-11 items-center justify-center rounded-xl bg-emerald-100 text-emerald-600">
+                      <Database size={23} />
+                    </span>
+                    <span className="mb-2 block text-base font-bold text-slate-800">Tạo bộ testcase từ thư viện có sẵn</span>
+                    <span className="block text-sm leading-6 text-slate-500">
+                      Mở màn hình builder hiện tại để chọn, kéo-thả và cấu hình từng testcase tái sử dụng.
+                    </span>
+                  </Link>
                 </div>
-              )
-            ) : files.length === 0 ? (
-              <div className="py-16 text-center text-sm text-slate-500">Không đọc được file testcase của đề này.</div>
+              </>
             ) : (
               <>
-                <div className="flex shrink-0 gap-1 overflow-x-auto border-b border-slate-100 bg-slate-50/60 px-3 py-2">
-                  {files.map((f, i) => (
-                    <button key={f.name} onClick={() => setActiveFile(i)}
-                      className={`shrink-0 rounded-md px-2.5 py-1 font-mono text-xs transition-colors ${i === activeFile ? "bg-indigo-50 text-indigo-700" : "text-slate-500 hover:bg-slate-100"}`}>
-                      {f.name}
-                    </button>
-                  ))}
+                <button
+                  type="button"
+                  onClick={() => { resetManualForm(); setCreatePanel("choose"); }}
+                  disabled={manualUploading}
+                  className="mb-4 inline-flex items-center gap-1.5 text-sm font-semibold text-slate-500 hover:text-indigo-600 disabled:opacity-40"
+                >
+                  <ArrowLeft size={16} /> Quay lại chọn cách tạo
+                </button>
+                <h3 id="create-testcase-title" className="mb-2 text-xl font-bold">Tạo bộ testcase thủ công</h3>
+                <p className="mb-5 text-sm text-slate-500">
+                  ZIP phải chứa trực tiếp exam_test.dart, grader.dart và skills_matrix.json. ZIP chỉ dùng để import và không được lưu lại.
+                </p>
+
+                <div
+                  onClick={() => !manualUploading && manualFileRef.current?.click()}
+                  onDragOver={(event) => { event.preventDefault(); if (!manualUploading) setManualDragging(true); }}
+                  onDragLeave={() => setManualDragging(false)}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    setManualDragging(false);
+                    if (!manualUploading) acceptManualFile(event.dataTransfer.files);
+                  }}
+                  className={`mb-5 cursor-pointer rounded-2xl border-2 border-dashed p-6 text-center transition ${
+                    manualDragging
+                      ? "border-indigo-500 bg-indigo-50"
+                      : "border-slate-200 bg-slate-50 hover:border-indigo-300 hover:bg-indigo-50/40"
+                  } ${manualUploading ? "pointer-events-none opacity-60" : ""}`}
+                >
+                  <span className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-white text-indigo-500 shadow-sm">
+                    {manualFile ? <Package size={24} /> : <UploadCloud size={24} />}
+                  </span>
+                  <p className="text-sm font-bold text-slate-700">
+                    {manualFile ? manualFile.name : "Kéo thả hoặc bấm để chọn ZIP testcase"}
+                  </p>
+                  <p className="mt-1 text-xs text-slate-400">Tối đa 20 MB</p>
+                  <input
+                    ref={manualFileRef}
+                    type="file"
+                    accept=".zip,application/zip"
+                    className="hidden"
+                    onChange={(event) => acceptManualFile(event.target.files)}
+                  />
                 </div>
-                <pre className="custom-scrollbar flex-1 overflow-auto whitespace-pre-wrap bg-slate-900 p-4 text-[11px] leading-relaxed text-slate-100">
-                  {files[activeFile]?.content}
-                </pre>
+
+                <div className="mb-4 grid gap-4 md:grid-cols-2">
+                  <label className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                    Tên bộ testcase — tự động
+                    <input
+                      value={manualExamName}
+                      readOnly
+                      placeholder="Chọn ZIP để hệ thống lấy tên"
+                      className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-100 px-3.5 py-3 text-sm font-medium normal-case tracking-normal text-slate-700 outline-none"
+                    />
+                  </label>
+                  <label className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                    Mã bộ testcase — tự động
+                    <input
+                      value={manualExamId}
+                      readOnly
+                      placeholder="Tự sinh từ tên ZIP"
+                      className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-100 px-3.5 py-3 font-mono text-sm normal-case tracking-normal text-slate-700 outline-none"
+                    />
+                  </label>
+                </div>
+
+                <label className="mb-4 block text-xs font-bold uppercase tracking-wider text-slate-500">
+                  Mô tả bộ testcase <span className="font-normal normal-case text-slate-400">(tùy chọn)</span>
+                  <textarea
+                    value={manualDescription}
+                    onChange={(event) => setManualDescription(event.target.value)}
+                    disabled={manualUploading}
+                    maxLength={2000}
+                    rows={4}
+                    placeholder="Nhập mô tả ngắn về yêu cầu hoặc phạm vi chấm của bộ testcase..."
+                    className="mt-1.5 w-full resize-none rounded-xl border border-slate-200 bg-white px-3.5 py-3 text-sm font-normal normal-case tracking-normal text-slate-700 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 disabled:opacity-60"
+                  />
+                </label>
+
+                {manualError && (
+                  <div className="mb-4 flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
+                    <AlertTriangle size={17} className="mt-0.5 shrink-0" /> {manualError}
+                  </div>
+                )}
+
+                <div className="flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={closeCreatePanel}
+                    disabled={manualUploading}
+                    className="rounded-lg px-4 py-2.5 text-sm font-semibold text-slate-500 hover:bg-slate-100 disabled:opacity-40"
+                  >
+                    Hủy
+                  </button>
+                  <button
+                    type="button"
+                    onClick={importManualTestcase}
+                    disabled={!manualFile || !manualExamId || manualUploading}
+                    className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {manualUploading ? <Loader2 size={16} className="animate-spin" /> : <UploadCloud size={16} />}
+                    {manualUploading ? "Đang giải nén..." : "Tạo bộ testcase"}
+                  </button>
+                </div>
               </>
             )}
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* Clone chỉ dùng cho bộ có config builder; mã và tên mới được nhập độc lập với thao tác Sửa. */}
+      {mounted && cloneSource && createPortal(
+        <div className="animate-modal-overlay fixed inset-0 z-[58] flex items-center justify-center bg-slate-900/65 p-4 backdrop-blur-sm" onClick={closeClone}>
+          <div role="dialog" aria-modal="true" aria-labelledby="clone-title" className="animate-modal-pop relative w-full max-w-xl rounded-2xl bg-white p-6 text-slate-800 shadow-2xl ring-1 ring-black/5" onClick={(event) => event.stopPropagation()}>
+            <button type="button" onClick={closeClone} disabled={cloning} aria-label="Đóng cửa sổ clone" className="absolute right-4 top-4 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:opacity-40"><X size={18} /></button>
+            <div className="mb-5 flex items-start gap-3">
+              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-violet-100 text-violet-600"><Copy size={22} /></span>
+              <div>
+                <h3 id="clone-title" className="text-xl font-bold">Clone bộ testcase</h3>
+                <p className="mt-1 text-sm leading-6 text-slate-500">Sao chép toàn bộ testcase, contract, code sinh và tài liệu từ <strong className="font-mono text-slate-700">{cloneSource.examId}</strong>. Kết quả là một bộ mới độc lập.</p>
+              </div>
+            </div>
+            <div className="grid gap-4 md:grid-cols-2">
+              <label className="text-xs font-bold uppercase tracking-wider text-slate-500">Mã bộ testcase mới
+                <input value={cloneExamId} maxLength={50} disabled={cloning} onChange={(event) => { setCloneExamId(event.target.value.toUpperCase().replace(/[^A-Z0-9_-]/g, "")); setCloneError(null); }} className="mt-1.5 w-full rounded-xl border border-slate-200 px-3.5 py-3 font-mono text-sm normal-case tracking-normal outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100" />
+              </label>
+              <label className="text-xs font-bold uppercase tracking-wider text-slate-500">Tên bộ testcase mới
+                <input value={cloneExamName} maxLength={200} disabled={cloning} onChange={(event) => { setCloneExamName(event.target.value); setCloneError(null); }} className="mt-1.5 w-full rounded-xl border border-slate-200 px-3.5 py-3 text-sm font-normal normal-case tracking-normal outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100" />
+              </label>
+            </div>
+            <label className="mt-4 block text-xs font-bold uppercase tracking-wider text-slate-500">Mô tả <span className="font-normal normal-case text-slate-400">(có thể sửa cho bộ mới)</span>
+              <textarea value={cloneNote} maxLength={2000} rows={4} disabled={cloning} onChange={(event) => setCloneNote(event.target.value)} className="mt-1.5 w-full resize-none rounded-xl border border-slate-200 px-3.5 py-3 text-sm font-normal normal-case tracking-normal outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100" />
+            </label>
+            {cloneError && <div className="mt-4 flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700"><AlertTriangle size={17} className="mt-0.5 shrink-0" /> {cloneError}</div>}
+            <div className="mt-5 flex justify-end gap-2">
+              <button type="button" onClick={closeClone} disabled={cloning} className="rounded-lg px-4 py-2.5 text-sm font-semibold text-slate-500 hover:bg-slate-100 disabled:opacity-40">Hủy</button>
+              <button type="button" onClick={cloneTestcaseSet} disabled={cloning || !cloneExamId.trim() || !cloneExamName.trim()} className="inline-flex items-center gap-2 rounded-lg bg-violet-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50">
+                {cloning ? <Loader2 size={16} className="animate-spin" /> : <Copy size={16} />}{cloning ? "Đang clone..." : "Tạo bản sao"}
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* Kết quả Build Sandbox — popup giữa viewport, không phụ thuộc vị trí cuộn. */}
+      {mounted && sandboxNotice && createPortal(
+        <div
+          className="animate-modal-overlay fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm"
+          onClick={() => setSandboxNotice(null)}
+        >
+          <div
+            role={sandboxNotice.type === "error" ? "alertdialog" : "dialog"}
+            aria-modal="true"
+            aria-labelledby="sandbox-result-title"
+            className="animate-modal-pop relative w-full max-w-md rounded-2xl bg-white p-6 text-slate-800 shadow-2xl ring-1 ring-black/5"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              onClick={() => setSandboxNotice(null)}
+              aria-label="Đóng thông báo"
+              className="absolute right-4 top-4 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+            >
+              <X size={18} />
+            </button>
+            <div className={`mb-4 flex h-12 w-12 items-center justify-center rounded-full ${
+              sandboxNotice.type === "ok"
+                ? "bg-emerald-100 text-emerald-600"
+                : "bg-rose-100 text-rose-600"
+            }`}>
+              {sandboxNotice.type === "ok"
+                ? <CheckCircle2 size={26} />
+                : <AlertTriangle size={26} />}
+            </div>
+            <h3 id="sandbox-result-title" className="mb-2 text-lg font-bold">{sandboxNotice.title}</h3>
+            <p className="mb-6 text-sm leading-6 text-slate-600">{sandboxNotice.text}</p>
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => setSandboxNotice(null)}
+                className={`rounded-lg px-5 py-2.5 text-sm font-semibold text-white ${
+                  sandboxNotice.type === "ok"
+                    ? "bg-emerald-600 hover:bg-emerald-700"
+                    : "bg-rose-600 hover:bg-rose-700"
+                }`}
+              >
+                Đóng
+              </button>
+            </div>
           </div>
         </div>,
         document.body
@@ -409,16 +758,16 @@ export default function ArchivePage() {
         <div className="animate-modal-overlay fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm" onClick={() => setConfirmDel(null)}>
           <div className="animate-modal-pop w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl ring-1 ring-black/5" onClick={(e) => e.stopPropagation()}>
             <div className="mb-3 flex items-center gap-2.5 text-rose-600">
-              <AlertTriangle size={20} /> <h3 className="text-base font-bold">Xóa đề {confirmDel}?</h3>
+              <AlertTriangle size={20} /> <h3 className="text-base font-bold">Xóa bộ testcase {confirmDel}?</h3>
             </div>
             <p className="mb-5 text-sm text-slate-600">
-              Sẽ gỡ <b>testcase + ảnh Docker + toàn bộ bài nộp (submissions)</b> của đề để giải phóng dung lượng. <b>Sau khi xóa KHÔNG chấm lại / xem mã nguồn bài nộp được nữa.</b> Điểm đã chấm vẫn lưu ở Lịch sử &amp; Thống kê.
+              Sẽ gỡ <b>testcase + ảnh Docker + toàn bộ bài nộp (submissions)</b> của bộ testcase để giải phóng dung lượng. <b>Sau khi xóa KHÔNG chấm lại / xem mã nguồn bài nộp được nữa.</b> Điểm đã chấm vẫn lưu ở Lịch sử &amp; Thống kê.
             </p>
             <div className="flex justify-end gap-2">
               <button onClick={() => setConfirmDel(null)} className="rounded-lg px-4 py-2 text-sm font-semibold text-slate-500 hover:bg-slate-100">Hủy</button>
               <button onClick={() => doDelete(confirmDel)} disabled={deleting === confirmDel}
                 className="flex items-center gap-2 rounded-lg bg-rose-600 px-4 py-2 text-sm font-semibold text-white hover:bg-rose-700 disabled:opacity-50">
-                {deleting === confirmDel ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />} Xóa đề
+                {deleting === confirmDel ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />} Xóa bộ testcase
               </button>
             </div>
           </div>

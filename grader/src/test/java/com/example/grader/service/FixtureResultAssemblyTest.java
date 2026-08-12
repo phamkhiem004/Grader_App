@@ -309,14 +309,6 @@ class FixtureResultAssemblyTest {
         // Fixture chạy resolver thật và không ngã, nên luôn null — vẫn phải có mặt.
         gradingResult.put("annotation_error", null);
 
-        // P6a: yêu cầu của đề đọc từ exam/requirements.txt và tách bằng ĐÚNG hàm sản xuất —
-        // tự tách lại trong harness là mở đường cho hai bản tách lệch nhau im lặng.
-        Path requirementsFile = examDir.resolve("requirements.txt");
-        assertTrue(Files.exists(requirementsFile),
-                "Thiếu exam/requirements.txt — từ P6a mọi đề của fixture phải có yêu cầu của đề");
-        List<String> requirements = BatchGradingService.splitRequirements(
-                Files.readString(requirementsFile, StandardCharsets.UTF_8));
-
         Map<String, Object> root = new LinkedHashMap<>();
         root.put("schema_version", "2");
         root.put("student", Map.of("id", "FIXTURE_" + variant.toUpperCase(), "name", "Fixture " + variant));
@@ -324,7 +316,6 @@ class FixtureResultAssemblyTest {
         examNode.put("code", "FIXTURE_V2");
         examNode.put("title", "Fixture result.json v2");
         examNode.put("total_score", 10);
-        examNode.put("requirements", requirements);
         root.put("exam", examNode);
         root.put("grading_result", gradingResult);
         root.put("test_cases", tcs);

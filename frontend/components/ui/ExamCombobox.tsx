@@ -21,11 +21,11 @@ interface Props {
 const LIST_ID = "exam-combobox-listbox";
 
 /**
- * Ô chọn mã đề — combobox tự viết (đẹp + tự đổi màu theo theme sáng/tối) thay cho
+ * Ô chọn mã bộ testcase — combobox tự viết (đẹp + tự đổi màu theo theme sáng/tối) thay cho
  * <input list>/<datalist> native vốn xấu và lỗi màu ở chế độ tối.
- * Gõ để lọc theo mã/tên đề; click hoặc ↑/↓ + Enter để chọn; vẫn nhập tay được mã bất kỳ.
+ * Gõ để lọc theo mã/tên bộ testcase; click hoặc ↑/↓ + Enter để chọn; vẫn nhập tay được mã bất kỳ.
  */
-export default function ExamCombobox({ options, value, onChange, onEnter, disabled, placeholder, ariaLabel = "Mã đề thi" }: Props) {
+export default function ExamCombobox({ options, value, onChange, onEnter, disabled, placeholder, ariaLabel = "Mã bộ testcase" }: Props) {
   const [open, setOpen] = useState(false);
   const [highlight, setHighlight] = useState(0);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -91,7 +91,7 @@ export default function ExamCombobox({ options, value, onChange, onEnter, disabl
       <button
         type="button" tabIndex={-1} disabled={disabled}
         onClick={() => { setOpen((o) => !o); inputRef.current?.focus(); }}
-        aria-label="Mở danh sách mã đề"
+        aria-label="Mở danh sách mã bộ testcase"
         className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-1 text-slate-400 transition-colors hover:text-slate-600 disabled:opacity-40"
       >
         <ChevronDown size={16} className={`transition-transform ${open ? "rotate-180" : ""}`} />
@@ -104,7 +104,7 @@ export default function ExamCombobox({ options, value, onChange, onEnter, disabl
         >
           {filtered.length === 0 ? (
             <div className="px-3 py-6 text-center text-xs text-slate-400">
-              {options.length === 0 ? "Chưa có đề nào đã chấm" : "Không khớp mã/tên đề nào"}
+              {options.length === 0 ? "Chưa có bộ testcase nào đã chấm" : "Không khớp mã/tên bộ testcase nào"}
             </div>
           ) : (
             filtered.map((o, i) => {

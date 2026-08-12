@@ -4,7 +4,6 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import SidebarLayout from "@/components/layout/SidebarLayout";
 import { API_BASE, PASS_THRESHOLD } from "@/lib/config";
-import { getToken } from "@/lib/auth";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { Tooltip } from "@/components/ui/Tooltip";
 import CompetencyPanel, { CompetencyItem } from "@/components/grading/CompetencyPanel";
@@ -211,13 +210,13 @@ export default function HistoryPage() {
     if (ex) setSelected(ex);
   }, []);
 
-  // Nạp danh sách đề đã chấm
+  // Nạp danh sách bộ testcase đã chấm
   useEffect(() => {
     fetch(`${API_BASE}/statistics/exams`)
       .then((r) => r.json())
       .then((data: ExamOption[]) => {
         setExams(Array.isArray(data) ? data : []);
-        // Chỉ tự chọn đề đầu khi CHƯA có đề nào được chọn từ URL
+        // Chỉ tự chọn đề đầu khi CHƯA có bộ testcase nào được chọn từ URL
         if (Array.isArray(data) && data.length) {
           setSelected((prev) => prev || data[0].examId);
         }
@@ -319,7 +318,7 @@ export default function HistoryPage() {
     setRegradingId(r.studentId);
     setRows((list) => list.map((x) => (x.studentId === r.studentId ? { ...x, status: "GRADING", score: null, errorLog: null } : x)));
     try {
-      const res = await fetch(`${API_BASE}/batch/regrade/${encodeURIComponent(selected)}/${encodeURIComponent(r.studentId)}`, { method: "POST", headers: { Authorization: `Bearer ${getToken() ?? ""}` } });
+      const res = await fetch(`${API_BASE}/batch/regrade/${encodeURIComponent(selected)}/${encodeURIComponent(r.studentId)}`, { method: "POST" });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Chấm lại thất bại");
       const batchId = data.batchId as string;
@@ -353,12 +352,12 @@ export default function HistoryPage() {
     setSelectedIds(new Set());
     try {
       const res = await fetch(`${API_BASE}/batch/regrade-batch/${encodeURIComponent(selected)}`, {
-        method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` }, body: JSON.stringify({ studentIds: ids }),
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ studentIds: ids }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Chấm lại thất bại");
       if (Array.isArray(data.skipped) && data.skipped.length)
-        alert(`Đã bỏ qua ${data.skipped.length} bài (mất file/đề): ${data.skipped.join(", ")}`);
+        alert(`Đã bỏ qua ${data.skipped.length} bài (mất file/bộ testcase): ${data.skipped.join(", ")}`);
     } catch (e) {
       await loadRows(false);
       alert((e as Error).message);
@@ -442,17 +441,17 @@ export default function HistoryPage() {
   return (
     <SidebarLayout
       title="Lịch sử chấm"
-      subtitle="Xem lại kết quả các bài đã chấm theo đề thi"
+      subtitle="Xem lại kết quả các bài đã chấm theo bộ testcase"
       activePath="/history"
     >
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-4">
-        {/* Cột trái: danh sách đề đã chấm */}
+        {/* Cột trái: danh sách bộ testcase đã chấm */}
         <div className="xl:col-span-1">
           <div className="card overflow-hidden">
             <div className="flex items-center gap-2 border-b border-slate-100 bg-slate-50/60 px-5 py-4">
               <FileText size={16} className="text-indigo-500" />
               <h2 className="text-sm font-bold uppercase tracking-wider text-slate-600">
-                Đề đã chấm ({exams.length})
+                Bộ testcase đã chấm ({exams.length})
               </h2>
             </div>
             <div className="custom-scrollbar max-h-[70vh] overflow-y-auto p-2">
@@ -462,7 +461,7 @@ export default function HistoryPage() {
                 ))
               ) : exams.length === 0 ? (
                 <div className="p-6 text-center text-sm text-slate-400">
-                  Chưa có đề nào được chấm.
+                  Chưa có bộ testcase nào được chấm.
                 </div>
               ) : (
                 exams.map((e) => {

@@ -54,6 +54,19 @@ class TemplateExpectedTextTest {
     private static final Pattern DOTTED_KEY = Pattern.compile(
             "(?<![\\w@.])[a-zA-Z][\\w-]*(\\.[\\w-]+)+(?![\\w@])");
 
+    /**
+     * MIỄN TRỪ HẸP của C3 — tên file mã nguồn. `public_contract.dart` khớp hình dạng "chữ.chữ"
+     * của DOTTED_KEY nhưng KHÔNG phải khoá chấm: nói tên file cho sinh viên là ngôn ngữ bình
+     * thường của đề bài ("cài `validateInput` trong `lib/domain/public_contract.dart`"), khác hẳn
+     * việc để lọt `action.save` — thứ sinh viên không có cách nào hiểu.
+     *
+     * <p>Chỉ miễn đúng các đuôi file liệt kê dưới đây; mọi hình dạng chấm khác vẫn bị bắt như cũ.
+     * Không có khoá nào trong ngữ pháp khoá kết thúc bằng các đuôi này nên miễn trừ không mở
+     * đường cho khoá thật lọt qua.
+     */
+    private static final Pattern SOURCE_FILE_NAME = Pattern.compile(
+            "(?i)[\\w-]+\\.(dart|json|ya?ml|md|txt)");
+
     /** C4 cho `expected`: từ vựng của bộ chấm/Flutter. `px` là ký hiệu đơn vị, không tính. */
     private static final List<String> ENGLISH_MARKERS = List.of(
             "widget", "target", "key", "render", "overflow", "renderflex", "portrait", "landscape",
@@ -100,7 +113,10 @@ class TemplateExpectedTextTest {
     static List<String> violations(String id, String text) {
         List<String> bad = new ArrayList<>();
         Matcher key = DOTTED_KEY.matcher(text);
-        while (key.find()) bad.add(id + ": lộ khoá '" + key.group() + "' — " + text);
+        while (key.find()) {
+            if (SOURCE_FILE_NAME.matcher(key.group()).matches()) continue;   // tên file, không phải khoá
+            bad.add(id + ": lộ khoá '" + key.group() + "' — " + text);
+        }
         String lower = text.toLowerCase();
         for (String marker : ENGLISH_MARKERS) {
             if (lower.contains(marker)) bad.add(id + ": từ vựng bộ chấm '" + marker + "' — " + text);

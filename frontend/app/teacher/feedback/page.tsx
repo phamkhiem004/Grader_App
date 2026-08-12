@@ -3,7 +3,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import SidebarLayout from "@/components/layout/SidebarLayout";
 import { API_BASE } from "@/lib/config";
-import { getToken } from "@/lib/auth";
 import {
   MessageSquareText, Play, Square, Download, Loader2, CheckCircle2,
   AlertCircle, XCircle, Sparkles, ShieldAlert, RefreshCw,
@@ -150,7 +149,7 @@ export default function FeedbackPage() {
 
   const stopRef = useRef(false);
 
-  // Danh sách đề đã chấm (gợi ý cho ô nhập mã đề)
+  // Danh sách bộ testcase đã chấm (gợi ý cho ô nhập mã bộ testcase)
   useEffect(() => {
     fetch(`${API_BASE}/statistics/exams`)
       .then((r) => (r.ok ? r.json() : []))
@@ -181,7 +180,7 @@ export default function FeedbackPage() {
 
   const run = async () => {
     const id = examId.trim();
-    if (!id) { setError("Hãy nhập mã đề (ví dụ: PE_01)."); return; }
+    if (!id) { setError("Hãy nhập mã bộ testcase (ví dụ: PE_01)."); return; }
     setError(null);
     setRunning(true);
     stopRef.current = false;
@@ -200,7 +199,7 @@ export default function FeedbackPage() {
     }
 
     if (students.length === 0) {
-      setError(`Đề "${id}" chưa có bài nộp nào đã chấm. Kiểm tra lại mã đề.`);
+      setError(`Bộ testcase "${id}" chưa có bài nộp nào đã chấm. Kiểm tra lại mã bộ testcase.`);
       setRunning(false);
       return;
     }
@@ -214,7 +213,6 @@ export default function FeedbackPage() {
     }));
     setRows(initial);
 
-    const token = getToken();
     await runPool(students, concurrencyFor(botProvider), () => stopRef.current, async (s, idx) => {
       patchRow(idx, { _state: "loading" });
       try {
@@ -222,7 +220,7 @@ export default function FeedbackPage() {
           `${API_BASE}/feedback/exam/${encodeURIComponent(id)}/${encodeURIComponent(s.studentId)}`,
           {
             method: "POST",
-            headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+            headers: { "Content-Type": "application/json" },
           },
         );
         const data = await res.json().catch(() => ({}));
@@ -279,7 +277,7 @@ export default function FeedbackPage() {
   return (
     <SidebarLayout
       title="Nhận xét bài làm bằng AI"
-      subtitle="Nhập mã đề → AI đọc kết quả chấm (JSON) và viết lời nhận xét cho từng sinh viên"
+      subtitle="Nhập mã bộ testcase → AI đọc kết quả chấm (JSON) và viết lời nhận xét cho từng sinh viên"
       activePath="/teacher/feedback"
     >
       <div className="space-y-5">
@@ -288,7 +286,7 @@ export default function FeedbackPage() {
           <div className="flex flex-wrap items-end gap-3">
             <div className="min-w-[220px] flex-1">
               <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500">
-                Mã đề thi
+                Mã bộ testcase
               </label>
               <ExamCombobox
                 options={exams}
@@ -389,9 +387,9 @@ export default function FeedbackPage() {
               <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-50 to-blue-50 text-indigo-400">
                 <MessageSquareText size={32} />
               </div>
-              <h3 className="mb-1 text-base font-bold text-slate-700">Nhập mã đề rồi bấm “Đọc &amp; nhận xét bài làm”</h3>
+              <h3 className="mb-1 text-base font-bold text-slate-700">Nhập mã bộ testcase rồi bấm “Đọc &amp; nhận xét bài làm”</h3>
               <p className="max-w-md text-sm text-slate-500">
-                AI sẽ đọc kết quả chấm (JSON) của từng sinh viên trong đề và viết lời nhận xét kèm lời khuyên. Sau đó bạn có thể tải toàn bộ nhận xét ra file Excel.
+                AI sẽ đọc kết quả chấm (JSON) của từng sinh viên trong bộ testcase và viết lời nhận xét kèm lời khuyên. Sau đó bạn có thể tải toàn bộ nhận xét ra file Excel.
               </p>
             </div>
           )

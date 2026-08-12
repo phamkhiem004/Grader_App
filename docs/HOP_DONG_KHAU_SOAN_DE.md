@@ -51,55 +51,41 @@ quả cho tài liệu này:
 
 ---
 
-## 1. Ba thứ BẮT BUỘC — bảng tóm tắt
+## 1. Hai thứ BẮT BUỘC — bảng tóm tắt
 
 | # | Tính năng ở khâu soạn đề | Đổ vào trường nào của `result.json` | Không có thì sao |
 |---|---|---|---|
-| 1 | **Ô nhập "Yêu cầu của đề"** | `exam.requirements[]` | Bot **im lặng hoàn toàn** về yêu cầu đề — sinh viên không biết đề đòi gì |
-| 2 | **Gán nhãn nhóm chức năng** (khác với gộp testcase) | `test_cases[].rubric` + `rubric_label` | Nhận xét không gom được theo chức năng, rơi về 3 nhãn kỹ thuật thô `LOGIC`/`WIDGET`/`BEHAVIOR` |
-| 3 | **Ngữ pháp khoá chấm** | `expected`, `actual`, `name` | Khoá nội bộ (`action.delete.1`) lọt vào chữ gửi sinh viên |
+| 1 | **Gán nhãn nhóm chức năng** (khác với gộp testcase) | `test_cases[].rubric` + `rubric_label` | Nhận xét không gom được theo chức năng, rơi về 3 nhãn kỹ thuật thô `LOGIC`/`WIDGET`/`BEHAVIOR` |
+| 2 | **Ngữ pháp khoá chấm** | `expected`, `actual`, `name` | Khoá nội bộ (`action.delete.1`) lọt vào chữ gửi sinh viên |
+
+> Trước đây bảng này có ba dòng; dòng **"Ô nhập Yêu cầu của đề"** đã **bị bỏ hẳn** — xem mục 2.
 
 Chi tiết từng cái ở dưới. Cách hiện thực là quyền của các bạn — phần **bắt buộc** là *hợp đồng dữ liệu*,
 không phải mã nguồn cụ thể.
 
 ---
 
-## 2. Yêu cầu của đề → `exam.requirements`
+## 2. ~~Yêu cầu của đề → `exam.requirements`~~ — ❌ **ĐÃ BỎ HẲN, KHÔNG CÒN LÀ YÊU CẦU**
 
-### Giảng viên thấy gì
-Một ô văn bản nhiều dòng, **bắt buộc**, khi soạn đề. **Mỗi dòng là một yêu cầu.**
+**Chủ đồ án quyết bỏ toàn bộ tính năng này.** Nó không còn tồn tại trong dự án và **các bạn không
+phải làm gì cho nó nữa** — kể cả những chỗ tài liệu này từng nhờ (đáng chú ý: mục 5 từng xin các
+bạn sửa đường nhập ZIP để chở `requirements`; **lời nhờ đó đã huỷ**).
 
-### Hợp đồng dữ liệu
+### Vì sao bỏ
 
-```jsonc
-"exam": {
-  "code": "PE_01", "title": "...", "total_score": 10,
-  "requirements": [
-    "Xây ứng dụng quản lý người dùng: xem danh sách, thêm, sửa, xoá.",
-    "Xoá người dùng phải có hộp thoại xác nhận trước khi xoá."
-  ]
-}
-```
+Trường này chỉ có **một** phía tiêu thụ: khối "Đề bài yêu cầu" trong bản nhận xét gửi sinh viên do
+phía bot NLP dựng. Phía đó đã **bỏ hẳn khối ấy** sau khi chấm tay 13 bài trên nhận xét sinh thật —
+người chấm chê khối này ở 6/13 bài (dài dòng, lặp lại), và cái lỗ mà nó sinh ra để lấp hoá ra không
+tồn tại. Không còn ai đọc thì giữ lại chỉ là chở dữ liệu chết vào `result.json` của từng bài.
 
-| Luật | Chi tiết |
-|---|---|
-| **Y NGUYÊN VĂN** | Không cắt, không đánh số, không chuẩn hoá, không sửa chính tả. Chữ này tới sinh viên **không đi qua mô hình ngôn ngữ** |
-| Tách dòng | Mỗi dòng một phần tử. Chỉ bỏ `\r` cuối dòng và **dòng trắng**. Hệ quả: phần tử **không bao giờ rỗng, không bao giờ chứa ký tự xuống dòng** — bên đọc dựa vào điều này |
-| Trần | **≤ 4000 ký tự và ≤ 40 dòng**, chặn **ở khâu nhập** (giảng viên thấy lỗi ngay). **Không được cắt lúc kết xuất** — cắt là phá "y nguyên văn" |
-| Vì sao có trần | Chuỗi này được chép nguyên văn vào `result.json` của **từng bài**; một đợt 600–750 bài mà dán cả đề 20 KB là ~15 MB lặp vô nghĩa |
-| Bắt buộc | Đề mới **không lưu được** nếu bỏ trống |
-| `[]` nghĩa là gì | **Chỉ** có nghĩa *"đề tạo trước khi có tính năng này"*. Không bao giờ có nghĩa *"giảng viên cố ý để trống"* |
+### Đã gỡ những gì
 
-### Ràng buộc quan trọng nhất
-Grader **không kiểm nội dung** trường này — đây là trường **duy nhất** trong `result.json` như vậy.
-*"Y nguyên văn"* và *"Grader kiểm duyệt chữ của giảng viên"* loại trừ nhau. Nên **đừng thêm bộ lọc**
-cho nó; đổi lại, phía chúng tôi không bao giờ đưa nó vào kho từ vựng hợp lệ của bot.
+Ô nhập trên màn soạn đề · phép chặn lúc lưu và hai con số trần (4000 ký tự / 40 dòng) ·
+`BatchGradingService.splitRequirements` · `TestcaseTemplateService.validateRequirements` ·
+cột `exams.requirements` trong entity · phần bù `[]` ở `ResultController` · trường
+`exam.requirements` trong `result.json` · cả file test `ExamRequirementsTest`.
 
-### Hiện thực hôm nay (tham khảo)
-Cột `exams.requirements` (LONGTEXT) · tách ở `BatchGradingService.splitRequirements` (**nguồn tách
-duy nhất**) · chặn ở `TestcaseTemplateService.validateRequirements` · bù `[]` cho dữ liệu cũ ở
-`ResultController.normalizeResultNode`.
-Test khoá: `ExamRequirementsTest` (8 test, ghim cả hai con số trần).
+Cột `requirements` trong DB các máy đang chạy **không migrate** — nó thành cột thừa, không ai đọc.
 
 ---
 
@@ -187,81 +173,35 @@ BẰNG nguồn thật, lệch là đỏ) + `GroupModeAndKeyGrammarTest`.
 
 ## 5. ⛔ KHIẾM KHUYẾT ĐANG CHẠY — cần các bạn quyết
 
-**Triệu chứng: mọi bài do khảo thí chấm đều mất "Yêu cầu của đề".**
+> **Mục này đã THU HẸP.** Trước đây nó xin ưu tiên cao vì đường ZIP làm mất "Yêu cầu của đề".
+> Tính năng đó nay **bỏ hẳn** (mục 2), nên **lý do ưu tiên ấy không còn** và chúng tôi rút lại lời
+> nhờ đó. Phần dưới là chỗ **vẫn hỏng thật**, độc lập với requirements.
 
-> ### 🔴 Vì sao chúng tôi xin xếp việc này ƯU TIÊN CAO
->
-> **Cập nhật 2026-08-15 — mentor đã chốt: bỏ tài khoản đăng nhập.** Lý do: giảng viên và khảo thí
-> chạy phần mềm trên **hai máy cá nhân riêng**, ai làm việc nấy; giảng viên soạn đề → xuất ZIP →
-> gửi khảo thí; hết kỳ thi khảo thí mới mở phần mềm lên để chấm.
->
-> Quyết định đó **đổi mức nghiêm trọng của khiếm khuyết này**, nên xin đọc lại với con mắt khác:
-> trước đây ZIP chỉ là *một trong các cách* mang đề đi (còn tài khoản thì còn tưởng tượng được một
-> ngày dùng chung máy chủ). Nay ZIP là **kênh vận chuyển CHÍNH THỨC và DUY NHẤT** giữa hai vai —
-> đã đo: toàn hệ thống chỉ có **một** đường nhập đề, và chép tay thư mục `exams/` thì không chấm
-> được vì thiếu bản ghi trong CSDL.
->
-> ⇒ Đây không phải bug ở một nhánh phụ. **Nó nằm trên con đường chính thức duy nhất của sản phẩm**,
-> và mọi bài khảo thí chấm đều đi qua nó.
->
-> Đây **không phải** một trường JSON bị rỗng. Đây là **một tính năng đã làm xong ở CẢ HAI phía mà
-> không bao giờ tới được người dùng cuối** — chỉ vì đề đi qua ZIP giữa hai máy.
->
-> Cụ thể thứ bị mất: bot có một khối *"Đề bài yêu cầu:"* in nguyên văn yêu cầu của giảng viên. Khối
-> đó sinh ra để lấp đúng một lỗ — với **bài gần hoàn hảo**, bot gần như không có gì hợp lệ để nói:
-> không được suy diễn về mã nguồn sinh viên, không được gợi ý nâng cao (đã bỏ vì hay bịa). Thứ duy
-> nhất được phép nói là *đề đã yêu cầu những gì*, bằng **chữ của chính giảng viên**.
->
-> Mất `requirements` ⇒ **bài 10 điểm nhận về một lời khen chung chung.** Đó là bài của sinh viên
-> làm tốt nhất lớp, và cũng là nhận xét dễ bị đem ra so sánh nhất.
->
-> Hôm nay trên bài thi thật, khối đó **chưa xuất hiện lần nào**.
-
-### Đo được (chạy thật trên stack, không phải đọc code)
-
-Luồng thật: giảng viên soạn đề ở **máy A** → tải ZIP → khảo thí ở **máy B** vào *Cấu hình đề thi*
-tạo mã đề bằng ZIP đó → chấm bài.
-
-| | Đề soạn tại chỗ (máy A) | Đề nhập bằng ZIP (máy B) |
-|---|---|---|
-| Điểm | 6.0 | 6.0 ✅ |
-| `rubric` / `rubric_label` | đủ | đủ ✅ |
-| `expected` sạch khoá | ✅ | ✅ |
-| **`exam.requirements`** | **4 yêu cầu** | **0 — MẤT SẠCH** ⛔ |
+**Triệu chứng: đề nhập bằng ZIP không bao giờ nâng được engine chấm.**
 
 ### Nguyên nhân
 * ZIP tải về chỉ đóng gói **3 file**: `exam_test.dart`, `grader.dart`, `skills_matrix.json`.
-* `testcase-config.json` **không** vào ZIP — và bản thân nó cũng **chưa** chứa `requirements`.
-* Đường nhập ZIP bỏ qua 4 cột DB: `requirements`, `testcase_config_json`, `created_by`,
-  `allowed_packages`.
+* `testcase-config.json` **không** vào ZIP.
+* Đường nhập ZIP bỏ qua 3 cột DB: `testcase_config_json`, `created_by`, `allowed_packages`.
 
-### Hai hệ quả
-1. `exam.requirements = []` trên **mọi** bài khảo thí chấm ⇒ bot im lặng về yêu cầu đề. Tính năng ở
-   mục 2 **chết trong luồng thật**.
-2. `refreshCommonEngine` luôn bỏ qua đề nhập bằng ZIP (nó đọc `engine_type` từ cột đang null) ⇒
-   **"Chấm lại đề" không bao giờ nâng được engine chấm** cho những đề này.
+### Hệ quả
+`refreshCommonEngine` luôn bỏ qua đề nhập bằng ZIP (nó đọc `engine_type` từ cột đang null) ⇒
+**"Chấm lại đề" không bao giờ nâng được engine chấm** cho những đề này. Nghĩa là đề đã phát cho
+khảo thí sẽ đứng yên ở bản engine lúc xuất ZIP, kể cả khi engine sau đó sửa được lỗi chấm sai.
+
+Mức nghiêm trọng phụ thuộc quyết định của mentor: ZIP là **kênh vận chuyển chính thức DUY NHẤT**
+giữa máy giảng viên và máy khảo thí (đã đo: toàn hệ thống chỉ có một đường nhập đề; chép tay thư
+mục `exams/` không chấm được vì thiếu bản ghi CSDL). Nên mọi đề khảo thí chấm đều đi qua đường này.
 
 ### Gợi ý phương án (các bạn quyết, chúng tôi không tự sửa)
-1. Thêm `requirements` vào `testcase-config.json` khi lưu/publish.
-2. ZIP tải về gồm **4 file** (thêm `testcase-config.json`).
-3. Khi nhập: thấy `testcase-config.json` thì phục hồi `requirements` + `testcase_config_json` +
-   version/status vào DB.
-4. **Cố ý không phục hồi `created_by`** — để khảo thí vẫn không sửa được đề, nhưng
+1. ZIP tải về gồm **4 file** (thêm `testcase-config.json`).
+2. Khi nhập: thấy `testcase-config.json` thì phục hồi `testcase_config_json` + version/status vào DB.
+3. **Cố ý không phục hồi `created_by`** — để khảo thí vẫn không sửa được đề, nhưng
    `refreshCommonEngine` chạy được.
-5. ZIP cũ 3 file vẫn nhập được như hôm nay.
+4. ZIP cũ 3 file vẫn nhập được như hôm nay.
 
 > Ghi chú: `testcase-config.json` hiện **được ghi ra đĩa nhưng không code nào đọc lại** — nguồn đọc
 > là cột DB. Nếu các bạn thiết kế lại, đây là chỗ đáng dọn.
-
-### Một hệ quả cho hợp đồng dữ liệu, chúng tôi đã tự xử
-Vì khiếm khuyết này, `[]` hiện **có hai nghĩa**: "đề cũ" *hoặc* "đề mới nhưng đi qua ZIP". Đã đính
-chính hợp đồng và báo phía bot đừng suy `[]` = "đề cũ" nữa (2026-08-14). Phía bot đã soát: không có
-chỗ nào suy như vậy, và họ thêm một test khoá để phiên sau **không dựng lại** nhánh đó.
-
-### 📣 Xin báo lại chúng tôi khi sửa xong
-Khi đường nhập đề chở được `requirements`, xin báo — chúng tôi cần **mốc** đó để nói với phía bot
-*"từ đây bài thi thật có khối yêu cầu"*, và để `[]` quay lại **một** nghĩa. Trước mốc đó, tài liệu
-bàn giao của phía bot phải ghi tính năng này là *"có, nhưng chết trong luồng hai máy"*.
 
 ---
 
@@ -271,8 +211,8 @@ Làm trong lúc các bạn refactor, nên **báo đủ để các bạn quyết 
 
 | Commit | Đụng gì | Ghi chú cho các bạn |
 |---|---|---|
-| `a9c7aa5` | **P6a** — cột `requirements`, chặn nhập, tách dòng, bù `[]` đường đọc | Backend + hợp đồng. Mục 2 |
-| `eff5c6f` | **P6b** — ô nhập "Yêu cầu của đề" + bộ đếm trên trang *Tạo testcase* | **UI của các bạn.** Nếu workflow mới đổi màn này, giữ lại *hành vi* ở mục 2 là đủ |
+| ~~`a9c7aa5`~~ | ~~**P6a** — cột `requirements`, chặn nhập, tách dòng, bù `[]` đường đọc~~ | ❌ **ĐÃ GỠ HẾT** — tính năng bị bỏ, xem mục 2. Không còn gì để các bạn giữ/sửa |
+| ~~`eff5c6f`~~ | ~~**P6b** — ô nhập "Yêu cầu của đề" + bộ đếm trên trang *Tạo testcase*~~ | ❌ **ĐÃ GỠ HẾT** — ô nhập đã xoá khỏi màn *Tạo testcase*, các bạn không phải giữ hành vi nào |
 | `f133595` | **`group_mode`** (nhãn/gộp) + **cưỡng chế ngữ pháp khoá** | ⚠️ Thêm khái niệm mới vào màn soạn đề (2 nút, 2 modal) **và đổi hành vi lưu đề** — xem cảnh báo dưới |
 | `7c54233` | Test pin `common-key-grammar.json` | Chỉ test, không đổi hành vi |
 | `6f3d5dc` | `targetType` vào `parameters_schema` của `WIDGET_VISIBLE`/`BUTTON_ACTION`; sửa race trùng `instance_id` ở FE | Bug thuần phía các bạn, chúng tôi vấp phải nên sửa luôn — chi tiết dưới |
@@ -313,12 +253,11 @@ nay điều đó thành vĩnh viễn. Nếu sau này nhà trường cần vết 
 
 ## 7. Cách tự kiểm sau khi các bạn đổi workflow
 
-Bộ test backend hiện có **97 test**, trong đó các lớp sau khoá đúng những gì tài liệu này mô tả —
+Bộ test backend hiện có **118 test**, trong đó các lớp sau khoá đúng những gì tài liệu này mô tả —
 **đừng xoá chúng, chúng đỏ là hợp đồng vỡ**:
 
 | Lớp test | Khoá điều gì |
 |---|---|
-| `ExamRequirementsTest` | Tách dòng, trần 4000/40, `[]` nghĩa gì |
 | `GroupModeAndKeyGrammarTest` | Nhãn ≠ gộp, hai bất biến cụm gộp, ngữ pháp khoá |
 | `KeyGrammarContractTest` | File ngữ pháp khoá công bố phải khớp nguồn thật |
 | `TemplateExpectedTextTest` | `expected` máy sinh không lộ khoá/từ vựng nội bộ |
@@ -339,5 +278,5 @@ hiệu `result.json` mất dữ liệu bot cần.
 ## 8. Liên hệ
 
 Mọi thứ liên quan tới **hình dạng và nội dung `result.json`** thì báo bên tôi trước khi đổi — đặc
-biệt: `exam.requirements`, `rubric`/`rubric_label`, `expected`, `actual`, và danh sách nhóm khoá.
+biệt: `rubric`/`rubric_label`, `expected`, `actual`, và danh sách nhóm khoá.
 Những phần còn lại của workflow soạn đề là của các bạn, chúng tôi không đụng.

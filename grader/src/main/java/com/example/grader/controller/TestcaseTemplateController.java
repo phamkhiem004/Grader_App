@@ -1,7 +1,7 @@
 package com.example.grader.controller;
 
+import com.example.grader.config.AppActor;
 import com.example.grader.service.TestcaseTemplateService;
-import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -31,6 +31,12 @@ public class TestcaseTemplateController {
         return ResponseEntity.ok(templateService.runnerCatalog());
     }
 
+    /** Mapping học liệu PRM393 sang các họ testcase tham số hóa; không tự nạp cả bộ vào đề. */
+    @GetMapping("/curriculum-source")
+    public ResponseEntity<?> curriculumSource() {
+        return ResponseEntity.ok(templateService.curriculumSource());
+    }
+
     /** Danh mục cách dò + bộ semantic key gợi ý cho Khu vực 0 (hợp đồng bài làm). */
     @GetMapping("/contract-catalog")
     public ResponseEntity<?> contractCatalog() {
@@ -54,26 +60,25 @@ public class TestcaseTemplateController {
     }
 
     @PostMapping
-    public ResponseEntity<?> create(@RequestBody Map<String, Object> body, HttpServletRequest request) {
-        return handle(() -> templateService.createTemplate(body, teacherEmail(request)));
+    public ResponseEntity<?> create(@RequestBody Map<String, Object> body) {
+        return handle(() -> templateService.createTemplate(body, AppActor.DEFAULT));
     }
 
     @PutMapping("/{templateId}")
     public ResponseEntity<?> update(@PathVariable String templateId,
-                                    @RequestBody Map<String, Object> body,
-                                    HttpServletRequest request) {
-        return handle(() -> templateService.updateTemplate(templateId, body, teacherEmail(request)));
+                                    @RequestBody Map<String, Object> body) {
+        return handle(() -> templateService.updateTemplate(templateId, body, AppActor.DEFAULT));
     }
 
     /** Ẩn khỏi thư viện (không xóa cứng) để đề đã lưu vẫn resolve được template_id. */
     @DeleteMapping("/{templateId}")
-    public ResponseEntity<?> hide(@PathVariable String templateId, HttpServletRequest request) {
-        return handle(() -> templateService.hideTemplate(templateId, teacherEmail(request)));
+    public ResponseEntity<?> hide(@PathVariable String templateId) {
+        return handle(() -> templateService.hideTemplate(templateId, AppActor.DEFAULT));
     }
 
     @PostMapping("/{templateId}/restore")
-    public ResponseEntity<?> restore(@PathVariable String templateId, HttpServletRequest request) {
-        return handle(() -> templateService.restoreTemplate(templateId, teacherEmail(request)));
+    public ResponseEntity<?> restore(@PathVariable String templateId) {
+        return handle(() -> templateService.restoreTemplate(templateId, AppActor.DEFAULT));
     }
 
     private ResponseEntity<?> handle(java.util.function.Supplier<Map<String, Object>> action) {
@@ -84,11 +89,6 @@ public class TestcaseTemplateController {
         } catch (IllegalStateException e) {
             return ResponseEntity.status(409).body(Map.of("error", e.getMessage()));
         }
-    }
-
-    private String teacherEmail(HttpServletRequest request) {
-        Object email = request.getAttribute("teacherEmail");
-        return email == null ? "unknown" : String.valueOf(email);
     }
 
     /**

@@ -440,5 +440,75 @@
       "absentKey": "state.empty"
     },
     "expected_template": "Trước thao tác, màn hình phải ở trạng thái ban đầu; bấm nút được kiểm thì màn hình phải chuyển sang trạng thái mới và trạng thái cũ không còn hiển thị."
+  },
+  {
+    "template_id": "COMMON_PUBLIC_FUNCTION_RESULT",
+    "template_version": "common-v3",
+    "engine_type": "COMMON_V1",
+    "profile_id": "COMMON_SEMANTIC_V1",
+    "runner": "CUSTOM_CODE",
+    "code_generator": "PUBLIC_FUNCTION_RESULT",
+    "skill_code": "DART_FUNCTIONS",
+    "layer": "BLACKBOX",
+    "testcase_group": "LOGIC",
+    "name": "Hàm public trả về đúng kết quả",
+    "description": "Gọi trực tiếp một hàm top-level hoặc static method thuộc public contract của starter qua main.dart. Tên hàm, đối số, expected và timeout đều là tham số; dùng lại được cho validator, tính toán, JSON mapping, service fixture hoặc nghiệp vụ ở bất kỳ domain nào mà không cần grading adapter.",
+    "difficulty": "intermediate",
+    "weight_default": 2,
+    "parameters_schema": {
+      "contractPath": "lib/domain/public_contract.dart",
+      "callable": "validateInput",
+      "argumentsJson": "[\"valid\"]",
+      "expectedJson": "true",
+      "timeoutMs": 3000
+    },
+    "expected_template": "Hàm {callable} trong contract {contractPath} phải trả về {expectedJson} với đối số {argumentsJson}."
+  },
+  {
+    "template_id": "COMMON_PUBLIC_FUNCTION_THROWS",
+    "template_version": "common-v3",
+    "engine_type": "COMMON_V1",
+    "profile_id": "COMMON_SEMANTIC_V1",
+    "runner": "CUSTOM_CODE",
+    "code_generator": "PUBLIC_FUNCTION_THROWS",
+    "skill_code": "DART_EXCEPTIONS",
+    "layer": "BLACKBOX",
+    "testcase_group": "LOGIC",
+    "name": "Hàm public ném đúng ngoại lệ",
+    "description": "Gọi public contract của starter với dữ liệu lỗi và xác nhận loại cùng nội dung ngoại lệ. Mọi thành phần thay đổi theo đề đều nằm trong parameters nên cùng mẫu dùng được cho parser, validation, repository hoặc business rule khác nhau.",
+    "difficulty": "intermediate",
+    "weight_default": 2,
+    "parameters_schema": {
+      "contractPath": "lib/domain/public_contract.dart",
+      "callable": "validateOrThrow",
+      "argumentsJson": "[\"invalid\"]",
+      "exceptionType": "ArgumentError",
+      "messageContains": "",
+      "timeoutMs": 3000
+    },
+    "expected_template": "Hàm {callable} trong contract {contractPath} phải ném {exceptionType} cho đối số {argumentsJson}."
+  },
+  {
+    "template_id": "COMMON_PUBLIC_STREAM_EVENTS",
+    "template_version": "common-v3",
+    "engine_type": "COMMON_V1",
+    "profile_id": "COMMON_SEMANTIC_V1",
+    "runner": "CUSTOM_CODE",
+    "code_generator": "PUBLIC_STREAM_EVENTS",
+    "skill_code": "ASYNC_STREAMS_STREAMBUILDER",
+    "layer": "BLACKBOX",
+    "testcase_group": "LOGIC",
+    "name": "Stream public phát đúng chuỗi sự kiện",
+    "description": "Gọi hàm public trả về Stream, chỉ lấy đúng số event đã khai báo với timeout hữu hạn rồi so sánh sâu theo thứ tự. Vì không chờ Stream đóng, mẫu dùng được cả với stream hữu hạn lẫn stream trạng thái chạy liên tục; không phụ thuộc domain và không gọi mạng thật.",
+    "difficulty": "advanced",
+    "weight_default": 3,
+    "parameters_schema": {
+      "contractPath": "lib/domain/public_contract.dart",
+      "callable": "eventsFor",
+      "argumentsJson": "[]",
+      "expectedEventsJson": "[1,2,3]",
+      "timeoutMs": 3000
+    },
+    "expected_template": "Stream {callable} trong contract {contractPath} phải phát lần lượt {expectedEventsJson}."
   }
 ]

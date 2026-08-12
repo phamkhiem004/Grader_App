@@ -85,6 +85,8 @@ public class ExamService {
     private SyllabusService syllabusService;
     @Autowired
     private com.example.grader.repository.ExamResultRepository resultRepository;
+    @Autowired
+    private com.example.grader.repository.GradingBatchRepository batchRepository;
 
     /**
      * Chặn PATH TRAVERSAL: mã đề/SV chỉ được chứa chữ/số/_/- (vd PE_50, FLUTTER_PE_01, HE123456).
@@ -610,6 +612,133 @@ public class ExamService {
         ensureTestcaseImportsAvailable(testcaseDir);
         validateTestcaseImports(testcaseDir);
         validateSkillCodes(testcaseDir);
+    }
+
+    /**
+     * Đổi mã bộ testcase. Mã đề là KHOÁ tự nhiên rải khắp hệ thống (tên thư mục exams/ và
+     * submissions/, cột exam_id của kết quả & phiên chấm, trường exam_id trong config,
+     * exam.code trong result_json) nên phải đổi đồng loạt — đổi mỗi bản ghi `exams` sẽ làm
+     * mồ côi toàn bộ lịch sử chấm.
+     * Thư mục đổi trước, DB đổi sau: DB có @Transactional tự rollback, còn file thì tự trả
+     * về chỗ cũ trong catch.
+     */
+    @org.springframework.transaction.annotation.Transactional
+    public Map<String, Object> renameExam(String rawOldId, String rawNewId) {
+        String oldId = safeId(rawOldId, "bộ testcase");
+        String newId = safeId(rawNewId, "bộ testcase mới");
+        if (newId.length() > 50)
+            throw new IllegalArgumentException("Mã bộ testcase mới không được dài quá 50 ký tự.");
+        if (oldId.equals(newId))
+            throw new IllegalArgumentException("Mã bộ testcase mới trùng với mã cũ.");
+        Exam exam = examRepository.findByExamId(oldId)
+                .orElseThrow(() -> new IllegalArgumentException("Không tìm thấy bộ testcase: " + oldId));
+        if (examRepository.existsByExamId(newId))
+            throw new IllegalStateException("Mã bộ testcase " + newId + " đã tồn tại.");
+
+        // Batch đang chạy giữ nguyên đường dẫn cũ trong bộ nhớ → đổi thư mục lúc này là hỏng phiên chấm.
+        boolean grading = batchRepository.findByExamIdOrderByCreatedAtDesc(oldId).stream()
+                .anyMatch(b -> b.getStatus() == com.example.grader.entity.BatchStatus.IN_PROGRESS);
+        if (grading)
+            throw new IllegalStateException("Bộ " + oldId + " đang có phiên chấm chạy dở. "
+                    + "Hãy đợi chấm xong rồi đổi mã.");
+
+        Path oldDir = examsRoot().resolve(oldId);
+        Path newDir = examsRoot().resolve(newId);
+        Path oldSub = resolveSibling(submissionsDir).resolve(oldId);
+        Path newSub = resolveSibling(submissionsDir).resolve(newId);
+        if (Files.exists(newDir))
+            throw new IllegalStateException("Thư mục của bộ testcase " + newId + " đã tồn tại.");
+        if (Files.exists(newSub))
+            throw new IllegalStateException("Thư mục bài nộp của bộ testcase " + newId + " đã tồn tại.");
+
+        boolean examDirMoved = false;
+        boolean subDirMoved = false;
+        try {
+            if (Files.isDirectory(oldDir)) { Files.move(oldDir, newDir); examDirMoved = true; }
+            if (Files.isDirectory(oldSub)) { Files.move(oldSub, newSub); subDirMoved = true; }
+
+            exam.setExamId(newId);
+            exam.setTestcasePath(rebaseExamPath(exam.getTestcasePath(), oldDir, newDir));
+            exam.setTestcaseConfigJson(withJsonText(exam.getTestcaseConfigJson(), "exam_id", newId));
+            examRepository.save(exam);
+
+            // result_json là bản ghi ĐÃ CHỐT gửi cho bot NLP: exam.code phải khớp mã mới.
+            int results = 0;
+            for (com.example.grader.entity.ExamResult r : resultRepository.findByExamId(oldId)) {
+                r.setExamId(newId);
+                r.setResultJson(withResultExamCode(r.getResultJson(), newId));
+                resultRepository.save(r);
+                results++;
+            }
+            int batches = 0;
+            for (com.example.grader.entity.GradingBatch b : batchRepository.findByExamIdOrderByCreatedAtDesc(oldId)) {
+                b.setExamId(newId);
+                batchRepository.save(b);
+                batches++;
+            }
+
+            // testcase-config.json trên đĩa cũng ghi mã đề; lệch với DB thì lần mở lại builder sẽ sai.
+            Path configFile = newDir.resolve("testcase").resolve("testcase-config.json");
+            if (Files.exists(configFile)) {
+                String updated = withJsonText(Files.readString(configFile, StandardCharsets.UTF_8), "exam_id", newId);
+                if (updated != null) Files.writeString(configFile, updated, StandardCharsets.UTF_8);
+            }
+
+            log.info("✏️ Đổi mã bộ testcase {} → {} ({} kết quả, {} phiên chấm)", oldId, newId, results, batches);
+            Map<String, Object> out = new LinkedHashMap<>();
+            out.put("exam_id", newId);
+            out.put("old_exam_id", oldId);
+            out.put("results_updated", results);
+            out.put("batches_updated", batches);
+            return out;
+        } catch (Exception e) {
+            // Trả thư mục về chỗ cũ; phần DB do @Transactional tự rollback khi ném tiếp.
+            if (subDirMoved)  try { Files.move(newSub, oldSub); } catch (Exception ignored) {}
+            if (examDirMoved) try { Files.move(newDir, oldDir); } catch (Exception ignored) {}
+            if (e instanceof IllegalArgumentException || e instanceof IllegalStateException) throw (RuntimeException) e;
+            throw new IllegalStateException("Không đổi được mã bộ testcase: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Đường dẫn testcase trỏ vào thư mục đề cũ → đổi phần gốc, giữ nguyên phần đuôi.
+     * Trỏ ra ngoài thư mục đề thì GIỮ NGUYÊN: chỗ đó không hề được di chuyển.
+     */
+    private String rebaseExamPath(String current, Path oldDir, Path newDir) {
+        Path from = oldDir.toAbsolutePath().normalize();
+        Path to = newDir.toAbsolutePath().normalize();
+        if (current == null || current.isBlank()) return to.resolve("testcase").toString();
+        Path p = Path.of(current).toAbsolutePath().normalize();
+        return p.startsWith(from) ? to.resolve(from.relativize(p)).toString() : current;
+    }
+
+    /** Ghi đè MỘT trường chuỗi ở gốc JSON; JSON rỗng/hỏng thì trả nguyên trạng để không mất dữ liệu. */
+    private String withJsonText(String json, String field, String value) {
+        if (json == null || json.isBlank()) return json;
+        try {
+            JsonNode root = mapper.readTree(json);
+            if (!root.isObject()) return json;
+            ((com.fasterxml.jackson.databind.node.ObjectNode) root).put(field, value);
+            return mapper.writerWithDefaultPrettyPrinter().writeValueAsString(root);
+        } catch (Exception e) {
+            log.warn("Không cập nhật được trường {} trong JSON khi đổi mã đề: {}", field, e.getMessage());
+            return json;
+        }
+    }
+
+    /** result_json giữ mã đề ở exam.code (xem BatchGradingService.assembleResultJson). */
+    private String withResultExamCode(String resultJson, String newId) {
+        if (resultJson == null || resultJson.isBlank()) return resultJson;
+        try {
+            JsonNode root = mapper.readTree(resultJson);
+            JsonNode examNode = root.path("exam");
+            if (!examNode.isObject()) return resultJson;
+            ((com.fasterxml.jackson.databind.node.ObjectNode) examNode).put("code", newId);
+            return mapper.writeValueAsString(root);
+        } catch (Exception e) {
+            log.warn("Không cập nhật được exam.code trong result_json khi đổi mã đề: {}", e.getMessage());
+            return resultJson;
+        }
     }
 
     // ── Xóa đề: gỡ ảnh legacy + testcase + TOÀN BỘ bài nộp (submissions) + bản ghi đề (DB) ──

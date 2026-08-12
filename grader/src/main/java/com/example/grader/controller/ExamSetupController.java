@@ -173,6 +173,22 @@ public class ExamSetupController {
         }
     }
 
+    /** Đổi mã bộ testcase (kéo theo thư mục, kết quả, phiên chấm). Bộ đang chấm dở bị từ chối. */
+    @PostMapping("/{examId}/rename")
+    public ResponseEntity<?> renameTestcaseSet(@PathVariable String examId,
+                                               @RequestBody Map<String, Object> body) {
+        try {
+            Object raw = body == null ? null : (body.get("new_exam_id") != null ? body.get("new_exam_id") : body.get("newExamId"));
+            return ResponseEntity.ok(examService.renameExam(examId, raw == null ? null : String.valueOf(raw).trim()));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        } catch (IllegalStateException e) {
+            return ResponseEntity.status(409).body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
+        }
+    }
+
     /** Clone toàn bộ cấu hình builder sang mã/tên mới; bộ nhập ZIP bị service từ chối. */
     @PostMapping("/{examId}/clone")
     public ResponseEntity<?> cloneTestcaseSet(@PathVariable String examId,

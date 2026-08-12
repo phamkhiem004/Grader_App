@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import SidebarLayout from "@/components/layout/SidebarLayout";
 import { API_BASE } from "@/lib/config";
 import {
@@ -26,6 +27,7 @@ interface ExamRow {
 }
 interface RegradeState { examId: string; batchId: string; total: number; done: number; error: number; running: boolean; }
 interface SandboxNotice { type: "ok" | "error"; title: string; text: string; }
+/** "manual" = màn nhập ZIP có sẵn (trên UI gọi là "Tạo bộ testcase sẵn có", khớp tên API import-manual-testcase). */
 type CreatePanel = "choose" | "manual" | null;
 const PAGE_SIZES = [10, 20, 50] as const;
 
@@ -48,9 +50,9 @@ function manualIdFromName(name: string) {
 // Nút hành động chính của trang: tạo bộ testcase mới.
 const newBtnCls = "inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-emerald-700";
 
-// Kiểu chung cho mọi nút trong cột Thao tác — để chúng cùng cao, cùng cỡ chữ, ngang hàng nhau.
+// Kiểu chung cho mọi nút trong cột Thao tác: ô vuông chỉ chứa icon → 6 nút vừa một hàng.
 const btnCls = (accent: string) =>
-  `inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-600 transition-colors disabled:opacity-40 disabled:hover:bg-white disabled:hover:text-slate-600 ${accent}`;
+  `inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 transition-colors disabled:opacity-40 disabled:hover:bg-white disabled:hover:text-slate-600 ${accent}`;
 
 async function api(path: string, method: string, body?: unknown) {
   const res = await fetch(`${API_BASE}${path}`, {
@@ -64,6 +66,7 @@ async function api(path: string, method: string, body?: unknown) {
 }
 
 export default function ArchivePage() {
+  const router = useRouter();
   const [exams, setExams] = useState<ExamRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);          // lỗi của một thao tác → banner
@@ -90,6 +93,8 @@ export default function ArchivePage() {
   const [cloneNote, setCloneNote] = useState("");
   const [cloneError, setCloneError] = useState<string | null>(null);
   const [cloning, setCloning] = useState(false);
+  /** Mã bộ vừa clone xong, đang điều hướng sang builder — chỉ để đổi chữ trên nút. */
+  const [cloneRedirect, setCloneRedirect] = useState<string | null>(null);
 
   // Portal modal ra <body> (tránh bị containing-block của .animate-fade-in-up cắt overlay)
   const [mounted, setMounted] = useState(false);
@@ -252,7 +257,7 @@ export default function ArchivePage() {
         body: form,
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Không nhập được bộ testcase thủ công.");
+      if (!res.ok) throw new Error(data.error || "Không nhập được bộ testcase từ file ZIP.");
       setCreatePanel(null);
       resetManualForm();
       setSandboxNotice({
@@ -284,6 +289,7 @@ export default function ArchivePage() {
     setCloneExamName(`${source.examName || source.examId} (Bản sao)`);
     setCloneNote(source.teacherNote || "");
     setCloneError(null);
+    setCloneRedirect(null);
   };
 
   const closeClone = () => {
@@ -311,17 +317,15 @@ export default function ArchivePage() {
         exam_name: cloneExamName.trim(),
         teacher_note: cloneNote.trim(),
       });
-      setCloneSource(null);
-      setPage(1);
-      setSandboxNotice({
-        type: "ok",
-        title: "Clone bộ testcase thành công",
-        text: `Đã tạo ${data.exam_id || normalizedId} từ ${cloneSource.examId}. Bộ mới đang ở trạng thái bản nháp để bạn mở Sửa và kiểm tra trước khi lưu chính thức.`,
-      });
-      await load();
+      // Bản sao luôn ở trạng thái DRAFT và gần như luôn cần sửa lại → vào thẳng builder
+      // của bộ mới thay vì quay về danh sách rồi bắt người dùng tự bấm Sửa.
+      const newExamId = String(data.exam_id || normalizedId);
+      setCloneRedirect(newExamId);
+      router.push(`/teacher/testcases?exam=${encodeURIComponent(newExamId)}`);
+      // KHÔNG tắt cloning / đóng modal ở đây: giữ nguyên màn "đang mở" cho tới lúc
+      // trang builder hiện ra, tránh nháy về danh sách cũ giữa chừng.
     } catch (e) {
       setCloneError((e as Error).message);
-    } finally {
       setCloning(false);
     }
   };
@@ -368,8 +372,7 @@ export default function ArchivePage() {
               <Plus size={15} /> Tạo bộ testcase
             </button>
           </div>
-          {/* overflow-x-auto: hàng nút nằm trên một dòng nên bảng có thể rộng hơn khung ở màn hẹp */}
-          <div className="custom-scrollbar overflow-x-auto">
+          {/* KHÔNG cuộn ngang: cột Thao tác tự xuống dòng, mã dài tự ngắt → bảng luôn vừa khung. */}
           <table className="w-full text-left text-sm">
             <thead>
               <tr className="border-b border-slate-100 text-[10px] uppercase tracking-wider text-slate-400">
@@ -385,8 +388,10 @@ export default function ArchivePage() {
                 const busy = regrade?.examId === e.examId && regrade.running;
                 return (
                   <tr key={e.examId} className="hover:bg-slate-50/60">
-                    <td className="px-5 py-3 font-mono font-medium text-slate-700">{e.examId}</td>
-                    <td className="px-5 py-3 text-slate-600">{e.examName || "—"}</td>
+                    {/* break-all chứ không phải break-words: mã là một chuỗi liền, chỉ break-all mới
+                        hạ được min-width của cột — nếu không bảng vẫn đòi rộng và bị cắt (card overflow-hidden). */}
+                    <td className="break-all px-5 py-3 font-mono font-medium text-slate-700">{e.examId}</td>
+                    <td className="break-words px-5 py-3 text-slate-600">{e.examName || "—"}</td>
                     <td className="px-5 py-3 text-center">
                       {e.hasTestcase ? (
                         <span className="inline-flex items-center gap-1 rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700"><CheckCircle2 size={10} /> có</span>
@@ -398,57 +403,63 @@ export default function ArchivePage() {
                       <span className="font-mono text-xs text-slate-600">{e.resultCount ?? 0}</span>
                     </td>
                     <td className="px-5 py-3">
-                      {/* Mọi nút cùng một kiểu, nằm ngang hàng trên một dòng (không bọc nhóm) */}
-                      <div className="flex items-center justify-end gap-1.5 whitespace-nowrap">
+                      {/* Nút CHỈ CÒN ICON để cả 6 thao tác nằm gọn trên MỘT hàng, không đẩy bảng
+                          rộng quá khung. Tên thao tác nằm ở title (tooltip) + aria-label. */}
+                      <div className="flex items-center justify-end gap-1.5">
                         <button onClick={() => doDownload(`/exam-setup/${encodeURIComponent(e.examId)}/download/exam-test`, `${e.examId}_exam_test.zip`)}
-                          disabled={!e.hasTestcase} title="Tải testcase: exam_test.dart + grader.dart + skills_matrix.json"
+                          disabled={!e.hasTestcase} aria-label="Tải testcase"
+                          title="Tải testcase: exam_test.dart + grader.dart + skills_matrix.json"
                           className={btnCls("hover:text-indigo-600")}>
-                          <FileArchive size={13} /> Testcase
+                          <FileArchive size={15} />
                         </button>
                         {/* Chỉ bộ dựng từ template mới mở lại builder được; bộ upload ZIP không có config. */}
                         {e.editable !== false ? (
                           <Link href={`/teacher/testcases?exam=${encodeURIComponent(e.examId)}`}
-                            title="Mở lại builder để thêm/bớt/xóa testcase trong bộ này"
+                            aria-label="Sửa bộ testcase"
+                            title="Sửa — mở lại builder để thêm/bớt/xóa testcase trong bộ này"
                             className={btnCls("hover:text-indigo-600")}>
-                            <Pencil size={13} /> Sửa
+                            <Pencil size={15} />
                           </Link>
                         ) : (
-                          <button disabled title="Bộ này được tải lên bằng ZIP nên không có cấu hình để mở lại; hãy tạo một bộ mới nếu cần thay đổi"
+                          <button disabled aria-label="Sửa bộ testcase"
+                            title="Sửa — bộ này được tải lên bằng ZIP nên không có cấu hình để mở lại; hãy tạo một bộ mới nếu cần thay đổi"
                             className={btnCls("")}>
-                            <Pencil size={13} /> Sửa
+                            <Pencil size={15} />
                           </button>
                         )}
                         <button
                           onClick={() => buildSandbox(e.examId)}
                           disabled={!e.hasTestcase || e.testcaseStatus !== "PUBLISHED" || buildingSandbox === e.examId || busy}
+                          aria-label="Build Sandbox"
                           title={e.testcaseStatus !== "PUBLISHED"
-                            ? "Hãy mở bộ testcase và bấm Lưu trước khi Build Sandbox"
-                            : "Kiểm tra bộ chấm và chuẩn bị ảnh nền Docker trực tiếp từ thư mục testcase"}
+                            ? "Build Sandbox — hãy mở bộ testcase và bấm Lưu trước"
+                            : "Build Sandbox — kiểm tra bộ chấm và chuẩn bị ảnh nền Docker trực tiếp từ thư mục testcase"}
                           className={btnCls("hover:text-emerald-600")}
                         >
                           {buildingSandbox === e.examId
-                            ? <Loader2 size={13} className="animate-spin" />
-                            : <Hammer size={13} />}
-                          Build Sandbox
+                            ? <Loader2 size={15} className="animate-spin" />
+                            : <Hammer size={15} />}
                         </button>
-                        <button onClick={() => doRegrade(e.examId)} title="Chấm lại toàn bộ bài đã nộp"
+                        <button onClick={() => doRegrade(e.examId)} aria-label="Chấm lại" title="Chấm lại toàn bộ bài đã nộp"
                           disabled={busy || e.status !== "READY" || (e.resultCount ?? 0) === 0} className={btnCls("hover:text-blue-600")}>
-                          {busy ? <Loader2 size={13} className="animate-spin" /> : <RotateCcw size={13} />} Chấm lại
+                          {busy ? <Loader2 size={15} className="animate-spin" /> : <RotateCcw size={15} />}
                         </button>
-                        <button onClick={() => setConfirmDel(e.examId)} title="Xóa bộ testcase (giải phóng dung lượng)"
+                        <button onClick={() => setConfirmDel(e.examId)} aria-label="Xóa bộ testcase"
+                          title="Xóa bộ testcase (giải phóng dung lượng)"
                           disabled={busy} className={btnCls("text-rose-500 hover:bg-rose-50 hover:text-rose-600")}>
-                          <Trash2 size={13} /> Xóa
+                          <Trash2 size={15} />
                         </button>
                         {/* Clone luôn là thao tác cuối; backend cũng kiểm tra editable để không thể clone bộ ZIP. */}
                         <button
                           onClick={() => openClone(e)}
                           disabled={busy || e.editable === false}
+                          aria-label="Clone đề"
                           title={e.editable === false
-                            ? "Bộ upload ZIP không có cấu hình builder nên không thể clone"
-                            : "Tạo bộ mới chứa toàn bộ testcase, contract và khung code của bộ này"}
+                            ? "Clone đề — bộ upload ZIP không có cấu hình builder nên không thể clone"
+                            : "Clone đề — tạo bộ mới chứa toàn bộ testcase, contract và khung code của bộ này"}
                           className={btnCls("hover:text-violet-600")}
                         >
-                          <Copy size={13} /> Clone đề
+                          <Copy size={15} />
                         </button>
                       </div>
                       {regrade?.examId === e.examId && (
@@ -464,7 +475,6 @@ export default function ArchivePage() {
               })}
             </tbody>
           </table>
-          </div>
           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 bg-slate-50/60 px-5 py-3">
             <div className="flex items-center gap-2 text-xs text-slate-500">
               <span>Hiển thị</span>
@@ -499,7 +509,7 @@ export default function ArchivePage() {
         </div>
       )}
 
-      {/* Tạo bộ testcase — chọn import thủ công hoặc builder từ thư viện. */}
+      {/* Tạo bộ testcase — chọn nhập ZIP có sẵn hoặc tự dựng bằng builder trên web. */}
       {mounted && createPanel && createPortal(
         <div
           className="animate-modal-overlay fixed inset-0 z-50 flex items-center justify-center bg-slate-900/65 p-4 backdrop-blur-sm"
@@ -524,9 +534,9 @@ export default function ArchivePage() {
 
             {createPanel === "choose" ? (
               <>
-                <h3 id="create-testcase-title" className="mb-2 text-xl font-bold">Chọn cách tạo bộ testcase</h3>
-                <p className="mb-6 text-sm text-slate-500">Mỗi cách tạo có quy trình chỉnh sửa khác nhau.</p>
+                <h3 id="create-testcase-title" className="mb-6 text-xl font-bold">Chọn cách tạo bộ testcase</h3>
                 <div className="grid gap-4 md:grid-cols-2">
+                  {/* "Sẵn có" = mang ZIP từ máy lên (state/API vẫn mang tên manual — đừng đổi tên endpoint). */}
                   <button
                     type="button"
                     onClick={() => setCreatePanel("manual")}
@@ -535,12 +545,10 @@ export default function ArchivePage() {
                     <span className="mb-4 flex h-11 w-11 items-center justify-center rounded-xl bg-indigo-100 text-indigo-600">
                       <UploadCloud size={23} />
                     </span>
-                    <span className="mb-2 block text-base font-bold text-slate-800">Tạo bộ testcase thủ công</span>
-                    <span className="block text-sm leading-6 text-slate-500">
-                      Upload ZIP đã có sẵn testcase. Hệ thống tự lấy tên file, giải nén thành thư mục và không cho sửa bằng builder.
-                    </span>
+                    <span className="block text-base font-bold text-slate-800">Tạo bộ testcase sẵn có</span>
                   </button>
 
+                  {/* "Thủ công" = tự dựng từng testcase trong builder trên web. */}
                   <Link
                     href="/teacher/testcases"
                     onClick={closeCreatePanel}
@@ -549,10 +557,7 @@ export default function ArchivePage() {
                     <span className="mb-4 flex h-11 w-11 items-center justify-center rounded-xl bg-emerald-100 text-emerald-600">
                       <Database size={23} />
                     </span>
-                    <span className="mb-2 block text-base font-bold text-slate-800">Tạo bộ testcase từ thư viện có sẵn</span>
-                    <span className="block text-sm leading-6 text-slate-500">
-                      Mở màn hình builder hiện tại để chọn, kéo-thả và cấu hình từng testcase tái sử dụng.
-                    </span>
+                    <span className="block text-base font-bold text-slate-800">Tạo bộ testcase thủ công</span>
                   </Link>
                 </div>
               </>
@@ -566,7 +571,7 @@ export default function ArchivePage() {
                 >
                   <ArrowLeft size={16} /> Quay lại chọn cách tạo
                 </button>
-                <h3 id="create-testcase-title" className="mb-2 text-xl font-bold">Tạo bộ testcase thủ công</h3>
+                <h3 id="create-testcase-title" className="mb-2 text-xl font-bold">Tạo bộ testcase sẵn có</h3>
                 <p className="mb-5 text-sm text-slate-500">
                   ZIP phải chứa trực tiếp exam_test.dart, grader.dart và skills_matrix.json. ZIP chỉ dùng để import và không được lưu lại.
                 </p>
@@ -677,7 +682,7 @@ export default function ArchivePage() {
               <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-violet-100 text-violet-600"><Copy size={22} /></span>
               <div>
                 <h3 id="clone-title" className="text-xl font-bold">Clone bộ testcase</h3>
-                <p className="mt-1 text-sm leading-6 text-slate-500">Sao chép toàn bộ testcase, contract, code sinh và tài liệu từ <strong className="font-mono text-slate-700">{cloneSource.examId}</strong>. Kết quả là một bộ mới độc lập.</p>
+                <p className="mt-1 text-sm leading-6 text-slate-500">Sao chép toàn bộ testcase, contract, code sinh và tài liệu từ <strong className="font-mono text-slate-700">{cloneSource.examId}</strong>. Kết quả là một bộ mới độc lập, tạo xong sẽ mở luôn trình sửa của bản sao.</p>
               </div>
             </div>
             <div className="grid gap-4 md:grid-cols-2">
@@ -695,7 +700,8 @@ export default function ArchivePage() {
             <div className="mt-5 flex justify-end gap-2">
               <button type="button" onClick={closeClone} disabled={cloning} className="rounded-lg px-4 py-2.5 text-sm font-semibold text-slate-500 hover:bg-slate-100 disabled:opacity-40">Hủy</button>
               <button type="button" onClick={cloneTestcaseSet} disabled={cloning || !cloneExamId.trim() || !cloneExamName.trim()} className="inline-flex items-center gap-2 rounded-lg bg-violet-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50">
-                {cloning ? <Loader2 size={16} className="animate-spin" /> : <Copy size={16} />}{cloning ? "Đang clone..." : "Tạo bản sao"}
+                {cloning ? <Loader2 size={16} className="animate-spin" /> : <Copy size={16} />}
+                {cloneRedirect ? "Đang mở trình sửa..." : cloning ? "Đang clone..." : "Tạo bản sao"}
               </button>
             </div>
           </div>

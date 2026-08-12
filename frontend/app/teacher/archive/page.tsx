@@ -317,8 +317,8 @@ export default function ArchivePage() {
         exam_name: cloneExamName.trim(),
         teacher_note: cloneNote.trim(),
       });
-      // Bản sao luôn ở trạng thái DRAFT và gần như luôn cần sửa lại → vào thẳng builder
-      // của bộ mới thay vì quay về danh sách rồi bắt người dùng tự bấm Sửa.
+      // Bản sao được lưu chính thức ngay để có thể Build Sandbox. Đồng thời mở
+      // thẳng builder của bộ mới để người dùng chỉnh tiếp khi cần.
       const newExamId = String(data.exam_id || normalizedId);
       setCloneRedirect(newExamId);
       router.push(`/teacher/testcases?exam=${encodeURIComponent(newExamId)}`);

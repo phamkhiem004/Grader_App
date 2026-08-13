@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import SidebarLayout from "@/components/layout/SidebarLayout";
+import Banner from "@/components/ui/Banner";
 import { API_BASE } from "@/lib/config";
 import {
   Package, Plus, Trash2, Loader2, Hammer, AlertTriangle, CheckCircle2,
@@ -123,11 +124,7 @@ export default function LibrariesPage() {
       {/* Trạng thái build */}
       {build && build.status !== "IDLE" && <BuildBanner build={build} />}
 
-      {err && (
-        <div className="mb-4 flex items-center gap-2 rounded-lg border border-rose-100 bg-rose-50 p-3 text-sm text-rose-600">
-          <AlertTriangle size={15} /> {err}
-        </div>
-      )}
+      {err && <Banner tone="error" onClose={() => setErr(null)}>{err}</Banner>}
 
       {loading ? (
         <div className="flex items-center justify-center py-20 text-slate-400"><Loader2 size={24} className="animate-spin" /></div>

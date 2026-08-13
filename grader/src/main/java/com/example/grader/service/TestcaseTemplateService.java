@@ -291,10 +291,9 @@ public class TestcaseTemplateService {
         cloneBody.put("items", normalizeExistingItems(sourceConfig.get("items")));
         cloneBody.put("contract", sourceConfig.getOrDefault("contract", Map.of()));
 
-        // Clone is already a complete copy of a builder configuration. Publish it
-        // immediately so the archive can build its sandbox without forcing the
-        // instructor through an otherwise redundant Edit -> Save round trip.
-        Map<String, Object> result = publish(targetExamId, cloneBody, actor);
+        // Bản clone là bộ MỚI mà giáo viên gần như luôn sửa tiếp, nên để ở trạng thái Nháp
+        // đúng như bộ tự dựng: chỉ khi bấm Lưu mới thành Hoàn tất và đem chấm được.
+        Map<String, Object> result = saveDraft(targetExamId, cloneBody, actor);
         try {
             examService.cloneHandout(sourceExamId, targetExamId);
         } catch (Exception copyError) {

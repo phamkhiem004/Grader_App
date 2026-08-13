@@ -1061,6 +1061,11 @@ function TestcasesEditor() {
   const [savedExamId, setSavedExamId] = useState(editExamId);
   /** Bật khi CHÍNH trang tự đổi URL sau lúc đổi mã: bỏ qua một lần nạp lại để không mất form. */
   const skipReloadRef = useRef(false);
+  /**
+   * Bộ đã được Lưu chính thức trên server. Tự lưu nháp KHÔNG được đụng vào bộ này: ghi đè
+   * sẽ hạ trạng thái về Nháp và bộ đang dùng để chấm bỗng dưng không chấm được nữa.
+   */
+  const [publishedOnServer, setPublishedOnServer] = useState(false);
 
   const [templates, setTemplates] = useState<Template[]>([]);
   const [examId, setExamId] = useState("");
@@ -1157,6 +1162,7 @@ function TestcasesEditor() {
           return;
         }
         setMissingConfig(false);
+        setPublishedOnServer(String(data.status || "").toUpperCase() === "PUBLISHED");
         setItems(Array.isArray(data.items) ? data.items as TestcaseItem[] : []);
         setExamName(typeof data.exam_name === "string" ? data.exam_name : "");
         setTeacherNote(typeof data.teacher_note === "string" ? data.teacher_note : "");
@@ -1896,6 +1902,42 @@ function TestcasesEditor() {
   // đúng như lúc tạo bộ mới, nên dùng chung kết quả kiểm tra trùng.
   const renameTarget = isEdit && examId.trim() && examId.trim() !== savedExamId ? examId.trim() : "";
   const needsIdCheck = !isEdit || !!renameTarget;
+
+  /**
+   * TỰ LƯU NHÁP. Bộ testcase mới phải có mặt trong Kho ngay với trạng thái Nháp, để người
+   * dùng đóng tab hay app tắt giữa chừng vẫn không mất công đã làm — chỉ khi bấm Lưu mới
+   * chuyển sang Hoàn tất và đem chấm được.
+   *
+   * Ba chốt chặn: KHÔNG đụng bộ đã Lưu chính thức, KHÔNG ghi đè mã đang thuộc về bộ khác
+   * (chờ kiểm tra mã xong), và chờ 2 giây sau lần gõ cuối để không bắn request mỗi phím.
+   */
+  const autoDraftRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (publishedOnServer || missingConfig || loadingExam || saving) return;
+    const id = examId.trim().toUpperCase();
+    const name = examName.trim();
+    if (!/^[A-Z0-9_-]{1,50}$/.test(id) || !name || items.length === 0) return;
+    if (needsIdCheck && examIdCheck !== "available") return;
+
+    if (autoDraftRef.current) clearTimeout(autoDraftRef.current);
+    autoDraftRef.current = setTimeout(() => {
+      fetch(`${API_BASE}/exam-setup/${encodeURIComponent(id)}/testcases/draft`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          exam_name: name,
+          teacher_note: teacherNote.trim(),
+          items,
+          contract: { require_keys: requireKeys, keys: contractKeys },
+        }),
+      })
+        .then((r) => { if (r.ok) setSavedExamId(id); })
+        .catch(() => { /* im lặng: đây là lưới an toàn, không phải thao tác người dùng yêu cầu */ });
+    }, 2000);
+
+    return () => { if (autoDraftRef.current) clearTimeout(autoDraftRef.current); };
+  }, [examId, examName, teacherNote, items, requireKeys, contractKeys,
+      publishedOnServer, missingConfig, loadingExam, saving, needsIdCheck, examIdCheck]);
 
   const save = async (kind: "draft" | "publish") => {
     if (!examId.trim()) {

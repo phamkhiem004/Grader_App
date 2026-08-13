@@ -29,8 +29,20 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * gì đỏ. Giáo viên để trống ô expected là dính bản mặc định ấy, và `expected` đi vào prompt của
  * bot sinh nhận xét — gửi hàng loạt.
  *
- * <p>Nên test này áp cho `expected` máy sinh đúng những luật ACCEPTANCE áp cho `actual`:
- * C3 (không lộ khoá nội bộ) và C4 (không có từ vựng của bộ chấm).
+ * <p><b>NỚI 2026-08-12 — chủ đồ án quyết: `expected` ĐƯỢC PHÉP chứa khoá chấm và chữ tiếng Anh.</b>
+ * Trước đó test này áp thêm C3 (không lộ khoá) và C4 (không từ vựng bộ chấm) lên `expected` máy
+ * sinh. Lý do nới: khoá KHÔNG phải bí mật — theo `docs/common-testcase-contract.md`, chính sinh
+ * viên gắn `ValueKey('field.email')` vào widget và còn được phát `exam_keys.dart`, nên nhắc khoá
+ * trong câu yêu cầu là nhắc đúng thứ các em đang cầm trong tay.
+ *
+ * <p><b>Còn giữ lại gì:</b> hai phép kiểm về HÌNH DẠNG, không phải về từ vựng — chỗ thay thế
+ * `{foo}` chưa được điền, và `{foo}` không có trong `parameters_schema`. Hai cái đó vẫn là lỗi
+ * thật: chuỗi `{updatedResultKey}` in nguyên xi ra màn hình thì không ai đọc được, kể cả người
+ * thuộc lòng mọi khoá.
+ *
+ * <p><b>KHÔNG đụng tới `actual`.</b> C3/C4 của `verify_result.py` áp cho `actual` — thứ engine tự
+ * phát ra lúc chấm — vẫn nguyên vẹn. Nới ở đây chỉ nới đúng `expected`, và {@code violations()}
+ * cũng chỉ được gọi trên `expected` (hai chỗ: test này và {@code MachineExpectedSampleTest}).
  *
  * <p>Phạm vi đã đo, nói rõ để không phát biểu rộng hơn phép đo: chỉ phần MÁY SINH. Câu giảng viên
  * tự gõ vào ô expected đi thẳng, Grader chỉ bảo đảm nguyên văn — xem SPEC.
@@ -47,27 +59,10 @@ class TemplateExpectedTextTest {
     private static final String FREE_TEXT_MASK = "«nội dung giảng viên nhập»";
 
     /**
-     * C3 cho `expected`: semantic key có dạng chấm-phân-cách (`action.delete.1`, `screen.home`).
-     * Luật C3 của verify_result.py bắt hình dạng log Flutter (`key [<…>]`); ở đây khoá tới thẳng
-     * từ tham số nên phải bắt đúng hình dạng tham số.
+     * Từ vựng bộ chấm. KHÔNG còn cưỡng chế trên `expected` (nới 2026-08-12, xem javadoc đầu lớp),
+     * nhưng VẪN dùng ở {@link #everyLabelInTheVocabularyIsVietnamese}: nhãn trong từ điển giá trị
+     * sinh ra để THAY chữ tiếng Anh, nhãn đó mà cũng tiếng Anh thì có từ điển bằng thừa.
      */
-    private static final Pattern DOTTED_KEY = Pattern.compile(
-            "(?<![\\w@.])[a-zA-Z][\\w-]*(\\.[\\w-]+)+(?![\\w@])");
-
-    /**
-     * MIỄN TRỪ HẸP của C3 — tên file mã nguồn. `public_contract.dart` khớp hình dạng "chữ.chữ"
-     * của DOTTED_KEY nhưng KHÔNG phải khoá chấm: nói tên file cho sinh viên là ngôn ngữ bình
-     * thường của đề bài ("cài `validateInput` trong `lib/domain/public_contract.dart`"), khác hẳn
-     * việc để lọt `action.save` — thứ sinh viên không có cách nào hiểu.
-     *
-     * <p>Chỉ miễn đúng các đuôi file liệt kê dưới đây; mọi hình dạng chấm khác vẫn bị bắt như cũ.
-     * Không có khoá nào trong ngữ pháp khoá kết thúc bằng các đuôi này nên miễn trừ không mở
-     * đường cho khoá thật lọt qua.
-     */
-    private static final Pattern SOURCE_FILE_NAME = Pattern.compile(
-            "(?i)[\\w-]+\\.(dart|json|ya?ml|md|txt)");
-
-    /** C4 cho `expected`: từ vựng của bộ chấm/Flutter. `px` là ký hiệu đơn vị, không tính. */
     private static final List<String> ENGLISH_MARKERS = List.of(
             "widget", "target", "key", "render", "overflow", "renderflex", "portrait", "landscape",
             "submit", "prefill", "semantics", "label", "enabled", "equals", "contains", "state",
@@ -109,30 +104,31 @@ class TemplateExpectedTextTest {
         return out;
     }
 
-    /** Luật C3/C4 áp cho `expected` — dùng chung với {@link MachineExpectedSampleTest}. */
+    /**
+     * Phép kiểm còn lại cho `expected` — dùng chung với {@link MachineExpectedSampleTest}.
+     *
+     * <p>Chỉ còn HÌNH DẠNG: chỗ thay thế chưa được điền. Khoá chấm và chữ tiếng Anh nay được
+     * phép (nới 2026-08-12, xem javadoc đầu lớp).
+     */
     static List<String> violations(String id, String text) {
         List<String> bad = new ArrayList<>();
-        Matcher key = DOTTED_KEY.matcher(text);
-        while (key.find()) {
-            if (SOURCE_FILE_NAME.matcher(key.group()).matches()) continue;   // tên file, không phải khoá
-            bad.add(id + ": lộ khoá '" + key.group() + "' — " + text);
-        }
-        String lower = text.toLowerCase();
-        for (String marker : ENGLISH_MARKERS) {
-            if (lower.contains(marker)) bad.add(id + ": từ vựng bộ chấm '" + marker + "' — " + text);
-        }
         if (text.contains("{") || text.contains("}"))
             bad.add(id + ": còn chỗ thay thế chưa điền — " + text);
         return bad;
     }
 
     /**
-     * (1) Bản thân 22 chuỗi template: cấm chỗ thay thế `{…Key}` và cấm từ vựng tiếng Anh.
+     * (1) Bản thân các chuỗi template: mọi chỗ thay thế phải KHAI ĐƯỢC từ `parameters_schema`.
      *
      * <p>Đây là phép kiểm TĨNH — bắt lỗi ngay lúc ai đó thêm template mới, không cần render.
+     *
+     * <p>Không còn cấm `{…Key}` hay chữ tiếng Anh (nới 2026-08-12). Cái còn cấm là chỗ thay thế
+     * KHÔNG CÓ trong `parameters_schema`: nó không bao giờ được điền, nên `{updatedResultKey}` sẽ
+     * in nguyên xi vào câu gửi sinh viên — lỗi này không liên quan gì tới việc khoá có bí mật hay
+     * không, người thuộc lòng mọi khoá đọc vẫn không hiểu.
      */
     @Test
-    void noExpectedTemplateLeaksAKeyPlaceholderOrEnglishWord() throws Exception {
+    void everyPlaceholderIsDeclaredInParametersSchema() throws Exception {
         List<String> bad = new ArrayList<>();
         for (JsonNode t : templates()) {
             String id = t.path("template_id").asText();
@@ -143,16 +139,8 @@ class TemplateExpectedTextTest {
             Set<String> placeholders = new LinkedHashSet<>();
             while (m.find()) placeholders.add(m.group(1));
             for (String name : placeholders) {
-                if (name.toLowerCase().endsWith("key") || name.toLowerCase().endsWith("keys"))
-                    bad.add(id + ": chỗ thay thế khoá {" + name + "} — khoá sẽ đi thẳng vào expected");
                 if (!t.path("parameters_schema").has(name))
                     bad.add(id + ": {" + name + "} không có trong parameters_schema — sẽ in ra nguyên xi");
-            }
-            // Chữ ngoài chỗ thay thế phải là tiếng Việt: bỏ chỗ thay thế rồi mới soi.
-            String prose = template.replaceAll("\\{\\w+}", " ");
-            String lower = prose.toLowerCase();
-            for (String marker : ENGLISH_MARKERS) {
-                if (lower.contains(marker)) bad.add(id + ": từ vựng bộ chấm '" + marker + "' — " + template);
             }
         }
         assertTrue(bad.isEmpty(), "expected_template chưa sạch:\n  " + String.join("\n  ", bad));

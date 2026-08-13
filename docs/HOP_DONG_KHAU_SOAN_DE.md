@@ -205,6 +205,75 @@ mục `exams/` không chấm được vì thiếu bản ghi CSDL). Nên mọi đ
 
 ---
 
+## 5b. 🔴 KHIẾM KHUYẾT NẶNG NHẤT: ảnh chấm tải thư viện SQLite **qua mạng lúc đang chấm**
+
+**Triệu chứng: cùng một bài nộp, chấm hai lần ra hai điểm khác nhau — chênh tới 6.7 điểm.**
+
+Đây là khiếm khuyết ăn thẳng vào điểm số sinh viên, và **nó im lặng**: nhìn `result.json` thì cả
+hai lần đều là dữ liệu hợp lệ, không có cờ nào báo "lần này đo hỏng".
+
+### Đo được (chạy thật, không phải đọc code)
+
+Bộ fixture `fixtures/result-json-v2`, bài `medium`, cùng ảnh `grading-base:latest`, cùng lệnh,
+hai lần chạy cách nhau vài phút:
+
+| | điểm | đạt | trạng thái các testcase |
+|---|---|---|---|
+| lần 1 | **0.0** | 0/25 | cả 25 testcase = `not_run` |
+| lần 2 | **6.7** | 19/25 | khớp kỳ vọng |
+
+### Nguyên nhân
+
+`runner_error` của lần hỏng nói thẳng:
+
+```
+Unhandled exception: By default, this package downloads a pre-compiled SQLite library.
+This failed (attempted to download
+  .../sqlite3.dart/releases/download/sqlite3-3.5.1/libsqlite3.x64.linux.so)
+Original cause: SocketException: Connection refused, address = github.com
+```
+
+`grader-base/pubspec.base.yaml` khai `sqflite_common_ffi`; gói này kéo theo package `sqlite3`, và
+package đó **tải thư viện native từ GitHub vào LẦN CHẠY ĐẦU TIÊN** — tức lúc chấm bài, không phải
+lúc dựng ảnh. `flutter pub get` trong `Dockerfile.base` chỉ kéo mã Dart, **không** nướng được file
+`.so` đó vào ảnh.
+
+⇒ Mỗi lần chấm là một lần phụ thuộc mạng. Mạng hụt đúng một nhịp thì **cả bộ test không khởi
+động**, và sinh viên nhận **0 điểm vì lý do không liên quan gì tới mã nguồn của em ấy**.
+
+### Vì sao chúng tôi xin xếp việc này ưu tiên cao nhất
+
+- Quy mô: mọi đề có testcase chạm SQLite đều dính. Một đợt 100–200 bài mà mạng chập một lúc là
+  cả loạt bài đó sai điểm cùng nhau.
+- Không ai phát hiện được sau đó: điểm 0 trông y hệt điểm 0 do bài làm hỏng thật.
+- Phía bot nhận xét **không đỡ được**: họ chỉ thấy `not_run` hợp lệ, nên sẽ viết nhận xét theo
+  hướng "bài chưa chạy được" — nói sai với sinh viên làm đúng.
+
+### Cách tái hiện (chưa tới một phút)
+
+```bash
+cd fixtures/result-json-v2
+./run-fixture.sh medium      # chạy vài lần; lần nào mạng tới GitHub trục trặc thì ra 0.0
+```
+
+Muốn ép ra lỗi ngay: chạy `docker run` với `--network none` rồi chấm lại bài `medium`.
+
+### Gợi ý phương án (các bạn quyết, chúng tôi không tự sửa)
+
+1. **Trỏ sang thư viện hệ thống** — ảnh **đã cài sẵn** `libsqlite3-0` và `libsqlite3-dev` qua apt.
+   Package `sqlite3` cho phép chỉ định thư viện thay vì tải; xem `hook-topic` trong chính thông
+   báo lỗi. Đây là hướng gọn nhất và bỏ hẳn phụ thuộc mạng.
+2. **Nướng sẵn file `.so` vào ảnh** lúc build (build có mạng, chấm thì không cần).
+3. Dù chọn hướng nào, nên **chạy chấm với `--network none`** để mọi phụ thuộc mạng còn sót lại
+   biến thành lỗi build ồn ào thay vì sai điểm im lặng.
+
+### 📣 Xin báo lại chúng tôi khi sửa xong
+
+Chúng tôi cần **mốc** đó để nói với phía bot nhận xét *"từ đây điểm không còn phụ thuộc mạng"*, và
+để đánh giá lại các đợt chấm đã thực hiện trước mốc.
+
+---
+
 ## 6. Những chỗ chúng tôi đã đụng vào code của các bạn
 
 Làm trong lúc các bạn refactor, nên **báo đủ để các bạn quyết giữ / sửa / gỡ**. Nhánh `chien1`.
@@ -241,19 +310,25 @@ không sót — cả ba đều hỏng **lúc chạy** chứ không lúc biên d�
 nay điều đó thành vĩnh viễn. Nếu sau này nhà trường cần vết truy đó thì phải **thêm trường vào
 `result.json`**, và đó là **đổi hợp đồng ⇒ báo chúng tôi trước**.
 
-### Ba lỗi phía các bạn chúng tôi phát hiện khi đo (đã sửa, không phải bàn giao)
+### Bốn lỗi phía các bạn chúng tôi phát hiện khi đo (đã sửa, không phải bàn giao)
 
 | Lỗi | Hệ quả nếu để nguyên |
 |---|---|
 | `WIDGET_VISIBLE`/`BUTTON_ACTION` thiếu `targetType` trong `parameters_schema`, dù engine và validator **đều đã hỗ trợ** | Nhánh validate là code không bao giờ chạy; đề khai `targetType` bị từ chối oan |
 | Bấm "Thêm vào đề" hai lần trong cùng một tick ⇒ hai testcase **trùng `instance_id`** | Trùng id hỏng im lặng: tick một ô thì cả hai cùng tick, sửa/xoá một cái trúng cả hai; giáo viên chỉ biết lúc bấm Lưu |
 | Tên nhóm mặc định đếm **số testcase có nhóm** thay vì **số nhóm** | 3 testcase trong 1 nhóm ⇒ tên gợi ý "Nhóm kiểm tra 04" |
+| **`syllabus.json` 2026.5 không nạp nổi vào DB**: cột `skill.testable` khai `length=10` mà từ vựng mới dài tới 28 ký tự (`pipeline_and_manual_evidence`) ⇒ RE-SEED chết ngay dòng đầu với `Data truncation` | **Tính năng 52 template curriculum của các bạn chết ngay từ đầu.** Bảng `skill` đứng ở 52 skill cũ, thiếu 19 skill mới; **10 skill_code** mà template curriculum cần (`API_HTTP_REST`, `STORAGE_SQLITE_CRUD`, `AUTH_LOGIN_SIGNUP`…) không có trong DB ⇒ `ExamService.validateSkillCodes` ném lỗi ⇒ **giáo viên chọn trúng nhóm đó là không lưu được đề**. Lỗi này **không test nào bắt được** vì nó chỉ xảy ra lúc seed vào MySQL thật — chúng tôi chỉ thấy khi bật stack lên chạy |
+
+> Về dòng cuối: chúng tôi nới cột lên 32 (`Skill.java`). `ddl-auto: update` nên DB tự sửa lúc khởi
+> động lại. Nếu sau này các bạn thêm giá trị `testable` dài hơn nữa thì phải nới tiếp — cân nhắc
+> đổi hẳn sang `VARCHAR(64)` hoặc bỏ trần, vì từ vựng này do `syllabus.json` định nghĩa chứ không
+> phải enum đóng trong code.
 
 ---
 
 ## 7. Cách tự kiểm sau khi các bạn đổi workflow
 
-Bộ test backend hiện có **118 test**, trong đó các lớp sau khoá đúng những gì tài liệu này mô tả —
+Bộ test backend hiện có **119 test**, trong đó các lớp sau khoá đúng những gì tài liệu này mô tả —
 **đừng xoá chúng, chúng đỏ là hợp đồng vỡ**:
 
 | Lớp test | Khoá điều gì |

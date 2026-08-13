@@ -5,12 +5,18 @@ import 'dart:ui' show Size;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 // Engine chung chỉ nhìn vào semantic key công khai, không import model/repository của bài.
 import '../lib/main.dart' as student_app;
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  // Máy chấm chạy Linux headless, không có platform channel Android/iOS của sqflite.
+  // Khởi tạo factory FFI một lần ở runner để mọi bài dùng sqflite đều mở DB thật được.
+  sqfliteFfiInit();
+  // noIsolate tránh isolate nền của sqflite_common_ffi bị treo trong Docker headless.
+  databaseFactory = createDatabaseFactoryFfi(noIsolate: true);
   final matrix = _loadMatrix();
   final mode = Platform.environment['GRADER_CASE_MODE'] ?? 'all';
   final selectedCase = Platform.environment['GRADER_CASE_ID'];
@@ -176,6 +182,21 @@ Future<void> _runCase(
     case 'STATE_REACTIVE_FLOW':
       await _checkStateReactiveFlow(tester, parameters);
       return;
+    case 'FORM_PERSISTENCE_FLOW':
+      await _checkFormPersistenceFlow(tester, parameters);
+      return;
+    case 'CRUD_EDIT_FLOW':
+      await _checkCrudEditFlow(tester, parameters);
+      return;
+    case 'CRUD_DELETE_FLOW':
+      await _checkCrudDeleteFlow(tester, parameters);
+      return;
+    case 'CRUD_DETAIL_FLOW':
+      await _checkCrudDetailFlow(tester, parameters);
+      return;
+    case 'RESPONSIVE_GRID_FLOW':
+      await _checkResponsiveGridFlow(tester, parameters);
+      return;
     case 'GROUP':
       await _checkGroup(tester, testId, metadata);
       return;
@@ -310,17 +331,26 @@ Future<void> _checkGroup(
     fail('Nhóm $groupId không có testcase con.');
   }
 
+  final previousDepth = _groupDepth;
+  final previousBooted = _groupBooted;
+  _groupDepth++;
+  _groupBooted = false;
   final failures = <String>[];
-  for (final rawChild in rawChildren) {
-    final child = _asMap(rawChild);
-    final childId = _text(child, 'instance_id', 'child');
-    try {
-      await _runCase(tester, '$groupId/$childId', child);
-    } catch (error) {
-      // Nêu TÊN yêu cầu con (tiếng Việt, giáo viên nhập) chứ không nêu instance_id:
-      // chuỗi này chảy vào result_json nên không được lộ định danh nội bộ.
-      failures.add('${_text(child, 'name', 'Yêu cầu con')}: $error');
+  try {
+    for (final rawChild in rawChildren) {
+      final child = _asMap(rawChild);
+      final childId = _text(child, 'instance_id', 'child');
+      try {
+        await _runCase(tester, '$groupId/$childId', child);
+      } catch (error) {
+        // Nêu TÊN yêu cầu con (tiếng Việt, giáo viên nhập) chứ không nêu instance_id:
+        // chuỗi này chảy vào result_json nên không được lộ định danh nội bộ.
+        failures.add('${_text(child, 'name', 'Yêu cầu con')}: $error');
+      }
     }
+  } finally {
+    _groupDepth = previousDepth;
+    _groupBooted = previousBooted;
   }
 
   if (failures.isNotEmpty) {
@@ -330,6 +360,359 @@ Future<void> _checkGroup(
       'Chưa đạt yêu cầu "${metadata['name'] ?? groupId}":\n${failures.join('\n')}',
     );
   }
+}
+
+Future<void> _fillFields(
+  WidgetTester tester,
+  Map<String, dynamic> parameters, {
+  String fieldKeysName = 'fieldKeys',
+  String valuesName = 'values',
+}) async {
+  final fields = _csv(parameters, fieldKeysName);
+  final values = _csv(parameters, valuesName);
+  if (fields.isEmpty || fields.length != values.length) {
+    fail('$fieldKeysName và $valuesName phải có cùng số phần tử.');
+  }
+  final fieldType = _text(parameters, 'fieldType', 'input');
+  for (var index = 0; index < fields.length; index++) {
+    final finder = _byKey(fields[index]);
+    _expectPresent(finder, 'field', 'Thiếu field key: ${fields[index]}');
+    _assertTargetType(tester, finder, fields[index], fieldType);
+    await tester.enterText(finder, _decodeInput(values[index]));
+  }
+}
+
+Future<void> _submitCurrentForm(
+  WidgetTester tester,
+  Map<String, dynamic> parameters, {
+  String submitKeyName = 'submitKey',
+  String resultKeyName = 'resultKey',
+}) async {
+  final submitKey = _requiredText(parameters, submitKeyName);
+  await _tap(tester, _byKey(submitKey), 'Không tìm thấy nút lưu: $submitKey');
+  await _settle(tester);
+  _failIfActionThrew(tester);
+  final resultKey = _text(parameters, resultKeyName);
+  if (resultKey.isNotEmpty) {
+    await _revealKey(tester, resultKey);
+    _expectPresent(
+      _byKey(resultKey),
+      'item',
+      'Lưu xong nhưng không thấy kết quả: $resultKey',
+      where: 'after_action',
+    );
+  }
+}
+
+Finder _actionInside(String itemKey, String actionKey) {
+  final item = _byKey(itemKey);
+  _expectPresent(item, 'item', 'Không tìm thấy item cần thao tác: $itemKey');
+  final exact = find.descendant(
+    of: item,
+    matching: find.byKey(ValueKey<String>(actionKey), skipOffstage: false),
+  );
+  if (exact.evaluate().isNotEmpty) return exact;
+
+  final rule = _contractRule(actionKey);
+  final scoped = rule == null ? null : _contractFinderWithin(rule, item);
+  if (scoped != null && scoped.evaluate().isNotEmpty) return scoped;
+  return find.descendant(of: item, matching: _byKey(actionKey));
+}
+
+/// Đưa item lazy của ListView/GridView vào cây widget trước khi kiểm tra/tap.
+/// Không dùng pumpAndSettle vì animation hợp lệ có thể chạy vô hạn.
+Future<void> _revealKey(WidgetTester tester, String key) async {
+  if (_byKey(key).evaluate().isNotEmpty) return;
+  for (var attempt = 0; attempt < 30; attempt++) {
+    final scrollables = find.byType(Scrollable, skipOffstage: false);
+    final count = scrollables.evaluate().length;
+    if (count == 0) return;
+    await tester.drag(scrollables.at(count - 1), const Offset(0, -180));
+    await _settle(tester);
+    if (_byKey(key).evaluate().isNotEmpty) return;
+  }
+}
+
+Future<void> _restartStudentApp(WidgetTester tester) async {
+  await tester.pumpWidget(const SizedBox.shrink());
+  await tester.pump();
+  final wasBooted = _groupBooted;
+  _groupBooted = false;
+  try {
+    await _boot(tester);
+  } finally {
+    if (_groupDepth == 0) _groupBooted = wasBooted;
+  }
+}
+
+/// Luồng tái sử dụng: nhập form → lưu → dựng app mới → dữ liệu vẫn còn.
+/// Không biết tên Model/Repository/bảng SQLite; chỉ kiểm tra kết quả quan sát được.
+Future<void> _checkFormPersistenceFlow(
+  WidgetTester tester,
+  Map<String, dynamic> parameters,
+) async {
+  await _boot(tester);
+  await _fillFields(tester, parameters);
+  await _submitCurrentForm(tester, parameters);
+  await _restartStudentApp(tester);
+  final resultKey = _requiredText(parameters, 'resultKey');
+  await _revealKey(tester, resultKey);
+  _expectPresent(
+    _byKey(resultKey),
+    'item',
+    'Dữ liệu không còn sau khi dựng lại ứng dụng: $resultKey',
+    where: 'after_restart',
+  );
+}
+
+/// Luồng sửa tổng quát: tự tạo fixture qua UI, tìm action bên trong đúng item,
+/// kiểm tra prefill rồi submit dữ liệu mới. Mọi điểm nối đều là tham số semantic key.
+Future<void> _checkCrudEditFlow(
+  WidgetTester tester,
+  Map<String, dynamic> parameters,
+) async {
+  await _boot(tester);
+  await _fillFields(tester, parameters, valuesName: 'seedValues');
+  await _submitCurrentForm(tester, parameters, resultKeyName: 'seedResultKey');
+
+  final itemKey = _requiredText(parameters, 'itemKey');
+  final editKey = _requiredText(parameters, 'editKey');
+  await _revealKey(tester, itemKey);
+  final edit = _actionInside(itemKey, editKey);
+  await _tap(tester, edit, 'Không tìm thấy nút sửa trong đúng item: $itemKey');
+  await _settle(tester);
+  _failIfActionThrew(tester);
+
+  final fields = _csv(parameters, 'fieldKeys');
+  final prefill = _csv(parameters, 'expectedPrefillValues');
+  if (fields.length != prefill.length) {
+    fail('fieldKeys và expectedPrefillValues phải có cùng số phần tử.');
+  }
+  for (var index = 0; index < fields.length; index++) {
+    final field = _byKey(fields[index]);
+    _expectPresent(field, 'field', 'Thiếu field khi sửa: ${fields[index]}');
+    final editable = find.descendant(
+      of: field,
+      matching: find.byType(EditableText),
+    );
+    _expectPresent(
+      editable,
+      'field',
+      'Field ${fields[index]} không phải ô nhập.',
+    );
+    final actual = tester.widget<EditableText>(editable).controller.text;
+    expect(
+      actual,
+      _decodeInput(prefill[index]),
+      reason: 'Dữ liệu prefill không đúng.',
+    );
+  }
+
+  await _fillFields(tester, parameters, valuesName: 'updatedValues');
+  await _submitCurrentForm(
+    tester,
+    parameters,
+    resultKeyName: 'updatedResultKey',
+  );
+  final oldResultKey = _text(parameters, 'oldResultKey');
+  if (oldResultKey.isNotEmpty) {
+    _expectGone(
+      _byKey(oldResultKey),
+      'item',
+      'Sửa xong nhưng dữ liệu cũ vẫn còn hiển thị.',
+      where: 'after_action',
+    );
+  }
+}
+
+/// Luồng xóa tổng quát: seed → mở dialog → hủy giữ nguyên item → mở lại → xác nhận
+/// và kiểm tra đúng item đã biến mất.
+Future<void> _checkCrudDeleteFlow(
+  WidgetTester tester,
+  Map<String, dynamic> parameters,
+) async {
+  await _boot(tester);
+  await _fillFields(tester, parameters, valuesName: 'seedValues');
+  await _submitCurrentForm(tester, parameters, resultKeyName: 'seedResultKey');
+
+  final itemKey = _requiredText(parameters, 'itemKey');
+  final deleteKey = _requiredText(parameters, 'deleteKey');
+  final dialogKey = _requiredText(parameters, 'dialogKey');
+  final cancelKey = _requiredText(parameters, 'cancelKey');
+  final confirmKey = _requiredText(parameters, 'confirmKey');
+
+  await _revealKey(tester, itemKey);
+
+  Future<void> openDialog() async {
+    await _tap(
+      tester,
+      _actionInside(itemKey, deleteKey),
+      'Không tìm thấy nút xóa trong đúng item.',
+    );
+    await _settle(tester);
+    _failIfActionThrew(tester);
+    _expectPresent(
+      _byKey(dialogKey),
+      'dialog',
+      'Không mở được hộp thoại xác nhận.',
+    );
+  }
+
+  await openDialog();
+  await _tap(tester, _byKey(cancelKey), 'Không tìm thấy nút hủy xóa.');
+  await _settle(tester);
+  _failIfActionThrew(tester);
+  _expectPresent(_byKey(itemKey), 'item', 'Hủy xóa nhưng item đã biến mất.');
+
+  await openDialog();
+  await _tap(tester, _byKey(confirmKey), 'Không tìm thấy nút xác nhận xóa.');
+  await _settle(tester);
+  _failIfActionThrew(tester);
+  _expectGone(
+    _byKey(itemKey),
+    'item',
+    'Xác nhận xóa nhưng item vẫn còn.',
+    where: 'after_action',
+  );
+}
+
+Future<void> _checkCrudDetailFlow(
+  WidgetTester tester,
+  Map<String, dynamic> parameters,
+) async {
+  await _boot(tester);
+  await _fillFields(tester, parameters, valuesName: 'seedValues');
+  await _submitCurrentForm(tester, parameters, resultKeyName: 'seedResultKey');
+
+  final itemKey = _requiredText(parameters, 'itemKey');
+  final openKey = _text(parameters, 'openKey');
+  await _revealKey(tester, itemKey);
+  final openFinder = openKey.isEmpty
+      ? _byKey(itemKey)
+      : _actionInside(itemKey, openKey);
+  await _tap(tester, openFinder, 'Không tìm thấy vùng mở chi tiết.');
+  await _settle(tester);
+  _failIfActionThrew(tester);
+  final destinationKey = _requiredText(parameters, 'destinationKey');
+  _expectPresent(
+    _byKey(destinationKey),
+    'screen',
+    'Không mở được màn hình chi tiết.',
+  );
+
+  final detailKeys = _csv(parameters, 'detailTextKeys');
+  final expectedValues = _csv(parameters, 'expectedDetailValues');
+  if (detailKeys.length != expectedValues.length) {
+    fail('detailTextKeys và expectedDetailValues phải có cùng số phần tử.');
+  }
+  for (var index = 0; index < detailKeys.length; index++) {
+    final finder = _byKey(detailKeys[index]);
+    _expectPresent(finder, 'text', 'Thiếu dữ liệu trên màn chi tiết.');
+    final textWidget = tester.widget<Text>(finder);
+    expect(
+      textWidget.data ?? '',
+      contains(_decodeInput(expectedValues[index])),
+      reason: 'Màn chi tiết nhận sai dữ liệu.',
+    );
+  }
+  final detailVisualKey = _text(parameters, 'detailVisualKey');
+  if (detailVisualKey.isNotEmpty) {
+    _expectPresent(
+      _byKey(detailVisualKey),
+      'image',
+      'Thiếu nội dung hình ảnh ở chi tiết.',
+    );
+  }
+}
+
+void _expectItemsInColumns(
+  WidgetTester tester,
+  String firstKey,
+  String secondKey, {
+  required bool sameRow,
+  required String where,
+}) {
+  final first = _byKey(firstKey);
+  final second = _byKey(secondKey);
+  _expectPresent(first, 'item', 'Thiếu item thứ nhất ở $where.');
+  _expectPresent(second, 'item', 'Thiếu item thứ hai ở $where.');
+  final a = tester.getRect(first);
+  final b = tester.getRect(second);
+  if (sameRow) {
+    expect(
+      (a.top - b.top).abs(),
+      lessThanOrEqualTo(6),
+      reason: '$where phải có hai cột.',
+    );
+    expect(
+      (a.center.dx - b.center.dx).abs(),
+      greaterThan(20),
+      reason: '$where phải tách hai cột.',
+    );
+  } else {
+    expect(
+      (a.top - b.top).abs(),
+      greaterThan(10),
+      reason: '$where phải xếp một cột dọc.',
+    );
+  }
+}
+
+/// Kiểm tra quan hệ một/hai cột thay vì ép GridView hoặc pixel cụ thể.
+Future<void> _checkResponsiveGridFlow(
+  WidgetTester tester,
+  Map<String, dynamic> parameters,
+) async {
+  tester.view.devicePixelRatio = 1.0;
+  addTearDown(tester.view.resetPhysicalSize);
+  addTearDown(tester.view.resetDevicePixelRatio);
+  tester.view.physicalSize = Size(
+    _number(parameters, 'phoneWidth', 400),
+    _number(parameters, 'phoneHeight', 900),
+  );
+  await _boot(tester);
+  await _fillFields(tester, parameters, valuesName: 'firstValues');
+  await _submitCurrentForm(tester, parameters, resultKeyName: 'firstItemKey');
+  await _fillFields(tester, parameters, valuesName: 'secondValues');
+  await _submitCurrentForm(tester, parameters, resultKeyName: 'secondItemKey');
+  final firstKey = _requiredText(parameters, 'firstItemKey');
+  final secondKey = _requiredText(parameters, 'secondItemKey');
+  _expectNoLayoutError(tester, where: 'phone_portrait');
+  _expectItemsInColumns(
+    tester,
+    firstKey,
+    secondKey,
+    sameRow: false,
+    where: 'Phone dọc',
+  );
+
+  tester.view.physicalSize = Size(
+    _number(parameters, 'landscapeWidth', 700),
+    _number(parameters, 'landscapeHeight', 400),
+  );
+  await _settle(tester);
+  _expectNoLayoutError(tester, where: 'phone_landscape');
+  _expectItemsInColumns(
+    tester,
+    firstKey,
+    secondKey,
+    sameRow: true,
+    where: 'Phone ngang',
+  );
+
+  tester.view.physicalSize = Size(
+    _number(parameters, 'tabletWidth', 800),
+    _number(parameters, 'tabletHeight', 1100),
+  );
+  await _settle(tester);
+  _expectNoLayoutError(tester, where: 'tablet');
+  _expectItemsInColumns(
+    tester,
+    firstKey,
+    secondKey,
+    sameRow: true,
+    where: 'Tablet',
+  );
 }
 
 Future<void> _checkStateReactiveFlow(
@@ -545,11 +928,25 @@ void _expectGone(
 /// PHẢI khớp hằng cùng tên trong `grader.dart` (hai chương trình Dart riêng, không import nhau).
 const String kBootFailedMarker = '###GRADER_BOOT_FAILED###';
 
+int _groupDepth = 0;
+bool _groupBooted = false;
+
 Future<void> _boot(WidgetTester tester) async {
+  // Các testcase con của GROUP là các bước của cùng một kịch bản. Khởi động lại main()
+  // ở mỗi bước sẽ làm mất trạng thái form/navigation và khiến nhóm không thể biểu diễn
+  // Edit, Delete hoặc Detail. Ngoài GROUP, mỗi testcase vẫn khởi động độc lập như cũ.
+  if (_groupDepth > 0 && _groupBooted) {
+    await tester.pump();
+    return;
+  }
   // SQLite FFI là I/O thật; gọi main trong FakeAsync khiến Future loadUsers không
   // được hoàn tất, còn pumpAndSettle thì chờ vô hạn vì CircularProgressIndicator.
   await tester.runAsync(() async {
     student_app.main();
+    // Một số bài tự gán lại databaseFactoryFfi (có isolate) trong main(). Gán lại ngay
+    // trước pump đầu tiên để Provider/Repository mở DB bằng backend noIsolate ổn định.
+    sqfliteFfiInit();
+    databaseFactory = createDatabaseFactoryFfi(noIsolate: true);
     await tester.pump();
     await Future<void>.delayed(const Duration(milliseconds: 500));
   });
@@ -563,6 +960,7 @@ Future<void> _boot(WidgetTester tester) async {
   // Giữ nguyên dạng `expect(..., isNull)`: backend đã có luật đọc `Actual:` là đối tượng lỗi
   // Dart và đổi thành câu tiếng Việt, đừng tự nhét exception vào thông điệp fail.
   expect(exception, isNull);
+  if (_groupDepth > 0) _groupBooted = true;
 }
 
 Future<void> _settle(WidgetTester tester) async {
@@ -1556,6 +1954,42 @@ Finder? _contractFinder(Map<String, dynamic> rule) {
     default:
       return null;
   }
+}
+
+/// Áp dụng rule contract trong phạm vi một item cụ thể. Hàm này ngăn trường hợp
+/// nút Edit/Delete của card đầu tiên bị dùng nhầm khi testcase đang chấm card khác.
+Finder? _contractFinderWithin(Map<String, dynamic> rule, Finder ancestor) {
+  final strategy = _text(rule, 'strategy');
+  final value = _text(rule, 'value');
+  final index = _number(rule, 'index', 0).toInt();
+  Finder candidate;
+  switch (strategy) {
+    case 'widget_type':
+      candidate = _byTypeName(value);
+      break;
+    case 'icon':
+      candidate = _buttonOrSelf(_iconFinder(value));
+      break;
+    case 'tooltip':
+      candidate = _buttonOrSelf(find.byTooltip(value, skipOffstage: false));
+      break;
+    case 'text':
+      candidate = _textLike(value);
+      break;
+    case 'button_text':
+      candidate = _buttonOrSelf(_textLike(value));
+      break;
+    case 'type_with_text':
+      candidate = find.ancestor(
+        of: _textLike(_text(rule, 'text')),
+        matching: _byTypeName(value),
+        matchRoot: true,
+      );
+      break;
+    default:
+      return null;
+  }
+  return _pickAt(find.descendant(of: ancestor, matching: candidate), index);
 }
 
 Finder _pickAt(Finder finder, int index) {

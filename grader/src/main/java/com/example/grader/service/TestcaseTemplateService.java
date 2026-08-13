@@ -1896,6 +1896,11 @@ public class TestcaseTemplateService {
             case "FORM_VALIDATE_FIELDS" -> validateFormFields(params, instanceId);
             case "FORM_PREFILL" -> validateFormPrefill(params, instanceId);
             case "FORM_SUBMIT" -> validateFormSubmit(params, instanceId);
+            case "FORM_PERSISTENCE_FLOW" -> validateFormPersistenceFlow(params, instanceId);
+            case "CRUD_EDIT_FLOW" -> validateCrudEditFlow(params, instanceId);
+            case "CRUD_DELETE_FLOW" -> validateCrudDeleteFlow(params, instanceId);
+            case "CRUD_DETAIL_FLOW" -> validateCrudDetailFlow(params, instanceId);
+            case "RESPONSIVE_GRID_FLOW" -> validateResponsiveGridFlow(params, instanceId);
             case "LIST_ITEM_COUNT" -> validateListItemCount(params, instanceId);
             case "DIALOG_FLOW" -> validateDialogFlow(params, instanceId);
             case "WIDGET_SEMANTICS_LABEL" -> validateWidgetSemanticsLabel(params, instanceId);
@@ -1969,6 +1974,55 @@ public class TestcaseTemplateService {
         List<String> values = csv(params.get("values"));
         if (fields.isEmpty() || fields.size() != values.size())
             throw new IllegalArgumentException("fieldKeys và values phải cùng số phần tử ở " + instanceId);
+    }
+
+    private void validateFieldValues(Map<String, Object> params, String valuesKey, String instanceId) {
+        requireParameter(params, "fieldKeys", instanceId);
+        requireParameter(params, valuesKey, instanceId);
+        validateInputFieldType(params, instanceId);
+        if (csv(params.get("fieldKeys")).isEmpty()
+                || csv(params.get("fieldKeys")).size() != csv(params.get(valuesKey)).size()) {
+            throw new IllegalArgumentException("fieldKeys và " + valuesKey
+                    + " phải cùng số phần tử ở " + instanceId);
+        }
+    }
+
+    private void validateFormPersistenceFlow(Map<String, Object> params, String instanceId) {
+        validateFieldValues(params, "values", instanceId);
+        requireParameter(params, "submitKey", instanceId);
+        requireParameter(params, "resultKey", instanceId);
+    }
+
+    private void validateCrudEditFlow(Map<String, Object> params, String instanceId) {
+        validateFieldValues(params, "seedValues", instanceId);
+        validateFieldValues(params, "expectedPrefillValues", instanceId);
+        validateFieldValues(params, "updatedValues", instanceId);
+        for (String key : List.of("submitKey", "seedResultKey", "itemKey", "editKey", "updatedResultKey"))
+            requireParameter(params, key, instanceId);
+    }
+
+    private void validateCrudDeleteFlow(Map<String, Object> params, String instanceId) {
+        validateFieldValues(params, "seedValues", instanceId);
+        for (String key : List.of("submitKey", "seedResultKey", "itemKey", "deleteKey",
+                "dialogKey", "cancelKey", "confirmKey")) requireParameter(params, key, instanceId);
+    }
+
+    private void validateCrudDetailFlow(Map<String, Object> params, String instanceId) {
+        validateFieldValues(params, "seedValues", instanceId);
+        for (String key : List.of("submitKey", "seedResultKey", "itemKey", "destinationKey",
+                "detailTextKeys", "expectedDetailValues")) requireParameter(params, key, instanceId);
+        if (csv(params.get("detailTextKeys")).size() != csv(params.get("expectedDetailValues")).size())
+            throw new IllegalArgumentException("detailTextKeys và expectedDetailValues phải cùng số phần tử ở " + instanceId);
+    }
+
+    private void validateResponsiveGridFlow(Map<String, Object> params, String instanceId) {
+        validateFieldValues(params, "firstValues", instanceId);
+        validateFieldValues(params, "secondValues", instanceId);
+        for (String key : List.of("submitKey", "firstItemKey", "secondItemKey"))
+            requireParameter(params, key, instanceId);
+        for (String key : List.of("phoneWidth", "phoneHeight", "landscapeWidth",
+                "landscapeHeight", "tabletWidth", "tabletHeight"))
+            requireNumber(params, key, instanceId, 1);
     }
 
     private void validateInputFieldType(Map<String, Object> params, String instanceId) {
@@ -2145,7 +2199,11 @@ public class TestcaseTemplateService {
     private Map<String, Object> commonRubricRow(Map<String, Object> item) {
         Map<String, Object> row = new LinkedHashMap<>();
         row.put("instance_id", item.get("instance_id"));
+        row.put("template_id", item.get("template_id"));
         row.put("runner", item.get("runner"));
+        if (Boolean.TRUE.equals(item.get("generated_custom"))) {
+            row.put("generated_custom", true);
+        }
         row.put("skill_code", item.get("skill_code"));
         row.put("testcase_group", item.get("testcase_group"));
         // group_id/group_name phải ĐI THEO vào matrix, không chỉ nằm trong config: khâu chấm chỉ

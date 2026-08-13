@@ -69,7 +69,7 @@ class FixtureResultAssemblyTest {
 
             @SuppressWarnings("unchecked")
             List<Map<String, Object>> tcs = (List<Map<String, Object>>) assembled.get("test_cases");
-            assertEquals(25, tcs.size(), variant + ": số testcase");
+            assertEquals(30, tcs.size(), variant + ": số testcase");
             for (Map<String, Object> tc : tcs) {
                 String id = String.valueOf(tc.get("test_id"));
                 // A1: ba khoá phải CÓ MẶT ở mọi testcase, kể cả giá trị null.

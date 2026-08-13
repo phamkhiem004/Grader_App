@@ -72,6 +72,11 @@ public final class TestCaseTaxonomy {
             Map.entry("FORM_VALIDATE_FIELDS", "integration"),
             Map.entry("FORM_PREFILL", "integration"),
             Map.entry("FORM_SUBMIT", "integration"),
+            Map.entry("FORM_PERSISTENCE_FLOW", "persist"),
+            Map.entry("CRUD_EDIT_FLOW", "integration"),
+            Map.entry("CRUD_DELETE_FLOW", "integration"),
+            Map.entry("CRUD_DETAIL_FLOW", "integration"),
+            Map.entry("RESPONSIVE_GRID_FLOW", "responsive"),
             Map.entry("RESPONSIVE_NO_OVERFLOW", "responsive"),
             Map.entry("RESPONSIVE_TARGET", "responsive"),
             // Code tay của giáo viên: engine khởi động app thật rồi chạy assert của họ — cùng lý lẽ

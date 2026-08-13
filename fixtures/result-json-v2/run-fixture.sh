@@ -58,8 +58,18 @@ for variant in "${VARIANTS[@]}"; do
     -v "$TEST_HOST:/app/test" \
     "$IMAGE" ./run_grader.sh >"$raw" 2>&1 || true
 
+  # Ghi qua file tạm rồi mới thay: lần chạy HỎNG (Docker tắt, ảnh thiếu…) không được phép
+  # xoá mất bộ kết quả tốt đang có. Đã xảy ra thật — một lần Docker tắt làm cả 8 file về 0 byte,
+  # kéo theo các cổng đo trong test Java mất luôn dữ liệu để đối chiếu.
+  tmp="$BUILD/out/$variant.json.part"
   sed -n '/GRADE_RESULT_START/,/GRADE_RESULT_END/p' "$raw" \
-    | grep -v -- '--- GRADE_RESULT' >"$BUILD/out/$variant.json" || true
+    | grep -v -- '--- GRADE_RESULT' >"$tmp" || true
+  if [ -s "$tmp" ]; then
+    mv "$tmp" "$BUILD/out/$variant.json"
+  else
+    rm -f "$tmp"
+    echo "  !! $variant: không có khối GRADE_RESULT — GIỮ NGUYÊN kết quả cũ, xem $raw" >&2
+  fi
 
   if ! python "$HERE/check_fixture.py" "$variant" \
       "$BUILD/out/$variant.json" "$HERE/expected/$variant.json"; then

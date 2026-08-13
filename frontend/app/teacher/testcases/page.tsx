@@ -1961,22 +1961,11 @@ function TestcasesEditor() {
     setSaving(kind);
     setMessage(null);
     try {
-      // Đổi mã TRƯỚC khi lưu config: backend kéo theo thư mục/kết quả/phiên chấm, xong xuôi
-      // thì phần lưu bên dưới mới ghi vào đúng bộ mang mã mới.
-      if (renameTarget) {
-        const renameRes = await fetch(`${API_BASE}/exam-setup/${encodeURIComponent(savedExamId)}/rename`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ new_exam_id: renameTarget }),
-        });
-        const renameData = await renameRes.json().catch(() => ({}));
-        if (!renameRes.ok) throw new Error(renameData.error || "Không đổi được mã bộ testcase");
-        setSavedExamId(renameTarget);
-        // Đồng bộ URL ngay để F5 không rơi vào mã cũ (đã biến mất); form giữ nguyên.
-        skipReloadRef.current = true;
-        router.replace(`/teacher/testcases?exam=${encodeURIComponent(renameTarget)}`);
-      }
-      const res = await fetch(`${API_BASE}/exam-setup/${encodeURIComponent(examId.trim())}/testcases/${kind}`, {
+      // Luôn kiểm tra và lưu cấu hình vào bộ HIỆN TẠI trước. Chỉ đổi mã sau khi bước này
+      // thành công; nếu contract/template sai thì bộ cũ vẫn nguyên vẹn, không còn trạng thái
+      // "đã đổi mã nhưng lưu testcase thất bại".
+      const saveExamId = renameTarget ? savedExamId : examId.trim();
+      const res = await fetch(`${API_BASE}/exam-setup/${encodeURIComponent(saveExamId)}/testcases/${kind}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1988,6 +1977,20 @@ function TestcasesEditor() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Không lưu được cấu hình testcase");
+
+      if (renameTarget) {
+        const renameRes = await fetch(`${API_BASE}/exam-setup/${encodeURIComponent(savedExamId)}/rename`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ new_exam_id: renameTarget }),
+        });
+        const renameData = await renameRes.json().catch(() => ({}));
+        if (!renameRes.ok) throw new Error(renameData.error || "Đã lưu cấu hình nhưng không đổi được mã bộ testcase");
+        setSavedExamId(renameTarget);
+        // Đồng bộ URL sau khi rename đã hoàn tất để F5 luôn tải đúng mã tồn tại.
+        skipReloadRef.current = true;
+        router.replace(`/teacher/testcases?exam=${encodeURIComponent(renameTarget)}`);
+      }
       setVersion(Number(data.version ?? version));
       setItems(Array.isArray(data.items) ? data.items as TestcaseItem[] : items);
       const renamed = renameTarget ? `Đã đổi mã bộ testcase thành ${renameTarget}. ` : "";

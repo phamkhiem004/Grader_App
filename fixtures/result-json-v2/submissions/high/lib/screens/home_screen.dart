@@ -176,15 +176,17 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildList() {
+  Widget _buildList({bool twoColumns = false}) {
     final List<User> users = _repository.users;
     if (users.isEmpty) {
       return const Center(
         child: Text('Chưa có người dùng', key: ValueKey<String>('state.empty')),
       );
     }
-    return ListView(
+    return GridView.count(
       key: const ValueKey<String>('list.items'),
+      crossAxisCount: twoColumns ? 2 : 1,
+      childAspectRatio: twoColumns ? 2.6 : 4.5,
       children: <Widget>[
         for (final User user in users)
           ListTile(
@@ -249,7 +251,7 @@ class _HomeScreenState extends State<HomeScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
                 Expanded(child: form),
-                Expanded(child: _buildList()),
+                Expanded(child: _buildList(twoColumns: true)),
               ],
             );
           }

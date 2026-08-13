@@ -33,7 +33,14 @@ const DIFF_BADGE: Record<string, string> = {
 const DIFF_VI: Record<string, string> = { basic: "Cơ bản", intermediate: "Trung bình", advanced: "Nâng cao" };
 interface DetailData {
   student?: { id?: string; name?: string };
-  grading_result?: { score?: number; passed_tests?: number; failed_tests?: number; total_tests?: number };
+  grading_result?: {
+    score?: number;
+    passed_tests?: number;
+    failed_tests?: number;
+    total_tests?: number;
+    total_scenarios?: number;
+    total_criteria?: number;
+  };
   competency_assessment?: CompetencyItem[];
   test_cases?: TestCaseItem[];
 }
@@ -42,12 +49,16 @@ interface ResultRow {
   studentId: string;
   studentName: string | null;
   score: number | null;
-  status: "DONE" | "ERROR" | "GRADING" | "QUEUED";
+  status: "DONE" | "ERROR" | "MANUAL_REVIEW" | "GRADING" | "QUEUED";
   batchId: string | null;
   submittedAt: string | null;
   updatedAt: string | null;
   details: string | null;
   errorLog: string | null;
+  diagnosticCode: string | null;
+  diagnosticOrigin: "STUDENT" | "TESTCASE" | "ENVIRONMENT" | "UNDETERMINED" | null;
+  diagnosticStage: string | null;
+  requiresManualReview: boolean;
   hasJson: boolean;
 }
 interface CodeFile { name: string; content: string; }
@@ -157,6 +168,7 @@ function csvCell(value: string | number): string {
 function statusVi(status: ResultRow["status"]): string {
   if (status === "DONE") return "Đã xong";
   if (status === "ERROR") return "Lỗi";
+  if (status === "MANUAL_REVIEW") return "Cần chấm tay";
   if (status === "GRADING") return "Đang chấm";
   if (status === "QUEUED") return "Đang chờ";
   return status;
@@ -265,10 +277,11 @@ export default function HistoryPage() {
   const stats = useMemo(() => {
     const done = rows.filter((r) => r.status === "DONE");
     const error = rows.filter((r) => r.status === "ERROR").length;
+    const manual = rows.filter((r) => r.status === "MANUAL_REVIEW").length;
     const avg = done.length
       ? done.reduce((s, r) => s + (r.score || 0), 0) / done.length
       : 0;
-    return { total: rows.length, done: done.length, error, avg };
+    return { total: rows.length, done: done.length, error, manual, avg };
   }, [rows]);
 
   // Mở modal chi tiết: tải result_json đầy đủ (có competency_assessment + test_cases)
@@ -493,9 +506,10 @@ export default function HistoryPage() {
         {/* Cột phải: danh sách bài đã chấm của đề */}
         <div className="space-y-6 xl:col-span-3">
           {/* Thống kê nhanh */}
-          <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+          <div className="grid grid-cols-2 gap-4 md:grid-cols-5">
             <MiniStat label="Tổng bài" value={stats.total} icon={Users} tone="slate" />
             <MiniStat label="Đã xong" value={stats.done} icon={CheckCircle} tone="emerald" />
+            <MiniStat label="Cần chấm tay" value={stats.manual} icon={AlertCircle} tone="amber" />
             <MiniStat label="Lỗi" value={stats.error} icon={AlertCircle} tone="rose" />
             <MiniStat label="Điểm TB" value={stats.avg.toFixed(1)} icon={Clock} tone="indigo" />
           </div>
@@ -596,6 +610,7 @@ export default function HistoryPage() {
                       const ratio = total > 0 ? Math.round((pass / total) * 100) : 0;
                       const isDone = r.status === "DONE";
                       const isError = r.status === "ERROR";
+                      const isManual = r.status === "MANUAL_REVIEW";
                       const initials = (r.studentName || r.studentId || "?").trim().charAt(0).toUpperCase();
                       return (
                         <tr key={r.id} className="group transition-colors hover:bg-slate-50/70">
@@ -623,6 +638,8 @@ export default function HistoryPage() {
                               className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${
                                 isDone
                                   ? "bg-emerald-100 text-emerald-700"
+                                  : isManual
+                                  ? "bg-amber-100 text-amber-800"
                                   : isError
                                   ? "bg-rose-100 text-rose-700"
                                   : "bg-slate-100 text-slate-600"
@@ -630,10 +647,10 @@ export default function HistoryPage() {
                             >
                               <span
                                 className={`h-1.5 w-1.5 rounded-full ${
-                                  isDone ? "bg-emerald-500" : isError ? "bg-rose-500" : "bg-slate-400"
+                                  isDone ? "bg-emerald-500" : isManual ? "bg-amber-500" : isError ? "bg-rose-500" : "bg-slate-400"
                                 }`}
                               ></span>
-                              {isDone ? "Đã xong" : isError ? "Lỗi" : r.status}
+                              {isDone ? "Đã xong" : isManual ? "Cần chấm tay" : isError ? "Lỗi" : r.status}
                             </span>
                           </td>
                           <td className="px-6 py-3.5">
@@ -649,9 +666,9 @@ export default function HistoryPage() {
                                   {pass}/{total}
                                 </span>
                               </div>
-                            ) : isError && r.errorLog ? (
-                              <span className="line-clamp-2 max-w-xs text-xs text-rose-500" title={r.errorLog}>
-                                {r.errorLog}
+                            ) : (isError || isManual) && r.errorLog ? (
+                              <span className={`line-clamp-3 max-w-xs text-xs ${isManual ? "text-amber-700" : "text-rose-500"}`} title={r.errorLog}>
+                                {r.diagnosticCode && <strong>[{r.diagnosticCode}] </strong>}{r.errorLog}
                               </span>
                             ) : (
                               <span className="text-slate-300">—</span>
@@ -772,12 +789,15 @@ export default function HistoryPage() {
                     </div>
                     <div className="text-right text-xs text-slate-500">
                       <p>
-                        Pass:{" "}
+                        Kịch bản pass:{" "}
                         <span className="font-bold text-emerald-600">
                           {detail.grading_result?.passed_tests ?? 0}
                         </span>{" "}
-                        / {detail.grading_result?.total_tests ?? 0}
+                        / {detail.grading_result?.total_scenarios ?? detail.grading_result?.total_tests ?? 0}
                       </p>
+                      {detail.grading_result?.total_criteria != null && (
+                        <p>{detail.grading_result.total_criteria} tiêu chí rubric</p>
+                      )}
                     </div>
                   </div>
 
@@ -891,12 +911,15 @@ export default function HistoryPage() {
               </div>
             </div>
 
-            {viewRow.status === "ERROR" && viewRow.errorLog && (
-              <div className="shrink-0 border-b border-rose-100 bg-rose-50 px-6 py-3">
-                <p className="mb-1 flex items-center gap-1.5 text-xs font-bold text-rose-700">
-                  <AlertCircle size={13} /> Lý do lỗi
+            {(viewRow.status === "ERROR" || viewRow.status === "MANUAL_REVIEW") && viewRow.errorLog && (
+              <div className={`shrink-0 border-b px-6 py-3 ${viewRow.status === "MANUAL_REVIEW" ? "border-amber-100 bg-amber-50" : "border-rose-100 bg-rose-50"}`}>
+                <p className={`mb-1 flex items-center gap-1.5 text-xs font-bold ${viewRow.status === "MANUAL_REVIEW" ? "text-amber-800" : "text-rose-700"}`}>
+                  <AlertCircle size={13} /> {viewRow.status === "MANUAL_REVIEW" ? "Lý do cần chấm tay" : "Lý do lỗi"}
                 </p>
-                <p className="custom-scrollbar max-h-28 overflow-y-auto whitespace-pre-wrap text-[11px] leading-relaxed text-rose-600">
+                <p className={`custom-scrollbar max-h-28 overflow-y-auto whitespace-pre-wrap text-[11px] leading-relaxed ${viewRow.status === "MANUAL_REVIEW" ? "text-amber-700" : "text-rose-600"}`}>
+                  {viewRow.diagnosticOrigin && <strong>{viewRow.diagnosticOrigin === "STUDENT" ? "Bài sinh viên" : viewRow.diagnosticOrigin === "TESTCASE" ? "Bộ testcase" : viewRow.diagnosticOrigin === "ENVIRONMENT" ? "Môi trường chấm" : "Chưa xác định"} · </strong>}
+                  {viewRow.diagnosticStage && <span>{viewRow.diagnosticStage} · </span>}
+                  {viewRow.diagnosticCode && <strong>[{viewRow.diagnosticCode}] </strong>}
                   {viewRow.errorLog}
                 </p>
               </div>
@@ -973,6 +996,7 @@ function MiniStat({
   const tones: Record<string, string> = {
     slate: "bg-slate-100 text-slate-500",
     emerald: "bg-emerald-100 text-emerald-600",
+    amber: "bg-amber-100 text-amber-700",
     rose: "bg-rose-100 text-rose-600",
     indigo: "bg-indigo-100 text-indigo-600",
   };

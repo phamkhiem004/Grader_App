@@ -28,6 +28,11 @@ spring:
 
 
 
+server:
+  tomcat:
+    # 200 parts = toi da 199 file trong batch vi examId cung la mot multipart part.
+    max-part-count: ${GRADER_MAX_PART_COUNT:200}
+
 grader:
   # Thư mục chứa Dockerfile.base/template, pubspec.base.yaml, scripts, run_grader.sh
   template-dir: ${GRADER_TEMPLATE_DIR:grader-base}
@@ -51,8 +56,9 @@ grader:
   timeout:
     seconds: ${GRADER_TIMEOUT_SECONDS:240}
   runner:
-    # Mỗi nhóm flutter test bị treo chỉ được chiếm tối đa 60 giây.
-    process-timeout-seconds: ${GRADER_RUNNER_PROCESS_TIMEOUT_SECONDS:60}
+    # Mỗi nhóm có tối đa 120 giây (bao gồm compile Flutter). APP_BOOT được engine
+    # tách riêng và chặn ở 60 giây để phát hiện bài treo sớm mà không làm mất cả lô.
+    process-timeout-seconds: ${GRADER_RUNNER_PROCESS_TIMEOUT_SECONDS:120}
   # Tài nguyên mỗi container chấm. Máy yếu/ít RAM: giảm các giá trị này hoặc GRADER_MAX_CONCURRENT.
   run:
     cpus: ${GRADER_RUN_CPUS:2.0}

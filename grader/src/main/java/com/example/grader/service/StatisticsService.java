@@ -56,6 +56,7 @@ public class StatisticsService {
                 GradingStatus.ERROR,
                 GradingStatus.QUEUED,
                 GradingStatus.GRADING,
+                GradingStatus.MANUAL_REVIEW,
                 passThreshold
         ));
 
@@ -64,18 +65,20 @@ public class StatisticsService {
         long graded      = asLong(totals, 2);
         long errors      = asLong(totals, 3);
         long pending     = asLong(totals, 4) + asLong(totals, 5);
-        long passCount   = asLong(totals, 6);
-        long failCount   = asLong(totals, 7);
-        double avgScore  = asDouble(totals, 8);
+        long manualReview = asLong(totals, 6);
+        long passCount   = asLong(totals, 7);
+        long failCount   = asLong(totals, 8);
+        double avgScore  = asDouble(totals, 9);
 
         double passRate = graded == 0 ? 0 : (passCount * 100.0 / graded);
-        double progressPct = submissions == 0 ? 0 : (graded * 100.0 / submissions);
+        double progressPct = submissions == 0 ? 0
+                : ((graded + errors + manualReview) * 100.0 / submissions);
         Instant since = LocalDate.now(ZONE).minusDays(6).atStartOfDay(ZONE).toInstant();
         List<ResultStat> trendRows = resultRepo.findTrendStatsSince(filterExam, since);
 
         return new StatisticsResponse(
                 all ? "ALL" : examId,
-                total, submissions, graded, errors, pending,
+                total, submissions, graded, errors, pending, manualReview,
                 passCount, failCount,
                 round1(passRate), round1(avgScore), round1(progressPct),
                 passThreshold,

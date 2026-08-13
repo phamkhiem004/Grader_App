@@ -161,6 +161,10 @@ class TestObservationRendererTest {
         assertEquals("LAYOUT_OVERFLOW", TestObservationRenderer.errorCodeOf(obs("kind", "OVERFLOW")));
         assertEquals("VALUE_MISMATCH", TestObservationRenderer.errorCodeOf(obs("kind", "TEXT_MISMATCH")));
         assertEquals("EXCEPTION_THROWN", TestObservationRenderer.errorCodeOf(obs("kind", "BOOT_FAILED")));
+        assertEquals("CONTRACT_VIOLATION",
+                TestObservationRenderer.errorCodeOf(obs("kind", "SOURCE_CONTRACT_VIOLATION")));
+        assertEquals("SOURCE_POLICY_VIOLATION",
+                TestObservationRenderer.errorCodeOf(obs("kind", "SOURCE_POLICY_VIOLATION")));
     }
 
     @Test
@@ -211,7 +215,7 @@ class TestObservationRendererTest {
         // Danh sách lấy TỪ CHÍNH lớp đó (`renderableKinds`), không chép tay: chép tay thì thêm
         // `kind` mới mà quên sửa test là test vẫn xanh — đúng lỗ hổng đang muốn bịt.
         Set<String> kinds = TestObservationRenderer.renderableKinds();
-        assertEquals(15, kinds.size(), "SPEC 5.5 khai 15 kind: " + kinds);
+        assertEquals(17, kinds.size(), "SPEC quan sát khai 17 kind: " + kinds);
         Set<String> noCode = TestObservationRenderer.kindsWithoutCode();
         for (String kind : kinds) {
             assertNotNull(TestObservationRenderer.render("Yêu cầu X", obs("kind", kind)), kind);

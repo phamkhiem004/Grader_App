@@ -13,5 +13,9 @@ public record ResultRow(
         GradingStatus status,
         Float score,
         String details,      // JSON gọn (soTestPass/tongSoTest) — bảng hiển thị tỉ lệ pass
-        String errorLog      // tóm tắt lỗi khi ERROR
+        String errorLog,     // tóm tắt lỗi khi ERROR/MANUAL_REVIEW
+        String diagnosticCode,
+        String diagnosticOrigin,
+        String diagnosticStage,
+        boolean requiresManualReview
 ) {}

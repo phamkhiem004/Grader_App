@@ -66,6 +66,7 @@ class TestcaseEngineRefreshTest {
 
         String generated = Files.readString(dir.resolve("exam_test.dart"), StandardCharsets.UTF_8);
         assertTrue(generated.contains("case 'PE_TEST_custom_01':"));
+        assertTrue(generated.contains("_stage('TESTCASE_CUSTOM_CODE');"));
         assertTrue(generated.contains("expect(1, 1);"));
     }
 

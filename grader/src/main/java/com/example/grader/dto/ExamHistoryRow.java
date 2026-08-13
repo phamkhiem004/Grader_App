@@ -16,5 +16,9 @@ public record ExamHistoryRow(
         Instant updatedAt,
         String details,
         String errorLog,
+        String diagnosticCode,
+        String diagnosticOrigin,
+        String diagnosticStage,
+        boolean requiresManualReview,
         Boolean hasJson
 ) {}

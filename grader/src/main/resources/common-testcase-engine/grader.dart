@@ -38,18 +38,27 @@ import 'dart:io';
 /// 3.0.0 — hỗ trợ lô testcase có thể cấu hình; mặc định gom suite vào một process để Flutter
 /// chỉ compile một lần. GROUP dùng một lần boot để các bước lồng nhau giữ đúng trạng thái.
 /// Thêm các flow CRUD/persistence/responsive tái sử dụng và SQLite FFI không dùng isolate.
-const String kEngineVersion = 'COMMON_V1-3.0.0';
+/// 3.2.0: run real SQLite, isolate headless image codec failures from CRUD,
+/// and report rubric criteria separately from executable scenarios.
+/// 3.3.0: isolate APP_BOOT as a preflight process and report the last execution
+/// stage so student, testcase and infrastructure timeouts are not conflated.
+/// 3.4.0: student-stage timeouts become explicit student failures; testcase or
+/// unknown timeouts still require manual review. Source contracts ignore harmless
+/// formatting differences and emit structured contract-violation evidence.
+const String kEngineVersion = 'COMMON_V1-3.4.0';
 
 /// PHẢI khớp hằng cùng tên trong `exam_test.dart` — hai chương trình Dart riêng biệt,
 /// không import nhau nên không chia sẻ được hằng số.
 const String kBootFailedMarker = '###GRADER_BOOT_FAILED###';
 const String kObservationMarker = '###GRADER_OBS###';
+const String kStageMarker = '###GRADER_STAGE###';
 const int kProcessTimeoutExitCode = -124;
 // Compile Flutter chiếm phần lớn thời gian. Các scenario đã dùng dữ liệu riêng và
 // SQLite noIsolate, nên gom toàn bộ suite vào một process ổn định hơn nhiều so với
 // compile lại 3-4 lần. Có thể override bằng GRADER_BATCH_SIZE khi cần chia lô.
 const int kDefaultBatchSize = 64;
 const int kDefaultBatchTimeoutSeconds = 180;
+const int kDefaultPreflightTimeoutSeconds = 60;
 const int kDefaultTotalTimeoutSeconds = 210;
 
 Future<void> main() async {
@@ -69,21 +78,46 @@ Future<void> main() async {
       kDefaultTotalTimeoutSeconds,
     ),
   );
+  final preflightTimeout = Duration(
+    seconds: _positiveEnvInt(
+      'GRADER_PREFLIGHT_TIMEOUT_SECONDS',
+      kDefaultPreflightTimeoutSeconds,
+    ),
+  );
   final totalWatch = Stopwatch()..start();
   var totalBudgetExceeded = false;
   final testIds = matrix.keys.toList(growable: false);
-
-  for (var offset = 0; offset < testIds.length; offset += batchSize) {
-    final end = offset + batchSize < testIds.length
+  String? appBootId;
+  for (final entry in matrix.entries) {
+    if (_asMap(entry.value)['runner']?.toString() == 'APP_BOOT') {
+      appBootId = entry.key;
+      break;
+    }
+  }
+  // APP_BOOT runs alone first. A synchronous loop in student_app.main() can then
+  // be attributed to app boot and stopped quickly instead of consuming the whole suite.
+  final batches = <List<String>>[];
+  if (appBootId != null) batches.add(<String>[appBootId]);
+  final remainingIds = testIds
+      .where((id) => id != appBootId)
+      .toList(growable: false);
+  for (var offset = 0; offset < remainingIds.length; offset += batchSize) {
+    final end = offset + batchSize < remainingIds.length
         ? offset + batchSize
-        : testIds.length;
-    final batch = testIds.sublist(offset, end);
+        : remainingIds.length;
+    batches.add(remainingIds.sublist(offset, end));
+  }
+
+  for (final batch in batches) {
+    final isPreflight =
+        appBootId != null && batch.length == 1 && batch.first == appBootId;
     final remaining = totalTimeout - totalWatch.elapsed;
     if (remaining <= Duration.zero) {
       totalBudgetExceeded = true;
       break;
     }
-    final limit = remaining < batchTimeout ? remaining : batchTimeout;
+    final configuredLimit = isPreflight ? preflightTimeout : batchTimeout;
+    final limit = remaining < configuredLimit ? remaining : configuredLimit;
     final process = await _runFlutterBatch(batch, limit);
     stdout.write(process.stdout);
     stderr.write(process.stderr);
@@ -96,12 +130,18 @@ Future<void> main() async {
       final missing = batch.where((id) => !runs.containsKey(id)).toList();
       if (missing.isNotEmpty) {
         final timedOutId = missing.first;
+        final diagnostic = _timeoutDiagnostic(
+          process.stdout.toString(),
+          timedOutId,
+          limit.inSeconds,
+        );
         runs[timedOutId] = <String, dynamic>{
           'passed': false,
           'bootFailed': false,
           'observation': <String, dynamic>{
             'kind': 'PROCESS_TIMEOUT',
             'timeout_seconds': limit.inSeconds,
+            ...diagnostic,
           },
           'message': 'Testcase vượt quá ${limit.inSeconds} giây và đã bị dừng.',
         };
@@ -113,6 +153,7 @@ Future<void> main() async {
           'Lô ${batch.join(',')}: process timeout sau ${limit.inSeconds}s',
         );
       }
+      if (isPreflight) break;
       continue;
     }
 
@@ -150,6 +191,12 @@ Future<void> main() async {
   final runnerError = runnerErrors.isEmpty
       ? null
       : _shorten(runnerErrors.join('\n'), 2000);
+  final runnerDiagnostic = _runnerDiagnostic(
+    runnerError: runnerError,
+    totalBudgetExceeded: totalBudgetExceeded,
+    ranAny: ranAny,
+    runs: runs,
+  );
   var passed = 0;
   var notRun = 0;
   var earned = 0.0;
@@ -160,6 +207,7 @@ Future<void> main() async {
     final weight = _number(metadata, 'weight', 1);
     final runner = (metadata['runner'] ?? '').toString();
     final result = runs[id];
+    final resultObservation = _asMap(result?['observation']);
     final ok = result?['passed'] == true;
 
     // `not_run` = CHƯA CÓ CƠ HỘI CHẠY, khác hẳn `failed` (đã chạy tới nơi và không đạt).
@@ -221,6 +269,35 @@ Future<void> main() async {
           : isNotRun
           ? <String, dynamic>{'kind': ranAny ? 'NOT_RUN_BOOT' : 'NOT_RUN_SUITE'}
           : result?['observation'],
+      'error_origin': ok
+          ? null
+          : totalBudgetExceeded
+          ? 'ENVIRONMENT'
+          : resultObservation['kind'] == 'PROCESS_TIMEOUT'
+          ? (resultObservation['origin'] ?? 'UNDETERMINED')
+          : bootFailed
+          ? 'STUDENT'
+          : isNotRun
+          ? 'UNDETERMINED'
+          : 'STUDENT',
+      'error_stage': ok
+          ? null
+          : bootFailed
+          ? 'APP_BOOT'
+          : resultObservation['kind'] == 'SOURCE_CONTRACT_VIOLATION' ||
+                resultObservation['kind'] == 'SOURCE_POLICY_VIOLATION'
+          ? 'SOURCE_CONTRACT'
+          : resultObservation['kind'] == 'PROCESS_TIMEOUT'
+          ? (resultObservation['stage'] ?? 'TESTCASE_EXECUTION')
+          : isNotRun
+          ? 'SUITE_STARTUP'
+          : 'TESTCASE_EXECUTION',
+      'requires_manual_review':
+          !ok &&
+          (totalBudgetExceeded ||
+              isNotRun ||
+              (resultObservation['kind'] == 'PROCESS_TIMEOUT' &&
+                  resultObservation['manual_review'] != false)),
     });
   }
 
@@ -229,6 +306,9 @@ Future<void> main() async {
   output['soTestPass'] = passed;
   output['soTestFail'] = cases.length - passed;
   output['tongSoTest'] = cases.length;
+  output['tongSoTieuChi'] = matrix.values
+      .map((value) => _criterionCount(_asMap(value)))
+      .fold<int>(0, (sum, count) => sum + count);
   output['chiTiet'] = cases
       .map(
         (item) => <String, dynamic>{
@@ -250,18 +330,222 @@ Future<void> main() async {
     // (SPEC mục 2) — đổi nghĩa sẽ làm lệch số liệu và biểu đồ đang có của frontend.
     'failed_tests': cases.length - passed,
     'total_tests': cases.length,
+    'total_scenarios': cases.length,
+    'total_criteria': output['tongSoTieuChi'],
     'not_run_tests': notRun,
     'earned_weight': earned,
     'total_weight': total,
     'blocked': false,
     'contract_violation': false,
     'runner_error': runnerError,
+    'diagnostic_code': runnerDiagnostic?['code'],
+    'diagnostic_origin': runnerDiagnostic?['origin'],
+    'diagnostic_stage': runnerDiagnostic?['stage'],
+    'diagnostic_message': runnerDiagnostic?['message'],
+    'requires_manual_review': runnerDiagnostic?['manual_review'] == true,
     'engine_version': kEngineVersion,
   };
 
   stdout.writeln('--- GRADE_RESULT_START ---');
   stdout.writeln(jsonEncode(output));
   stdout.writeln('--- GRADE_RESULT_END ---');
+}
+
+int _criterionCount(Map<String, dynamic> metadata) {
+  final children = _asList(metadata['children']);
+  if (children.isEmpty) return 1;
+  return children
+      .map((child) => _criterionCount(_asMap(child)))
+      .fold<int>(0, (sum, count) => sum + count);
+}
+
+Map<String, dynamic> _timeoutDiagnostic(
+  String reporterOutput,
+  String testId,
+  int timeoutSeconds,
+) {
+  final namesById = <int, String>{};
+  String? lastStage;
+  for (final line in reporterOutput.split('\n')) {
+    dynamic event;
+    try {
+      event = jsonDecode(line.trim());
+    } catch (_) {
+      continue;
+    }
+    if (event is! Map) continue;
+    if (event['type'] == 'testStart' && event['test'] is Map) {
+      final test = event['test'] as Map;
+      final id = (test['id'] as num?)?.toInt();
+      final name = test['name']?.toString();
+      if (id != null && name != null) namesById[id] = name;
+      continue;
+    }
+    if (event['type'] != 'print') continue;
+    final reporterId = (event['testID'] as num?)?.toInt();
+    if (reporterId == null || namesById[reporterId] != testId) continue;
+    final message = event['message']?.toString() ?? '';
+    final at = message.lastIndexOf(kStageMarker);
+    if (at < 0) continue;
+    final candidate = message.substring(at + kStageMarker.length).trim();
+    final match = RegExp(r'^[A-Z0-9_]+').firstMatch(candidate);
+    if (match != null) lastStage = match.group(0);
+  }
+
+  return switch (lastStage) {
+    'STUDENT_APP_BOOT' => <String, dynamic>{
+      'diagnostic_code': 'STUDENT_APP_BOOT_TIMEOUT',
+      'origin': 'STUDENT',
+      'stage': 'APP_BOOT',
+      'message':
+          'Ứng dụng sinh viên bị kẹt trong lúc chạy main()/khởi tạo dữ liệu quá $timeoutSeconds giây.',
+      'manual_review': false,
+    },
+    'STUDENT_UI_ACTION' => <String, dynamic>{
+      'diagnostic_code': 'STUDENT_ACTION_TIMEOUT',
+      'origin': 'STUDENT',
+      'stage': 'UI_ACTION',
+      'message':
+          'Bài sinh viên bị kẹt khi xử lý thao tác giao diện quá $timeoutSeconds giây.',
+      'manual_review': false,
+    },
+    'STUDENT_ASYNC_SETTLE' => <String, dynamic>{
+      'diagnostic_code': 'STUDENT_ASYNC_TIMEOUT',
+      'origin': 'STUDENT',
+      'stage': 'ASYNC_STATE_SETTLE',
+      'message':
+          'Bài sinh viên không hoàn tất cập nhật trạng thái/I/O sau thao tác trong $timeoutSeconds giây.',
+      'manual_review': false,
+    },
+    'STUDENT_PUBLIC_FUNCTION' => <String, dynamic>{
+      'diagnostic_code': 'STUDENT_FUNCTION_TIMEOUT',
+      'origin': 'STUDENT',
+      'stage': 'LOGIC_EXECUTION',
+      'message':
+          'Hàm public của bài sinh viên không hoàn tất trong $timeoutSeconds giây.',
+      'manual_review': false,
+    },
+    'TESTCASE_SOURCE_CHECK' ||
+    'TESTCASE_CUSTOM_CODE' ||
+    'TESTCASE_DISPATCH' ||
+    'TESTCASE_ASSERTION' => <String, dynamic>{
+      'diagnostic_code': 'TESTCASE_EXECUTION_TIMEOUT',
+      'origin': 'TESTCASE',
+      'stage': lastStage,
+      'message':
+          'Runner/testcase bị kẹt tại $lastStage sau $timeoutSeconds giây; không quy lỗi cho sinh viên.',
+      'manual_review': true,
+    },
+    _ => <String, dynamic>{
+      'diagnostic_code': 'TEST_PROCESS_TIMEOUT',
+      'origin': 'UNDETERMINED',
+      'stage': 'TESTCASE_EXECUTION',
+      'message':
+          'Tiến trình test vượt quá $timeoutSeconds giây nhưng không có đủ dấu mốc để quy lỗi.',
+      'manual_review': true,
+    },
+  };
+}
+
+Map<String, dynamic>? _runnerDiagnostic({
+  required String? runnerError,
+  required bool totalBudgetExceeded,
+  required bool ranAny,
+  required Map<String, Map<String, dynamic>> runs,
+}) {
+  if (totalBudgetExceeded) {
+    return <String, dynamic>{
+      'code': 'GRADER_TOTAL_TIMEOUT',
+      'origin': 'ENVIRONMENT',
+      'stage': 'GRADER_TOTAL',
+      'message': 'Bộ chấm đã hết ngân sách thời gian; cần kiểm tra tải máy và chấm tay phần chưa chạy.',
+      'manual_review': true,
+    };
+  }
+  final processTimeout = runs.values.any(
+    (run) => (run['observation'] as Map?)?['kind'] == 'PROCESS_TIMEOUT',
+  );
+  if (processTimeout) {
+    final timeoutRun = runs.values.firstWhere(
+      (run) => (run['observation'] as Map?)?['kind'] == 'PROCESS_TIMEOUT',
+    );
+    final timeoutObservation = _asMap(timeoutRun['observation']);
+    return <String, dynamic>{
+      'code': timeoutObservation['diagnostic_code'] ?? 'TEST_PROCESS_TIMEOUT',
+      'origin': timeoutObservation['origin'] ?? 'UNDETERMINED',
+      'stage': timeoutObservation['stage'] ?? 'TESTCASE_EXECUTION',
+      'message':
+          timeoutObservation['message'] ??
+          'Một testcase bị timeout nhưng chưa đủ bằng chứng để quy lỗi.',
+      'manual_review': timeoutObservation['manual_review'] != false,
+    };
+  }
+  if (runnerError == null || runnerError.isEmpty) return null;
+  final lower = runnerError.toLowerCase();
+  final studentCompileEvidence = RegExp(
+    r'''(?:^|\s)(?:\.\./)?lib/[^\s:'"]+\.dart(?::\d+:\d+)?''',
+    caseSensitive: false,
+  ).hasMatch(runnerError);
+  final testcaseCompileEvidence = RegExp(
+    r'''(?:^|\s)test/(?:exam_test|grader)\.dart(?::\d+:\d+)?''',
+    caseSensitive: false,
+  ).hasMatch(runnerError);
+  final publicContractEvidence =
+      lower.contains('student_app.') &&
+      (lower.contains('method not found') ||
+          lower.contains('getter not found') ||
+          lower.contains('undefined name') ||
+          lower.contains("isn't defined"));
+  if (!ranAny && studentCompileEvidence) {
+    return <String, dynamic>{
+      'code': 'STUDENT_COMPILE_ERROR',
+      'origin': 'STUDENT',
+      'stage': 'SOURCE_COMPILE',
+      'message': 'Mã nguồn bài sinh viên không biên dịch được; xem runner_error để biết file và dòng đầu tiên.',
+      'manual_review': false,
+    };
+  }
+  if (!ranAny && publicContractEvidence) {
+    return <String, dynamic>{
+      'code': 'STUDENT_CONTRACT_COMPILE_ERROR',
+      'origin': 'STUDENT',
+      'stage': 'SOURCE_CONTRACT',
+      'message':
+          'Bài sinh viên thiếu hoặc đổi tên symbol public mà contract yêu cầu.',
+      'manual_review': false,
+    };
+  }
+  if (!ranAny && testcaseCompileEvidence) {
+    return <String, dynamic>{
+      'code': 'TESTCASE_COMPILE_ERROR',
+      'origin': 'TESTCASE',
+      'stage': 'SOURCE_COMPILE',
+      'message':
+          'Bộ testcase không biên dịch được; không quy thành 0 điểm sinh viên.',
+      'manual_review': true,
+    };
+  }
+  if (lower.contains('test/exam_test.dart') ||
+      lower.contains('test/grader.dart') ||
+      lower.contains('chưa có common runner')) {
+    return <String, dynamic>{
+      'code': 'TESTCASE_RUNNER_ERROR',
+      'origin': 'TESTCASE',
+      'stage': 'TESTCASE_SETUP',
+      'message': 'Bộ testcase không khởi động đúng; không được quy thành 0 điểm của sinh viên.',
+      'manual_review': true,
+    };
+  }
+  if (!ranAny) {
+    return <String, dynamic>{
+      'code': 'SUITE_STARTUP_UNDETERMINED',
+      'origin': 'UNDETERMINED',
+      'stage': 'SUITE_STARTUP',
+      'message': 'Bộ test không khởi động; cần đối chiếu log compile để xác định lỗi bài hay lỗi testcase.',
+      'manual_review': true,
+    };
+  }
+  return null;
 }
 
 Future<ProcessResult> _runFlutterBatch(List<String> testIds, Duration timeout) {
@@ -276,7 +560,6 @@ Future<ProcessResult> _runFlutterBatch(List<String> testIds, Duration timeout) {
       'test',
       '--no-pub',
       '--concurrency=1',
-      '--dart-define=GRADER_MODE=true',
       '--reporter=json',
       'test/exam_test.dart',
     ],
@@ -383,6 +666,8 @@ Map<String, dynamic> _asMap(dynamic value) {
     for (final entry in value.entries) entry.key.toString(): entry.value,
   };
 }
+
+List<dynamic> _asList(dynamic value) => value is List ? value : <dynamic>[];
 
 Map<String, Map<String, dynamic>> _parseReporter(String output) {
   final namesById = <int, String>{};

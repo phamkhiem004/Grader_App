@@ -53,6 +53,22 @@ public final class TestErrorClassifier {
     private List<Rule> buildCatalog() {
         List<Rule> c = new ArrayList<>();
 
+        // Nội dung bị contract cấm là vi phạm policy nguồn, khác với việc thiếu một symbol bắt buộc.
+        // Mã riêng giúp màn giảng viên chỉ đưa vi phạm chặn chấm lên cột sự cố, còn thiếu symbol
+        // vẫn là một testcase fail bình thường trong JSON.
+        c.add(rule(p -> p.has("forbidden token") || p.has("token bị cấm")
+                        || p.has("class is not allowed") || p.has("class không được phép"),
+                p -> new Result("SOURCE_POLICY_VIOLATION", excActual(p),
+                        "Bài làm chứa class hoặc nội dung mà contract của đề không cho phép.")));
+
+        // Public contract do đề/starter công bố là ranh giới hợp lệ giữa bài làm và bộ chấm.
+        // Nhận diện trước lỗi compile/finder để giáo viên không hiểu nhầm đây là lỗi hạ tầng.
+        c.add(rule(p -> p.has("source contract") || p.has("source token")
+                        || p.has("public contract") || p.has("required symbol")
+                        || p.has("khong tim thay source contract") || p.has("thieu source token"),
+                p -> new Result("CONTRACT_VIOLATION", excActual(p),
+                        "Bài làm không tuân theo file, class hoặc symbol mà đề/starter đã công bố.")));
+
         // ── Lỗi UI/layout & thời gian (đặc thù, nhận diện trước) ──
         // Lưu ý: nhóm exception/UI-crash dùng message CỐ ĐỊNH (hướng dẫn tiếng Việt) — KHÔNG lấy
         // `reason` vì với exception, các dòng còn lại là DUMP tiếng Anh (đã nằm ở `actual`).

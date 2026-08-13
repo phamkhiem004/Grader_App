@@ -291,9 +291,9 @@ public class TestcaseTemplateService {
         cloneBody.put("items", normalizeExistingItems(sourceConfig.get("items")));
         cloneBody.put("contract", sourceConfig.getOrDefault("contract", Map.of()));
 
-        // Bản clone là bộ MỚI mà giáo viên gần như luôn sửa tiếp, nên để ở trạng thái Nháp
-        // đúng như bộ tự dựng: chỉ khi bấm Lưu mới thành Hoàn tất và đem chấm được.
-        Map<String, Object> result = saveDraft(targetExamId, cloneBody, actor);
+        // Bản clone đã là một bản sao hoàn chỉnh của cấu hình builder. Publish ngay để
+        // có thể build sandbox/chấm trực tiếp; giáo viên vẫn có thể thay đổi bằng nút Sửa.
+        Map<String, Object> result = publish(targetExamId, cloneBody, actor);
         try {
             examService.cloneHandout(sourceExamId, targetExamId);
         } catch (Exception copyError) {
@@ -637,6 +637,7 @@ public class TestcaseTemplateService {
                 block.append("    // ").append(singleLine(text(item.get("name"), ""))).append('\n');
                 block.append("    case '").append(item.get("instance_id")).append("':\n");
                 block.append("      testWidgets('").append(item.get("instance_id")).append("', (tester) async {\n");
+                block.append("        _stage('TESTCASE_CUSTOM_CODE');\n");
                 for (String line : normalizeNewlines(text(item.get("custom_code"), "")).split("\n", -1)) {
                     if (line.isBlank()) block.append('\n');
                     else block.append("        ").append(line.stripTrailing()).append('\n');
@@ -1293,7 +1294,7 @@ public class TestcaseTemplateService {
                     params.get("forbiddenTokensJson"), "forbiddenTokensJson", generator);
             boolean caseSensitive = bool(params.get("caseSensitive"), true);
             if (!exactChecks.isEmpty()) {
-                StringBuilder exactCode = new StringBuilder();
+                StringBuilder exactCode = new StringBuilder("_stage('TESTCASE_SOURCE_CHECK');\n");
                 for (int index = 0; index < exactChecks.size(); index++) {
                     Map<String, Object> check = castMap(exactChecks.get(index));
                     String path = text(check.get("path"), "").replace('\\', '/');
@@ -1305,9 +1306,11 @@ public class TestcaseTemplateService {
                     String sourceVar = "source" + index;
                     exactCode.append("final ").append(fileVar).append(" = File(")
                             .append(dartLiteral(path)).append(");\n")
-                            .append("expect(").append(fileVar)
-                            .append(".existsSync(), isTrue, reason: 'Không tìm thấy source contract: ")
+                            .append("if (!").append(fileVar).append(".existsSync()) {\n")
+                            .append("  _observe('SOURCE_CONTRACT_VIOLATION', where: 'source_contract');\n")
+                            .append("  fail('Không tìm thấy source contract: ")
                             .append(path.replace("'", "\\'")).append("');\n")
+                            .append("}\n")
                             .append("final ").append(sourceVar).append(" = _sourceWithoutComments(")
                             .append(fileVar).append(".readAsStringSync(), ")
                             .append(dartLiteral(path)).append(");\n");
@@ -1317,12 +1320,16 @@ public class TestcaseTemplateService {
                 return exactCode.toString().stripTrailing();
             }
             StringBuilder code = new StringBuilder()
+                    .append("_stage('TESTCASE_SOURCE_CHECK');\n")
                     .append("final sourcePaths = <String>")
                     .append(dartLiteral(paths)).append(";\n")
                     .append("final sourceParts = <String>[];\n")
                     .append("for (final path in sourcePaths) {\n")
                     .append("  final file = File(path);\n")
-                    .append("  expect(file.existsSync(), isTrue, reason: 'Không tìm thấy source contract: $path');\n")
+                    .append("  if (!file.existsSync()) {\n")
+                    .append("    _observe('SOURCE_CONTRACT_VIOLATION', where: 'source_contract');\n")
+                    .append("    fail('Không tìm thấy source contract: $path');\n")
+                    .append("  }\n")
                     .append("  sourceParts.add(_sourceWithoutComments(file.readAsStringSync(), path));\n")
                     .append("}\n")
                     .append("final source = sourceParts.join('\\n');\n");
@@ -1338,13 +1345,16 @@ public class TestcaseTemplateService {
                 + ")";
         int timeoutMs = (int) number(params.get("timeoutMs"), 3000);
         String timeout = "const Duration(milliseconds: " + timeoutMs + ")";
+        String studentCallStage = "_stage('STUDENT_PUBLIC_FUNCTION');\n";
         String prelude = "final contractFile = File(" + dartLiteral(contractPath) + ");\n"
-                + "expect(contractFile.existsSync(), isTrue, "
-                + "reason: 'Không tìm thấy public contract: " + contractPath + "');\n";
+                + "if (!contractFile.existsSync()) {\n"
+                + "  _observe('SOURCE_CONTRACT_VIOLATION', where: 'source_contract');\n"
+                + "  fail('Không tìm thấy public contract: " + contractPath + "');\n"
+                + "}\n";
         return switch (generator) {
             case "PUBLIC_FUNCTION_RESULT" -> {
                 String expectedJson = canonicalJson(params.get("expectedJson"), "expectedJson", callable);
-                yield prelude
+                yield prelude + studentCallStage
                         + "final actual = await Future<dynamic>.sync(() => " + invocation + ")\n"
                         + "    .timeout(" + timeout + ");\n"
                         + "final expected = jsonDecode(" + dartLiteral(expectedJson) + ");\n"
@@ -1353,7 +1363,7 @@ public class TestcaseTemplateService {
             case "PUBLIC_FUNCTION_THROWS" -> {
                 String exceptionType = text(params.get("exceptionType"), "");
                 String message = text(params.get("messageContains"), "");
-                StringBuilder code = new StringBuilder(prelude)
+                StringBuilder code = new StringBuilder(prelude).append(studentCallStage)
                         .append("Object? caught;\n")
                         .append("try {\n")
                         .append("  await Future<dynamic>.sync(() => ").append(invocation).append(")\n")
@@ -1377,7 +1387,7 @@ public class TestcaseTemplateService {
                 } catch (Exception e) {
                     throw new IllegalArgumentException("expectedEventsJson không thể chuẩn hóa ở " + callable);
                 }
-                yield prelude
+                yield prelude + studentCallStage
                         + "final candidate = " + invocation + ";\n"
                         + "expect(candidate, isA<Stream<dynamic>>());\n"
                         + "final actual = await (candidate as Stream<dynamic>).take("
@@ -1395,25 +1405,23 @@ public class TestcaseTemplateService {
                                         boolean caseSensitive) {
         for (Object raw : required) {
             String token = String.valueOf(raw);
-            String expression = caseSensitive
-                    ? sourceVariable + ".contains(" + dartLiteral(token) + ")"
-                    : sourceVariable + ".toLowerCase().contains("
-                    + dartLiteral(token.toLowerCase()) + ")";
-            code.append("expect(").append(expression)
-                    .append(", isTrue, reason: ")
+            String expression = "_sourceContainsToken(" + sourceVariable + ", "
+                    + dartLiteral(token) + ", caseSensitive: " + caseSensitive + ")";
+            code.append("if (!").append(expression).append(") {\n")
+                    .append("  _observe('SOURCE_CONTRACT_VIOLATION', where: 'source_contract');\n")
+                    .append("  fail(")
                     .append(dartLiteral("Thiếu source token '" + token + "' trong " + path))
-                    .append(");\n");
+                    .append(");\n}\n");
         }
         for (Object raw : forbidden) {
             String token = String.valueOf(raw);
-            String expression = caseSensitive
-                    ? sourceVariable + ".contains(" + dartLiteral(token) + ")"
-                    : sourceVariable + ".toLowerCase().contains("
-                    + dartLiteral(token.toLowerCase()) + ")";
-            code.append("expect(").append(expression)
-                    .append(", isFalse, reason: ")
+            String expression = "_sourceContainsToken(" + sourceVariable + ", "
+                    + dartLiteral(token) + ", caseSensitive: " + caseSensitive + ")";
+            code.append("if (").append(expression).append(") {\n")
+                    .append("  _observe('SOURCE_POLICY_VIOLATION', where: 'source_policy');\n")
+                    .append("  fail(")
                     .append(dartLiteral("Source " + path + " chứa token bị cấm: " + token))
-                    .append(");\n");
+                    .append(");\n}\n");
         }
     }
 
@@ -2023,7 +2031,7 @@ public class TestcaseTemplateService {
 
     private void validateOptionalTargetType(Map<String, Object> params, String key, String instanceId) {
         String value = text(params.get(key), "").toLowerCase();
-        if (!value.isBlank() && !Set.of("any", "form", "image", "text", "input", "button",
+        if (!value.isBlank() && !Set.of("any", "form", "image", "text", "input", "control", "button",
                 "dialog", "icon", "checkbox", "switch", "dropdown", "padding", "container").contains(value)) {
             throw new IllegalArgumentException(key + " không hợp lệ ở " + instanceId + ": " + value);
         }

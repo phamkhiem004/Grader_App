@@ -21,6 +21,10 @@ class CommonEngineExecutionTest {
         assertTrue(grader.contains("GRADER_BATCH_SIZE"));
         assertTrue(grader.contains("GRADER_BATCH_TIMEOUT_SECONDS"));
         assertTrue(grader.contains("GRADER_TOTAL_TIMEOUT_SECONDS"));
+        assertTrue(grader.contains("GRADER_PREFLIGHT_TIMEOUT_SECONDS"));
+        assertTrue(grader.contains("STUDENT_APP_BOOT_TIMEOUT"));
+        assertTrue(grader.contains("TESTCASE_EXECUTION_TIMEOUT"));
+        assertTrue(grader.contains("kStageMarker"));
         assertTrue(grader.contains("GRADER_CASE_MODE"));
         assertTrue(grader.contains("GRADER_CASE_IDS"));
         assertTrue(grader.contains("--concurrency=1"));
@@ -36,6 +40,11 @@ class CommonEngineExecutionTest {
         assertTrue(exam.contains("Platform.environment['GRADER_CASE_MODE']"));
         assertTrue(exam.contains("Platform.environment['GRADER_CASE_IDS']"));
         assertTrue(exam.contains("!selectedBatch.contains(testId)"));
+        assertTrue(exam.contains("STUDENT_APP_BOOT"));
+        assertTrue(exam.contains("STUDENT_UI_ACTION"));
+        assertTrue(exam.contains("TESTCASE_ASSERTION"));
+        assertTrue(exam.contains("case 'action.delete.confirm':"));
+        assertTrue(exam.contains("confirm( delete)?"));
     }
 
     private String resource(String path) throws Exception {

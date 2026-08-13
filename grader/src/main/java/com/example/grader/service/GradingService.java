@@ -36,6 +36,9 @@ public class GradingService {
     @Value("${grader.timeout.seconds:120}")
     private int timeoutSeconds;
 
+    @Value("${grader.runner.process-timeout-seconds:120}")
+    private int testcaseProcessTimeoutSeconds;
+
     /** RAM mỗi container chấm. Tăng giúp tránh OOM khi compile project lớn. */
     @Value("${grader.run.memory:2048m}")
     private String runMemory;
@@ -48,6 +51,7 @@ public class GradingService {
     private boolean analyzeEnabled;
 
     private final ObjectMapper mapper = new ObjectMapper();
+    private final SubmissionPackagePolicy submissionPackagePolicy = new SubmissionPackagePolicy();
 
     // ── Entry point ──────────────────────────────────────────────
 
@@ -126,6 +130,10 @@ public class GradingService {
             // Bây giờ hàm này sẽ trả về thư mục ngay sát bên ngoài thư mục lib/
             Path projectRoot = detectProjectRoot(extractDir);
             Path studentLib = projectRoot.resolve("lib");
+            // Chặn package ngoài TRƯỚC compile. Import nội bộ theo tên package của starter
+            // được đổi sang exam_project vì image chạy --no-pub với package graph đã cache.
+            SubmissionPackagePolicy.Policy packagePolicy = submissionPackagePolicy.load(testcasePath);
+            submissionPackagePolicy.validateAndNormalize(studentLib, packagePolicy);
             applyPe27CompatibilityPatches(examId, studentLib);
 
             // Chỉ kiểm tra file .dart bên trong thư mục lib (đóng Stream)
@@ -141,7 +149,10 @@ public class GradingService {
             return runDockerGrader(
                     studentId, studentLib.toAbsolutePath().toString(),
                     projectRoot.resolve("assets").toAbsolutePath().toString(),
-                    prepareRuntimePubspec(tempDir, Files.isDirectory(projectRoot.resolve("assets")),
+                    prepareRuntimePubspec(
+                            tempDir,
+                            Files.isDirectory(projectRoot.resolve("assets")),
+                            Files.isDirectory(studentLib.resolve("assets")),
                             "exam_project"),
                     examId, testcasePath
             );
@@ -787,8 +798,16 @@ class UserListScreen extends HomeScreen {
 
         // MOUNT mode: mount testcase vào ảnh nền (không cần image riêng cho đề).
         // Fallback (đề cũ): dùng image grading-env-<đề> đã build sẵn.
-        boolean mountMode = testcasePath != null && !testcasePath.isBlank()
-                && Files.exists(Path.of(testcasePath));
+        boolean testcaseConfigured = testcasePath != null && !testcasePath.isBlank();
+        if (testcaseConfigured && !Files.exists(Path.of(testcasePath))) {
+            throw new GradingDiagnosticException(
+                    "TESTCASE_FILES_MISSING",
+                    GradingDiagnosticException.Origin.TESTCASE,
+                    "TESTCASE_SETUP",
+                    true,
+                    "Không tìm thấy thư mục testcase đã cấu hình: " + testcasePath);
+        }
+        boolean mountMode = testcaseConfigured;
         String image;
         if (mountMode) {
             mounts.add("-v");
@@ -803,12 +822,29 @@ class UserListScreen extends HomeScreen {
                 "docker", "run", "--name", containerName, "--rm", "--memory", runMemory, "--cpus", runCpus));
         command.add("-e");
         command.add("GRADER_ANALYZE_LIB=" + analyzeEnabled);
+        command.add("-e");
+        command.add("GRADER_BATCH_TIMEOUT_SECONDS=" + testcaseProcessTimeoutSeconds);
+        command.add("-e");
+        command.add("GRADER_TOTAL_TIMEOUT_SECONDS=" + Math.max(30, timeoutSeconds - 15));
+        command.add("-e");
+        command.add("GRADER_PREFLIGHT_TIMEOUT_SECONDS="
+                + Math.min(60, testcaseProcessTimeoutSeconds));
         command.addAll(mounts);
         command.add(image);
         command.add("./run_grader.sh");   // chạy chấm tường minh — không phụ thuộc CMD baked trong ảnh
 
         ProcessBuilder pb = new ProcessBuilder(command);
-        Process process = pb.start();
+        Process process;
+        try {
+            process = pb.start();
+        } catch (IOException e) {
+            throw new GradingDiagnosticException(
+                    "DOCKER_START_FAILED",
+                    GradingDiagnosticException.Origin.ENVIRONMENT,
+                    "CONTAINER_START",
+                    true,
+                    "Không khởi động được container chấm: " + e.getMessage(), e);
+        }
 
         StringBuilder stdout = new StringBuilder();
         StringBuilder stderr = new StringBuilder();
@@ -836,15 +872,24 @@ class UserListScreen extends HomeScreen {
         if (!finished) {
             process.destroyForcibly();
             removeContainerQuietly(containerName);
-            throw new RuntimeException("Timeout sau " + timeoutSeconds + "s");
+            throw new GradingDiagnosticException(
+                    "CONTAINER_WATCHDOG_TIMEOUT",
+                    GradingDiagnosticException.Origin.ENVIRONMENT,
+                    "CONTAINER_WATCHDOG",
+                    true,
+                    "Container chấm vượt quá watchdog " + timeoutSeconds
+                            + " giây sau khi timeout nội bộ của testcase lẽ ra đã kết thúc. "
+                            + "Đây là lỗi môi trường/runner; không quy thành 0 điểm sinh viên.");
         }
 
         t1.join();
         t2.join();
 
         String output = stdout.toString();
-        if (process.exitValue() != 0 && !output.contains("GRADE_RESULT_START"))
-            throw new RuntimeException("Lỗi biên dịch: " + stderr.toString().trim());
+        if (process.exitValue() != 0 && !output.contains("GRADE_RESULT_START")) {
+            String compileLog = (stderr + "\n" + output).trim();
+            throw GradingCompileDiagnostic.classify(compileLog);
+        }
 
         String resultJson = parseGraderOutput(output);
         // 0/0 (không test nào chạy) → coi là LỖI, không phải DONE; chạy probe để lấy LÝ DO THẬT.
@@ -856,39 +901,46 @@ class UserListScreen extends HomeScreen {
      * Bài Flutter có thể dùng Image.asset('assets/...'). Trước đây chỉ mount lib/ nên asset có
      * trong ZIP vẫn bị mất trong container. Pubspec runtime cần khai assets/ để flutter_test load được.
      */
-    private String prepareRuntimePubspec(Path tempDir, boolean includeAssets, String packageName) throws Exception {
+    private String prepareRuntimePubspec(Path tempDir, boolean includeRootAssets,
+                                         boolean includeLibAssets, String packageName) throws Exception {
         Path base = locateTemplateDir().resolve("pubspec.base.yaml");
         if (!Files.exists(base)) return null;
         String content = Files.readString(base, StandardCharsets.UTF_8);
         // Image nền chạy `--no-pub`, nên tên package phải khớp package_graph đã cache.
         content = content.replaceFirst("(?m)^name:\\s*[^\\r\\n]+", "name: exam_project");
-        if (includeAssets) content = ensureAssetsDeclared(content);
+        if (includeRootAssets || includeLibAssets) {
+            content = ensureAssetsDeclared(content, includeRootAssets, includeLibAssets);
+        }
         else content = removeAssetsDeclared(content);
         Path out = tempDir.resolve("pubspec.yaml");
         Files.writeString(out, content, StandardCharsets.UTF_8);
         return out.toAbsolutePath().toString();
     }
 
-    private String ensureAssetsDeclared(String pubspec) {
-        if (pubspec.contains("\n  assets:") || pubspec.contains("\r\n  assets:")) return pubspec;
+    private String ensureAssetsDeclared(String pubspec, boolean includeRootAssets, boolean includeLibAssets) {
         String nl = pubspec.contains("\r\n") ? "\r\n" : "\n";
-        String assetBlock = "  assets:" + nl + "    - assets/" + nl;
+        String normalized = removeAssetsDeclared(pubspec);
+        StringBuilder assetBlock = new StringBuilder("  assets:").append(nl);
+        if (includeRootAssets) assetBlock.append("    - assets/").append(nl);
+        if (includeLibAssets) assetBlock.append("    - lib/assets/").append(nl);
         String material = "  uses-material-design: true";
-        int materialAt = pubspec.indexOf(material);
+        int materialAt = normalized.indexOf(material);
         if (materialAt >= 0) {
-            int lineEnd = pubspec.indexOf(nl, materialAt);
-            if (lineEnd < 0) lineEnd = pubspec.length();
-            return pubspec.substring(0, lineEnd + nl.length()) + assetBlock + pubspec.substring(lineEnd + nl.length());
+            int lineEnd = normalized.indexOf(nl, materialAt);
+            if (lineEnd < 0) lineEnd = normalized.length();
+            return normalized.substring(0, lineEnd + nl.length())
+                    + assetBlock
+                    + normalized.substring(lineEnd + nl.length());
         }
-        int flutterAt = pubspec.indexOf("flutter:");
+        int flutterAt = normalized.indexOf("flutter:");
         if (flutterAt >= 0) {
-            int lineEnd = pubspec.indexOf(nl, flutterAt);
-            if (lineEnd < 0) lineEnd = pubspec.length();
-            return pubspec.substring(0, lineEnd + nl.length())
+            int lineEnd = normalized.indexOf(nl, flutterAt);
+            if (lineEnd < 0) lineEnd = normalized.length();
+            return normalized.substring(0, lineEnd + nl.length())
                     + "  uses-material-design: true" + nl + assetBlock
-                    + pubspec.substring(lineEnd + nl.length());
+                    + normalized.substring(lineEnd + nl.length());
         }
-        return pubspec.stripTrailing() + nl + nl + "flutter:" + nl
+        return normalized.stripTrailing() + nl + nl + "flutter:" + nl
                 + "  uses-material-design: true" + nl + assetBlock;
     }
 

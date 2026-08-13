@@ -10,6 +10,13 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 // Engine chung chỉ nhìn vào semantic key công khai, không import model/repository của bài.
 import '../lib/main.dart' as student_app;
 
+/// Progress marker consumed only by grader.dart when a process is force-stopped.
+/// It lets the backend tell whether the last risky operation belonged to the
+/// student app or to the testcase engine, without exposing implementation keys.
+const String kStageMarker = '###GRADER_STAGE###';
+
+void _stage(String value) => print('$kStageMarker$value');
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   // Máy chấm chạy Linux headless, không có platform channel Android/iOS của sqflite.
@@ -117,11 +124,39 @@ String _sourceWithoutComments(String input, String path) {
   return output.toString();
 }
 
+/// So khớp token của public contract mà không phụ thuộc cách format mã nguồn.
+///
+/// Ví dụ `int? id`, `int ? id` và xuống dòng quanh dấu `?` đều là cùng một
+/// khai báo Dart. Testcase contract không được trừ điểm chỉ vì sinh viên chạy
+/// formatter khác, nhưng vẫn phải phân biệt đúng tên class/field/method.
+bool _sourceContainsToken(
+  String source,
+  String token, {
+  required bool caseSensitive,
+}) {
+  String normalize(String value) => value
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .replaceAllMapped(
+        RegExp(r'\s*([?(),;{}\[\]:])\s*'),
+        (match) => match.group(1)!,
+      )
+      .trim();
+
+  var normalizedSource = normalize(source);
+  var normalizedToken = normalize(token);
+  if (!caseSensitive) {
+    normalizedSource = normalizedSource.toLowerCase();
+    normalizedToken = normalizedToken.toLowerCase();
+  }
+  return normalizedSource.contains(normalizedToken);
+}
+
 Future<void> _runCase(
   WidgetTester tester,
   String testId,
   Map<String, dynamic> metadata,
 ) async {
+  _stage('TESTCASE_DISPATCH');
   final runner = (metadata['runner'] ?? '').toString();
   final parameters = _asMap(metadata['parameters']);
 
@@ -136,7 +171,7 @@ Future<void> _runCase(
           'Không tìm thấy màn hình gốc: $rootKey',
         );
       }
-      expect(tester.takeException(), isNull);
+      expect(_takeRelevantException(tester), isNull);
       return;
     case 'WIDGET_VISIBLE':
       await _boot(tester);
@@ -373,13 +408,70 @@ Future<void> _fillFields(
   if (fields.isEmpty || fields.length != values.length) {
     fail('$fieldKeysName và $valuesName phải có cùng số phần tử.');
   }
-  final fieldType = _text(parameters, 'fieldType', 'input');
   for (var index = 0; index < fields.length; index++) {
     final finder = _byKey(fields[index]);
     _expectPresent(finder, 'field', 'Thiếu field key: ${fields[index]}');
-    _assertTargetType(tester, finder, fields[index], fieldType);
-    await tester.enterText(finder, _decodeInput(values[index]));
+    await _setFormControlValue(
+      tester,
+      fields[index],
+      finder,
+      _decodeInput(values[index]),
+    );
   }
+}
+
+/// Điền một control theo khả năng quan sát thay vì ép mọi trường thành TextField.
+/// Các đề có avatar/category/date thường dùng nút mở picker hoặc dropdown. Nếu
+/// giá trị rỗng thì giữ nguyên control để testcase validation kiểm tra lỗi required.
+Future<void> _setFormControlValue(
+  WidgetTester tester,
+  String semanticKey,
+  Finder finder,
+  String value,
+) async {
+  final editable = find.descendant(
+    of: finder,
+    matching: find.byType(EditableText, skipOffstage: false),
+    matchRoot: true,
+  );
+  if (editable.evaluate().isNotEmpty) {
+    await tester.enterText(editable.first, value);
+    return;
+  }
+  if (value.isEmpty) return;
+
+  final widget = tester.widget<Widget>(finder.first);
+  final selectable =
+      widget is ButtonStyleButton ||
+      widget is IconButton ||
+      widget is DropdownButton ||
+      widget is DropdownButtonFormField ||
+      widget is InkWell ||
+      widget is GestureDetector;
+  if (!selectable) {
+    fail('Control $semanticKey không hỗ trợ nhập text hoặc chọn giá trị.');
+  }
+
+  await tester.tap(finder.first);
+  await _settle(tester);
+  _failIfActionThrew(tester);
+
+  // Picker local trong starter thường mở DropdownMenuItem/ListTile. Chọn mục
+  // đầu tiên ở overlay thay vì phụ thuộc tên asset hay ngôn ngữ hiển thị.
+  final menuItems = find.byType(DropdownMenuItem, skipOffstage: false);
+  if (menuItems.evaluate().isNotEmpty) {
+    await tester.tap(menuItems.first);
+    await _settle(tester);
+    return;
+  }
+  final options = find.byType(ListTile, skipOffstage: false);
+  if (options.evaluate().isNotEmpty) {
+    await tester.tap(options.last);
+    await _settle(tester);
+    return;
+  }
+
+  fail('Control $semanticKey đã mở nhưng không tìm thấy lựa chọn cục bộ.');
 }
 
 Future<void> _submitCurrentForm(
@@ -493,14 +585,14 @@ Future<void> _checkCrudEditFlow(
     _expectPresent(field, 'field', 'Thiếu field khi sửa: ${fields[index]}');
     final editable = find.descendant(
       of: field,
-      matching: find.byType(EditableText),
+      matching: find.byType(EditableText, skipOffstage: false),
+      matchRoot: true,
     );
-    _expectPresent(
-      editable,
-      'field',
-      'Field ${fields[index]} không phải ô nhập.',
-    );
-    final actual = tester.widget<EditableText>(editable).controller.text;
+    // Picker/dropdown không công khai đường dẫn asset dưới dạng text editable.
+    // Sự hiện diện và khả năng chọn lại của control đã được _fillFields kiểm tra;
+    // chỉ đối chiếu prefill chính xác với control có giá trị text quan sát được.
+    if (editable.evaluate().isEmpty) continue;
+    final actual = tester.widget<EditableText>(editable.first).controller.text;
     expect(
       actual,
       _decodeInput(prefill[index]),
@@ -871,7 +963,9 @@ Future<void> _tap(
   String? where,
 }) async {
   _expectPresent(finder, 'button', reason, where: where);
+  _stage('STUDENT_UI_ACTION');
   await tester.tap(finder);
+  _stage('TESTCASE_ASSERTION');
 }
 
 /// Sau MỖI thao tác: ứng dụng có ném lỗi không? Nếu có thì đó là **nguyên nhân gốc**, phải nói ra
@@ -891,13 +985,29 @@ Future<void> _tap(
 /// ĐIỂM KHÔNG ĐỔI: lỗi chưa lấy đi vẫn làm `flutter_test` đánh hỏng test lúc kết thúc, nên phán
 /// quyết y nguyên — chỉ đổi chỗ hỏng và cách BÁO.
 void _failIfActionThrew(WidgetTester tester, {String where = 'after_action'}) {
-  final exception = tester.takeException();
+  final exception = _takeRelevantException(tester);
   if (exception == null) return;
   _observe('ACTION_FAILED', where: where);
   fail('Ứng dụng ném lỗi khi thực hiện thao tác: $exception');
 }
 
 /// Bọc phép kiểm "PHẢI BIẾN MẤT". Luôn dùng [_goneByKey] cho finder, xem lý do ở đó.
+/// Resource image decoding is independent from CRUD and validation behavior.
+/// A dedicated image testcase must inspect Image/ImageProvider explicitly.
+Object? _takeRelevantException(WidgetTester tester) {
+  for (var index = 0; index < 20; index++) {
+    final exception = tester.takeException();
+    if (exception == null) return null;
+    final message = exception.toString().toLowerCase();
+    final unsupportedImageCodec =
+        message.contains('codec failed to produce an image') ||
+        message.contains('invalid image data') ||
+        message.contains('imagecodec exception');
+    if (!unsupportedImageCodec) return exception;
+  }
+  return null;
+}
+
 void _expectGone(
   Finder finder,
   String subject,
@@ -941,6 +1051,7 @@ Future<void> _boot(WidgetTester tester) async {
   }
   // SQLite FFI là I/O thật; gọi main trong FakeAsync khiến Future loadUsers không
   // được hoàn tất, còn pumpAndSettle thì chờ vô hạn vì CircularProgressIndicator.
+  _stage('STUDENT_APP_BOOT');
   await tester.runAsync(() async {
     student_app.main();
     // Một số bài tự gán lại databaseFactoryFfi (có isolate) trong main(). Gán lại ngay
@@ -950,8 +1061,9 @@ Future<void> _boot(WidgetTester tester) async {
     await tester.pump();
     await Future<void>.delayed(const Duration(milliseconds: 500));
   });
+  _stage('TESTCASE_ASSERTION');
   await tester.pump();
-  final exception = tester.takeException();
+  final exception = _takeRelevantException(tester);
   // In TRƯỚC khi assertion ném: sau đó không còn cơ hội in nữa.
   if (exception != null) {
     print(kBootFailedMarker);
@@ -972,6 +1084,7 @@ Future<void> _settle(WidgetTester tester) async {
   //    `tester.tap` vào nút trên AppBar màn hình mới bị chắn và chỉ ghi một dòng cảnh báo —
   //    sinh viên làm đúng vẫn mất điểm.
   //
+  _stage('STUDENT_ASYNC_SETTLE');
   await tester.runAsync(() async {
     await Future<void>.delayed(const Duration(milliseconds: 300));
   });
@@ -990,6 +1103,7 @@ Future<void> _settle(WidgetTester tester) async {
     // Không lặng được trong hạn: vẫn đẩy đồng hồ một nhịp để không đứng im tại t=0.
     await tester.pump(const Duration(milliseconds: 350));
   }
+  _stage('TESTCASE_ASSERTION');
 }
 
 Future<void> _responsive(
@@ -1023,7 +1137,7 @@ Future<void> _responsive(
 /// Tràn khung là điều QUAN SÁT ĐƯỢC: sinh viên mở máy ở đúng kích thước đó là thấy vệt vàng.
 /// Nên chỉ cần nói *tràn ở kích thước nào*, không cần dán log tiếng Anh.
 void _expectNoLayoutError(WidgetTester tester, {required String where}) {
-  final exception = tester.takeException();
+  final exception = _takeRelevantException(tester);
   if (exception != null) {
     final text = exception.toString().toLowerCase();
     _observe(
@@ -1201,12 +1315,15 @@ Future<void> _checkFormValidateFields(
       fields.length != errors.length) {
     fail('fieldKeys, invalidValues và errorKeys phải có cùng số phần tử.');
   }
-  final fieldType = _text(parameters, 'fieldType', 'input');
   for (var i = 0; i < fields.length; i++) {
     final fieldFinder = _byKey(fields[i]);
     _expectPresent(fieldFinder, 'field', 'Thiếu field key: ${fields[i]}');
-    _assertTargetType(tester, fieldFinder, fields[i], fieldType);
-    await tester.enterText(fieldFinder, _decodeInput(values[i]));
+    await _setFormControlValue(
+      tester,
+      fields[i],
+      fieldFinder,
+      _decodeInput(values[i]),
+    );
   }
   final submitKey = _requiredText(parameters, 'submitKey');
   await _tap(tester, _byKey(submitKey), 'Không tìm thấy nút lưu: $submitKey');
@@ -1261,21 +1378,16 @@ Future<void> _checkFormPrefill(
   if (fields.isEmpty || fields.length != expectedValues.length) {
     fail('fieldKeys và expectedValues phải có cùng số phần tử.');
   }
-  final fieldType = _text(parameters, 'fieldType', 'input');
   for (var i = 0; i < fields.length; i++) {
     final fieldFinder = _byKey(fields[i]);
     _expectPresent(fieldFinder, 'field', 'Thiếu field key: ${fields[i]}');
-    _assertTargetType(tester, fieldFinder, fields[i], fieldType);
     final editable = find.descendant(
       of: fieldFinder,
-      matching: find.byType(EditableText),
+      matching: find.byType(EditableText, skipOffstage: false),
+      matchRoot: true,
     );
-    _expectPresent(
-      editable,
-      'field',
-      'Field ${fields[i]} không phải editable input',
-    );
-    final filled = tester.widget<EditableText>(editable).controller.text;
+    if (editable.evaluate().isEmpty) continue;
+    final filled = tester.widget<EditableText>(editable.first).controller.text;
     // Giá trị đang nằm trong ô nhập là thứ sinh viên tự nhìn thấy được.
     if (filled != _decodeInput(expectedValues[i])) {
       _observe(
@@ -1303,13 +1415,7 @@ Future<void> _checkFormSubmit(
   if (fields.isEmpty || fields.length != values.length) {
     fail('fieldKeys và values phải có cùng số phần tử.');
   }
-  final fieldType = _text(parameters, 'fieldType', 'input');
-  for (var i = 0; i < fields.length; i++) {
-    final fieldFinder = _byKey(fields[i]);
-    _expectPresent(fieldFinder, 'field', 'Thiếu field key: ${fields[i]}');
-    _assertTargetType(tester, fieldFinder, fields[i], fieldType);
-    await tester.enterText(fieldFinder, _decodeInput(values[i]));
-  }
+  await _fillFields(tester, parameters);
   final submitKey = _requiredText(parameters, 'submitKey');
   await _tap(tester, _byKey(submitKey), 'Không tìm thấy nút lưu: $submitKey');
   await _settle(tester);
@@ -1503,9 +1609,8 @@ Future<void> _checkWidgetTextStyle(
   _assertTargetType(tester, finder, key, targetType);
 
   final text = tester.widget<Text>(finder);
-  final resolved = DefaultTextStyle.of(
-    tester.element(finder),
-  ).style.merge(text.style);
+  final resolved = DefaultTextStyle.of(tester.element(finder)).style
+      .merge(text.style);
   final tolerance = _number(parameters, 'tolerance', 0.5);
   final expectedSize = _number(parameters, 'fontSize', double.nan);
   if (!expectedSize.isNaN) {
@@ -1584,6 +1689,15 @@ void _assertTargetType(
     'image' => widget is Image,
     'text' => widget is Text,
     'input' => widget is TextField || widget is TextFormField,
+    'control' =>
+      widget is TextField ||
+          widget is TextFormField ||
+          widget is ButtonStyleButton ||
+          widget is IconButton ||
+          widget is DropdownButton ||
+          widget is DropdownButtonFormField ||
+          widget is Checkbox ||
+          widget is Switch,
     'button' =>
       widget is ButtonStyleButton ||
           widget is IconButton ||
@@ -1725,7 +1839,11 @@ Finder _byKey(String key) {
     if (strategy == 'key_only') return _notFound();
     if (strategy != 'auto') {
       final finder = _contractFinder(rule);
-      if (finder != null) return finder;
+      // Với contract không bắt buộc ValueKey, locator của giảng viên là ưu tiên
+      // chứ không phải điểm dừng tuyệt đối. Locator rỗng phải được phép rơi về
+      // heuristic vai trò; nếu không chỉ một khác biệt GridView/SliverGrid hay
+      // TextFormField/nút chọn avatar sẽ làm cả luồng CRUD mất điểm dây chuyền.
+      if (finder != null && finder.evaluate().isNotEmpty) return finder;
     }
   }
 
@@ -1744,9 +1862,13 @@ Finder _byKey(String key) {
     case 'field.email':
       return _textFormFieldAt(1);
     case 'field.avatar':
-      return find.byWidgetPredicate(
+      final dropdown = find.byWidgetPredicate(
         (widget) => widget is DropdownButtonFormField,
         skipOffstage: false,
+      );
+      if (dropdown.evaluate().isNotEmpty) return dropdown.first;
+      return _buttonWithText(
+        RegExp(r'avatar|image|photo|picture|ảnh|hình', caseSensitive: false),
       );
     case 'action.save':
       return _buttonWithText(
@@ -1767,6 +1889,13 @@ Finder _byKey(String key) {
       return _buttonWithText(
         RegExp(r'^(cancel|no|hủy|đóng)$', caseSensitive: false),
       );
+    case 'action.delete.confirm':
+      return _buttonWithText(
+        RegExp(
+          r'^(confirm( delete)?|yes|delete|remove|xóa|xoá|đồng ý)$',
+          caseSensitive: false,
+        ),
+      );
     case 'action.back':
       return _buttonWithText(
         RegExp(r'^(back|quay lại|trở về)$', caseSensitive: false),
@@ -1774,7 +1903,7 @@ Finder _byKey(String key) {
     case 'action.open-detail':
       return find.byType(ListTile, skipOffstage: false);
     case 'list.items':
-      return find.byType(ListView, skipOffstage: false);
+      return _collectionFinder();
     case 'item.1':
       return _listTileAt(0);
     case 'item.2':
@@ -1826,6 +1955,16 @@ Finder _textFormFieldAt(int index) {
   final fields = find.byType(TextField, skipOffstage: false);
   return fields.evaluate().length > index ? fields.at(index) : _notFound();
 }
+
+Finder _collectionFinder() => find.byWidgetPredicate(
+  (widget) =>
+      widget is ListView ||
+      widget is GridView ||
+      widget is SliverList ||
+      widget is SliverGrid ||
+      widget is CustomScrollView,
+  skipOffstage: false,
+);
 
 Finder _listTileAt(int index) {
   final items = find.byType(ListTile, skipOffstage: false);

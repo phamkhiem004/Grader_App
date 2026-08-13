@@ -14,5 +14,6 @@ public class BatchProgressResponse {
     private long            grading;
     private long            queued;
     private long            error;
+    private long            manualReview;
     private List<ResultRow> results;   // NHẸ: không kèm cột LONGTEXT (xem ResultRow)
 }

@@ -20,8 +20,123 @@ export default function AutomaticGradingPage() {
   const [phase, setPhase] = useState("idle"); // idle | uploading | polling | done
   const [uploadErr, setUploadErr] = useState(null);
   const [parseErrors, setParseErrors] = useState([]);
+  const [resultFilter, setResultFilter] = useState("all");
+  const [diagnosticFilter, setDiagnosticFilter] = useState("all");
   const fileRef = useRef();
   const pollRef = useRef(null);
+
+  // Keep the diagnostic helpers in the component scope. Next.js Fast Refresh can
+  // replace only the component body during development; module-level helpers added
+  // in the same refresh may otherwise be missing from the temporary eval scope.
+  const diagnosticCategoryLabels = {
+    dependency: "Thư viện ngoài không được phép",
+    testcase_timeout: "Timeout do bộ testcase",
+    compile: "Lỗi biên dịch",
+    structure: "Class/cấu trúc không được phép",
+    crash: "Ứng dụng không thể khởi động",
+    testcase: "Lỗi bộ testcase",
+    environment: "Lỗi môi trường chấm",
+    undetermined: "Chưa xác định nguồn lỗi",
+  };
+
+  const hasLayoutFailureEvidence = (row) => {
+    const directEvidence = `${row?.errorLog || ""} ${row?.diagnosticMessage || ""}`;
+    if (/RenderFlex|overflowed by|LAYOUT_OVERFLOW|LAYOUT_ERROR/i.test(directEvidence)) return true;
+    try {
+      const details = JSON.parse(row?.details || "{}");
+      return (details?.test_cases || []).some((testcase) => {
+        const evidence = `${testcase?.error_code || ""} ${testcase?.actual || ""} ${testcase?.observation?.kind || ""}`;
+        return /RenderFlex|overflowed by|LAYOUT_OVERFLOW|LAYOUT_ERROR/i.test(evidence);
+      });
+    } catch (_) {
+      return false;
+    }
+  };
+
+  const hasSourcePolicyEvidence = (row) => {
+    const directEvidence = `${row?.errorLog || ""} ${row?.diagnosticMessage || ""}`;
+    if (/SOURCE_POLICY_VIOLATION|forbidden token|token bị cấm|class (?:is )?not allowed|class không được phép/i.test(directEvidence)) {
+      return true;
+    }
+    try {
+      const details = JSON.parse(row?.details || "{}");
+      return (details?.test_cases || []).some((testcase) => {
+        const evidence = `${testcase?.error_code || ""} ${testcase?.actual || ""} ${testcase?.observation?.kind || ""}`;
+        return /SOURCE_POLICY_VIOLATION|forbidden token|token bị cấm|class (?:is )?not allowed|class không được phép/i.test(evidence);
+      });
+    } catch (_) {
+      return false;
+    }
+  };
+
+  const getDiagnosticInfo = (row) => {
+    const code = String(row?.diagnosticCode || "").toUpperCase();
+    const origin = String(row?.diagnosticOrigin || "").toUpperCase();
+    const stage = String(row?.diagnosticStage || "").toUpperCase();
+    const status = String(row?.status || "").toUpperCase();
+    if (!code && status !== "ERROR" && status !== "MANUAL_REVIEW") return null;
+    const sourcePolicyViolation = code.includes("SOURCE_POLICY")
+      || code.includes("FORBIDDEN_CLASS")
+      || code.includes("CLASS_NOT_ALLOWED")
+      || code.includes("SUBMISSION_STRUCTURE")
+      || hasSourcePolicyEvidence(row);
+
+    // Đây là cột sự cố của pipeline chấm, không phải bản tóm tắt mọi testcase fail.
+    // Render/validation/behavior sai vẫn được giữ đầy đủ trong JSON và điểm số.
+    const isOrdinaryTestFailure = code.includes("REQUIREMENTS_NOT_MET")
+      || code.includes("TESTS_FAILED")
+      || (code === "CONTRACT_VIOLATION" && !sourcePolicyViolation)
+      || code.includes("LAYOUT_OVERFLOW")
+      || code.includes("BUILD_ERROR");
+    if (isOrdinaryTestFailure || hasLayoutFailureEvidence(row)) return null;
+
+    const runtimeAssertion = ["NULL_ERROR", "TYPE_ERROR", "RANGE_ERROR", "FORMAT_ERROR",
+      "STATE_ERROR", "NO_SUCH_METHOD", "EXCEPTION_THROWN"].some((value) => code.includes(value));
+    if (runtimeAssertion && stage !== "APP_BOOT") return null;
+
+    let category;
+    if (code.includes("EXTERNAL_PACKAGE") || code.includes("DEPENDENCY")) category = "dependency";
+    else if (code.includes("TIMEOUT") || code.includes("WATCHDOG")) {
+      // Timeout trong main(), hàm hoặc thao tác của sinh viên là kết quả bài làm và
+      // đã nằm trong JSON. Cột này chỉ gọi là timeout testcase khi backend đã có
+      // bằng chứng origin=TESTCASE; không suy đoán từ một chuỗi "timed out" chung.
+      if (origin !== "TESTCASE") return null;
+      category = "testcase_timeout";
+    }
+    else if (code.includes("COMPILE")) category = "compile";
+    else if (sourcePolicyViolation) category = "structure";
+    else if (runtimeAssertion && stage === "APP_BOOT") category = "crash";
+    else if (code.includes("CRASH") || code.includes("APP_BOOT_ERROR")) category = "crash";
+    else if (origin === "TESTCASE") category = "testcase";
+    else if (origin === "ENVIRONMENT") category = "environment";
+    else if (origin === "UNDETERMINED" || status === "MANUAL_REVIEW" || status === "ERROR") category = "undetermined";
+    else return null;
+
+    const scope = origin === "STUDENT" ? "student" : "system";
+    const tone = status === "MANUAL_REVIEW" || row?.requiresManualReview
+      ? "border-amber-200 bg-amber-50 text-amber-800"
+      : origin === "TESTCASE" || origin === "ENVIRONMENT" || origin === "UNDETERMINED"
+        ? "border-violet-200 bg-violet-50 text-violet-700"
+        : "border-rose-200 bg-rose-50 text-rose-700";
+
+    return { category, scope, label: diagnosticCategoryLabels[category], tone };
+  };
+
+  const formatDiagnosticStage = (stage) => {
+    const labels = {
+      DEPENDENCY_PREFLIGHT: "Kiểm tra thư viện",
+      COMPILE: "Biên dịch",
+      SOURCE_CONTRACT: "Contract mã nguồn",
+      SOURCE_POLICY: "Chính sách class/mã nguồn",
+      APP_BOOT: "Khởi động ứng dụng",
+      STUDENT_UI_ACTION: "Thao tác giao diện",
+      STUDENT_ASYNC_SETTLE: "Chờ xử lý bất đồng bộ",
+      STUDENT_FUNCTION: "Hàm sinh viên",
+      TESTCASE_EXECUTION: "Thực thi testcase",
+      CONTAINER: "Docker sandbox",
+    };
+    return labels[stage] || stage || "";
+  };
 
   // Nạp toàn bộ bộ testcase đã tạo để giáo viên chọn nhanh; không giới hạn ở bộ testcase đã chấm.
   useEffect(() => {
@@ -117,6 +232,7 @@ export default function AutomaticGradingPage() {
     if (!examId.trim()) { setUploadErr("Vui lòng nhập mã bộ testcase."); return; }
 
     setPhase("uploading"); setUploadErr(null); setParseErrors([]);
+    setResultFilter("all"); setDiagnosticFilter("all");
 
     const form = new FormData();
     form.append("examId", examId.trim());
@@ -169,6 +285,7 @@ export default function AutomaticGradingPage() {
     try { localStorage.removeItem(ACTIVE_BATCH_KEY); } catch (_) {}
     setFiles([]); setBatchId(null); setProgress(null);
     setPhase("idle"); setUploadErr(null); setParseErrors([]);
+    setResultFilter("all"); setDiagnosticFilter("all");
   };
 
   const downloadCSV = () => {
@@ -180,6 +297,9 @@ export default function AutomaticGradingPage() {
     const validRows = (progress?.results || []).map(r => {
       let note = "";
       if (r.status === "ERROR") note = "Lỗi khi chấm (thường do lỗi compile hoặc crash)";
+      if (r.status === "MANUAL_REVIEW") {
+        note = `Cần chấm tay: ${r.diagnosticCode || "UNCLASSIFIED"} · ${r.diagnosticOrigin || "UNDETERMINED"} · ${r.errorLog || ""}`;
+      }
       if (r.status === "DONE") {
         try {
           const d = JSON.parse(r.details || "{}");
@@ -251,20 +371,48 @@ export default function AutomaticGradingPage() {
 
   const totalItems = (p?.total || 0) + parseErrors.length;
   const errorItems = (p?.error || 0) + parseErrors.length;
+  const manualItems = p?.manualReview || 0;
   const doneItems = p?.done || 0;
   const gradingItems = p?.grading || 0;
 
-  const pct = totalItems > 0 ? Math.round((doneItems / totalItems) * 100) : 0;
+  const processedItems = doneItems + errorItems + manualItems;
+  const pct = totalItems > 0 ? Math.round((processedItems / totalItems) * 100) : 0;
+  const donePct = totalItems > 0 ? Math.round((doneItems / totalItems) * 100) : 0;
   const errPct = totalItems > 0 ? Math.round((errorItems / totalItems) * 100) : 0;
+  const reviewPct = totalItems > 0 ? Math.round((manualItems / totalItems) * 100) : 0;
 
   const totalSize = files.reduce((s, f) => s + f.size, 0);
 
+  const allResultRows = p?.results || [];
+  // Luôn hiển thị đủ danh mục, kể cả lô hiện tại có 0 bài ở loại đó. Trước đây
+  // "Thư viện ngoài" biến mất khi không có ca vi phạm, khiến người dùng tưởng
+  // hệ thống chưa hỗ trợ nhận diện dependency.
+  const diagnosticCategoryCounts = allResultRows.reduce((counts, row) => {
+    const category = getDiagnosticInfo(row)?.category;
+    if (category) counts[category] = (counts[category] || 0) + 1;
+    return counts;
+  }, {});
+  const availableDiagnosticCategories = Object.keys(diagnosticCategoryLabels);
+  const filteredResultRows = allResultRows.filter((row) => {
+    const diagnostic = getDiagnosticInfo(row);
+    const hasIncident = Boolean(diagnostic);
+    const matchesResult = resultFilter === "all"
+      || (resultFilter === "incidents" && hasIncident)
+      || (resultFilter === "student" && diagnostic?.scope === "student")
+      || (resultFilter === "system" && diagnostic?.scope === "system")
+      || (resultFilter === "manual" && row.status === "MANUAL_REVIEW")
+      || (resultFilter === "error" && row.status === "ERROR");
+    const matchesDiagnostic = diagnosticFilter === "all"
+      || diagnostic?.category === diagnosticFilter;
+    return matchesResult && matchesDiagnostic;
+  });
+
   return (
     <SidebarLayout title="Chấm bài tự động" subtitle="Chấm tự động bài thi Flutter trong môi trường Docker cô lập" activePath="/teacher/grading">
-      <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
+      <div className="grid min-w-0 grid-cols-1 gap-6 xl:grid-cols-[minmax(300px,0.75fr)_minmax(0,2.25fr)]">
 
         {/* Cột trái: Form cấu hình & Upload */}
-        <div className="space-y-6 xl:col-span-1">
+        <div className="min-w-0 space-y-6">
           <div className="card overflow-hidden">
             {/* Header gradient */}
             <div className="flex items-center gap-3 border-b border-slate-100 bg-gradient-to-r from-indigo-50 to-blue-50 px-6 py-4">
@@ -398,14 +546,15 @@ export default function AutomaticGradingPage() {
         </div>
 
         {/* Cột phải: Tiến độ & Kết quả */}
-        <div className="space-y-6 xl:col-span-2">
+        <div className="min-w-0 space-y-6">
           {(phase === "polling" || phase === "done") ? (
             <>
               {/* Thống kê nhanh */}
-              <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+              <div className="grid grid-cols-2 gap-4 md:grid-cols-5">
                 <StatCard label="Tổng số bài" value={totalItems} icon={Users} tone="slate" />
                 <StatCard label="Hoàn thành" value={doneItems} icon={CheckCircle} tone="emerald" />
                 <StatCard label="Đang chấm" value={gradingItems} icon={Clock} tone="blue" pulse={gradingItems > 0} />
+                <StatCard label="Cần chấm tay" value={manualItems} icon={AlertCircle} tone="amber" />
                 <StatCard label="Bị lỗi" value={errorItems} icon={AlertCircle} tone="rose" />
               </div>
 
@@ -435,12 +584,13 @@ export default function AutomaticGradingPage() {
                 </div>
 
                 <div className="flex h-3 w-full overflow-hidden rounded-full bg-slate-100">
-                  <div className="h-full bg-gradient-to-r from-emerald-400 to-emerald-500 transition-all duration-500 ease-out" style={{ width: `${pct}%` }}></div>
+                  <div className="h-full bg-gradient-to-r from-emerald-400 to-emerald-500 transition-all duration-500 ease-out" style={{ width: `${donePct}%` }}></div>
+                  <div className="h-full bg-gradient-to-r from-amber-400 to-amber-500 transition-all duration-500 ease-out" style={{ width: `${reviewPct}%` }}></div>
                   <div className="h-full bg-gradient-to-r from-rose-400 to-rose-500 transition-all duration-500 ease-out" style={{ width: `${errPct}%` }}></div>
                 </div>
                 <div className="mt-3 flex items-center justify-between text-xs text-slate-500">
-                  <span><span className="font-semibold text-emerald-600">{doneItems}</span> đạt · <span className="font-semibold text-rose-600">{errorItems}</span> lỗi</span>
-                  <span>{doneItems + errorItems}/{totalItems} đã xử lý</span>
+                  <span><span className="font-semibold text-emerald-600">{doneItems}</span> xong · <span className="font-semibold text-amber-600">{manualItems}</span> chấm tay · <span className="font-semibold text-rose-600">{errorItems}</span> lỗi</span>
+                  <span>{processedItems}/{totalItems} đã xử lý</span>
                 </div>
 
                 {phase === "done" && (
@@ -453,7 +603,7 @@ export default function AutomaticGradingPage() {
               </div>
 
               {/* Bảng kết quả */}
-              <div className="card overflow-hidden">
+              <div className="card min-w-0 overflow-hidden">
                 <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50/50 px-6 py-4">
                   <h3 className="text-sm font-bold uppercase tracking-wider text-slate-700">Chi tiết kết quả</h3>
                   {phase === "done" && (
@@ -468,19 +618,64 @@ export default function AutomaticGradingPage() {
                   )}
                 </div>
 
-                <div className="overflow-x-auto">
-                  <table className="w-full border-collapse text-left">
+                <div className="flex flex-wrap items-end gap-3 border-b border-slate-100 bg-white px-6 py-3">
+                  <label className="min-w-[190px] text-xs font-semibold text-slate-500">
+                    Phạm vi hiển thị
+                    <select
+                      value={resultFilter}
+                      onChange={(event) => setResultFilter(event.target.value)}
+                      className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+                    >
+                      <option value="all">Tất cả bài</option>
+                      <option value="incidents">Có sự cố chặn chấm</option>
+                      <option value="student">Sự cố từ bài làm</option>
+                      <option value="system">Sự cố testcase/môi trường</option>
+                      <option value="manual">Cần chấm tay</option>
+                      <option value="error">Lỗi thực thi</option>
+                    </select>
+                  </label>
+                  <label className="min-w-[210px] text-xs font-semibold text-slate-500">
+                    Loại sự cố
+                    <select
+                      value={diagnosticFilter}
+                      onChange={(event) => setDiagnosticFilter(event.target.value)}
+                      className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+                    >
+                      <option value="all">Tất cả loại sự cố</option>
+                      {availableDiagnosticCategories.map((category) => (
+                        <option key={category} value={category}>
+                          {diagnosticCategoryLabels[category] || category} ({diagnosticCategoryCounts[category] || 0})
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <div className="pb-2 text-xs font-medium text-slate-400">
+                    Hiển thị {filteredResultRows.length}/{allResultRows.length} bài
+                  </div>
+                </div>
+
+                <div className="max-w-full overflow-x-auto">
+                  <table className="w-full min-w-[900px] table-fixed border-collapse text-left">
+                    <colgroup>
+                      <col className="w-[24%]" />
+                      <col className="w-[13%]" />
+                      <col className="w-[17%]" />
+                      <col className="w-[28%]" />
+                      <col className="w-[10%]" />
+                      <col className="w-[8%]" />
+                    </colgroup>
                     <thead>
                       <tr className="border-b border-slate-100 bg-white text-xs font-bold uppercase tracking-wider text-slate-500">
-                        <th className="px-6 py-3.5">Sinh viên</th>
-                        <th className="px-6 py-3.5 text-center">Trạng thái</th>
-                        <th className="px-6 py-3.5">Tỉ lệ Pass</th>
-                        <th className="px-6 py-3.5 text-right">Điểm số</th>
-                        <th className="px-4 py-3.5 text-center">JSON</th>
+                        <th className="px-4 py-3.5">Sinh viên</th>
+                        <th className="px-3 py-3.5 text-center">Trạng thái</th>
+                        <th className="px-3 py-3.5">Tỉ lệ Pass</th>
+                        <th className="px-3 py-3.5">Sự cố chặn chấm</th>
+                        <th className="px-3 py-3.5 text-right">Điểm số</th>
+                        <th className="px-3 py-3.5 text-center">JSON</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {p?.results?.map((r) => {
+                      {filteredResultRows.map((r) => {
                         let passCount = 0, totalCount = 0;
                         try {
                           const d = JSON.parse(r.details || "{}");
@@ -490,13 +685,19 @@ export default function AutomaticGradingPage() {
 
                         const isDone = r.status === "DONE";
                         const isError = r.status === "ERROR";
+                        const isManual = r.status === "MANUAL_REVIEW";
                         const isGrading = r.status === "GRADING";
                         const ratio = totalCount > 0 ? Math.round((passCount / totalCount) * 100) : 0;
                         const initials = (r.studentName || r.studentId || "?").trim().charAt(0).toUpperCase();
+                        const diagnosticScope = r.diagnosticOrigin === "STUDENT" ? "Bài sinh viên" :
+                          r.diagnosticOrigin === "TESTCASE" ? "Bộ testcase" :
+                          r.diagnosticOrigin === "ENVIRONMENT" ? "Môi trường chấm" :
+                          r.diagnosticOrigin === "UNDETERMINED" ? "Chưa xác định" : "";
+                        const diagnostic = getDiagnosticInfo(r);
 
                         return (
                           <tr key={r.id} className="transition-colors hover:bg-slate-50/70">
-                            <td className="px-6 py-3.5">
+                            <td className="px-4 py-3.5">
                               <div className="flex items-center gap-3">
                                 <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-slate-100 to-slate-200 text-xs font-bold text-slate-500">
                                   {initials}
@@ -507,32 +708,54 @@ export default function AutomaticGradingPage() {
                                 </div>
                               </div>
                             </td>
-                            <td className="px-6 py-3.5 text-center">
+                            <td className="px-3 py-3.5 text-center">
                               <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${
                                 isDone ? 'bg-emerald-100 text-emerald-700' :
+                                isManual ? 'bg-amber-100 text-amber-800' :
                                 isError ? 'bg-rose-100 text-rose-700' :
                                 isGrading ? 'bg-blue-100 text-blue-700' :
                                 'bg-slate-100 text-slate-600'
                               }`}>
                                 <span className={`h-1.5 w-1.5 rounded-full ${
-                                  isDone ? 'bg-emerald-500' : isError ? 'bg-rose-500' : isGrading ? 'bg-blue-500 animate-pulse' : 'bg-slate-400'
+                                  isDone ? 'bg-emerald-500' : isManual ? 'bg-amber-500' : isError ? 'bg-rose-500' : isGrading ? 'bg-blue-500 animate-pulse' : 'bg-slate-400'
                                 }`}></span>
-                                {isDone ? 'Đã xong' : isError ? 'Lỗi' : isGrading ? 'Đang chấm' : 'Chờ'}
+                                {isDone ? 'Đã xong' : isManual ? 'Cần chấm tay' : isError ? 'Lỗi' : isGrading ? 'Đang chấm' : 'Chờ'}
                               </span>
                             </td>
-                            <td className="px-6 py-3.5">
-                              {isDone ? (
+                            <td className="px-3 py-3.5">
+                              {(isDone || isManual) ? (
                                 <div className="flex items-center gap-2">
-                                  <div className="h-1.5 w-20 overflow-hidden rounded-full bg-slate-100">
+                                  <div className="h-1.5 min-w-8 flex-1 overflow-hidden rounded-full bg-slate-100">
                                     <div className={`h-full rounded-full ${ratio >= 50 ? 'bg-emerald-500' : 'bg-amber-500'}`} style={{ width: `${ratio}%` }}></div>
                                   </div>
                                   <span className="text-xs font-medium text-slate-500">{passCount}/{totalCount}</span>
                                 </div>
-                              ) : isError && r.errorLog ? (
-                                <span className="line-clamp-2 max-w-xs text-xs text-rose-500" title={r.errorLog}>{r.errorLog}</span>
                               ) : <span className="text-slate-300">—</span>}
                             </td>
-                            <td className="px-6 py-3.5 text-right">
+                            <td className="px-3 py-3.5">
+                              {diagnostic ? (
+                                <div
+                                  className={`w-full min-w-0 rounded-lg border px-2.5 py-2 ${diagnostic.tone}`}
+                                  title={[r.diagnosticCode, diagnosticScope, r.diagnosticStage, r.errorLog].filter(Boolean).join(" · ")}
+                                >
+                                  <div className="flex items-center gap-1.5 text-xs font-bold">
+                                    <AlertCircle size={13} className="shrink-0" />
+                                    <span className="truncate">{diagnostic.label}</span>
+                                  </div>
+                                  <p className="mt-1 truncate font-mono text-[10px] opacity-80">
+                                    {r.diagnosticCode || "CHƯA PHÂN LOẠI"}
+                                  </p>
+                                  {(diagnosticScope || r.diagnosticStage) && (
+                                    <p className="mt-0.5 truncate text-[10px] font-medium opacity-80">
+                                      {[diagnosticScope, formatDiagnosticStage(r.diagnosticStage)].filter(Boolean).join(" · ")}
+                                    </p>
+                                  )}
+                                </div>
+                              ) : (
+                                <span className="text-xs text-slate-300">—</span>
+                              )}
+                            </td>
+                            <td className="px-3 py-3.5 text-right">
                               {r.score != null ? (
                                 <span className={`inline-block rounded-lg px-2.5 py-1 text-sm font-bold ${r.score >= PASS_THRESHOLD ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'}`}>
                                   {r.score.toFixed(1)}
@@ -541,8 +764,8 @@ export default function AutomaticGradingPage() {
                                 <span className="font-medium text-slate-300">—</span>
                               )}
                             </td>
-                            <td className="px-4 py-3.5 text-center">
-                              {isDone && (
+                            <td className="px-3 py-3.5 text-center">
+                              {(isDone || isManual) && (
                                 <button
                                   onClick={() => downloadStudentJson(r)}
                                   title={`Tải JSON của ${r.studentId}`}
@@ -555,11 +778,18 @@ export default function AutomaticGradingPage() {
                           </tr>
                         );
                       })}
-                      {(!p?.results || p.results.length === 0) && (
+                      {allResultRows.length === 0 && (
                         <tr>
-                          <td colSpan="5" className="px-6 py-10 text-center text-sm text-slate-500">
+                          <td colSpan="6" className="px-6 py-10 text-center text-sm text-slate-500">
                             <Loader2 size={20} className="mx-auto mb-2 animate-spin text-slate-300" />
                             Đang chờ dữ liệu...
+                          </td>
+                        </tr>
+                      )}
+                      {allResultRows.length > 0 && filteredResultRows.length === 0 && (
+                        <tr>
+                          <td colSpan="6" className="px-6 py-10 text-center text-sm text-slate-500">
+                            Không có bài nào phù hợp với bộ lọc hiện tại.
                           </td>
                         </tr>
                       )}
@@ -616,6 +846,7 @@ function StatCard({ label, value, icon: Icon, tone, pulse }) {
     slate:   { text: "text-slate-800",  badge: "bg-slate-100 text-slate-500",     border: "border-slate-200" },
     emerald: { text: "text-emerald-600", badge: "bg-emerald-100 text-emerald-600", border: "border-emerald-100" },
     blue:    { text: "text-blue-600",    badge: "bg-blue-100 text-blue-600",       border: "border-blue-100" },
+    amber:   { text: "text-amber-600",   badge: "bg-amber-100 text-amber-700",     border: "border-amber-100" },
     rose:    { text: "text-rose-600",    badge: "bg-rose-100 text-rose-600",       border: "border-rose-100" },
   };
   const t = tones[tone] || tones.slate;

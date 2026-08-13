@@ -65,6 +65,10 @@ public class ResultController {
         m.put("resultJson", normalizeJsonString(r.getResultJson())); // chuỗi JSON đầy đủ (chỉ có expected)
         m.put("details", r.getDetails());
         m.put("errorLog", r.getErrorLog());
+        m.put("diagnosticCode", r.getDiagnosticCode());
+        m.put("diagnosticOrigin", r.getDiagnosticOrigin());
+        m.put("diagnosticStage", r.getDiagnosticStage());
+        m.put("requiresManualReview", r.isRequiresManualReview());
         m.put("manualScore", r.getManualScore());
         m.put("manualJson", r.getManualJson());
         m.put("manualBy", r.getManualBy());
@@ -114,6 +118,10 @@ public class ResultController {
             m.put("updatedAt", r.updatedAt());
             m.put("details", r.details());     // JSON gon cua grader: soTestPass / tongSoTest
             m.put("errorLog", r.errorLog());
+            m.put("diagnosticCode", r.diagnosticCode());
+            m.put("diagnosticOrigin", r.diagnosticOrigin());
+            m.put("diagnosticStage", r.diagnosticStage());
+            m.put("requiresManualReview", r.requiresManualReview());
             m.put("hasJson", Boolean.TRUE.equals(r.hasJson()));
             out.add(m);
         }

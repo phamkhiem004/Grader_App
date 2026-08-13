@@ -20,7 +20,8 @@ public interface ExamResultRepository extends JpaRepository<ExamResult, Long> {
 
     // NHẸ cho /batch/progress (poll 3s): bỏ cột LONGTEXT result_json/manual_json
     @Query("select new com.example.grader.dto.ResultRow(r.id, r.studentId, r.studentName, " +
-           "r.status, r.score, r.details, r.errorLog) from ExamResult r " +
+           "r.status, r.score, r.details, r.errorLog, r.diagnosticCode, r.diagnosticOrigin, " +
+           "r.diagnosticStage, r.requiresManualReview) from ExamResult r " +
            "where r.batchId = :batchId order by r.studentId")
     List<com.example.grader.dto.ResultRow> findRowsByBatchId(@Param("batchId") String batchId);
 
@@ -40,6 +41,7 @@ public interface ExamResultRepository extends JpaRepository<ExamResult, Long> {
                coalesce(sum(case when r.status = :error then 1 else 0 end), 0),
                coalesce(sum(case when r.status = :queued then 1 else 0 end), 0),
                coalesce(sum(case when r.status = :grading then 1 else 0 end), 0),
+               coalesce(sum(case when r.status = :manualReview then 1 else 0 end), 0),
                coalesce(sum(case when r.status = :done and r.score >= :passThreshold then 1 else 0 end), 0),
                coalesce(sum(case when r.status = :done and r.score < :passThreshold then 1 else 0 end), 0),
                coalesce(avg(case when r.status = :done and r.score is not null then r.score else null end), 0)
@@ -52,6 +54,7 @@ public interface ExamResultRepository extends JpaRepository<ExamResult, Long> {
                             @Param("error") GradingStatus error,
                             @Param("queued") GradingStatus queued,
                             @Param("grading") GradingStatus grading,
+                            @Param("manualReview") GradingStatus manualReview,
                             @Param("passThreshold") float passThreshold);
 
     @Query("""
@@ -85,6 +88,7 @@ public interface ExamResultRepository extends JpaRepository<ExamResult, Long> {
         select new com.example.grader.dto.ExamHistoryRow(
             r.id, r.studentId, r.studentName, r.score, r.manualScore, r.status,
             r.batchId, r.submittedAt, r.updatedAt, r.details, r.errorLog,
+            r.diagnosticCode, r.diagnosticOrigin, r.diagnosticStage, r.requiresManualReview,
             case when r.resultJson is null then false else true end
         )
         from ExamResult r

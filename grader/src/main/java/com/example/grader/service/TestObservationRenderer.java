@@ -59,6 +59,8 @@ public final class TestObservationRenderer {
             Map.entry("OVERFLOW", "LAYOUT_OVERFLOW"),
             Map.entry("LAYOUT_ERROR", "BUILD_ERROR"),
             Map.entry("BOOT_FAILED", "EXCEPTION_THROWN"),
+            Map.entry("SOURCE_CONTRACT_VIOLATION", "CONTRACT_VIOLATION"),
+            Map.entry("SOURCE_POLICY_VIOLATION", "SOURCE_POLICY_VIOLATION"),
             // Bốn mã MỚI ở A1 — chỉ xuất hiện khi các kind Mức 2 chạy thật.
             Map.entry("NUMBER_MISMATCH", "SIZE_MISMATCH"),
             Map.entry("STYLE_MISMATCH", "TEXT_STYLE_MISMATCH"),
@@ -195,6 +197,10 @@ public final class TestObservationRenderer {
             case "OVERFLOW" -> "giao diện bị tràn khung" + suffix + ".";
             case "LAYOUT_ERROR" -> "bố cục dựng không xong" + suffix + ".";
             case "BOOT_FAILED" -> "ứng dụng không mở được, chưa hiện được nội dung nào.";
+            case "SOURCE_CONTRACT_VIOLATION" ->
+                    "mã nguồn không đáp ứng public contract mà đề đã công bố.";
+            case "SOURCE_POLICY_VIOLATION" ->
+                    "mã nguồn chứa class hoặc nội dung mà contract của đề không cho phép.";
             // NGUYÊN NHÂN GỐC, không phải triệu chứng. Trước A2c chỗ này không tồn tại: app ném
             // lỗi lúc bấm thì báo cáo nói "không thấy hộp thoại nào" — sinh viên đi tìm widget
             // thiếu trong khi lỗi là truy cập ngoài phạm vi. Câu này chỉ nói ĐIỀU QUAN SÁT ĐƯỢC

@@ -95,8 +95,15 @@ interface ContractCatalog {
   strategies: ContractStrategy[];
   icon_groups: string[];
   default_keys: ContractKey[];
+  default_allowed_packages: string[];
   common_widget_types: string[];
 }
+
+const DEFAULT_GRADING_PACKAGES = [
+  "flutter", "flutter_test", "flutter_riverpod", "riverpod", "riverpod_annotation",
+  "path", "sqflite", "sqflite_common", "sqflite_common_ffi",
+  "sqflite_common_ffi_web", "path_provider", "sembast_web", "image_picker", "intl",
+];
 
 interface TemplateDraft {
   template_id: string;
@@ -1120,6 +1127,8 @@ function TestcasesEditor() {
   // Khi sửa đề cũ, giá trị đã lưu vẫn được nạp lại ở useEffect bên dưới.
   const [requireKeys, setRequireKeys] = useState(true);
   const [contractKeys, setContractKeys] = useState<ContractKey[]>([]);
+  const [allowedPackages, setAllowedPackages] = useState<string[]>(DEFAULT_GRADING_PACKAGES);
+  const [localPackageNames, setLocalPackageNames] = useState<string[]>([]);
   const [contractDoc, setContractDoc] = useState<{ requirements_text: string; starter_dart: string } | null>(null);
   const [contractBusy, setContractBusy] = useState(false);
   const [contractMode, setContractMode] = useState<"form" | "json">("form");
@@ -1167,9 +1176,18 @@ function TestcasesEditor() {
         setExamName(typeof data.exam_name === "string" ? data.exam_name : "");
         setTeacherNote(typeof data.teacher_note === "string" ? data.teacher_note : "");
         setVersion(Number(data.version) || 0);
-        const contract = (data.contract || {}) as { require_keys?: boolean; keys?: ContractKey[] };
+        const contract = (data.contract || {}) as {
+          require_keys?: boolean;
+          keys?: ContractKey[];
+          allowed_packages?: string[];
+          local_package_names?: string[];
+        };
         setRequireKeys(!!contract.require_keys);
         setContractKeys(Array.isArray(contract.keys) ? contract.keys : []);
+        setAllowedPackages(Array.isArray(contract.allowed_packages)
+          ? contract.allowed_packages : DEFAULT_GRADING_PACKAGES);
+        setLocalPackageNames(Array.isArray(contract.local_package_names)
+          ? contract.local_package_names : []);
       })
       .catch((e: unknown) => setMessage({
         type: "error",
@@ -1238,7 +1256,12 @@ function TestcasesEditor() {
             exam_name: examName.trim(),
             teacher_note: teacherNote.trim(),
             items,
-            contract: { require_keys: requireKeys, keys: contractKeys },
+            contract: {
+              require_keys: requireKeys,
+              keys: contractKeys,
+              allowed_packages: allowedPackages,
+              local_package_names: localPackageNames,
+            },
           }),
         });
         const data = await response.json().catch(() => ({}));
@@ -1259,7 +1282,7 @@ function TestcasesEditor() {
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [previewOpen, examId, examName, teacherNote, items, requireKeys, contractKeys]);
+  }, [previewOpen, examId, examName, teacherNote, items, requireKeys, contractKeys, allowedPackages, localPackageNames]);
 
   useEffect(() => {
     fetch(`${API_BASE}/testcase-templates?includeHidden=${showHiddenTemplates}`)
@@ -1678,7 +1701,12 @@ function TestcasesEditor() {
   const switchContractMode = (mode: "form" | "json") => {
     setContractJsonError("");
     if (mode === "json") {
-      setContractJson(JSON.stringify({ require_keys: requireKeys, keys: contractKeys }, null, 2));
+      setContractJson(JSON.stringify({
+        require_keys: requireKeys,
+        keys: contractKeys,
+        allowed_packages: allowedPackages,
+        local_package_names: localPackageNames,
+      }, null, 2));
     }
     setContractMode(mode);
   };
@@ -1714,6 +1742,10 @@ function TestcasesEditor() {
       const parsed = JSON.parse(contractJson);
       if (!parsed || !Array.isArray(parsed.keys)) throw new Error("Thiếu mảng \"keys\"");
       setRequireKeys(parsed.require_keys === true);
+      setAllowedPackages(Array.isArray(parsed.allowed_packages)
+        ? parsed.allowed_packages.map(String) : DEFAULT_GRADING_PACKAGES);
+      setLocalPackageNames(Array.isArray(parsed.local_package_names)
+        ? parsed.local_package_names.map(String) : []);
       setContractKeys(parsed.keys.map((row: Partial<ContractKey>) => ({
         key: String(row.key ?? "").trim(),
         label: String(row.label ?? "").trim(),
@@ -1746,7 +1778,12 @@ function TestcasesEditor() {
       const res = await fetch(`${API_BASE}/testcase-templates/contract/preview`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ contract: { require_keys: requireKeys, keys: contractKeys } }),
+        body: JSON.stringify({ contract: {
+          require_keys: requireKeys,
+          keys: contractKeys,
+          allowed_packages: allowedPackages,
+          local_package_names: localPackageNames,
+        } }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Không dựng được hợp đồng");
@@ -1968,7 +2005,12 @@ function TestcasesEditor() {
           exam_name: examName.trim(),
           teacher_note: teacherNote.trim(),
           items,
-          contract: { require_keys: requireKeys, keys: contractKeys },
+          contract: {
+            require_keys: requireKeys,
+            keys: contractKeys,
+            allowed_packages: allowedPackages,
+            local_package_names: localPackageNames,
+          },
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -2606,6 +2648,33 @@ function TestcasesEditor() {
                     Bật ô này là bỏ toàn bộ cách nhận diện thay thế: thiếu key thì phần đó không được tính điểm.
                   </span>
                 </label>
+
+                <div className="grid gap-3 rounded-xl border border-amber-200 bg-amber-50/70 p-3 md:grid-cols-2">
+                  <label className="space-y-1.5 text-xs text-slate-600">
+                    <span className="font-bold text-slate-700">Package được phép trong bài</span>
+                    <input
+                      value={allowedPackages.join(",")}
+                      onChange={(e) => setAllowedPackages(e.target.value.split(",").map((value) => value.trim()))}
+                      placeholder="flutter,flutter_riverpod,sqflite,path"
+                      className="w-full rounded-lg border border-amber-200 bg-white px-3 py-2 font-mono text-xs outline-none focus:border-amber-400"
+                    />
+                    <span className="block leading-relaxed">
+                      Bài import package ngoài danh sách này sẽ chuyển sang <strong>Cần chấm tay</strong>, không tự nhận 0 điểm.
+                    </span>
+                  </label>
+                  <label className="space-y-1.5 text-xs text-slate-600">
+                    <span className="font-bold text-slate-700">Tên package nội bộ của starter</span>
+                    <input
+                      value={localPackageNames.join(",")}
+                      onChange={(e) => setLocalPackageNames(e.target.value.split(",").map((value) => value.trim()))}
+                      placeholder="user_manager_exam_standard"
+                      className="w-full rounded-lg border border-amber-200 bg-white px-3 py-2 font-mono text-xs outline-none focus:border-amber-400"
+                    />
+                    <span className="block leading-relaxed">
+                      Dùng khi starter import chính file trong <code className="font-mono">lib/</code> bằng tên package riêng.
+                    </span>
+                  </label>
+                </div>
 
                 {contractMode === "json" ? (
                   <>

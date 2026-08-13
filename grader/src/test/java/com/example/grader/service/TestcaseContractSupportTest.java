@@ -9,6 +9,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class TestcaseContractSupportTest {
 
@@ -20,6 +21,22 @@ class TestcaseContractSupportTest {
                 "require_keys", false,
                 "keys", java.util.List.of())).get("require_keys"),
                 "Không được tự đổi contract của đề legacy đã lưu");
+    }
+
+    @Test
+    void normalizeKeepsDependencyPolicyAndRejectsInvalidPackageNames() {
+        Map<String, Object> normalized = TestcaseContractSupport.normalize(Map.of(
+                "require_keys", false,
+                "keys", List.of(),
+                "allowed_packages", List.of("flutter", "sqflite", "flutter_riverpod"),
+                "local_package_names", List.of("user_manager_exam_standard")));
+
+        assertEquals(List.of("flutter", "sqflite", "flutter_riverpod"),
+                normalized.get("allowed_packages"));
+        assertEquals(List.of("user_manager_exam_standard"),
+                normalized.get("local_package_names"));
+        assertThrows(IllegalArgumentException.class, () -> TestcaseContractSupport.normalize(Map.of(
+                "keys", List.of(), "allowed_packages", List.of("bad-package"))));
     }
 
     @Test

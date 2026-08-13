@@ -226,8 +226,9 @@ class CurriculumTestcaseSourceTest {
 
         assertTrue(code.contains("final source0 = _sourceWithoutComments"));
         assertTrue(code.contains("final source1 = _sourceWithoutComments"));
-        assertTrue(code.contains("source0.contains(\"class Task\")"));
-        assertTrue(code.contains("source1.contains(\"class TaskRepository\")"));
+        assertTrue(code.contains("_sourceContainsToken(source0, \"class Task\", caseSensitive: true)"));
+        assertTrue(code.contains("_sourceContainsToken(source1, \"class TaskRepository\", caseSensitive: true)"));
+        assertTrue(code.contains("_observe('SOURCE_CONTRACT_VIOLATION'"));
         assertFalse(code.contains("sourceParts.join"),
                 "Chế độ exact không được gộp file rồi tìm token toàn cục");
 
@@ -235,6 +236,7 @@ class CurriculumTestcaseSourceTest {
         assertTrue(engine.contains("String _sourceWithoutComments"));
         assertTrue(engine.contains("inLineComment"));
         assertTrue(engine.contains("inBlockComment"));
+        assertTrue(engine.contains("bool _sourceContainsToken"));
 
         params.put("sourceChecksJson", "[{\"path\":\"../secret.dart\","
                 + "\"requiredTokens\":[\"secret\"],\"forbiddenTokens\":[]}]");

@@ -60,6 +60,20 @@ public class ExamResult {
     @Column(name = "error_log", columnDefinition = "LONGTEXT")
     private String errorLog;
 
+    /** Mã/ngồn/giai đoạn lỗi ở cấp lượt chấm; không trộn với lỗi assertion của từng testcase. */
+    @Column(name = "diagnostic_code", length = 80)
+    private String diagnosticCode;
+
+    @Column(name = "diagnostic_origin", length = 30)
+    private String diagnosticOrigin;
+
+    @Column(name = "diagnostic_stage", length = 40)
+    private String diagnosticStage;
+
+    @ColumnDefault("false")
+    @Column(name = "requires_manual_review", nullable = false)
+    private boolean requiresManualReview;
+
     // ── "Đọc & nhận xét bài làm bằng AI" (feedback-bot) — cache nhận xét đã sinh ──
     @Column(name = "feedback_json", columnDefinition = "LONGTEXT")
     private String feedbackJson;      // FeedbackRow đã sinh (JSON)

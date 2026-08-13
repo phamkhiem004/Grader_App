@@ -182,6 +182,10 @@ public class BatchGradingService {
                 placeholder.setScore(null);     // reset kết quả lần chấm trước
                 placeholder.setDetails(null);
                 placeholder.setErrorLog(null);
+                placeholder.setDiagnosticCode(null);
+                placeholder.setDiagnosticOrigin(null);
+                placeholder.setDiagnosticStage(null);
+                placeholder.setRequiresManualReview(false);
                 resultRepo.save(placeholder);
 
                 pendingJobs.add(new GradingJob(
@@ -220,6 +224,7 @@ public class BatchGradingService {
     // ── Xử lý 1 job (TUYỆT ĐỐI không ném exception ra ngoài → worker không bao giờ chết) ──
     private void processJob(GradingJob job) {
         boolean success = false;
+        boolean manualReview = false;
         try {
             log.info("[{}] Chấm: {}", job.batchId(), job.studentId());
             updateStatus(job, GradingStatus.GRADING, null, null, null);
@@ -237,22 +242,37 @@ public class BatchGradingService {
 
             float score = parseScore(resultJson);
             String fullJson = assembleResultJson(job, resultJson);   // JSON đầy đủ cho lịch sử/năng lực
-            updateStatus(job, GradingStatus.DONE, score, resultJson, fullJson);
-            examRepo.markHasResults(job.examId());   // Flag Pattern: đề này đã có bài chấm xong
-            log.info("[{}] DONE {} → {} đ", job.batchId(), job.studentId(), score);
-            success = true;
+            GradingDiagnosticException diagnostic = diagnoseGraderResult(resultJson, score);
+            if (diagnostic != null && diagnostic.manualReview()) {
+                manualReview = true;
+                updateStatus(job, GradingStatus.MANUAL_REVIEW, null, resultJson, fullJson);
+                updateDiagnostic(job, diagnostic);
+                log.warn("[{}] MANUAL_REVIEW {} → {}", job.batchId(), job.studentId(),
+                        diagnostic.teacherMessage());
+            } else {
+                updateStatus(job, GradingStatus.DONE, score, resultJson, fullJson);
+                if (diagnostic != null) updateDiagnostic(job, diagnostic);
+                examRepo.markHasResults(job.examId());   // chỉ kết quả tự động hợp lệ mới bật flag
+                log.info("[{}] DONE {} → {} đ", job.batchId(), job.studentId(), score);
+                success = true;
+            }
 
         } catch (Exception e) {
-            // errorLog KHÔNG được rỗng: nếu exception thiếu message thì dùng e.toString() (tên lớp)
-            String emsg = (e.getMessage() != null && !e.getMessage().isBlank()) ? e.getMessage() : e.toString();
-            log.error("[{}] ERROR {} → {}", job.batchId(), job.studentId(), emsg);
-            try { updateStatus(job, GradingStatus.ERROR, 0f, null, null); }
-            catch (Exception ex) { log.warn("[{}] Không ghi được ERROR cho {}: {}", job.batchId(), job.studentId(), ex.getMessage()); }
-            updateErrorLog(job, emsg);               // đã tự bọc try/catch + cắt ngắn bên trong
+            GradingDiagnosticException diagnostic = diagnoseException(e);
+            manualReview = diagnostic.manualReview();
+            GradingStatus terminal = manualReview ? GradingStatus.MANUAL_REVIEW : GradingStatus.ERROR;
+            log.error("[{}] {} {} → {}", job.batchId(), terminal, job.studentId(), diagnostic.teacherMessage());
+            try { updateStatus(job, terminal, null, null, null); }
+            catch (Exception ex) {
+                log.warn("[{}] Không ghi được {} cho {}: {}", job.batchId(), terminal,
+                        job.studentId(), ex.getMessage());
+            }
+            updateDiagnostic(job, diagnostic);
         } finally {
             // Bookkeeping luôn chạy & có bọc lỗi → 1 lỗi ghi DB không làm kẹt batch
             try { if (!saveSubmissions) deleteQuietly(Path.of(job.zipPath())); } catch (Exception ignored) {}
-            try { batchRepo.incrementCounts(job.batchId(), success ? 1 : 0, success ? 0 : 1); }
+            try { batchRepo.incrementCounts(job.batchId(), success ? 1 : 0,
+                    success || manualReview ? 0 : 1); }
             catch (Exception ex) { log.warn("[{}] incrementCounts lỗi: {}", job.batchId(), ex.getMessage()); }
             try { checkBatchComplete(job.batchId()); }
             catch (Exception ex) { log.warn("[{}] checkBatchComplete lỗi: {}", job.batchId(), ex.getMessage()); }
@@ -267,6 +287,199 @@ public class BatchGradingService {
             if (fullJson != null) r.setResultJson(fullJson);
             resultRepo.save(r);
         });
+    }
+
+    /** Phân loại exception cấp lượt chấm; không còn biến mọi lỗi thành ERROR 0 điểm giống nhau. */
+    private GradingDiagnosticException diagnoseException(Exception error) {
+        if (error instanceof GradingDiagnosticException diagnostic) return diagnostic;
+        String message = error.getMessage() == null || error.getMessage().isBlank()
+                ? error.toString() : error.getMessage();
+        String low = message.toLowerCase(java.util.Locale.ROOT);
+        if (low.contains("không tìm thấy thư mục lib") || low.contains("không có file .dart")) {
+            return new GradingDiagnosticException("SUBMISSION_STRUCTURE_INVALID",
+                    GradingDiagnosticException.Origin.STUDENT, "SUBMISSION_PREFLIGHT", false,
+                    message, error);
+        }
+        if (low.contains("test/exam_test.dart") || low.contains("test/grader.dart")
+                || low.contains("testcase chưa có") || low.contains("không tìm thấy skills_matrix")) {
+            return new GradingDiagnosticException("TESTCASE_RUNNER_ERROR",
+                    GradingDiagnosticException.Origin.TESTCASE, "TESTCASE_SETUP", true,
+                    message, error);
+        }
+        if (low.contains("docker") || low.contains("daemon") || low.contains("no space left")
+                || low.contains("cannot allocate memory")) {
+            return new GradingDiagnosticException("GRADING_ENVIRONMENT_ERROR",
+                    GradingDiagnosticException.Origin.ENVIRONMENT, "CONTAINER_RUNTIME", true,
+                    message, error);
+        }
+        if (low.contains("timeout") || low.contains("quá thời gian")) {
+            return new GradingDiagnosticException("GRADING_TIMEOUT_UNDETERMINED",
+                    GradingDiagnosticException.Origin.UNDETERMINED, "GRADER_TOTAL", true,
+                    message + " Chưa đủ bằng chứng để quy lỗi cho bài sinh viên.", error);
+        }
+        return new GradingDiagnosticException("UNCLASSIFIED_GRADING_ERROR",
+                GradingDiagnosticException.Origin.UNDETERMINED, "GRADING_PIPELINE", true,
+                message, error);
+    }
+
+    /**
+     * Một bài chấm xong nhưng 0 điểm vẫn phải có lý do ở cấp lượt chấm. Timeout/runner lỗi
+     * chuyển sang chấm tay; bài đã thực thi đủ nhưng không đạt yêu cầu vẫn là kết quả 0 hợp lệ.
+     */
+    private GradingDiagnosticException diagnoseGraderResult(String graderJson, float score) {
+        if (graderJson == null || graderJson.isBlank()) return null;
+        try {
+            JsonNode root = mapper.readTree(graderJson);
+            JsonNode grading = root.path("grading_result");
+            String declaredCode = grading.path("diagnostic_code").asText("");
+            String declaredOrigin = grading.path("diagnostic_origin").asText("");
+            String declaredStage = grading.path("diagnostic_stage").asText("");
+            boolean declaredReview = grading.path("requires_manual_review").asBoolean(false);
+            String runnerError = grading.path("runner_error").asText("");
+            if (!declaredCode.isBlank()) {
+                GradingDiagnosticException.Origin origin;
+                try {
+                    origin = GradingDiagnosticException.Origin.valueOf(declaredOrigin);
+                } catch (Exception ignored) {
+                    origin = GradingDiagnosticException.Origin.UNDETERMINED;
+                }
+                String declaredMessage = grading.path("diagnostic_message")
+                        .asText("Bộ chấm đã phát hiện một lỗi có cấu trúc.");
+                // Với lỗi compile, câu "xem runner_error" không hữu ích trên bảng kết quả vì
+                // giáo viên không nhìn thấy trường JSON đó. Đưa bằng chứng đầu tiên lên diagnostic
+                // nhưng vẫn giới hạn độ dài; lỗi package ngoài đã có thông điệp riêng ở preflight.
+                if (declaredCode.contains("COMPILE") && !runnerError.isBlank()) {
+                    declaredMessage += " Lỗi đầu tiên: " + TestErrorClassifier.shorten(runnerError, 700);
+                }
+                return new GradingDiagnosticException(declaredCode, origin,
+                        declaredStage.isBlank() ? "TESTCASE_EXECUTION" : declaredStage,
+                        declaredReview,
+                        declaredMessage);
+            }
+            String low = runnerError.toLowerCase(java.util.Locale.ROOT);
+            if (low.contains("process_timeout") || low.contains("process timeout")) {
+                return new GradingDiagnosticException("TEST_PROCESS_TIMEOUT",
+                        GradingDiagnosticException.Origin.UNDETERMINED, "TESTCASE_EXECUTION", true,
+                        "Một tiến trình testcase bị timeout. Cần đối chiếu bài mẫu chuẩn và log trước khi quy lỗi cho sinh viên: "
+                                + TestErrorClassifier.shorten(runnerError, 1_000));
+            }
+            if (low.contains("grader_total_timeout")) {
+                return new GradingDiagnosticException("GRADER_TOTAL_TIMEOUT",
+                        GradingDiagnosticException.Origin.ENVIRONMENT, "GRADER_TOTAL", true,
+                        "Hết ngân sách thời gian toàn bộ bộ chấm; cần kiểm tra tải máy hoặc chia lại testcase.");
+            }
+            if (low.contains("test/exam_test.dart") || low.contains("test/grader.dart")
+                    || low.contains("chưa có common runner")) {
+                return new GradingDiagnosticException("TESTCASE_RUNNER_ERROR",
+                        GradingDiagnosticException.Origin.TESTCASE, "TESTCASE_EXECUTION", true,
+                        "Bộ testcase không chạy đúng: " + TestErrorClassifier.shorten(runnerError, 1_000));
+            }
+
+            boolean contractViolation = false;
+            boolean sourcePolicyViolation = false;
+            String contractEvidence = "";
+            String sourcePolicyEvidence = "";
+            String firstFailureName = "";
+            String firstFailureActual = "";
+            String firstFailureKind = "";
+            int executed = 0;
+            int failed = 0;
+            JsonNode cases = root.path("test_cases");
+            if (cases.isArray()) {
+                for (JsonNode tc : cases) {
+                    String code = tc.path("error_code").asText("");
+                    String actualRaw = tc.path("actual").asText("");
+                    String actual = actualRaw.toLowerCase(java.util.Locale.ROOT);
+                    String observationKind = tc.path("observation").path("kind").asText("");
+                    String status = tc.path("status").asText("");
+                    if (tc.path("executed").asBoolean(!"not_run".equals(status))) executed++;
+                    if ("failed".equals(status)) {
+                        failed++;
+                        if (firstFailureName.isBlank()) {
+                            firstFailureName = tc.path("name").asText(tc.path("test_id").asText("testcase"));
+                            firstFailureActual = actualRaw;
+                            firstFailureKind = tc.path("observation").path("kind").asText("");
+                        }
+                    }
+                    if ("SOURCE_POLICY_VIOLATION".equals(code)
+                            || "SOURCE_POLICY_VIOLATION".equals(observationKind)
+                            || actual.contains("forbidden token")
+                            || actual.contains("token b\u1ecb c\u1ea5m")) {
+                        sourcePolicyViolation = true;
+                        sourcePolicyEvidence = actualRaw;
+                    } else if ("CONTRACT_VIOLATION".equals(code)
+                            || "SOURCE_CONTRACT_VIOLATION".equals(observationKind)
+                            || actual.contains("source contract")
+                            || actual.contains("source token")) {
+                        contractViolation = true;
+                        contractEvidence = actualRaw;
+                    }
+                }
+            }
+            if (sourcePolicyViolation) {
+                return new GradingDiagnosticException("SOURCE_POLICY_VIOLATION",
+                        GradingDiagnosticException.Origin.STUDENT, "SOURCE_POLICY", false,
+                        "Bài chứa class/token mà contract của đề đã cấm. Chi tiết: "
+                                + TestErrorClassifier.shorten(sourcePolicyEvidence, 800));
+            }
+            if (contractViolation) {
+                return new GradingDiagnosticException("CONTRACT_VIOLATION",
+                        GradingDiagnosticException.Origin.STUDENT, "SOURCE_CONTRACT", false,
+                        "Bài không tuân theo public contract về file/class/symbol. Chi tiết: "
+                                + TestErrorClassifier.shorten(contractEvidence, 800));
+            }
+            if (score > 0f) return null;
+            if ("BOOT_FAILED".equalsIgnoreCase(firstFailureKind)) {
+                return diagnoseStudentBootFailure(firstFailureActual);
+            }
+            String evidence = firstFailureName.isBlank() ? "không có assertion chi tiết"
+                    : firstFailureName + ": " + TestErrorClassifier.shorten(firstFailureActual, 800);
+            return new GradingDiagnosticException("REQUIREMENTS_NOT_MET",
+                    GradingDiagnosticException.Origin.STUDENT, "TESTCASE_EXECUTION", false,
+                    "Đã thực thi " + executed + " kịch bản, có " + failed
+                            + " kịch bản thất bại và không đạt điểm. Lỗi đầu tiên: " + evidence);
+        } catch (Exception ignored) {
+            return new GradingDiagnosticException("ZERO_SCORE_UNCLASSIFIED",
+                    GradingDiagnosticException.Origin.UNDETERMINED, "RESULT_ASSEMBLY", true,
+                    "Bài nhận 0 điểm nhưng kết quả grader không đủ dữ liệu để xác định nguyên nhân.");
+        }
+    }
+
+    /**
+     * `_boot()` có thể thất bại vì nhiều nguyên nhân rất khác nhau. Không được gộp
+     * RenderFlex overflow, null/type/range error và lỗi khởi động chưa xác định vào
+     * cùng nhãn "ứng dụng bị crash": giáo viên sẽ không biết lỗi nào cần sửa trong bài.
+     */
+    private GradingDiagnosticException diagnoseStudentBootFailure(String rawFailure) {
+        TestErrorClassifier.Result classified = errorClassifier.classify(rawFailure);
+        String code = classified.code();
+        String evidence = TestErrorClassifier.shorten(rawFailure, 800);
+        String message;
+        String stage;
+
+        switch (code) {
+            case "LAYOUT_OVERFLOW" -> {
+                stage = "UI_LAYOUT";
+                message = "Ứng dụng đã dựng giao diện nhưng bị tràn RenderFlex khi khởi động. "
+                        + "Đây là lỗi layout của bài sinh viên, không phải lỗi testcase. Chi tiết: " + evidence;
+            }
+            case "BUILD_ERROR" -> {
+                stage = "APP_BUILD";
+                message = "Ứng dụng phát sinh lỗi trong lúc dựng widget đầu tiên. Chi tiết: " + evidence;
+            }
+            case "NULL_ERROR", "TYPE_ERROR", "RANGE_ERROR", "FORMAT_ERROR", "STATE_ERROR",
+                    "NO_SUCH_METHOD", "EXCEPTION_THROWN" -> {
+                stage = "APP_BOOT";
+                message = "Ứng dụng phát sinh " + code + " trong lúc khởi động. Chi tiết: " + evidence;
+            }
+            default -> {
+                code = "STUDENT_APP_BOOT_ERROR";
+                stage = "APP_BOOT";
+                message = "Ứng dụng sinh viên phát sinh lỗi khi khởi động. Chi tiết đầu tiên: " + evidence;
+            }
+        }
+        return new GradingDiagnosticException(code,
+                GradingDiagnosticException.Origin.STUDENT, stage, false, message);
     }
 
     // ── Ghép JSON đầy đủ: student + exam + kết quả chấm ─
@@ -450,6 +663,7 @@ public class BatchGradingService {
                 Object error = tc.get("error");
                 tc.put("error_code", error instanceof Map<?, ?> m ? m.get("code") : null);
             }
+            attachCaseDiagnostic(tc, status);
             // P2b — GỠ HẲN hai trường. Phải gỡ ở đây, sau khi đã rút `error_code` ra: grader của
             // đề legacy vẫn gửi chúng, và bỏ sót là hợp đồng nói một đằng dữ liệu một nẻo.
             tc.remove("error");
@@ -592,8 +806,9 @@ public class BatchGradingService {
         tc.put("error_code", res.code());
     }
 
-    /** Giới hạn độ dài log lỗi để không phình DB / không tràn cột. */
+    /** Giới hạn log dù cột hiện tại là LONGTEXT; bản DB cũ TINYTEXT vẫn được bảo vệ ở fallback. */
     private static final int MAX_ERROR_LOG = 60_000;
+    private static final int LEGACY_ERROR_LOG_LIMIT = 240;
 
     private void updateErrorLog(GradingJob job, String msg) {
         try {
@@ -609,12 +824,77 @@ public class BatchGradingService {
         }
     }
 
+    private void updateDiagnostic(GradingJob job, GradingDiagnosticException diagnostic) {
+        try {
+            String text = diagnostic.teacherMessage();
+            // Diagnostic cấp lượt chấm chỉ cần thông điệp ngắn; bằng chứng đầy đủ đã nằm trong
+            // details/result_json. Giới hạn này còn giúp máy chưa ALTER được cột TINYTEXT vẫn lưu
+            // được code/origin/stage thay vì rollback cả lần cập nhật.
+            if (text.length() > LEGACY_ERROR_LOG_LIMIT)
+                text = text.substring(0, LEGACY_ERROR_LOG_LIMIT) + "…";
+            final String finalText = text;
+            resultRepo.findByStudentIdAndBatchId(job.studentId(), job.batchId()).ifPresent(r -> {
+                r.setDiagnosticCode(diagnostic.code());
+                r.setDiagnosticOrigin(diagnostic.origin().name());
+                r.setDiagnosticStage(diagnostic.stage());
+                r.setRequiresManualReview(diagnostic.manualReview());
+                r.setErrorLog(finalText);
+                resultRepo.save(r);
+            });
+        } catch (Exception e) {
+            log.warn("[{}] Không ghi được diagnostic cho {}: {}",
+                    job.batchId(), job.studentId(), e.getMessage());
+        }
+    }
+
+    /**
+     * Gắn nguồn và giai đoạn cho từng testcase. Đây là thông tin dành cho giáo viên;
+     * không dùng nó để suy đoán nguyên nhân sâu trong code sinh viên.
+     */
+    private void attachCaseDiagnostic(Map<String, Object> tc, String status) {
+        if ("passed".equals(status)) {
+            tc.putIfAbsent("error_origin", null);
+            tc.putIfAbsent("error_stage", null);
+            tc.putIfAbsent("requires_manual_review", false);
+            return;
+        }
+
+        String code = String.valueOf(tc.getOrDefault("error_code", ""));
+        String kind = "";
+        Object rawObservation = tc.get("observation");
+        if (rawObservation instanceof Map<?, ?> observation) {
+            Object rawKind = observation.get("kind");
+            kind = rawKind == null ? "" : String.valueOf(rawKind);
+        }
+
+        String origin = "STUDENT";
+        String stage = "TESTCASE_EXECUTION";
+        boolean review = false;
+        if ("TIMEOUT".equals(code) || "PROCESS_TIMEOUT".equalsIgnoreCase(kind)) {
+            origin = "UNDETERMINED";
+            stage = "TESTCASE_EXECUTION";
+            review = true;
+        } else if ("NOT_RUN_SUITE".equalsIgnoreCase(kind)) {
+            origin = "UNDETERMINED";
+            stage = "SUITE_STARTUP";
+            review = true;
+        } else if ("NOT_RUN_BOOT".equalsIgnoreCase(kind) || "EXCEPTION_THROWN".equals(code)) {
+            stage = "APP_BOOT_OR_RUNTIME";
+        } else if ("CONTRACT_VIOLATION".equals(code) || "COMPILE_ERROR".equals(code)) {
+            stage = "SOURCE_CONTRACT_OR_COMPILE";
+        }
+        tc.putIfAbsent("error_origin", origin);
+        tc.putIfAbsent("error_stage", stage);
+        tc.putIfAbsent("requires_manual_review", review);
+    }
+
     private void checkBatchComplete(String batchId) {
         batchRepo.findByBatchId(batchId).ifPresent(b -> {
             // Đếm TRẠNG THÁI THẬT từ exam_results → tự lành nếu bộ đếm trên batch bị lệch (crash
             // giữa lúc lưu status và incrementCounts) → batch không còn kẹt IN_PROGRESS vĩnh viễn.
             long done    = resultRepo.countByBatchIdAndStatus(batchId, GradingStatus.DONE);
             long error   = resultRepo.countByBatchIdAndStatus(batchId, GradingStatus.ERROR);
+            long review  = resultRepo.countByBatchIdAndStatus(batchId, GradingStatus.MANUAL_REVIEW);
             long pending = resultRepo.countByBatchIdAndStatus(batchId, GradingStatus.QUEUED)
                          + resultRepo.countByBatchIdAndStatus(batchId, GradingStatus.GRADING);
             b.setDoneCount((int) done);      // đồng bộ lại bộ đếm hiển thị (thông báo) theo số THẬT
@@ -622,9 +902,10 @@ public class BatchGradingService {
             // Hoàn tất khi KHÔNG còn bài chờ/đang chấm (không phụ thuộc totalFiles có thể lệch).
             // Guard completedAt: chỉ đóng batch + ghi mốc 1 lần (tránh 2 worker cuối đóng 2 lần).
             if (pending == 0 && b.getCompletedAt() == null) {
-                b.setStatus(error == 0 ? BatchStatus.COMPLETED : BatchStatus.PARTIAL);
+                b.setStatus(error == 0 && review == 0 ? BatchStatus.COMPLETED : BatchStatus.PARTIAL);
                 b.setCompletedAt(Instant.now());
-                log.info("[{}] Batch hoàn tất: {} đạt / {} lỗi", batchId, done, error);
+                log.info("[{}] Batch hoàn tất: {} đạt / {} lỗi / {} cần chấm tay",
+                        batchId, done, error, review);
             }
             batchRepo.save(b);
         });
@@ -977,8 +1258,9 @@ public class BatchGradingService {
         long grading = resultRepo.countByBatchIdAndStatus(batchId, GradingStatus.GRADING);
         long queued  = resultRepo.countByBatchIdAndStatus(batchId, GradingStatus.QUEUED);
         long error   = resultRepo.countByBatchIdAndStatus(batchId, GradingStatus.ERROR);
+        long review  = resultRepo.countByBatchIdAndStatus(batchId, GradingStatus.MANUAL_REVIEW);
         List<com.example.grader.dto.ResultRow> rows = resultRepo.findRowsByBatchId(batchId);
-        return new BatchProgressResponse(batchId, rows.size(), done, grading, queued, error, rows);
+        return new BatchProgressResponse(batchId, rows.size(), done, grading, queued, error, review, rows);
     }
 
     // ── Helpers ──────────────────────────────────────────────────

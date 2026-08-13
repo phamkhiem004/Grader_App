@@ -18,7 +18,7 @@ final class TestcaseRunnerCatalog {
     private TestcaseRunnerCatalog() {}
 
     /** Loại widget mà `targetType` chấp nhận; trùng danh sách trong _assertTargetType. */
-    static final List<String> TARGET_TYPES = List.of("any", "form", "image", "text", "input",
+    static final List<String> TARGET_TYPES = List.of("any", "form", "image", "text", "input", "control",
             "button", "dialog", "icon", "checkbox", "switch", "dropdown", "padding", "container");
 
     private static final List<String> FIELD_TYPES = List.of("input", "text");

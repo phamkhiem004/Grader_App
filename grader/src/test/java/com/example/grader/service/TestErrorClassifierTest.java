@@ -46,4 +46,20 @@ class TestErrorClassifierTest {
         assertEquals("COMPILE_ERROR", result.code());
         assertTrue(result.actual().contains("sqflite_common_ffi"));
     }
+
+    @Test
+    void classifiesPublishedSourceContractViolationSeparately() {
+        TestErrorClassifier.Result result = classifier.classify(
+                "Khong tim thay source contract lib/repositories/user_repository.dart");
+
+        assertEquals("CONTRACT_VIOLATION", result.code());
+    }
+
+    @Test
+    void classifiesForbiddenSourcePolicySeparatelyFromMissingContract() {
+        TestErrorClassifier.Result result = classifier.classify(
+                "Source lib/models/user.dart chứa token bị cấm: class LegacyUser");
+
+        assertEquals("SOURCE_POLICY_VIOLATION", result.code());
+    }
 }

@@ -22,6 +22,7 @@ interface Stats {
   graded: number;
   errors: number;
   pending: number;
+  manualReview: number;
   passCount: number;
   failCount: number;
   passRate: number;
@@ -156,13 +157,14 @@ export default function StatisticsPage() {
               <KpiCard icon={Users}      tone="blue"    label="Tổng thí sinh"  value={stats.totalStudents} sub={stats.totalSubmissions !== stats.totalStudents ? `${stats.totalSubmissions} lượt chấm` : "Số sinh viên dự thi"} />
               <KpiCard icon={Target}     tone="emerald" label="Tỉ lệ Pass"     value={`${stats.passRate}%`} sub={`${stats.passCount}/${stats.graded} bài đạt`} progress={stats.passRate} />
               <KpiCard icon={Award}      tone="amber"   label="Điểm trung bình" value={stats.avgScore} suffix="/ 10" progress={stats.avgScore * 10} />
-              <KpiCard icon={TrendingUp} tone="indigo"  label="Tiến độ chấm"   value={`${stats.progressPct}%`} sub={`${stats.graded}/${stats.totalSubmissions} đã chấm`} progress={stats.progressPct} />
+              <KpiCard icon={TrendingUp} tone="indigo"  label="Tiến độ chấm"   value={`${stats.progressPct}%`} sub={`${stats.graded + stats.errors + (stats.manualReview ?? 0)}/${stats.totalSubmissions} đã xử lý`} progress={stats.progressPct} />
             </div>
 
             {/* Status breakdown */}
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
               <StatusPill icon={CheckCircle2} tone="emerald" label="Đã chấm xong" value={stats.graded} />
               <StatusPill icon={Clock}        tone="amber"   label="Đang chờ / chấm" value={stats.pending} />
+              <StatusPill icon={AlertCircle}  tone="amber"   label="Cần chấm tay" value={stats.manualReview ?? 0} />
               <StatusPill icon={XCircle}      tone="rose"    label="Lỗi" value={stats.errors} />
             </div>
 

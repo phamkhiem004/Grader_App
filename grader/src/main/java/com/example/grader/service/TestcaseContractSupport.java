@@ -25,8 +25,14 @@ final class TestcaseContractSupport {
 
     static final int SCHEMA_VERSION = 1;
     private static final int MAX_KEYS = 200;
+    private static final int MAX_PACKAGES = 60;
     private static final Pattern KEY_PATTERN =
             Pattern.compile("[a-z][a-zA-Z0-9_-]*(\\.[a-zA-Z0-9_-]+)+");
+    private static final Pattern PACKAGE_PATTERN = Pattern.compile("[a-z_][a-z0-9_]*");
+    private static final List<String> DEFAULT_ALLOWED_PACKAGES = List.of(
+            "flutter", "flutter_test", "flutter_riverpod", "riverpod", "riverpod_annotation",
+            "path", "sqflite", "sqflite_common", "sqflite_common_ffi",
+            "sqflite_common_ffi_web", "path_provider", "sembast_web", "image_picker", "intl");
 
     /** value = mô tả cho giáo viên; key = giá trị lưu trong contract.json. */
     private static final Map<String, String> STRATEGIES = new LinkedHashMap<>();
@@ -106,6 +112,7 @@ final class TestcaseContractSupport {
         out.put("strategies", strategies);
         out.put("icon_groups", ICON_GROUPS);
         out.put("default_keys", defaultKeys());
+        out.put("default_allowed_packages", DEFAULT_ALLOWED_PACKAGES);
         out.put("common_widget_types", List.of("Scaffold", "AppBar", "ListView", "GridView",
                 "SliverList", "SliverGrid", "CustomScrollView", "ListTile", "Card", "InkWell",
                 "TextField", "TextFormField", "Form", "ElevatedButton", "FilledButton",
@@ -125,11 +132,18 @@ final class TestcaseContractSupport {
         // public starter contract. Đề cũ đã lưu false vẫn giữ nguyên qua nhánh đọc bên dưới.
         out.put("require_keys", true);
         out.put("keys", List.of());
+        out.put("allowed_packages", DEFAULT_ALLOWED_PACKAGES);
+        out.put("local_package_names", List.of());
         if (!(raw instanceof Map<?, ?> map)) return out;
 
         Object requireKeys = map.get("require_keys");
         out.put("require_keys", requireKeys instanceof Boolean b ? b
                 : Boolean.parseBoolean(String.valueOf(requireKeys)));
+
+        out.put("allowed_packages", normalizePackages(
+                map.get("allowed_packages"), DEFAULT_ALLOWED_PACKAGES, "package được phép"));
+        out.put("local_package_names", normalizePackages(
+                map.get("local_package_names"), List.of(), "tên package nội bộ"));
 
         Object rawKeys = map.get("keys");
         if (!(rawKeys instanceof List<?> list)) return out;
@@ -188,6 +202,23 @@ final class TestcaseContractSupport {
         return out;
     }
 
+    private static List<String> normalizePackages(Object raw, List<String> fallback, String label) {
+        if (raw == null) return List.copyOf(fallback);
+        List<?> values = raw instanceof List<?> list
+                ? list : List.of(String.valueOf(raw).split(","));
+        if (values.size() > MAX_PACKAGES)
+            throw new IllegalArgumentException("Tối đa " + MAX_PACKAGES + " " + label + ".");
+        Set<String> unique = new LinkedHashSet<>();
+        for (Object value : values) {
+            String name = value == null ? "" : String.valueOf(value).trim();
+            if (name.isEmpty()) continue;
+            if (!PACKAGE_PATTERN.matcher(name).matches())
+                throw new IllegalArgumentException("Tên package không hợp lệ: " + name);
+            unique.add(name);
+        }
+        return List.copyOf(unique);
+    }
+
     static boolean isEmpty(Map<String, Object> contract) {
         if (contract == null) return true;
         Object keys = contract.get("keys");
@@ -222,6 +253,16 @@ final class TestcaseContractSupport {
            .append("cách chia widget và chọn loại widget — miễn là chuỗi key đúng như bảng trên.\n")
            .append("`const ValueKey('field.email')` và `const Key('field.email')` là như nhau;\n")
            .append("KHÔNG dùng `ObjectKey`, `GlobalKey` hay key ghép chuỗi động.\n");
+        List<String> allowedPackages = stringRows(contract.get("allowed_packages"));
+        List<String> localPackages = stringRows(contract.get("local_package_names"));
+        out.append("\n## Quy ước package\n\n")
+           .append("Bài chỉ được dùng các package sau: `")
+           .append(String.join("`, `", allowedPackages)).append("`.\n")
+           .append("Nếu dùng package khác, hệ thống sẽ dừng chấm tự động và chuyển bài sang **Cần chấm tay**, không tự cho 0 điểm.\n");
+        if (!localPackages.isEmpty()) {
+            out.append("Tên package nội bộ của starter được chấp nhận: `")
+               .append(String.join("`, `", localPackages)).append("`.\n");
+        }
         return out.toString();
     }
 
@@ -287,6 +328,11 @@ final class TestcaseContractSupport {
 
     private static boolean isNumber(String value) {
         try { Integer.parseInt(value); return true; } catch (Exception e) { return false; }
+    }
+
+    private static List<String> stringRows(Object raw) {
+        if (!(raw instanceof List<?> list)) return List.of();
+        return list.stream().map(String::valueOf).filter(s -> !s.isBlank()).toList();
     }
 
     private static String text(Object value) { return value == null ? null : String.valueOf(value); }

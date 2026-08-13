@@ -497,10 +497,20 @@ public class ExamService {
             exam.setCreatedBy(actor);
             examRepository.save(exam);
 
+            // Nhập xong là chuẩn bị sandbox luôn (không còn nút Build Sandbox thủ công). Docker
+            // tắt thì vẫn giữ được bộ testcase vừa nhập — lúc chấm sẽ thử chuẩn bị lại.
+            String status = "BUILDING";
+            try {
+                buildSandbox(examId);
+                status = "READY";
+            } catch (Exception e) {
+                log.warn("Không chuẩn bị được sandbox cho {} ngay sau khi nhập ZIP: {}", examId, e.getMessage());
+            }
+
             Map<String, Object> out = new LinkedHashMap<>();
             out.put("examId", examId);
             out.put("examName", examName);
-            out.put("status", "BUILDING");
+            out.put("status", status);
             out.put("testcaseStatus", "PUBLISHED");
             out.put("hasTestcase", true);
             return out;

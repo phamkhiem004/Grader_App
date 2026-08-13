@@ -103,7 +103,6 @@ export default function SyllabusPage() {
   return (
     <SidebarLayout
       title="Khung năng lực (Syllabus)"
-      subtitle="Danh mục kiến thức môn học — testcase tham chiếu skill bằng mã code"
       activePath="/syllabus"
     >
       {/* Thanh tiêu đề + nút thêm category */}
@@ -148,7 +147,6 @@ export default function SyllabusPage() {
                       <span className="rounded bg-slate-200/70 px-1.5 py-0.5 font-mono text-[10px] text-slate-500">{c.code}</span>
                       {!c.active && <span className="rounded bg-slate-200 px-1.5 py-0.5 text-[10px] text-slate-500">đã ẩn</span>}
                     </div>
-                    <p className="truncate text-xs text-slate-400">{c.name} · {c.skills.length} skill</p>
                   </div>
                 </div>
                 <div className="flex items-center gap-1.5">
@@ -183,7 +181,11 @@ export default function SyllabusPage() {
                           )}
                           {s.deprecated && <span className="rounded bg-rose-100 px-1.5 py-0.5 text-[10px] text-rose-600">deprecated</span>}
                         </div>
-                        {s.description && <p className="mt-0.5 line-clamp-1 text-xs text-slate-400">{s.description}</p>}
+                        {/* Phần lớn skill đang để mô tả trùng y hệt tên → dòng phụ chỉ là nhiễu.
+                            Chỉ hiện khi mô tả thật sự nói thêm điều gì so với tên. */}
+                        {s.description?.trim() && s.description.trim() !== s.name.trim() && (
+                          <p className="mt-0.5 line-clamp-1 text-xs text-slate-400">{s.description}</p>
+                        )}
                       </div>
                       <div className="flex shrink-0 items-center gap-1.5">
                         <IconBtn title="Sửa skill" onClick={() => setSkillModal({ mode: "edit", data: s })}><Pencil size={13} /></IconBtn>

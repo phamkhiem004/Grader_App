@@ -78,7 +78,7 @@ export default function StatisticsPage() {
     : (exams.find(e => e.examId === examId)?.examName ?? examId);
 
   return (
-    <SidebarLayout title="Thống kê & Báo cáo" subtitle="Phân tích phổ điểm và tiến độ chấm bài" activePath="/statistics">
+    <SidebarLayout title="Thống kê & Báo cáo" activePath="/statistics">
       <div className="space-y-6 pb-10">
 
         {/* Header / Toolbar */}
@@ -173,8 +173,7 @@ export default function StatisticsPage() {
                 className="lg:col-span-2"
                 icon={BarChart2}
                 tone="indigo"
-                title="Phổ điểm của lớp"
-                subtitle={`Phân bố điểm số của ${stats.graded} bài đã chấm`}
+                title="Phổ điểm"
               >
                 <div className="h-72 w-full">
                   {!loading && (
@@ -233,7 +232,7 @@ export default function StatisticsPage() {
             </div>
 
             {/* Charts Row 2 */}
-            <ChartCard icon={TrendingUp} tone="blue" title="Tiến độ chấm bài 7 ngày qua" subtitle="Số bài hoàn thành và lỗi mỗi ngày">
+            <ChartCard icon={TrendingUp} tone="blue" title="Tiến độ chấm bài 7 ngày qua">
               <div className="h-64 w-full">
                 {!loading && (
                   <ResponsiveContainer width="100%" height="100%">

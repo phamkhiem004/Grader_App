@@ -277,7 +277,6 @@ export default function FeedbackPage() {
   return (
     <SidebarLayout
       title="Nhận xét bài làm bằng AI"
-      subtitle="Nhập mã bộ testcase → AI đọc kết quả chấm (JSON) và viết lời nhận xét cho từng sinh viên"
       activePath="/teacher/feedback"
     >
       <div className="space-y-5">

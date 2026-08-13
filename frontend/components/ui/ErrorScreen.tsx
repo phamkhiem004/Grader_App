@@ -66,9 +66,9 @@ export default function ErrorScreen({
   const Icon = ICON[kind];
   const isPage = variant === "page";
   // Trang lỗi độc lập thì luôn cần lối thoát; màn lỗi nhúng đã có sidebar nên không cần.
-  // Trỏ THẲNG /teacher/grading, không dùng "/": "/" chỉ là redirect sang /statistics,
-  // nên nếu chính /statistics đang hỏng thì bấm nút lại quay về đúng màn lỗi này.
-  const home = homeHref === undefined ? (isPage ? "/teacher/grading" : null) : homeHref;
+  // Trỏ THẲNG /statistics (trang chủ thật sự), không dùng "/" — "/" chỉ là một redirect,
+  // đi vòng thêm một nhịp mà kết quả vẫn là /statistics.
+  const home = homeHref === undefined ? (isPage ? "/statistics" : null) : homeHref;
 
   const card = (
     <div className="card mx-auto w-full max-w-md p-8 text-center">
@@ -100,7 +100,7 @@ export default function ErrorScreen({
               href={home}
               className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-600 transition-colors hover:text-indigo-600"
             >
-              <Home size={16} /> Về trang chấm bài
+              <Home size={16} /> Về trang thống kê
             </Link>
           )}
         </div>

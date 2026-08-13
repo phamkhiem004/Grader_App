@@ -450,8 +450,8 @@ public class TestcaseTemplateService {
             Files.writeString(dir.resolve("testcase-config.json"), mapper.writerWithDefaultPrettyPrinter()
                     .writeValueAsString(config), StandardCharsets.UTF_8);
             exam.setTestcasePath(dir.toAbsolutePath().normalize().toString());
-            // Publish mới chỉ sinh file. Sandbox chỉ READY sau khi người dùng bấm Build Sandbox
-            // và backend đã kiểm tra file + bảo đảm ảnh nền Docker dùng chung.
+            // Draft chỉ sinh file nên chưa chấm được; bản publish sẽ được chuẩn bị sandbox ngay
+            // bên dưới (sau khi lưu) để không cần thao tác Build Sandbox thủ công nữa.
             exam.setStatus(ExamStatus.BUILDING);
 
             exam.setExamId(examId);
@@ -464,6 +464,19 @@ public class TestcaseTemplateService {
             exam.setTestcaseStatus(publish ? "PUBLISHED" : "DRAFT");
             if (publish) exam.setTestcasePublishedAt(now);
             examRepository.save(exam);
+
+            // Publish xong là chuẩn bị sandbox luôn → bộ testcase chấm được ngay, không cần bấm
+            // thêm nút nào. KHÔNG để lỗi ở đây làm hỏng thao tác Lưu: Docker có thể đang tắt, mà
+            // bài làm của giáo viên thì phải lưu được. Chấm bài sẽ thử chuẩn bị lại (xem
+            // BatchGradingService.enqueueBatch).
+            if (publish) {
+                try {
+                    examService.buildSandbox(examId);
+                    exam.setStatus(ExamStatus.READY);   // buildSandbox đã ghi READY xuống DB
+                } catch (Exception e) {
+                    log.warn("Không chuẩn bị được sandbox cho {} ngay sau khi publish: {}", examId, e.getMessage());
+                }
+            }
             return response(exam, config, items, publish, syntaxWarning);
         } catch (IllegalArgumentException e) {
             throw e;

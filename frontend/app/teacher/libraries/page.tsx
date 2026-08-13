@@ -118,18 +118,8 @@ export default function LibrariesPage() {
   return (
     <SidebarLayout
       title="Thư viện chấm"
-      subtitle="Thêm/xóa package Dart-Flutter cho môi trường chấm — để khớp với exam_test"
       activePath="/teacher/libraries"
     >
-      {/* Giải thích */}
-      <div className="mb-5 flex items-start gap-2.5 rounded-xl border border-indigo-100 bg-indigo-50/60 p-4 text-xs text-indigo-700">
-        <Info size={16} className="mt-0.5 shrink-0" />
-        <div className="space-y-1">
-          <p>Thư viện ở đây quyết định package nào được phép dùng trong <span className="font-mono">exam_test.dart</span>. Thêm package (vd <span className="font-mono">intl</span>, <span className="font-mono">collection</span>) rồi bấm <b>Áp dụng &amp; cập nhật</b> — chỉ cần gõ TÊN, hệ thống tự chọn version tương thích.</p>
-          <p className="text-indigo-600/80">Thay đổi được <b>cập nhật thẳng vào ảnh nền hiện có</b> (không tạo ảnh mới nên không phình dung lượng); <b>bài đang chấm không bị ảnh hưởng</b>. Lỗi sẽ tự hoàn tác.</p>
-        </div>
-      </div>
-
       {/* Trạng thái build */}
       {build && build.status !== "IDLE" && <BuildBanner build={build} />}
 

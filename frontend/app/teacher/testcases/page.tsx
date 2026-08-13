@@ -1949,7 +1949,7 @@ function TestcasesEditor() {
       setItems(Array.isArray(data.items) ? data.items as TestcaseItem[] : items);
       const renamed = renameTarget ? `Đã đổi mã bộ testcase thành ${renameTarget}. ` : "";
       setMessage({ type: "ok", text: renamed + (data.warning || (kind === "publish"
-        ? `Đã lưu bộ code testcase v${data.version}. Hãy Build Sandbox tại Kho bộ testcase trước khi chấm.`
+        ? `Đã lưu bộ code testcase v${data.version} và chuẩn bị môi trường chấm — dùng chấm được ngay.`
         : `Đã lưu nháp bộ code testcase v${data.version} (chưa dùng để chấm).` )) });
     } catch (e) {
       setMessage({ type: "error", text: e instanceof Error ? e.message : "Không lưu được cấu hình testcase" });

@@ -8,7 +8,7 @@ import SidebarLayout from "@/components/layout/SidebarLayout";
 import { API_BASE } from "@/lib/config";
 import {
   Archive, RotateCcw, Trash2, Loader2, AlertTriangle, CheckCircle2,
-  Database, FileArchive, Pencil, Plus, Hammer, X, UploadCloud, Package, ArrowLeft,
+  Database, FileArchive, Pencil, Plus, X, UploadCloud, Package, ArrowLeft,
   Copy, ChevronLeft, ChevronRight, PenLine,
 } from "lucide-react";
 import ErrorScreen from "@/components/ui/ErrorScreen";
@@ -17,8 +17,6 @@ import { appError, kindOf, messageOf } from "@/lib/errors";
 interface ExamRow {
   examId: string;
   examName?: string;
-  status?: string;
-  testcaseStatus?: string;
   hasTestcase?: boolean;
   resultCount?: number;
   teacherNote?: string;
@@ -26,7 +24,8 @@ interface ExamRow {
   editable?: boolean;
 }
 interface RegradeState { examId: string; batchId: string; total: number; done: number; error: number; running: boolean; }
-interface SandboxNotice { type: "ok" | "error"; title: string; text: string; }
+/** Popup báo kết quả một thao tác nặng (nhập ZIP, đổi tên...) — nổi giữa màn, không phải banner. */
+interface Notice { type: "ok" | "error"; title: string; text: string; }
 /** "manual" = màn nhập ZIP có sẵn (trên UI gọi là "Tạo bộ testcase sẵn có", khớp tên API import-manual-testcase). */
 type CreatePanel = "choose" | "manual" | null;
 const PAGE_SIZES = [10, 20, 50] as const;
@@ -50,9 +49,10 @@ function manualIdFromName(name: string) {
 // Nút hành động chính của trang: tạo bộ testcase mới.
 const newBtnCls = "inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-emerald-700";
 
-// Kiểu chung cho mọi nút trong cột Thao tác: ô vuông chỉ chứa icon để bảng không bị tràn ngang.
+// Kiểu chung cho mọi nút trong cột Thao tác: icon + CHỮ để không phải đoán nghĩa biểu tượng.
+// Chữ luôn hiện; nhãn giữ ngắn và whitespace-nowrap để cả hàng nút nằm gọn một dòng.
 const btnCls = (accent: string) =>
-  `inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 transition-colors disabled:opacity-40 disabled:hover:bg-white disabled:hover:text-slate-600 ${accent}`;
+  `inline-flex h-8 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-600 transition-colors disabled:opacity-40 disabled:hover:bg-white disabled:hover:text-slate-600 ${accent}`;
 
 async function api(path: string, method: string, body?: unknown) {
   const res = await fetch(`${API_BASE}${path}`, {
@@ -76,8 +76,7 @@ export default function ArchivePage() {
   // Xác nhận xóa
   const [confirmDel, setConfirmDel] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
-  const [buildingSandbox, setBuildingSandbox] = useState<string | null>(null);
-  const [sandboxNotice, setSandboxNotice] = useState<SandboxNotice | null>(null);
+  const [notice, setNotice] = useState<Notice | null>(null);
   const [createPanel, setCreatePanel] = useState<CreatePanel>(null);
   const [manualFile, setManualFile] = useState<File | null>(null);
   const [manualDescription, setManualDescription] = useState("");
@@ -194,27 +193,6 @@ export default function ArchivePage() {
     }
   };
 
-  const buildSandbox = async (examId: string) => {
-    setErr(null); setMsg(null); setBuildingSandbox(examId);
-    try {
-      const data = await api(`/exam-setup/${encodeURIComponent(examId)}/sandbox`, "POST");
-      setSandboxNotice({
-        type: "ok",
-        title: "Build Sandbox thành công",
-        text: `Build Sandbox cho ${examId} thành công — trạng thái ${data.status || "READY"}.`,
-      });
-      await load();
-    } catch (e) {
-      setSandboxNotice({
-        type: "error",
-        title: "Build Sandbox thất bại",
-        text: (e as Error).message,
-      });
-    } finally {
-      setBuildingSandbox(null);
-    }
-  };
-
   const resetManualForm = () => {
     setManualFile(null);
     setManualDescription("");
@@ -265,10 +243,10 @@ export default function ArchivePage() {
       if (!res.ok) throw new Error(data.error || "Không nhập được bộ testcase từ file ZIP.");
       setCreatePanel(null);
       resetManualForm();
-      setSandboxNotice({
+      setNotice({
         type: "ok",
         title: "Tạo bộ testcase thành công",
-        text: `Đã giải nén bộ ${data.examId} thành thư mục testcase. Hãy bấm Build Sandbox trước khi chấm.`,
+        text: `Đã giải nén bộ ${data.examId} thành thư mục testcase và chuẩn bị sẵn môi trường chấm.`,
       });
       await load();
     } catch (e) {
@@ -322,7 +300,7 @@ export default function ArchivePage() {
         exam_name: cloneExamName.trim(),
         teacher_note: cloneNote.trim(),
       });
-      // Bản sao được lưu chính thức ngay để có thể Build Sandbox. Đồng thời mở
+      // Bản sao được lưu chính thức ngay nên chấm được luôn. Đồng thời mở
       // thẳng builder của bộ mới để người dùng chỉnh tiếp khi cần.
       const newExamId = String(data.exam_id || normalizedId);
       setCloneRedirect(newExamId);
@@ -373,7 +351,7 @@ export default function ArchivePage() {
         exam_name: normalizedName,
       });
       setRenameSource(null);
-      setSandboxNotice({
+      setNotice({
         type: "ok",
         title: "Đổi tên bộ testcase thành công",
         text: `Bộ ${renameSource.examId} đã được đổi thành ${data.exam_id || normalizedId} — ${data.exam_name || normalizedName}.`,
@@ -392,7 +370,6 @@ export default function ArchivePage() {
   return (
     <SidebarLayout
       title="Kho bộ testcase"
-      subtitle="Lưu trữ bộ testcase + exam_test để chấm lại khi cần; xóa bộ testcase cũ để giải phóng dung lượng"
       activePath="/teacher/archive"
     >
       {err && (
@@ -414,7 +391,7 @@ export default function ArchivePage() {
         <div className="flex flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-300/70 bg-white/60 p-12 text-center">
           <Archive size={36} className="mb-3 text-slate-300" />
           <h3 className="mb-1 text-base font-bold text-slate-700">Chưa có bộ testcase nào</h3>
-          <p className="mb-4 max-w-sm text-sm text-slate-500">Tạo bộ mới từ thư viện testcase, sau đó Build Sandbox trực tiếp tại trang này.</p>
+          <p className="mb-4 max-w-sm text-sm text-slate-500">Tạo bộ mới từ thư viện testcase hoặc nhập ZIP có sẵn — môi trường chấm được chuẩn bị tự động.</p>
           <button type="button" onClick={() => setCreatePanel("choose")} className={newBtnCls}>
             <Plus size={15} /> Tạo bộ testcase
           </button>
@@ -430,13 +407,14 @@ export default function ArchivePage() {
           </div>
           {/* Cố định tỷ lệ cột để dữ liệu dài không làm thay đổi bố cục giữa các trang. */}
           <div className="custom-scrollbar overflow-x-auto">
-          <table className="w-full min-w-[980px] table-fixed text-left text-sm">
+          {/* Cột Thao tác rộng hơn hẳn vì mỗi nút giờ mang cả icon lẫn chữ. */}
+          <table className="w-full min-w-[1120px] table-fixed text-left text-sm">
             <colgroup>
-              <col className="w-[28%]" />
-              <col className="w-[28%]" />
-              <col className="w-[10%]" />
-              <col className="w-[8%]" />
-              <col className="w-[26%]" />
+              <col className="w-[20%]" />
+              <col className="w-[24%]" />
+              <col className="w-[9%]" />
+              <col className="w-[7%]" />
+              <col className="w-[40%]" />
             </colgroup>
             <thead>
               <tr className="border-b border-slate-100 text-[10px] uppercase tracking-wider text-slate-400">
@@ -469,64 +447,48 @@ export default function ArchivePage() {
                       <span className="font-mono text-xs text-slate-600">{e.resultCount ?? 0}</span>
                     </td>
                     <td className="px-5 py-3 align-middle">
-                      {/* Giữ các thao tác trên một hàng; bảng chỉ cuộn ngang khi viewport thực sự hẹp. */}
-                      <div className="flex flex-nowrap items-center justify-end gap-1.5">
+                      {/* Nhãn chữ đi kèm icon; màn hẹp thì xuống dòng thay vì bị cắt mất nút. */}
+                      <div className="flex flex-wrap items-center justify-end gap-1.5">
                         <button onClick={() => doDownload(`/exam-setup/${encodeURIComponent(e.examId)}/download/exam-test`, `${e.examId}_exam_test.zip`)}
-                          disabled={!e.hasTestcase} aria-label="Tải testcase"
+                          disabled={!e.hasTestcase}
                           title="Tải testcase: exam_test.dart + grader.dart + skills_matrix.json"
                           className={btnCls("hover:text-indigo-600")}>
-                          <FileArchive size={15} />
+                          <FileArchive size={15} /> Tải
                         </button>
                         {/* Chỉ bộ dựng từ template mới mở lại builder được; bộ upload ZIP không có config. */}
                         {e.editable !== false ? (
                           <Link href={`/teacher/testcases?exam=${encodeURIComponent(e.examId)}`}
-                            aria-label="Sửa bộ testcase"
                             title="Sửa — đổi mã, tên hoặc thêm/bớt testcase trong bộ này"
                             className={btnCls("hover:text-indigo-600")}>
-                            <Pencil size={15} />
+                            <Pencil size={15} /> Sửa
                           </Link>
                         ) : (
                           <button type="button" onClick={() => openRename(e)}
                             disabled={busy || (renaming && renameSource?.examId === e.examId)}
-                            aria-label="Đổi mã hoặc tên bộ testcase"
-                            title="Đổi mã hoặc tên — bộ upload ZIP không thể sửa nội dung testcase bằng builder"
+                            title="Đổi tên — bộ upload ZIP không thể sửa nội dung testcase bằng builder"
                             className={btnCls("hover:text-amber-600")}>
-                            <Pencil size={15} />
+                            <Pencil size={15} /> Đổi tên
                           </button>
                         )}
-                        <button
-                          onClick={() => buildSandbox(e.examId)}
-                          disabled={!e.hasTestcase || e.testcaseStatus !== "PUBLISHED" || buildingSandbox === e.examId || busy}
-                          aria-label="Build Sandbox"
-                          title={e.testcaseStatus !== "PUBLISHED"
-                            ? "Build Sandbox — hãy mở bộ testcase và bấm Lưu trước"
-                            : "Build Sandbox — kiểm tra bộ chấm và chuẩn bị ảnh nền Docker trực tiếp từ thư mục testcase"}
-                          className={btnCls("hover:text-emerald-600")}
-                        >
-                          {buildingSandbox === e.examId
-                            ? <Loader2 size={15} className="animate-spin" />
-                            : <Hammer size={15} />}
+                        <button onClick={() => doRegrade(e.examId)} title="Chấm lại toàn bộ bài đã nộp"
+                          disabled={busy || (e.resultCount ?? 0) === 0} className={btnCls("hover:text-blue-600")}>
+                          {busy ? <Loader2 size={15} className="animate-spin" /> : <RotateCcw size={15} />} Chấm lại
                         </button>
-                        <button onClick={() => doRegrade(e.examId)} aria-label="Chấm lại" title="Chấm lại toàn bộ bài đã nộp"
-                          disabled={busy || e.status !== "READY" || (e.resultCount ?? 0) === 0} className={btnCls("hover:text-blue-600")}>
-                          {busy ? <Loader2 size={15} className="animate-spin" /> : <RotateCcw size={15} />}
-                        </button>
-                        <button onClick={() => setConfirmDel(e.examId)} aria-label="Xóa bộ testcase"
+                        <button onClick={() => setConfirmDel(e.examId)}
                           title="Xóa bộ testcase (giải phóng dung lượng)"
                           disabled={busy} className={btnCls("text-rose-500 hover:bg-rose-50 hover:text-rose-600")}>
-                          <Trash2 size={15} />
+                          <Trash2 size={15} /> Xóa
                         </button>
                         {/* Clone luôn là thao tác cuối; backend cũng kiểm tra editable để không thể clone bộ ZIP. */}
                         <button
                           onClick={() => openClone(e)}
                           disabled={busy || e.editable === false}
-                          aria-label="Clone đề"
                           title={e.editable === false
-                            ? "Clone đề — bộ upload ZIP không có cấu hình builder nên không thể clone"
-                            : "Clone đề — tạo bộ mới chứa toàn bộ testcase, contract và khung code của bộ này"}
+                            ? "Clone — bộ upload ZIP không có cấu hình builder nên không thể clone"
+                            : "Clone — tạo bộ mới chứa toàn bộ testcase, contract và khung code của bộ này"}
                           className={btnCls("hover:text-violet-600")}
                         >
-                          <Copy size={15} />
+                          <Copy size={15} /> Clone
                         </button>
                       </div>
                       {regrade?.examId === e.examId && (
@@ -812,44 +774,44 @@ export default function ArchivePage() {
         document.body
       )}
 
-      {/* Kết quả Build Sandbox — popup giữa viewport, không phụ thuộc vị trí cuộn. */}
-      {mounted && sandboxNotice && createPortal(
+      {/* Kết quả thao tác — popup giữa viewport, không phụ thuộc vị trí cuộn. */}
+      {mounted && notice && createPortal(
         <div
           className="animate-modal-overlay fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm"
-          onClick={() => setSandboxNotice(null)}
+          onClick={() => setNotice(null)}
         >
           <div
-            role={sandboxNotice.type === "error" ? "alertdialog" : "dialog"}
+            role={notice.type === "error" ? "alertdialog" : "dialog"}
             aria-modal="true"
-            aria-labelledby="sandbox-result-title"
+            aria-labelledby="notice-title"
             className="animate-modal-pop relative w-full max-w-md rounded-2xl bg-white p-6 text-slate-800 shadow-2xl ring-1 ring-black/5"
             onClick={(e) => e.stopPropagation()}
           >
             <button
               type="button"
-              onClick={() => setSandboxNotice(null)}
+              onClick={() => setNotice(null)}
               aria-label="Đóng thông báo"
               className="absolute right-4 top-4 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
             >
               <X size={18} />
             </button>
             <div className={`mb-4 flex h-12 w-12 items-center justify-center rounded-full ${
-              sandboxNotice.type === "ok"
+              notice.type === "ok"
                 ? "bg-emerald-100 text-emerald-600"
                 : "bg-rose-100 text-rose-600"
             }`}>
-              {sandboxNotice.type === "ok"
+              {notice.type === "ok"
                 ? <CheckCircle2 size={26} />
                 : <AlertTriangle size={26} />}
             </div>
-            <h3 id="sandbox-result-title" className="mb-2 text-lg font-bold">{sandboxNotice.title}</h3>
-            <p className="mb-6 text-sm leading-6 text-slate-600">{sandboxNotice.text}</p>
+            <h3 id="notice-title" className="mb-2 text-lg font-bold">{notice.title}</h3>
+            <p className="mb-6 text-sm leading-6 text-slate-600">{notice.text}</p>
             <div className="flex justify-end">
               <button
                 type="button"
-                onClick={() => setSandboxNotice(null)}
+                onClick={() => setNotice(null)}
                 className={`rounded-lg px-5 py-2.5 text-sm font-semibold text-white ${
-                  sandboxNotice.type === "ok"
+                  notice.type === "ok"
                     ? "bg-emerald-600 hover:bg-emerald-700"
                     : "bg-rose-600 hover:bg-rose-700"
                 }`}

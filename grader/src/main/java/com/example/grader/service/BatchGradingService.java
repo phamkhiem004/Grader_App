@@ -129,8 +129,19 @@ public class BatchGradingService {
                                             String examId, String createdBy) throws Exception {
         Exam exam = examRepo.findByExamId(examId)
                 .orElseThrow(() -> new IllegalArgumentException("Không tìm thấy đề thi: " + examId));
-        if (exam.getStatus() != ExamStatus.READY)
-            throw new IllegalStateException("Đề thi chưa READY: " + exam.getStatus());
+        // Không còn nút "Build Sandbox" thủ công: sandbox được chuẩn bị ngay lúc publish/import.
+        // Lần đó có thể hỏng vì Docker chưa bật, nên thử lại tại đây — chấm bài vốn đã cần Docker.
+        if (exam.getStatus() != ExamStatus.READY) {
+            try {
+                examService.buildSandbox(examId);
+            } catch (Exception e) {
+                throw new IllegalStateException("Đề thi chưa sẵn sàng để chấm: " + e.getMessage(), e);
+            }
+            exam = examRepo.findByExamId(examId)
+                    .orElseThrow(() -> new IllegalArgumentException("Không tìm thấy đề thi: " + examId));
+            if (exam.getStatus() != ExamStatus.READY)
+                throw new IllegalStateException("Đề thi chưa READY: " + exam.getStatus());
+        }
 
         String batchId = genBatchId();
         GradingBatch batch = new GradingBatch();

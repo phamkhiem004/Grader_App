@@ -288,11 +288,6 @@ export default function AutomaticGradingPage() {
                   ariaLabel="Mã bộ testcase"
                   placeholder={examOptionsLoading ? "Đang tải danh sách bộ testcase..." : "Nhập hoặc chọn mã bộ testcase..."}
                 />
-                <p className="mt-2 text-xs text-slate-400">
-                  {examOptions.length > 0
-                    ? `Bấm vào ô để chọn nhanh ${examOptions.length} bộ testcase đã tạo, hoặc vẫn có thể nhập mã mới.`
-                    : "Chưa có bộ testcase đã tạo; bạn vẫn có thể nhập mã bộ testcase thủ công."}
-                </p>
               </div>
 
               {phase === "idle" && (

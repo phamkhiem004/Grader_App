@@ -12,11 +12,14 @@ import {
   Copy, ChevronLeft, ChevronRight, PenLine,
 } from "lucide-react";
 import ErrorScreen from "@/components/ui/ErrorScreen";
+import Banner from "@/components/ui/Banner";
 import { appError, kindOf, messageOf } from "@/lib/errors";
 
 interface ExamRow {
   examId: string;
   examName?: string;
+  /** DRAFT = mới tạo, chưa bấm Lưu · PUBLISHED = đã lưu chính thức, dùng chấm được. */
+  testcaseStatus?: string;
   hasTestcase?: boolean;
   resultCount?: number;
   teacherNote?: string;
@@ -53,6 +56,26 @@ const newBtnCls = "inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px
 // Chữ luôn hiện; nhãn giữ ngắn và whitespace-nowrap để cả hàng nút nằm gọn một dòng.
 const btnCls = (accent: string) =>
   `inline-flex h-8 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-600 transition-colors disabled:opacity-40 disabled:hover:bg-white disabled:hover:text-slate-600 ${accent}`;
+
+// Nút trong cột Thao tác phải RỘNG BẰNG NHAU: nhãn ở cùng vị trí thay đổi theo dòng
+// ("Sửa" với bộ dựng từ template, "Đổi tên" với bộ upload ZIP). Để nút co theo chữ thì
+// cả hàng nút của dòng đó bị đẩy lệch so với dòng khác — khoá cứng bề ngang là hết lệch.
+// Bề ngang khoá cứng nhưng giữ gọn (92px) để 5 nút + cột dữ liệu vừa khít bề ngang trang,
+// không sinh thanh cuộn ngang. Padding/gap hẹp hơn btnCls để nhãn dài nhất vẫn không tràn.
+const actBtnCls = (accent: string) =>
+  `${btnCls(accent)} w-[92px] !gap-1 !px-2`;
+
+/**
+ * Trạng thái bộ testcase. DRAFT sinh ra ngay lúc tạo bộ (kể cả khi người dùng chưa bấm Lưu
+ * hoặc app tắt giữa chừng); chỉ khi bấm Lưu backend mới chuyển sang PUBLISHED và cho đem chấm.
+ */
+function StatusBadge({ row }: { row: ExamRow }) {
+  if (!row.hasTestcase)
+    return <span className="inline-flex items-center gap-1 rounded bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-400">Chưa có testcase</span>;
+  if ((row.testcaseStatus || "DRAFT").toUpperCase() === "PUBLISHED")
+    return <span className="inline-flex items-center gap-1 rounded bg-emerald-100 px-2 py-0.5 text-[10px] font-medium text-emerald-700"><CheckCircle2 size={10} /> Hoàn tất</span>;
+  return <span className="inline-flex items-center gap-1 rounded bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-700"><PenLine size={10} /> Nháp</span>;
+}
 
 async function api(path: string, method: string, body?: unknown) {
   const res = await fetch(`${API_BASE}${path}`, {
@@ -300,8 +323,8 @@ export default function ArchivePage() {
         exam_name: cloneExamName.trim(),
         teacher_note: cloneNote.trim(),
       });
-      // Bản sao được lưu chính thức ngay nên chấm được luôn. Đồng thời mở
-      // thẳng builder của bộ mới để người dùng chỉnh tiếp khi cần.
+      // Bản sao dừng ở trạng thái Nháp — mở thẳng builder để người dùng chỉnh tiếp,
+      // bấm Lưu ở đó mới thành Hoàn tất và đem chấm được.
       const newExamId = String(data.exam_id || normalizedId);
       setCloneRedirect(newExamId);
       router.push(`/teacher/testcases?exam=${encodeURIComponent(newExamId)}`);
@@ -371,16 +394,15 @@ export default function ArchivePage() {
     <SidebarLayout
       title="Kho bộ testcase"
       activePath="/teacher/archive"
+      // Rộng hơn max-w-6xl mặc định để bảng 5 nút vừa khít, nhưng vẫn có trần: bỏ trần hẳn
+      // thì màn lớn kéo cột Tên dài lê thê và hàng nút trôi xa khỏi phần dữ liệu.
+      contentClassName="max-w-7xl"
     >
       {err && (
-        <div className="mb-4 flex items-center gap-2 rounded-lg border border-rose-100 bg-rose-50 p-3 text-sm text-rose-600">
-          <AlertTriangle size={15} /> {err}
-        </div>
+        <Banner tone="error" onClose={() => setErr(null)}>{err}</Banner>
       )}
       {msg && (
-        <div className="mb-4 flex items-center gap-2 rounded-lg border border-emerald-100 bg-emerald-50 p-3 text-sm text-emerald-700">
-          <CheckCircle2 size={15} /> {msg}
-        </div>
+        <Banner tone="ok" onClose={() => setMsg(null)}>{msg}</Banner>
       )}
 
       {loading ? (
@@ -406,21 +428,25 @@ export default function ArchivePage() {
             </button>
           </div>
           {/* Cố định tỷ lệ cột để dữ liệu dài không làm thay đổi bố cục giữa các trang. */}
-          <div className="custom-scrollbar overflow-x-auto">
-          {/* Cột Thao tác rộng hơn hẳn vì mỗi nút giờ mang cả icon lẫn chữ. */}
-          <table className="w-full min-w-[1120px] table-fixed text-left text-sm">
+          <div>
+          {/* KHÔNG đặt min-width: bảng co theo bề ngang trang nên không bao giờ sinh thanh
+              cuộn ngang. Màn quá hẹp thì hàng nút tự xuống dòng (vẫn thẳng cột vì nút cố định).
+              Ba cột cuối đo bằng px ĐÚNG chỗ chúng cần (cột Thao tác = 5 nút 92px + khoảng cách
+              + padding ô); để chúng theo % thì màn rộng sinh ra một mảng trắng to giữa Số bài
+              và hàng nút. Cột Tên không khai bề ngang nên nuốt trọn phần dư. */}
+          <table className="w-full table-fixed text-left text-sm">
             <colgroup>
-              <col className="w-[20%]" />
-              <col className="w-[24%]" />
-              <col className="w-[9%]" />
-              <col className="w-[7%]" />
-              <col className="w-[40%]" />
+              <col className="w-[22%]" />
+              <col />
+              <col className="w-[150px]" />
+              <col className="w-[72px]" />
+              <col className="w-[524px]" />
             </colgroup>
             <thead>
               <tr className="border-b border-slate-100 text-[10px] uppercase tracking-wider text-slate-400">
                 <th className="px-5 py-2.5">Mã bộ testcase</th>
                 <th className="px-5 py-2.5">Tên bộ testcase</th>
-                <th className="px-5 py-2.5 text-center">Testcase</th>
+                <th className="px-5 py-2.5 text-center">Trạng thái bộ testcase</th>
                 <th className="px-5 py-2.5 text-center">Số bài</th>
                 <th className="px-5 py-2.5 text-right">Thao tác</th>
               </tr>
@@ -437,11 +463,7 @@ export default function ArchivePage() {
                       <div title={e.examName || "—"} className="truncate text-slate-600">{e.examName || "—"}</div>
                     </td>
                     <td className="px-5 py-3 text-center align-middle">
-                      {e.hasTestcase ? (
-                        <span className="inline-flex items-center gap-1 rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700"><CheckCircle2 size={10} /> có</span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-400">thiếu</span>
-                      )}
+                      <StatusBadge row={e} />
                     </td>
                     <td className="px-5 py-3 text-center align-middle">
                       <span className="font-mono text-xs text-slate-600">{e.resultCount ?? 0}</span>
@@ -452,31 +474,31 @@ export default function ArchivePage() {
                         <button onClick={() => doDownload(`/exam-setup/${encodeURIComponent(e.examId)}/download/exam-test`, `${e.examId}_exam_test.zip`)}
                           disabled={!e.hasTestcase}
                           title="Tải testcase: exam_test.dart + grader.dart + skills_matrix.json"
-                          className={btnCls("hover:text-indigo-600")}>
+                          className={actBtnCls("hover:text-indigo-600")}>
                           <FileArchive size={15} /> Tải
                         </button>
                         {/* Chỉ bộ dựng từ template mới mở lại builder được; bộ upload ZIP không có config. */}
                         {e.editable !== false ? (
                           <Link href={`/teacher/testcases?exam=${encodeURIComponent(e.examId)}`}
                             title="Sửa — đổi mã, tên hoặc thêm/bớt testcase trong bộ này"
-                            className={btnCls("hover:text-indigo-600")}>
+                            className={actBtnCls("hover:text-indigo-600")}>
                             <Pencil size={15} /> Sửa
                           </Link>
                         ) : (
                           <button type="button" onClick={() => openRename(e)}
                             disabled={busy || (renaming && renameSource?.examId === e.examId)}
                             title="Đổi tên — bộ upload ZIP không thể sửa nội dung testcase bằng builder"
-                            className={btnCls("hover:text-amber-600")}>
+                            className={actBtnCls("hover:text-amber-600")}>
                             <Pencil size={15} /> Đổi tên
                           </button>
                         )}
                         <button onClick={() => doRegrade(e.examId)} title="Chấm lại toàn bộ bài đã nộp"
-                          disabled={busy || (e.resultCount ?? 0) === 0} className={btnCls("hover:text-blue-600")}>
+                          disabled={busy || (e.resultCount ?? 0) === 0} className={actBtnCls("hover:text-blue-600")}>
                           {busy ? <Loader2 size={15} className="animate-spin" /> : <RotateCcw size={15} />} Chấm lại
                         </button>
                         <button onClick={() => setConfirmDel(e.examId)}
                           title="Xóa bộ testcase (giải phóng dung lượng)"
-                          disabled={busy} className={btnCls("text-rose-500 hover:bg-rose-50 hover:text-rose-600")}>
+                          disabled={busy} className={actBtnCls("text-rose-500 hover:bg-rose-50 hover:text-rose-600")}>
                           <Trash2 size={15} /> Xóa
                         </button>
                         {/* Clone luôn là thao tác cuối; backend cũng kiểm tra editable để không thể clone bộ ZIP. */}
@@ -486,7 +508,7 @@ export default function ArchivePage() {
                           title={e.editable === false
                             ? "Clone — bộ upload ZIP không có cấu hình builder nên không thể clone"
                             : "Clone — tạo bộ mới chứa toàn bộ testcase, contract và khung code của bộ này"}
-                          className={btnCls("hover:text-violet-600")}
+                          className={actBtnCls("hover:text-violet-600")}
                         >
                           <Copy size={15} /> Clone
                         </button>

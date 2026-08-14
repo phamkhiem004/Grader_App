@@ -9,7 +9,7 @@ import { API_BASE } from "@/lib/config";
 import {
   Archive, RotateCcw, Trash2, Loader2, AlertTriangle, CheckCircle2,
   Database, FileArchive, Pencil, Plus, X, UploadCloud, Package, ArrowLeft,
-  Copy, ChevronLeft, ChevronRight, PenLine,
+  Copy, ChevronLeft, ChevronRight, PenLine, Pause, Play,
 } from "lucide-react";
 import ErrorScreen from "@/components/ui/ErrorScreen";
 import Banner from "@/components/ui/Banner";
@@ -26,7 +26,17 @@ interface ExamRow {
   /** true = bộ dựng từ template nên mở lại sửa được; false = bộ upload ZIP, không có config. */
   editable?: boolean;
 }
-interface RegradeState { examId: string; batchId: string; total: number; done: number; error: number; running: boolean; }
+interface RegradeState {
+  examId: string;
+  batchId: string;
+  total: number;
+  done: number;
+  error: number;
+  manualReview: number;
+  grading: number;
+  queued: number;
+  status: "IN_PROGRESS" | "PAUSED";
+}
 /** Popup báo kết quả một thao tác nặng (nhập ZIP, đổi tên...) — nổi giữa màn, không phải banner. */
 interface Notice { type: "ok" | "error"; title: string; text: string; }
 /** "manual" = màn nhập ZIP có sẵn (trên UI gọi là "Tạo bộ testcase sẵn có", khớp tên API import-manual-testcase). */
@@ -57,13 +67,9 @@ const newBtnCls = "inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px
 const btnCls = (accent: string) =>
   `inline-flex h-8 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-600 transition-colors disabled:opacity-40 disabled:hover:bg-white disabled:hover:text-slate-600 ${accent}`;
 
-// Nút trong cột Thao tác phải RỘNG BẰNG NHAU: nhãn ở cùng vị trí thay đổi theo dòng
-// ("Sửa" với bộ dựng từ template, "Đổi tên" với bộ upload ZIP). Để nút co theo chữ thì
-// cả hàng nút của dòng đó bị đẩy lệch so với dòng khác — khoá cứng bề ngang là hết lệch.
-// Bề ngang khoá cứng nhưng giữ gọn (92px) để 5 nút + cột dữ liệu vừa khít bề ngang trang,
-// không sinh thanh cuộn ngang. Padding/gap hẹp hơn btnCls để nhãn dài nhất vẫn không tràn.
+// Cột thao tác dùng icon vuông và tooltip để năm hành động luôn nằm trên một dòng.
 const actBtnCls = (accent: string) =>
-  `${btnCls(accent)} w-[92px] !gap-1 !px-2`;
+  `${btnCls(accent)} h-9 w-9 !gap-0 !px-0`;
 
 /**
  * Trạng thái bộ testcase. DRAFT sinh ra ngay lúc tạo bộ (kể cả khi người dùng chưa bấm Lưu
@@ -127,10 +133,8 @@ export default function ArchivePage() {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
-  // Chấm lại cả đề (poll tiến độ)
-  const [regrade, setRegrade] = useState<RegradeState | null>(null);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const stopPoll = () => { if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; } };
+  // Trạng thái lấy lại từ backend, không phụ thuộc vòng đời của trang React.
+  const [regrades, setRegrades] = useState<Record<string, RegradeState>>({});
 
   const load = useCallback(async () => {
     setLoadErr(null);
@@ -147,7 +151,39 @@ export default function ArchivePage() {
     }
   }, []);
 
-  useEffect(() => { load(); return stopPoll; }, [load]);
+  const loadActiveRegrades = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/batch/active`);
+      const data = await res.json().catch(() => []);
+      if (!res.ok || !Array.isArray(data)) return;
+      const next: Record<string, RegradeState> = {};
+      for (const item of data) {
+        const examId = String(item?.examId || "");
+        if (!examId || next[examId]) continue; // endpoint trả mới nhất trước
+        next[examId] = {
+          examId,
+          batchId: String(item.batchId || ""),
+          total: Number(item.total || 0),
+          done: Number(item.done || 0),
+          error: Number(item.error || 0),
+          manualReview: Number(item.manualReview || 0),
+          grading: Number(item.grading || 0),
+          queued: Number(item.queued || 0),
+          status: item.status === "PAUSED" ? "PAUSED" : "IN_PROGRESS",
+        };
+      }
+      setRegrades(next);
+    } catch {
+      // Giữ trạng thái gần nhất nếu backend tạm thời không phản hồi.
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+    loadActiveRegrades();
+    const poll = setInterval(loadActiveRegrades, 3000);
+    return () => clearInterval(poll);
+  }, [load, loadActiveRegrades]);
 
   const totalPages = Math.max(1, Math.ceil(exams.length / pageSize));
   const pageStart = exams.length ? (page - 1) * pageSize : 0;
@@ -161,25 +197,39 @@ export default function ArchivePage() {
     try {
       const d = await api(`/batch/regrade-exam/${encodeURIComponent(examId)}`, "POST");
       const skipped = Array.isArray(d.skipped) ? d.skipped.length : 0;
-      setRegrade({ examId, batchId: d.batchId, total: d.queued || 0, done: 0, error: 0, running: true });
+      setRegrades((current) => ({
+        ...current,
+        [examId]: {
+          examId,
+          batchId: d.batchId,
+          total: d.queued || 0,
+          done: 0,
+          error: 0,
+          manualReview: 0,
+          grading: 0,
+          queued: d.queued || 0,
+          status: "IN_PROGRESS",
+        },
+      }));
       if (skipped) setMsg(`Bỏ qua ${skipped} bài (mất file bài nộp/testcase).`);
-      startPoll(d.batchId, examId);
+      await loadActiveRegrades();
     } catch (e) {
       setErr((e as Error).message);
     }
   };
 
-  const startPoll = (batchId: string, examId: string) => {
-    stopPoll();
-    pollRef.current = setInterval(async () => {
-      try {
-        const s = await fetch(`${API_BASE}/batch/progress/${batchId}`).then((r) => r.json());
-        const done = s.done || 0, error = s.error || 0, total = s.total || 0;
-        const running = (s.queued || 0) + (s.grading || 0) > 0;
-        setRegrade({ examId, batchId, total, done, error, running });
-        if (!running) { stopPoll(); load(); }
-      } catch { /* giữ trạng thái */ }
-    }, 3000);
+  const togglePause = async (state: RegradeState) => {
+    setErr(null); setMsg(null);
+    const action = state.status === "PAUSED" ? "resume" : "pause";
+    try {
+      await api(`/batch/${encodeURIComponent(state.batchId)}/${action}`, "POST");
+      setMsg(action === "pause"
+        ? "Đã tạm dừng. Các bài đang chạy sẽ hoàn tất, bài đang chờ chưa được khởi động."
+        : "Đã tiếp tục phiên chấm.");
+      await loadActiveRegrades();
+    } catch (e) {
+      setErr((e as Error).message);
+    }
   };
 
   // Tải file của đề (exam_test .zip / starter .zip / solution .zip) — backend gắn sẵn tên file.
@@ -429,18 +479,14 @@ export default function ArchivePage() {
           </div>
           {/* Cố định tỷ lệ cột để dữ liệu dài không làm thay đổi bố cục giữa các trang. */}
           <div>
-          {/* KHÔNG đặt min-width: bảng co theo bề ngang trang nên không bao giờ sinh thanh
-              cuộn ngang. Màn quá hẹp thì hàng nút tự xuống dòng (vẫn thẳng cột vì nút cố định).
-              Ba cột cuối đo bằng px ĐÚNG chỗ chúng cần (cột Thao tác = 5 nút 92px + khoảng cách
-              + padding ô); để chúng theo % thì màn rộng sinh ra một mảng trắng to giữa Số bài
-              và hàng nút. Cột Tên không khai bề ngang nên nuốt trọn phần dư. */}
+          {/* Các cột trạng thái/thao tác có độ rộng cố định; tên bộ nhận toàn bộ phần còn lại. */}
           <table className="w-full table-fixed text-left text-sm">
             <colgroup>
               <col className="w-[22%]" />
               <col />
-              <col className="w-[150px]" />
+              <col className="w-[190px]" />
               <col className="w-[72px]" />
-              <col className="w-[524px]" />
+              <col className="w-[260px]" />
             </colgroup>
             <thead>
               <tr className="border-b border-slate-100 text-[10px] uppercase tracking-wider text-slate-400">
@@ -453,7 +499,8 @@ export default function ArchivePage() {
             </thead>
             <tbody className="divide-y divide-slate-50">
               {pageExams.map((e) => {
-                const busy = regrade?.examId === e.examId && regrade.running;
+                const regrade = regrades[e.examId];
+                const busy = Boolean(regrade);
                 return (
                   <tr key={e.examId} className="hover:bg-slate-50/60">
                     <td className="px-5 py-3 align-middle">
@@ -470,36 +517,49 @@ export default function ArchivePage() {
                     </td>
                     <td className="px-5 py-3 align-middle">
                       {/* Nhãn chữ đi kèm icon; màn hẹp thì xuống dòng thay vì bị cắt mất nút. */}
-                      <div className="flex flex-wrap items-center justify-end gap-1.5">
+                      <div className="flex items-center justify-end gap-1.5">
                         <button onClick={() => doDownload(`/exam-setup/${encodeURIComponent(e.examId)}/download/exam-test`, `${e.examId}_exam_test.zip`)}
                           disabled={!e.hasTestcase}
                           title="Tải testcase: exam_test.dart + grader.dart + skills_matrix.json"
                           className={actBtnCls("hover:text-indigo-600")}>
-                          <FileArchive size={15} /> Tải
+                          <FileArchive size={16} /><span className="sr-only">Tải testcase</span>
                         </button>
                         {/* Chỉ bộ dựng từ template mới mở lại builder được; bộ upload ZIP không có config. */}
                         {e.editable !== false ? (
                           <Link href={`/teacher/testcases?exam=${encodeURIComponent(e.examId)}`}
                             title="Sửa — đổi mã, tên hoặc thêm/bớt testcase trong bộ này"
                             className={actBtnCls("hover:text-indigo-600")}>
-                            <Pencil size={15} /> Sửa
+                            <Pencil size={16} /><span className="sr-only">Sửa</span>
                           </Link>
                         ) : (
                           <button type="button" onClick={() => openRename(e)}
                             disabled={busy || (renaming && renameSource?.examId === e.examId)}
                             title="Đổi tên — bộ upload ZIP không thể sửa nội dung testcase bằng builder"
                             className={actBtnCls("hover:text-amber-600")}>
-                            <Pencil size={15} /> Đổi tên
+                            <Pencil size={16} /><span className="sr-only">Đổi tên</span>
                           </button>
                         )}
-                        <button onClick={() => doRegrade(e.examId)} title="Chấm lại toàn bộ bài đã nộp"
-                          disabled={busy || (e.resultCount ?? 0) === 0} className={actBtnCls("hover:text-blue-600")}>
-                          {busy ? <Loader2 size={15} className="animate-spin" /> : <RotateCcw size={15} />} Chấm lại
+                        <button
+                          onClick={() => regrade ? togglePause(regrade) : doRegrade(e.examId)}
+                          title={regrade?.status === "PAUSED"
+                            ? "Tiếp tục đưa các bài đang chờ vào máy chấm"
+                            : regrade
+                              ? "Tạm dừng sau khi các bài đang chạy hoàn tất"
+                              : "Chấm lại toàn bộ bài đã nộp"}
+                          disabled={!regrade && (e.resultCount ?? 0) === 0}
+                          className={actBtnCls("hover:text-blue-600")}
+                        >
+                          {regrade?.status === "PAUSED"
+                            ? <Play size={16} />
+                            : regrade
+                              ? <Pause size={16} />
+                              : <RotateCcw size={16} />}
+                          <span className="sr-only">{regrade?.status === "PAUSED" ? "Tiếp tục" : regrade ? "Tạm dừng" : "Chấm lại"}</span>
                         </button>
                         <button onClick={() => setConfirmDel(e.examId)}
                           title="Xóa bộ testcase (giải phóng dung lượng)"
                           disabled={busy} className={actBtnCls("text-rose-500 hover:bg-rose-50 hover:text-rose-600")}>
-                          <Trash2 size={15} /> Xóa
+                          <Trash2 size={16} /><span className="sr-only">Xóa</span>
                         </button>
                         {/* Clone luôn là thao tác cuối; backend cũng kiểm tra editable để không thể clone bộ ZIP. */}
                         <button
@@ -510,14 +570,14 @@ export default function ArchivePage() {
                             : "Clone — tạo bộ mới chứa toàn bộ testcase, contract và khung code của bộ này"}
                           className={actBtnCls("hover:text-violet-600")}
                         >
-                          <Copy size={15} /> Clone
+                          <Copy size={16} /><span className="sr-only">Clone</span>
                         </button>
                       </div>
-                      {regrade?.examId === e.examId && (
+                      {regrade && (
                         <p className="mt-1 text-right text-[11px] text-blue-600">
-                          {regrade.running
-                            ? `Đang chấm lại ${regrade.done + regrade.error}/${regrade.total}...`
-                            : `✓ Xong ${regrade.done}/${regrade.total}${regrade.error ? `, ${regrade.error} lỗi` : ""}`}
+                          {regrade.status === "PAUSED"
+                            ? `Đã tạm dừng · ${regrade.done + regrade.error + regrade.manualReview}/${regrade.total} đã xử lý`
+                            : `Đang chấm ${regrade.done + regrade.error + regrade.manualReview}/${regrade.total} · ${regrade.grading} đang chạy`}
                         </p>
                       )}
                     </td>

@@ -7,7 +7,45 @@ import ExamCombobox from "@/components/ui/ExamCombobox";
 
 // Khóa lưu phiên chấm đang/ vừa chạy → rời trang rồi quay lại KHÔNG mất kết quả
 const ACTIVE_BATCH_KEY = "grader_active_batch";
-import { UploadCloud, Play, FileArchive, X, CheckCircle, Clock, AlertCircle, DownloadCloud, Loader2, CheckSquare, BarChart2, Users, TrendingUp, FileJson } from "lucide-react";
+import { UploadCloud, Play, Pause, FileArchive, X, CheckCircle, Clock, AlertCircle, DownloadCloud, Loader2, CheckSquare, BarChart2, Users, TrendingUp, FileJson } from "lucide-react";
+
+const normalizedPath = (value) => String(value || "").replace(/\\/g, "/");
+
+const identityFromUsername = (username) => {
+  const value = String(username || "").trim();
+  const match = value.match(/([A-Za-z]{2}\d{6,})$/);
+  return { studentId: (match?.[1] || value).toUpperCase(), studentName: value };
+};
+
+const submissionFromFile = (file, suppliedPath = "") => {
+  const relativePath = normalizedPath(suppliedPath || file.webkitRelativePath || file.name);
+  const segments = relativePath.split("/").filter(Boolean);
+  if (segments.length < 2 || segments.at(-1)?.toLowerCase() !== "solution.zip") return null;
+  const username = segments.at(-2)?.trim();
+  if (!username || !/^[A-Za-z0-9_-]{1,60}$/.test(username)) return null;
+  return { file, username, relativePath, key: username.toLowerCase() };
+};
+
+const readDirectoryEntries = async (reader) => {
+  const entries = [];
+  while (true) {
+    const page = await new Promise((resolve, reject) => reader.readEntries(resolve, reject));
+    if (!page.length) return entries;
+    entries.push(...page);
+  }
+};
+
+const collectDroppedEntry = async (entry, parentPath = "") => {
+  const path = parentPath ? `${parentPath}/${entry.name}` : entry.name;
+  if (entry.isFile) {
+    const file = await new Promise((resolve, reject) => entry.file(resolve, reject));
+    return [{ file, relativePath: path }];
+  }
+  if (!entry.isDirectory) return [];
+  const children = await readDirectoryEntries(entry.createReader());
+  const nested = await Promise.all(children.map((child) => collectDroppedEntry(child, path)));
+  return nested.flat();
+};
 
 export default function AutomaticGradingPage() {
   const [examId, setExamId] = useState("");
@@ -205,25 +243,44 @@ export default function AutomaticGradingPage() {
       return `${fileName}: Lỗi cơ sở dữ liệu khi lưu kết quả.`;
     }
 
-    return errStr; // For things like "Sai format — cần: MaSV_Ten.zip"
+    return errStr;
   };
 
   // File handling
   const addFiles = useCallback((incoming) => {
-    const zips = Array.from(incoming).filter(f => f.name.endsWith(".zip"));
+    const candidates = Array.from(incoming).map((value) => value?.file
+      ? submissionFromFile(value.file, value.relativePath)
+      : submissionFromFile(value));
+    const submissions = candidates.filter(Boolean);
+    if (!submissions.length) {
+      setUploadErr("Không tìm thấy bài hợp lệ. Mỗi thư mục sinh viên phải chứa file solution.zip.");
+      return;
+    }
     setFiles(prev => {
-      const existing = new Set(prev.map(f => f.name));
-      return [...prev, ...zips.filter(f => !existing.has(f.name))];
+      const existing = new Set(prev.map((entry) => entry.key));
+      return [...prev, ...submissions.filter((entry) => !existing.has(entry.key))];
     });
     setUploadErr(null);
   }, []);
 
-  const onDrop = useCallback((e) => {
+  const onDrop = useCallback(async (e) => {
     e.preventDefault(); setDragging(false);
-    addFiles(e.dataTransfer.files);
+    try {
+      const roots = Array.from(e.dataTransfer.items || [])
+        .map((item) => item.webkitGetAsEntry?.())
+        .filter(Boolean);
+      if (roots.length) {
+        const nested = await Promise.all(roots.map((entry) => collectDroppedEntry(entry)));
+        addFiles(nested.flat());
+      } else {
+        addFiles(e.dataTransfer.files);
+      }
+    } catch (error) {
+      setUploadErr("Không đọc được thư mục đã thả: " + (error?.message || "lỗi không xác định"));
+    }
   }, [addFiles]);
 
-  const removeFile = (name) => setFiles(f => f.filter(x => x.name !== name));
+  const removeFile = (key) => setFiles((current) => current.filter((entry) => entry.key !== key));
 
   // Upload + poll
   const execute = async () => {
@@ -236,7 +293,10 @@ export default function AutomaticGradingPage() {
 
     const form = new FormData();
     form.append("examId", examId.trim());
-    files.forEach(f => form.append("files", f));
+    files.forEach((entry) => {
+      form.append("files", entry.file, "solution.zip");
+      form.append("usernames", entry.username);
+    });
 
     try {
       const res = await fetch(`${API_BASE}/batch/upload`, { method: "POST", body: form });
@@ -280,6 +340,20 @@ export default function AutomaticGradingPage() {
     }, 3000);
   };
 
+  const toggleBatchPause = async () => {
+    if (!batchId) return;
+    const action = progress?.status === "PAUSED" ? "resume" : "pause";
+    try {
+      const res = await fetch(`${API_BASE}/batch/${encodeURIComponent(batchId)}/${action}`, { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || "Không cập nhật được trạng thái phiên chấm.");
+      setProgress(data);
+      setUploadErr(null);
+    } catch (error) {
+      setUploadErr(error?.message || "Không cập nhật được trạng thái phiên chấm.");
+    }
+  };
+
   const reset = () => {
     clearInterval(pollRef.current);
     try { localStorage.removeItem(ACTIVE_BATCH_KEY); } catch (_) {}
@@ -315,9 +389,11 @@ export default function AutomaticGradingPage() {
       const parts = errStr.split(': ');
       const filename = parts[0] || errStr;
 
-      const fileParts = filename.replace('.zip', '').split('_');
-      const studentId = fileParts[0] || filename;
-      const studentName = fileParts.slice(1).join(' ') || "";
+      const pathParts = normalizedPath(filename).split('/').filter(Boolean);
+      const username = pathParts.length > 1 && pathParts.at(-1)?.toLowerCase() === "solution.zip"
+        ? pathParts.at(-2)
+        : filename;
+      const { studentId, studentName } = identityFromUsername(username);
 
       const cleanedMsg = formatErrorMsg(errStr).replace(/"/g, '""');
       return `${studentId},"${studentName}","",BỊ LOẠI,"${cleanedMsg}"`;
@@ -336,19 +412,54 @@ export default function AutomaticGradingPage() {
     a.click();
   };
 
-  // Tải JSON đầy đủ của cả batch để lưu trữ/đối chiếu.
-  const downloadResultsJson = async () => {
+  const resultFolderName = () => {
+    const dateStr = new Date().toISOString().split("T")[0];
+    return `${examId}_results_${dateStr}_${batchId}`.replace(/[^A-Za-z0-9_-]/g, "_");
+  };
+
+  const safeResultFileName = (row) => {
+    const studentId = String(row.studentId || "student").replace(/[^A-Za-z0-9_-]/g, "_");
+    const username = String(row.studentName || studentId).replace(/[^A-Za-z0-9_-]/g, "_");
+    const base = username.toLowerCase().endsWith(studentId.toLowerCase())
+      ? username
+      : `${username}_${studentId}`;
+    return `${base}.json`;
+  };
+
+  // Chrome/Edge trên localhost có thể ghi trực tiếp một thư mục. Trình duyệt khác nhận
+  // ZIP vận chuyển chứa đúng một thư mục và các JSON riêng lẻ, không còn JSON gộp.
+  const downloadResultsFolder = async () => {
     if (!batchId) return;
     try {
-      const res = await fetch(`${API_BASE}/results/batch/${batchId}`);
-      const text = await res.text();
-      const blob = new Blob([text], { type: "application/json" });
+      if (typeof window.showDirectoryPicker === "function") {
+        const parent = await window.showDirectoryPicker({ mode: "readwrite" });
+        const folder = await parent.getDirectoryHandle(resultFolderName(), { create: true });
+        let written = 0;
+        for (const row of progress?.results || []) {
+          const exId = row.examId || examId;
+          const res = await fetch(`${API_BASE}/results/${encodeURIComponent(exId)}/${encodeURIComponent(row.studentId)}`);
+          if (!res.ok) continue;
+          const handle = await folder.getFileHandle(safeResultFileName(row), { create: true });
+          const writable = await handle.createWritable();
+          await writable.write(await res.text());
+          await writable.close();
+          written++;
+        }
+        if (!written) throw new Error("Chưa có kết quả JSON nào để xuất.");
+        return;
+      }
+
+      const res = await fetch(`${API_BASE}/results/batch/${encodeURIComponent(batchId)}/archive`);
+      if (!res.ok) throw new Error("Không tạo được thư mục kết quả.");
+      const blob = await res.blob();
       const a = document.createElement("a");
       a.href = URL.createObjectURL(blob);
-      const dateStr = new Date().toISOString().split("T")[0];
-      a.download = `${examId}_results_${dateStr}.json`;
+      a.download = `${resultFolderName()}.zip`;
       a.click();
-    } catch (_) {}
+      URL.revokeObjectURL(a.href);
+    } catch (error) {
+      if (error?.name !== "AbortError") setUploadErr(error?.message || "Không xuất được thư mục JSON.");
+    }
   };
 
   // Tải JSON riêng của 1 sinh viên → MaSV.json
@@ -368,6 +479,7 @@ export default function AutomaticGradingPage() {
 
   const isRunning = phase === "uploading" || phase === "polling";
   const p = progress;
+  const isPaused = p?.status === "PAUSED";
 
   const totalItems = (p?.total || 0) + parseErrors.length;
   const errorItems = (p?.error || 0) + parseErrors.length;
@@ -381,7 +493,7 @@ export default function AutomaticGradingPage() {
   const errPct = totalItems > 0 ? Math.round((errorItems / totalItems) * 100) : 0;
   const reviewPct = totalItems > 0 ? Math.round((manualItems / totalItems) * 100) : 0;
 
-  const totalSize = files.reduce((s, f) => s + f.size, 0);
+  const totalSize = files.reduce((sum, entry) => sum + entry.file.size, 0);
 
   const allResultRows = p?.results || [];
   // Luôn hiển thị đủ danh mục, kể cả lô hiện tại có 0 bài ở loại đó. Trước đây
@@ -453,9 +565,17 @@ export default function AutomaticGradingPage() {
                     <div className={`mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full border border-slate-100 bg-white shadow-sm transition-transform ${dragging ? "scale-110" : ""}`}>
                       <UploadCloud size={24} className={dragging ? "text-indigo-500" : "text-slate-400"} />
                     </div>
-                    <p className="mb-1 text-sm font-semibold text-slate-700">Kéo thả file ZIP vào đây</p>
-                    <p className="text-xs text-slate-500">Hoặc click để duyệt. Định dạng: <span className="font-mono text-slate-600">MaSV_HoTen.zip</span></p>
-                    <input ref={fileRef} type="file" multiple accept=".zip" className="hidden" onChange={e => addFiles(e.target.files)} />
+                    <p className="mb-1 text-sm font-semibold text-slate-700">Kéo thả thư mục bài nộp vào đây</p>
+                    <p className="text-xs text-slate-500">Mỗi thư mục mang tên username và chứa <span className="font-mono text-slate-600">solution.zip</span></p>
+                    <input
+                      ref={fileRef}
+                      type="file"
+                      multiple
+                      webkitdirectory=""
+                      directory=""
+                      className="hidden"
+                      onChange={(event) => { addFiles(event.target.files); event.target.value = ""; }}
+                    />
                   </div>
                 </div>
               )}
@@ -509,7 +629,7 @@ export default function AutomaticGradingPage() {
                 <div className="rounded-xl border border-indigo-100 bg-indigo-50 p-6 text-center">
                   <Loader2 size={28} className="mx-auto mb-3 animate-spin text-indigo-600" />
                   <h3 className="mb-1 text-sm font-bold text-indigo-900">Đang tải dữ liệu lên...</h3>
-                  <p className="text-xs text-indigo-700/80">Đang upload {files.length} bài thi lên server</p>
+                  <p className="text-xs text-indigo-700/80">Đang upload {files.length} thư mục bài thi lên server</p>
                 </div>
               )}
             </div>
@@ -520,22 +640,22 @@ export default function AutomaticGradingPage() {
             <div className="card flex max-h-[420px] flex-col overflow-hidden">
               <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50/50 px-5 py-4">
                 <div className="flex items-center gap-2">
-                  <span className="text-xs font-bold uppercase tracking-wider text-slate-500">File đã chọn ({files.length})</span>
+                  <span className="text-xs font-bold uppercase tracking-wider text-slate-500">Bài nộp đã chọn ({files.length})</span>
                   <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500">{(totalSize / 1024 / 1024).toFixed(1)} MB</span>
                 </div>
                 <button onClick={() => setFiles([])} className="text-xs font-semibold text-rose-500 transition-colors hover:text-rose-700">Xóa hết</button>
               </div>
               <div className="custom-scrollbar overflow-y-auto p-2">
-                {files.map((f) => (
-                  <div key={f.name} className="group flex items-center gap-3 rounded-lg p-3 transition-colors hover:bg-slate-50">
+                {files.map((entry) => (
+                  <div key={entry.key} className="group flex items-center gap-3 rounded-lg p-3 transition-colors hover:bg-slate-50">
                     <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-indigo-50 text-indigo-500">
                       <FileArchive size={15} />
                     </div>
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium text-slate-700">{f.name}</p>
-                      <p className="text-xs text-slate-400">{(f.size / 1024).toFixed(0)} KB</p>
+                      <p className="truncate text-sm font-medium text-slate-700">{entry.username}</p>
+                      <p className="truncate text-xs text-slate-400">solution.zip · {(entry.file.size / 1024).toFixed(0)} KB</p>
                     </div>
-                    <button onClick={() => removeFile(f.name)} className="p-1 text-slate-300 opacity-0 transition-opacity hover:text-rose-500 group-hover:opacity-100">
+                    <button onClick={() => removeFile(entry.key)} className="p-1 text-slate-300 opacity-0 transition-opacity hover:text-rose-500 group-hover:opacity-100">
                       <X size={16} />
                     </button>
                   </div>
@@ -550,17 +670,16 @@ export default function AutomaticGradingPage() {
           {(phase === "polling" || phase === "done") ? (
             <>
               {/* Thống kê nhanh */}
-              <div className="grid grid-cols-2 gap-4 md:grid-cols-5">
+              <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
                 <StatCard label="Tổng số bài" value={totalItems} icon={Users} tone="slate" />
                 <StatCard label="Hoàn thành" value={doneItems} icon={CheckCircle} tone="emerald" />
                 <StatCard label="Đang chấm" value={gradingItems} icon={Clock} tone="blue" pulse={gradingItems > 0} />
-                <StatCard label="Cần chấm tay" value={manualItems} icon={AlertCircle} tone="amber" />
                 <StatCard label="Bị lỗi" value={errorItems} icon={AlertCircle} tone="rose" />
               </div>
 
               {/* Thanh tiến độ */}
               <div className="card p-6">
-                <div className="mb-4 flex items-end justify-between">
+                <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
                   <div>
                     <h3 className="flex items-center gap-2 text-base font-bold text-slate-800">
                       <TrendingUp size={18} className="text-indigo-500" /> Tiến độ thực thi
@@ -569,17 +688,32 @@ export default function AutomaticGradingPage() {
                       Batch: <span className="rounded bg-slate-100 px-2 py-0.5 font-mono text-slate-700">{batchId}</span>
                     </p>
                   </div>
-                  <div className="text-right">
+                  <div className="flex items-end gap-3 text-right">
+                    {phase === "polling" && (
+                      <button
+                        type="button"
+                        onClick={toggleBatchPause}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-100"
+                        title={isPaused
+                          ? "Tiếp tục đưa bài đang chờ vào máy chấm"
+                          : "Tạm dừng sau khi các bài đang chạy hoàn tất"}
+                      >
+                        {isPaused ? <Play size={14} /> : <Pause size={14} />}
+                        {isPaused ? "Tiếp tục" : "Tạm dừng"}
+                      </button>
+                    )}
+                    <div>
                     <span className="text-3xl font-bold text-slate-800">{pct}<span className="text-lg text-slate-400">%</span></span>
                     {phase === "polling" && (
-                      <p className="flex items-center justify-end gap-1.5 text-xs font-semibold text-blue-600">
+                      <p className={`flex items-center justify-end gap-1.5 text-xs font-semibold ${isPaused ? "text-amber-600" : "text-blue-600"}`}>
                         <span className="relative flex h-2 w-2">
-                          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-blue-400 opacity-75"></span>
-                          <span className="relative inline-flex h-2 w-2 rounded-full bg-blue-500"></span>
+                          {!isPaused && <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-blue-400 opacity-75"></span>}
+                          <span className={`relative inline-flex h-2 w-2 rounded-full ${isPaused ? "bg-amber-500" : "bg-blue-500"}`}></span>
                         </span>
-                        Đang chạy
+                        {isPaused ? "Đã tạm dừng" : "Đang chạy"}
                       </p>
                     )}
+                    </div>
                   </div>
                 </div>
 
@@ -608,8 +742,8 @@ export default function AutomaticGradingPage() {
                   <h3 className="text-sm font-bold uppercase tracking-wider text-slate-700">Chi tiết kết quả</h3>
                   {phase === "done" && (
                     <div className="flex items-center gap-2">
-                      <button onClick={downloadResultsJson} title="Tải JSON kết quả đầy đủ" className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 shadow-sm transition-all hover:text-slate-900 hover:shadow active:scale-95">
-                        <FileJson size={16} /> JSON
+                      <button onClick={downloadResultsFolder} title="Xuất thư mục gồm một JSON cho mỗi sinh viên" className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 shadow-sm transition-all hover:text-slate-900 hover:shadow active:scale-95">
+                        <FileJson size={16} /> Thư mục JSON
                       </button>
                       <button onClick={downloadCSV} className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 shadow-sm transition-all hover:text-slate-900 hover:shadow active:scale-95">
                         <DownloadCloud size={16} /> Xuất CSV
@@ -804,7 +938,7 @@ export default function AutomaticGradingPage() {
                 <BarChart2 size={36} />
               </div>
               <h3 className="mb-2 text-base font-bold text-slate-700">Chưa có phiên chấm bài nào</h3>
-              <p className="max-w-sm text-sm text-slate-500">Cấu hình mã bộ testcase và upload các file ZIP bài làm của sinh viên để bắt đầu chấm điểm tự động.</p>
+              <p className="max-w-sm text-sm text-slate-500">Chọn mã bộ testcase và upload các thư mục username có chứa solution.zip để bắt đầu chấm điểm tự động.</p>
             </div>
           )}
         </div>
@@ -829,8 +963,8 @@ function categorizeError(errStr) {
 
   if (/trùng mã sv|cùng lần upload|cùng lần nộp/i.test(msg))
     return { file, type: "Trùng trong lần nộp", detail: "Mã SV xuất hiện nhiều lần trong cùng một lần upload — chỉ giữ 1 bài.", tone: "amber" };
-  if (/sai format|masv_ten|định dạng/i.test(msg))
-    return { file, type: "Sai tên file", detail: "Tên file phải theo định dạng MaSV_HoTen.zip.", tone: "amber" };
+  if (/sai format|username|solution\.zip|định dạng/i.test(msg))
+    return { file, type: "Sai cấu trúc thư mục", detail: "Mỗi thư mục username phải chứa đúng file solution.zip.", tone: "amber" };
   if (/chỉ nhận|file rỗng|quá 50mb|rỗng/i.test(msg))
     return { file, type: "File không hợp lệ", detail: msg, tone: "rose" };
   if (/duplicate entry|đã có kết quả/i.test(msg))

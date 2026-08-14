@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import {
   FileText, FileCode2, CheckSquare, BarChart2, Bell, Search,
   GraduationCap, Loader2, History, PanelLeftClose,
-  Clock, CheckCircle2, AlertCircle, BookOpen, Package,
+  Clock, CheckCircle2, AlertCircle, BookOpen, Package, Pause,
   MessageSquareText, Bot, ChevronDown,
 } from 'lucide-react';
 import { clsx } from 'clsx';
@@ -63,6 +63,7 @@ const PRIMARY_NAV: NavEntry[] = [
 function notifStatus(n: BatchNotif) {
   const done = n.doneCount || 0, err = n.errorCount || 0, total = n.totalFiles || 0;
   if (n.status === 'IN_PROGRESS') return { Icon: Clock, tone: 'text-blue-500', text: `Đang chấm ${done + err}/${total}` };
+  if (n.status === 'PAUSED') return { Icon: Pause, tone: 'text-amber-500', text: `Tạm dừng ${done + err}/${total}` };
   if (n.status === 'COMPLETED') return { Icon: CheckCircle2, tone: 'text-emerald-500', text: `Hoàn tất ${done}/${total} bài` };
   if (n.status === 'PARTIAL') return { Icon: AlertCircle, tone: 'text-amber-500', text: `Xong ${done}/${total}, ${err} lỗi` };
   return { Icon: AlertCircle, tone: 'text-slate-400', text: `${done + err}/${total}` };

@@ -23,13 +23,14 @@ public class BatchController {
     @PostMapping("/upload")
     public ResponseEntity<?> uploadBatch(
             @RequestParam("files") List<MultipartFile> files,
+            @RequestParam(value = "usernames", required = false) List<String> usernames,
             @RequestParam(value = "examId",     defaultValue = "FLUTTER_PE_01") String examId) {
 
         if (files == null || files.isEmpty())
             return ResponseEntity.badRequest().body(Map.of("error", "Không có file"));
 
         try {
-            return ResponseEntity.ok(batchService.enqueueBatch(files, examId, AppActor.DEFAULT));
+            return ResponseEntity.ok(batchService.enqueueBatch(files, usernames, examId, AppActor.DEFAULT));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         } catch (Exception e) {
@@ -41,6 +42,40 @@ public class BatchController {
     public ResponseEntity<?> getProgress(@PathVariable String batchId) {
         try {
             return ResponseEntity.ok(batchService.getBatchProgress(batchId));
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    /** Các phiên chưa kết thúc để UI phục hồi tiến độ sau khi đổi trang hoặc tải lại. */
+    @GetMapping("/active")
+    public ResponseEntity<?> active() {
+        try {
+            return ResponseEntity.ok(batchService.activeBatches());
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    /** Tạm ngừng lấy bài mới khỏi hàng đợi; bài đang chạy được phép hoàn tất. */
+    @PostMapping("/{batchId}/pause")
+    public ResponseEntity<?> pause(@PathVariable String batchId) {
+        try {
+            return ResponseEntity.ok(batchService.pauseBatch(batchId));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    /** Tiếp tục một phiên đã tạm dừng. */
+    @PostMapping("/{batchId}/resume")
+    public ResponseEntity<?> resume(@PathVariable String batchId) {
+        try {
+            return ResponseEntity.ok(batchService.resumeBatch(batchId));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         } catch (Exception e) {
             return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
         }

@@ -36,8 +36,6 @@ import java.util.stream.Stream;
 @Service
 public class BatchGradingService {
 
-    @Value("${grader.max.concurrent:3}")
-    private int maxConcurrent;
     @Value("${grader.workers.enabled:true}")
     private boolean workersEnabled;
 
@@ -59,6 +57,7 @@ public class BatchGradingService {
     @Autowired private SyllabusService    syllabusService;
     @Autowired private CompetencyService  competencyService;
     @Autowired private TestcaseTemplateService templateService;
+    @Autowired private GradingRuntimeSettingsService runtimeSettings;
 
     /** Bản hợp đồng `result.json` mà backend này phát hành — xem SPEC_grader_result_json/. */
     private static final String SCHEMA_VERSION = "2";
@@ -76,6 +75,20 @@ public class BatchGradingService {
     private ExecutorService executor;
     private final BlockingQueue<GradingJob> jobQueue = new LinkedBlockingQueue<>();
 
+    /**
+     * Số bài chấm SONG SONG = số worker đang sống. Giáo viên đổi được ngay giữa phiên chấm
+     * (trang Chấm bài tự động → Hiệu năng chấm) nên không dùng pool cố định nữa:
+     * tăng thì mở thêm worker, giảm thì worker dư tự rút lui SAU khi chấm xong bài đang cầm
+     * (không bao giờ cắt ngang một bài đang chấm dở).
+     */
+    private final java.util.concurrent.atomic.AtomicInteger targetWorkers =
+            new java.util.concurrent.atomic.AtomicInteger();
+    private final java.util.concurrent.atomic.AtomicInteger liveWorkers =
+            new java.util.concurrent.atomic.AtomicInteger();
+    private final java.util.concurrent.atomic.AtomicInteger workerSeq =
+            new java.util.concurrent.atomic.AtomicInteger();
+    private volatile boolean shuttingDown = false;
+
     record GradingJob(String studentId, String studentName,
                       String batchId, String examId, String zipPath,
                       String testcasePath) {}   // testcasePath != null = ép dùng (chấm lại đề cũ)
@@ -87,29 +100,15 @@ public class BatchGradingService {
             log.info("Grading workers disabled by configuration");
             return;
         }
-        executor = Executors.newFixedThreadPool(maxConcurrent);
-        for (int i = 0; i < maxConcurrent; i++) {
-            final int idx = i;
-            executor.submit(() -> {
-                Thread.currentThread().setName("grading-worker-" + idx);
-                while (!Thread.currentThread().isInterrupted()) {
-                    GradingJob job = null;
-                    try {
-                        job = jobQueue.take();
-                        processJob(job);
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                        break;
-                    } catch (Throwable t) {
-                        // QUAN TRỌNG: KHÔNG để 1 job lỗi giết chết worker (nếu chết thì các bài
-                        // sau sẽ kẹt QUEUED vĩnh viễn). Ghi log rồi tiếp tục nhận job kế tiếp.
-                        log.error("Worker gặp lỗi ngoài dự kiến khi xử lý job {}: {}",
-                                job != null ? job.studentId() : "?", t.toString(), t);
-                    }
-                }
-            });
-        }
-        log.info("Grading workers started (concurrent: {})", maxConcurrent);
+        // Cached pool: worker rút lui xong thì thread được tái dùng cho lần tăng mức song song sau.
+        executor = Executors.newCachedThreadPool(r -> {
+            Thread t = new Thread(r, "grading-worker-" + workerSeq.incrementAndGet());
+            t.setDaemon(true);
+            return t;
+        });
+        runtimeSettings.bindConcurrencyApplier(this::applyConcurrency);
+        applyConcurrency(runtimeSettings.maxConcurrent());
+        log.info("Grading workers started (concurrent: {})", targetWorkers.get());
         recoverPendingJobs();   // hàng đợi bền: nạp lại job QUEUED/GRADING sau restart
         try {                   // Flag Pattern: bật has_results cho dữ liệu cũ (chạy 1 lần)
             int n = examRepo.backfillHasResults();
@@ -121,7 +120,71 @@ public class BatchGradingService {
 
     @PreDestroy
     public void shutdown() {
+        shuttingDown = true;
         if (executor != null) executor.shutdownNow();
+    }
+
+    /**
+     * Đổi số bài chấm song song NGAY khi hệ thống đang chạy.
+     *
+     * <p>Tăng → mở thêm worker, nhận việc luôn từ hàng đợi. Giảm → worker dư tự thoát khi vòng lặp
+     * kế tiếp thấy mình thừa; bài đang chấm dở KHÔNG bị cắt ngang (nếu cắt thì bài đó thành ERROR
+     * oan cho sinh viên).
+     */
+    public synchronized void applyConcurrency(int desired) {
+        if (!workersEnabled || executor == null || shuttingDown) return;
+        int target = Math.max(1, desired);
+        targetWorkers.set(target);
+        while (liveWorkers.get() < target) {
+            liveWorkers.incrementAndGet();
+            executor.submit(this::workerLoop);
+        }
+    }
+
+    /** Tình trạng thực tế của bộ chấm — để trang cấu hình cho thấy mức mới đã có hiệu lực. */
+    public Map<String, Object> workerStatus() {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("enabled", workersEnabled);
+        m.put("targetWorkers", targetWorkers.get());
+        m.put("activeWorkers", liveWorkers.get());
+        m.put("queuedJobs", jobQueue.size());
+        return m;
+    }
+
+    private void workerLoop() {
+        boolean retired = false;
+        try {
+            while (!Thread.currentThread().isInterrupted() && !shuttingDown) {
+                if (retireIfExcess()) { retired = true; return; }
+                GradingJob job = null;
+                try {
+                    // poll (không phải take) để worker DƯ còn thấy được mức song song mới
+                    // ngay cả khi hàng đợi đang rỗng.
+                    job = jobQueue.poll(1, TimeUnit.SECONDS);
+                    if (job == null) continue;
+                    processJob(job);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return;
+                } catch (Throwable t) {
+                    // QUAN TRỌNG: KHÔNG để 1 job lỗi giết chết worker (nếu chết thì các bài
+                    // sau sẽ kẹt QUEUED vĩnh viễn). Ghi log rồi tiếp tục nhận job kế tiếp.
+                    log.error("Worker gặp lỗi ngoài dự kiến khi xử lý job {}: {}",
+                            job != null ? job.studentId() : "?", t.toString(), t);
+                }
+            }
+        } finally {
+            if (!retired) liveWorkers.decrementAndGet();
+        }
+    }
+
+    /** true = worker này thừa so với mức song song hiện tại (đã tự trừ khỏi sổ) và phải dừng. */
+    private boolean retireIfExcess() {
+        while (true) {
+            int live = liveWorkers.get();
+            if (live <= targetWorkers.get()) return false;
+            if (liveWorkers.compareAndSet(live, live - 1)) return true;
+        }
     }
 
     // ── GV upload hàng loạt ──────────────────────────────────────

@@ -33,22 +33,19 @@ public class GradingService {
     @Value("${grader.template-dir:grader-base}")
     private String templateDir;
 
-    @Value("${grader.timeout.seconds:120}")
-    private int timeoutSeconds;
-
     @Value("${grader.runner.process-timeout-seconds:120}")
     private int testcaseProcessTimeoutSeconds;
 
-    /** RAM mỗi container chấm. Tăng giúp tránh OOM khi compile project lớn. */
-    @Value("${grader.run.memory:2048m}")
-    private String runMemory;
-
-    /** Số CPU mỗi container chấm. Tăng giúp `flutter test` compile nhanh hơn. */
-    @Value("${grader.run.cpus:2.0}")
-    private String runCpus;
-
     @Value("${grader.analyze.enabled:true}")
     private boolean analyzeEnabled;
+
+    /**
+     * CPU/RAM mỗi container và watchdog mỗi bài giờ CHỈNH ĐƯỢC lúc đang chạy (trang Chấm bài tự
+     * động → Hiệu năng chấm). Đọc lại ngay trước khi bật container nên cấu hình mới có hiệu lực
+     * từ bài kế tiếp, không cần khởi động lại backend.
+     */
+    @org.springframework.beans.factory.annotation.Autowired
+    private GradingRuntimeSettingsService runtimeSettings;
 
     private final ObjectMapper mapper = new ObjectMapper();
     private final SubmissionPackagePolicy submissionPackagePolicy = new SubmissionPackagePolicy();
@@ -838,6 +835,12 @@ class UserListScreen extends HomeScreen {
             image = imagePrefix + "-" + examId.toLowerCase();
         }
 
+        // Chốt cấu hình tài nguyên MỘT LẦN cho cả lượt chấm này: người dùng có đổi giữa chừng thì
+        // container và watchdog vẫn dùng chung một mức, không lệch nhau.
+        String runMemory = runtimeSettings.memoryArg();
+        String runCpus = runtimeSettings.cpusArg();
+        int timeoutSeconds = runtimeSettings.timeoutSeconds();
+
         String containerName = dockerContainerName("grader-run", examId, studentId);
         List<String> command = new ArrayList<>(List.of(
                 "docker", "run", "--name", containerName, "--rm", "--memory", runMemory, "--cpus", runCpus));
@@ -1089,7 +1092,8 @@ class UserListScreen extends HomeScreen {
         String containerName = dockerContainerName("grader-probe", "compile", "zero-tests");
         try {
             List<String> cmd = new ArrayList<>(List.of(
-                    "docker", "run", "--name", containerName, "--rm", "--memory", runMemory, "--cpus", runCpus));
+                    "docker", "run", "--name", containerName, "--rm",
+                    "--memory", runtimeSettings.memoryArg(), "--cpus", runtimeSettings.cpusArg()));
             cmd.addAll(mounts);
             cmd.add("--entrypoint");
             cmd.add("bash");

@@ -49,7 +49,7 @@ interface ResultRow {
   studentId: string;
   studentName: string | null;
   score: number | null;
-  status: "DONE" | "ERROR" | "MANUAL_REVIEW" | "GRADING" | "QUEUED";
+  status: "DONE" | "ERROR" | "MANUAL_REVIEW" | "GRADING" | "QUEUED" | "CANCELLED";
   batchId: string | null;
   submittedAt: string | null;
   updatedAt: string | null;
@@ -171,6 +171,7 @@ function statusVi(status: ResultRow["status"]): string {
   if (status === "MANUAL_REVIEW") return "Cần chấm tay";
   if (status === "GRADING") return "Đang chấm";
   if (status === "QUEUED") return "Đang chờ";
+  if (status === "CANCELLED") return "Đã dừng";
   return status;
 }
 

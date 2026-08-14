@@ -15,5 +15,7 @@ public class BatchProgressResponse {
     private long            queued;
     private long            error;
     private long            manualReview;
+    private long            cancelled;     // bài bị bỏ khi người dùng dừng/hủy phiên chấm
+    private String          batchStatus;   // BatchStatus của phiên (FE biết phiên đã bị dừng)
     private List<ResultRow> results;   // NHẸ: không kèm cột LONGTEXT (xem ResultRow)
 }

@@ -196,7 +196,33 @@ if (-not (Test-PortFree 8080)) {
 # Ghi NEXT_PUBLIC_API_BASE vao frontend/.env.local (giu cac dong khac) de FE goi dung cong backend.
 $apiBase  = "http://localhost:$bePort/api"
 $envLocal = Join-Path $feDir ".env.local"
-$keep = @(); if (Test-Path $envLocal) { $keep = Get-Content $envLocal | Where-Object { $_ -notmatch '^\s*NEXT_PUBLIC_API_BASE\s*=' } }
+$keep = @(); $oldApiBase = ""
+if (Test-Path $envLocal) {
+  $all  = Get-Content $envLocal
+  $keep = $all | Where-Object { $_ -notmatch '^\s*NEXT_PUBLIC_API_BASE\s*=' }
+  $hit  = $all | Where-Object { $_ -match '^\s*NEXT_PUBLIC_API_BASE\s*=' } | Select-Object -First 1
+  if ($hit) { $oldApiBase = ($hit -replace '^\s*NEXT_PUBLIC_API_BASE\s*=\s*', '').Trim() }
+}
+# Next.js NHUNG CUNG NEXT_PUBLIC_* vao bundle luc bien dich, khong doc lai luc chay. Neu cong
+# backend doi ma cache .next van con chunk cu thi trinh duyet goi sang cong CU -> loi
+# "Failed to fetch" du backend van song. Doi cong = phai xoa cache, khong co cach nao khac.
+if ($oldApiBase -ne $apiBase) {
+  $nextDir = Join-Path $feDir ".next"
+  if (Test-Path $nextDir) {
+    if ($oldApiBase -eq "") {
+      Write-Host "  Chua ro cong backend lan truoc -> xoa cache frontend cho chac." -ForegroundColor Yellow
+    } else {
+      Write-Host "  Backend doi cong ($oldApiBase -> $apiBase) -> xoa cache frontend." -ForegroundColor Yellow
+    }
+    try {
+      Remove-Item -LiteralPath $nextDir -Recurse -Force -ErrorAction Stop
+      Write-Host "  [OK] Da xoa frontend\.next (lan khoi dong dau se lau hon vi phai bien dich lai)." -ForegroundColor Green
+    } catch {
+      Write-Host "  [LOI] Khong xoa duoc frontend\.next : $($_.Exception.Message)" -ForegroundColor Yellow
+      Write-Host "        Hay dong het cua so dev roi xoa tay thu muc do." -ForegroundColor Yellow
+    }
+  }
+}
 # Ghi KHONG BOM: 'Set-Content -Encoding utf8' tren PS 5.1 chen BOM -> Next.js doc sai bien
 # dau dong (NEXT_PUBLIC_API_BASE) -> FE goi sai cong backend. Dung UTF8 khong BOM.
 $lines = @($keep) + "NEXT_PUBLIC_API_BASE=$apiBase"

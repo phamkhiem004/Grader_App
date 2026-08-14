@@ -147,7 +147,7 @@ public class BatchGradingService {
                                             String examId, String createdBy) throws Exception {
         if (usernames == null || usernames.size() != files.size())
             throw new IllegalArgumentException(
-                    "Mỗi solution.zip phải đi kèm đúng tên thư mục username.");
+                    "Mỗi file .zip phải đi kèm đúng tên thư mục username.");
         Exam exam = examRepo.findByExamId(examId)
                 .orElseThrow(() -> new IllegalArgumentException("Không tìm thấy đề thi: " + examId));
         // Không còn nút "Build Sandbox" thủ công: sandbox được chuẩn bị ngay lúc publish/import.
@@ -180,7 +180,7 @@ public class BatchGradingService {
             MultipartFile file = files.get(index);
             String filename = Objects.requireNonNull(file.getOriginalFilename());
             String username = usernames.get(index) == null ? "" : usernames.get(index).trim();
-            String submissionLabel = username + "/solution.zip";
+            String submissionLabel = username + "/" + filename;
             try {
                 validateZip(file, filename);
                 StudentInfo info = parseStudentInfo(username);
@@ -1531,9 +1531,9 @@ public class BatchGradingService {
         );
     }
 
-    private void validateZip(MultipartFile f, String name) throws Exception {
-        if (!"solution.zip".equalsIgnoreCase(name))
-            throw new IllegalArgumentException("Thư mục username phải chứa file solution.zip");
+    void validateZip(MultipartFile f, String name) throws Exception {
+        if (name == null || !name.toLowerCase(java.util.Locale.ROOT).endsWith(".zip"))
+            throw new IllegalArgumentException("Thư mục username phải chứa một file .zip");
         if (f.isEmpty())                          throw new IllegalArgumentException("File rỗng");
         if (f.getSize() > 50L * 1024 * 1024)     throw new IllegalArgumentException("Quá 50MB");
     }

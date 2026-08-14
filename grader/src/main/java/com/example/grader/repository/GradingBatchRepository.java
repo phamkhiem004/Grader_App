@@ -14,6 +14,8 @@ public interface GradingBatchRepository extends JpaRepository<GradingBatch,Long>
 
     List<GradingBatch> findByExamIdOrderByCreatedAtDesc(String examId);
 
+    List<GradingBatch> findByStatusInOrderByCreatedAtDesc(List<com.example.grader.entity.BatchStatus> statuses);
+
     // Cập nhật progress sau mỗi bài chấm xong
     @Modifying
     @Transactional

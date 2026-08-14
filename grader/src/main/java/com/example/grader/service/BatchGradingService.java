@@ -30,6 +30,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 @Slf4j
@@ -70,11 +72,14 @@ public class BatchGradingService {
     /** Bộ đếm đảm bảo batchId DUY NHẤT ngay cả khi 2 request cùng mili-giây (cùng cột UNIQUE ở DB). */
     private static final java.util.concurrent.atomic.AtomicLong BATCH_SEQ =
             new java.util.concurrent.atomic.AtomicLong();
+    private static final Pattern STUDENT_ID_SUFFIX = Pattern.compile("(?i)([a-z]{2}\\d{6,})$");
     private static String genBatchId() {
         return "BATCH_" + System.currentTimeMillis() + "_" + Long.toHexString(BATCH_SEQ.incrementAndGet());
     }
     private ExecutorService executor;
     private final BlockingQueue<GradingJob> jobQueue = new LinkedBlockingQueue<>();
+    /** Cache trạng thái pause; trạng thái chuẩn vẫn được lưu trong grading_batches. */
+    private final java.util.Set<String> pausedBatchIds = ConcurrentHashMap.newKeySet();
 
     record GradingJob(String studentId, String studentName,
                       String batchId, String examId, String zipPath,
@@ -87,6 +92,13 @@ public class BatchGradingService {
             log.info("Grading workers disabled by configuration");
             return;
         }
+        try {
+            batchRepo.findByStatusInOrderByCreatedAtDesc(List.of(BatchStatus.PAUSED))
+                    .forEach(batch -> pausedBatchIds.add(batch.getBatchId()));
+        } catch (Exception e) {
+            log.warn("Không nạp được danh sách batch tạm dừng: {}", e.getMessage());
+        }
+
         executor = Executors.newFixedThreadPool(maxConcurrent);
         for (int i = 0; i < maxConcurrent; i++) {
             final int idx = i;
@@ -96,6 +108,12 @@ public class BatchGradingService {
                     GradingJob job = null;
                     try {
                         job = jobQueue.take();
+                        if (pausedBatchIds.contains(job.batchId())) {
+                            // Đưa về cuối hàng đợi để batch khác vẫn tiếp tục chạy, tránh chiếm cứng worker.
+                            jobQueue.offer(job);
+                            Thread.sleep(250);
+                            continue;
+                        }
                         processJob(job);
                     } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();
@@ -125,8 +143,11 @@ public class BatchGradingService {
     }
 
     // ── GV upload hàng loạt ──────────────────────────────────────
-    public BatchSubmitResponse enqueueBatch(List<MultipartFile> files,
+    public BatchSubmitResponse enqueueBatch(List<MultipartFile> files, List<String> usernames,
                                             String examId, String createdBy) throws Exception {
+        if (usernames == null || usernames.size() != files.size())
+            throw new IllegalArgumentException(
+                    "Mỗi solution.zip phải đi kèm đúng tên thư mục username.");
         Exam exam = examRepo.findByExamId(examId)
                 .orElseThrow(() -> new IllegalArgumentException("Không tìm thấy đề thi: " + examId));
         // Không còn nút "Build Sandbox" thủ công: sandbox được chuẩn bị ngay lúc publish/import.
@@ -155,11 +176,14 @@ public class BatchGradingService {
         List<String> parseErrors = new ArrayList<>();
         List<GradingJob> pendingJobs = new ArrayList<>();   // enqueue SAU khi chốt totalFiles
 
-        for (MultipartFile file : files) {
+        for (int index = 0; index < files.size(); index++) {
+            MultipartFile file = files.get(index);
             String filename = Objects.requireNonNull(file.getOriginalFilename());
+            String username = usernames.get(index) == null ? "" : usernames.get(index).trim();
+            String submissionLabel = username + "/solution.zip";
             try {
                 validateZip(file, filename);
-                StudentInfo info = parseStudentInfo(filename);
+                StudentInfo info = parseStudentInfo(username);
 
                 // Chấm lại = GHI ĐÈ: tái sử dụng bản ghi cũ (cùng SV + đề + mode) nếu có
                 ExamResult placeholder = resultRepo
@@ -195,8 +219,8 @@ public class BatchGradingService {
                 queued.add(info.studentId() + " — " + info.studentName());
 
             } catch (Exception e) {
-                parseErrors.add(filename + ": " + e.getMessage());
-                log.warn("Skip {}: {}", filename, e.getMessage());
+                parseErrors.add(submissionLabel + ": " + e.getMessage());
+                log.warn("Skip {}: {}", submissionLabel, e.getMessage());
             }
         }
 
@@ -904,6 +928,7 @@ public class BatchGradingService {
             if (pending == 0 && b.getCompletedAt() == null) {
                 b.setStatus(error == 0 && review == 0 ? BatchStatus.COMPLETED : BatchStatus.PARTIAL);
                 b.setCompletedAt(Instant.now());
+                pausedBatchIds.remove(batchId);
                 log.info("[{}] Batch hoàn tất: {} đạt / {} lỗi / {} cần chấm tay",
                         batchId, done, error, review);
             }
@@ -1017,6 +1042,64 @@ public class BatchGradingService {
     /** Thông báo: 10 phiên chấm gần nhất (app một người dùng → không lọc theo người tạo). */
     public List<GradingBatch> recentBatches() {
         return batchRepo.findTop10ByOrderByCreatedAtDesc();
+    }
+
+    /**
+     * Các batch còn hoạt động. Dữ liệu lấy từ DB nên UI có thể phục hồi sau khi đổi trang/F5,
+     * không phụ thuộc state đang giữ trong trình duyệt.
+     */
+    public List<Map<String, Object>> activeBatches() {
+        List<GradingBatch> candidates = batchRepo.findByStatusInOrderByCreatedAtDesc(
+                List.of(BatchStatus.IN_PROGRESS, BatchStatus.PAUSED));
+        List<Map<String, Object>> out = new ArrayList<>();
+        for (GradingBatch candidate : candidates) {
+            BatchProgressResponse progress = getBatchProgress(candidate.getBatchId());
+            if (progress.getQueued() + progress.getGrading() == 0) checkBatchComplete(candidate.getBatchId());
+            GradingBatch batch = batchRepo.findByBatchId(candidate.getBatchId()).orElse(candidate);
+            if (batch.getStatus() != BatchStatus.IN_PROGRESS && batch.getStatus() != BatchStatus.PAUSED) continue;
+
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("batchId", batch.getBatchId());
+            row.put("examId", batch.getExamId());
+            row.put("status", batch.getStatus().name());
+            row.put("total", progress.getTotal());
+            row.put("done", progress.getDone());
+            row.put("grading", progress.getGrading());
+            row.put("queued", progress.getQueued());
+            row.put("error", progress.getError());
+            row.put("manualReview", progress.getManualReview());
+            out.add(row);
+        }
+        return out;
+    }
+
+    public BatchProgressResponse pauseBatch(String batchId) {
+        GradingBatch batch = requireBatch(batchId);
+        if (batch.getStatus() == BatchStatus.COMPLETED || batch.getStatus() == BatchStatus.PARTIAL)
+            throw new IllegalArgumentException("Phiên chấm đã kết thúc nên không thể tạm dừng.");
+        batch.setStatus(BatchStatus.PAUSED);
+        batchRepo.save(batch);
+        pausedBatchIds.add(batchId);
+        log.info("[{}] Đã tạm dừng nhận bài mới từ hàng đợi", batchId);
+        return getBatchProgress(batchId);
+    }
+
+    public BatchProgressResponse resumeBatch(String batchId) {
+        GradingBatch batch = requireBatch(batchId);
+        if (batch.getStatus() == BatchStatus.COMPLETED || batch.getStatus() == BatchStatus.PARTIAL)
+            throw new IllegalArgumentException("Phiên chấm đã kết thúc nên không thể tiếp tục.");
+        batch.setStatus(BatchStatus.IN_PROGRESS);
+        batchRepo.save(batch);
+        pausedBatchIds.remove(batchId);
+        log.info("[{}] Tiếp tục phiên chấm", batchId);
+        return getBatchProgress(batchId);
+    }
+
+    private GradingBatch requireBatch(String batchId) {
+        if (batchId == null || batchId.isBlank())
+            throw new IllegalArgumentException("Thiếu batchId.");
+        return batchRepo.findByBatchId(batchId)
+                .orElseThrow(() -> new IllegalArgumentException("Không tìm thấy phiên chấm: " + batchId));
     }
 
     /** Đọc các file mã nguồn trong bài nộp (zip đã staged) để hiển thị cho GV chấm tay. */
@@ -1260,7 +1343,10 @@ public class BatchGradingService {
         long error   = resultRepo.countByBatchIdAndStatus(batchId, GradingStatus.ERROR);
         long review  = resultRepo.countByBatchIdAndStatus(batchId, GradingStatus.MANUAL_REVIEW);
         List<com.example.grader.dto.ResultRow> rows = resultRepo.findRowsByBatchId(batchId);
-        return new BatchProgressResponse(batchId, rows.size(), done, grading, queued, error, review, rows);
+        String status = batchRepo.findByBatchId(batchId)
+                .map(batch -> batch.getStatus() == null ? BatchStatus.IN_PROGRESS.name() : batch.getStatus().name())
+                .orElse("UNKNOWN");
+        return new BatchProgressResponse(batchId, rows.size(), done, grading, queued, error, review, status, rows);
     }
 
     // ── Helpers ──────────────────────────────────────────────────
@@ -1277,18 +1363,20 @@ public class BatchGradingService {
         return (createdBy == null || createdBy.isBlank()) ? "unknown" : createdBy.trim();
     }
 
-    private StudentInfo parseStudentInfo(String filename) {
-        String name = filename.replace(".zip","").trim();
-        int sep = name.indexOf('_');
-        if (sep < 1) throw new IllegalArgumentException("Sai format — cần: MaSV_Ten.zip");
+    StudentInfo parseStudentInfo(String username) {
+        String normalized = username == null ? "" : username.trim();
+        ExamService.safeId(normalized, "username");
+        Matcher matcher = STUDENT_ID_SUFFIX.matcher(normalized);
+        String studentId = matcher.find() ? matcher.group(1) : normalized;
         return new StudentInfo(
-                ExamService.safeId(name.substring(0, sep).trim().toUpperCase(), "SV"),  // chặn path traversal
-                name.substring(sep + 1).replace("_", " ").trim()
+                ExamService.safeId(studentId.toUpperCase(), "SV"),
+                normalized
         );
     }
 
     private void validateZip(MultipartFile f, String name) throws Exception {
-        if (!name.toLowerCase().endsWith(".zip")) throw new IllegalArgumentException("Chỉ nhận .zip");
+        if (!"solution.zip".equalsIgnoreCase(name))
+            throw new IllegalArgumentException("Thư mục username phải chứa file solution.zip");
         if (f.isEmpty())                          throw new IllegalArgumentException("File rỗng");
         if (f.getSize() > 50L * 1024 * 1024)     throw new IllegalArgumentException("Quá 50MB");
     }

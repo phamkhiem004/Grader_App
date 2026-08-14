@@ -5,6 +5,8 @@ import com.example.grader.dto.ExamHistoryRow;
 import com.example.grader.entity.ExamResult;
 import com.example.grader.repository.ExamResultRepository;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -13,10 +15,16 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
 
+import java.io.ByteArrayOutputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 
 /** Cung cấp JSON kết quả đầy đủ cho lịch sử, năng lực và xuất dữ liệu. */
 @RestController
@@ -197,6 +205,60 @@ public class ResultController {
         return ResponseEntity.ok().contentType(JSON_UTF8).body(out);
     }
 
+    /**
+     * Xuất một thư mục kết quả theo lô. HTTP không truyền trực tiếp được thư mục nên ZIP chỉ là
+     * lớp vận chuyển; bên trong luôn là một folder và mỗi sinh viên có đúng một file JSON riêng.
+     */
+    @GetMapping(value = "/batch/{batchId}/archive", produces = "application/zip")
+    public ResponseEntity<byte[]> getBatchResultsArchive(@PathVariable String batchId) {
+        List<ExamResult> rows = resultRepo.findByBatchIdOrderByStudentId(batchId);
+        if (rows.stream().noneMatch(row -> row.getResultJson() != null && !row.getResultJson().isBlank()))
+            return ResponseEntity.notFound().build();
+        try {
+            byte[] archive = buildBatchResultsArchive(batchId, rows);
+            String downloadName = safeArchivePart(batchId) + "_results.zip";
+            return ResponseEntity.ok()
+                    .contentType(MediaType.parseMediaType("application/zip"))
+                    .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment()
+                            .filename(downloadName, StandardCharsets.UTF_8).build().toString())
+                    .body(archive);
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+
+    byte[] buildBatchResultsArchive(String batchId, List<ExamResult> rows) throws Exception {
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        String root = safeArchivePart(batchId) + "_results/";
+        Set<String> usedNames = new HashSet<>();
+        try (ZipOutputStream zip = new ZipOutputStream(bytes, StandardCharsets.UTF_8)) {
+            zip.putNextEntry(new ZipEntry(root));
+            zip.closeEntry();
+            for (ExamResult row : rows) {
+                String json = row.getResultJson();
+                if (json == null || json.isBlank()) continue;
+                String preferred = row.getStudentName();
+                if (preferred == null || !preferred.matches("[A-Za-z0-9_-]{1,60}"))
+                    preferred = row.getStudentId();
+                String base = safeArchivePart(preferred == null ? "student" : preferred);
+                String name = base + ".json";
+                if (!usedNames.add(name.toLowerCase())) {
+                    name = base + "_" + safeArchivePart(row.getStudentId()) + ".json";
+                    usedNames.add(name.toLowerCase());
+                }
+                zip.putNextEntry(new ZipEntry(root + name));
+                zip.write(pretty(json).getBytes(StandardCharsets.UTF_8));
+                zip.closeEntry();
+            }
+        }
+        return bytes.toByteArray();
+    }
+
+    private String safeArchivePart(String value) {
+        String safe = value == null ? "result" : value.replaceAll("[^A-Za-z0-9_-]", "_");
+        return safe.isBlank() ? "result" : safe;
+    }
+
     private String pretty(String json) {
         try {
             return mapper.writerWithDefaultPrettyPrinter()
@@ -208,32 +270,53 @@ public class ResultController {
 
     /** Giữ schema JSON ổn định cho cả kết quả cũ chưa có expected/actual. */
     private JsonNode normalizeResultNode(JsonNode root) {
-        if (!(root instanceof ObjectNode object)) return root;
-        JsonNode rawCases = object.get("test_cases");
-        if (!(rawCases instanceof ArrayNode cases)) return root;
+        if (root instanceof ObjectNode object) {
+            JsonNode rawCases = object.get("test_cases");
+            if (rawCases instanceof ArrayNode cases) {
+                for (JsonNode rawCase : cases) {
+                    if (!(rawCase instanceof ObjectNode tc)) continue;
 
-        for (JsonNode rawCase : cases) {
-            if (!(rawCase instanceof ObjectNode tc)) continue;
+                    String expected = textOrBlank(tc.get("expected"));
+                    if (expected.isBlank()) expected = textOrBlank(tc.get("expect"));
+                    if (expected.isBlank()) expected = "PASS";
+                    tc.put("expected", expected);
+                    tc.remove("expect"); // dữ liệu cũ vẫn đọc được nhưng không phát hành alias này nữa
 
-            String expected = textOrBlank(tc.get("expected"));
-            if (expected.isBlank()) expected = textOrBlank(tc.get("expect"));
-            if (expected.isBlank()) expected = "PASS";
-            tc.put("expected", expected);
-            tc.remove("expect"); // dữ liệu cũ vẫn đọc được nhưng không phát hành alias này nữa
+                    String actual = normalizeActual(textOrBlank(tc.get("actual")));
+                    if (actual.isBlank()) {
+                        String status = textOrBlank(tc.get("status")).toLowerCase();
+                        tc.put("actual", status.contains("pass") ? "Đã đáp ứng yêu cầu" : "Không đáp ứng yêu cầu");
+                    } else {
+                        tc.put("actual", actual);
+                    }
 
-            String actual = normalizeActual(textOrBlank(tc.get("actual")));
-            if (actual.isBlank()) {
-                String status = textOrBlank(tc.get("status")).toLowerCase();
-                tc.put("actual", status.contains("pass") ? "Đã đáp ứng yêu cầu" : "Không đáp ứng yêu cầu");
-            } else {
-                tc.put("actual", actual);
+                    // Thứ tự bắt buộc: rút `error_code` ra TRƯỚC khi xoá object `error`.
+                    addContractKeysWithoutGuessing(tc);
+                    dropRetiredErrorFields(tc);
+                }
             }
-
-            // Thứ tự bắt buộc: rút `error_code` ra TRƯỚC khi xoá object `error`.
-            addContractKeysWithoutGuessing(tc);
-            dropRetiredErrorFields(tc);
         }
+        removeNullObjectFields(root);
         return root;
+    }
+
+    /**
+     * JSON tải xuống chỉ giữ thông tin thực sự có giá trị. Field tùy chọn vẫn xuất hiện khi có dữ liệu,
+     * nhưng không phát hành hàng nghìn cặp key:null làm file khó đọc.
+     */
+    private void removeNullObjectFields(JsonNode node) {
+        if (node instanceof ObjectNode object) {
+            List<String> nullFields = new ArrayList<>();
+            object.properties().forEach(entry -> {
+                if (entry.getValue() == null || entry.getValue().isNull()) nullFields.add(entry.getKey());
+                else removeNullObjectFields(entry.getValue());
+            });
+            nullFields.forEach(object::remove);
+            return;
+        }
+        if (node instanceof ArrayNode array) {
+            for (JsonNode child : array) removeNullObjectFields(child);
+        }
     }
 
     /**

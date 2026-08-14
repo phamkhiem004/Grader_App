@@ -7,7 +7,7 @@ import ExamCombobox from "@/components/ui/ExamCombobox";
 
 // Khóa lưu phiên chấm đang/ vừa chạy → rời trang rồi quay lại KHÔNG mất kết quả
 const ACTIVE_BATCH_KEY = "grader_active_batch";
-import { UploadCloud, Play, Pause, FileArchive, X, CheckCircle, Clock, AlertCircle, DownloadCloud, Loader2, CheckSquare, BarChart2, Users, TrendingUp, FileJson } from "lucide-react";
+import { UploadCloud, Play, Pause, FileArchive, X, CheckCircle, Clock, AlertCircle, DownloadCloud, Loader2, CheckSquare, BarChart2, Users, TrendingUp, FileJson, StopCircle, Trash2, Ban } from "lucide-react";
 
 const normalizedPath = (value) => String(value || "").replace(/\\/g, "/");
 
@@ -60,6 +60,8 @@ export default function AutomaticGradingPage() {
   const [parseErrors, setParseErrors] = useState([]);
   const [resultFilter, setResultFilter] = useState("all");
   const [diagnosticFilter, setDiagnosticFilter] = useState("all");
+  const [batchAction, setBatchAction] = useState(null);   // "stop" | "cancel" khi đang gọi API
+  const [stopNotice, setStopNotice] = useState(null);
   const fileRef = useRef();
   const pollRef = useRef(null);
 
@@ -288,7 +290,7 @@ export default function AutomaticGradingPage() {
     if (!files.length) { setUploadErr("Chưa có file nào để chấm."); return; }
     if (!examId.trim()) { setUploadErr("Vui lòng nhập mã bộ testcase."); return; }
 
-    setPhase("uploading"); setUploadErr(null); setParseErrors([]);
+    setPhase("uploading"); setUploadErr(null); setParseErrors([]); setStopNotice(null);
     setResultFilter("all"); setDiagnosticFilter("all");
 
     const form = new FormData();
@@ -358,8 +360,51 @@ export default function AutomaticGradingPage() {
     clearInterval(pollRef.current);
     try { localStorage.removeItem(ACTIVE_BATCH_KEY); } catch (_) {}
     setFiles([]); setBatchId(null); setProgress(null);
-    setPhase("idle"); setUploadErr(null); setParseErrors([]);
+    setPhase("idle"); setUploadErr(null); setParseErrors([]); setStopNotice(null);
     setResultFilter("all"); setDiagnosticFilter("all");
+  };
+
+  // ── Dừng / hủy phiên chấm đang chạy ────────────────────────────
+  // Dừng  = bỏ các bài chưa chấm + giết container đang chạy, GIỮ kết quả đã có.
+  // Hủy   = dừng rồi XÓA sạch kết quả và file bài nộp của phiên này (không hoàn tác được).
+  const stopGrading = async () => {
+    if (!batchId || batchAction) return;
+    setBatchAction("stop");
+    try {
+      const res = await fetch(`${API_BASE}/batch/${batchId}/stop`, { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { setUploadErr(data.error || "Không dừng được phiên chấm."); return; }
+      const skipped = (data.dequeued || 0) + (data.cancelled || 0);
+      setStopNotice(`Đã dừng phiên chấm: ${skipped} bài chưa chấm bị bỏ qua`
+        + (data.killedContainers ? `, ${data.killedContainers} bài đang chấm bị ngắt` : "")
+        + ". Kết quả của các bài đã chấm xong vẫn được giữ nguyên.");
+      try { localStorage.removeItem(ACTIVE_BATCH_KEY); } catch (_) {}
+      // KHÔNG tự chuyển sang "done" ở đây: vòng poll sẵn có sẽ tự kết thúc khi container cuối
+      // cùng thực sự thoát — nếu giết hụt thì người dùng phải thấy nó vẫn đang chạy.
+    } catch (e) {
+      setUploadErr("Không kết nối được server: " + e.message);
+    } finally {
+      setBatchAction(null);
+    }
+  };
+
+  const cancelGrading = async () => {
+    if (!batchId || batchAction) return;
+    if (!confirm("Hủy phiên chấm này?\n\nToàn bộ kết quả đã chấm và file bài nộp của phiên sẽ bị XÓA "
+      + "(bài đã có điểm chấm tay được giữ lại). Thao tác này không hoàn tác được.")) return;
+    setBatchAction("cancel");
+    try {
+      const res = await fetch(`${API_BASE}/batch/${batchId}/cancel`, { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { setUploadErr(data.error || "Không hủy được phiên chấm."); return; }
+      reset();
+      setStopNotice(`Đã hủy phiên chấm và xóa ${data.deleted || 0} bản ghi kết quả`
+        + (data.keptManual ? `, giữ lại ${data.keptManual} bài đã chấm tay` : "") + ".");
+    } catch (e) {
+      setUploadErr("Không kết nối được server: " + e.message);
+    } finally {
+      setBatchAction(null);
+    }
   };
 
   const downloadCSV = () => {
@@ -371,6 +416,7 @@ export default function AutomaticGradingPage() {
     const validRows = (progress?.results || []).map(r => {
       let note = "";
       if (r.status === "ERROR") note = "Lỗi khi chấm (thường do lỗi compile hoặc crash)";
+      if (r.status === "CANCELLED") note = "Chưa chấm — phiên chấm đã bị dừng";
       if (r.status === "MANUAL_REVIEW") {
         note = `Cần chấm tay: ${r.diagnosticCode || "UNCLASSIFIED"} · ${r.diagnosticOrigin || "UNDETERMINED"} · ${r.errorLog || ""}`;
       }
@@ -486,12 +532,15 @@ export default function AutomaticGradingPage() {
   const manualItems = p?.manualReview || 0;
   const doneItems = p?.done || 0;
   const gradingItems = p?.grading || 0;
+  const cancelledItems = p?.cancelled || 0;   // bài bị bỏ do người dùng dừng phiên
 
-  const processedItems = doneItems + errorItems + manualItems;
+  // Bài bị dừng cũng là "đã xử lý xong": không tính vào đây thì thanh tiến độ đứng mãi dưới 100%.
+  const processedItems = doneItems + errorItems + manualItems + cancelledItems;
   const pct = totalItems > 0 ? Math.round((processedItems / totalItems) * 100) : 0;
   const donePct = totalItems > 0 ? Math.round((doneItems / totalItems) * 100) : 0;
   const errPct = totalItems > 0 ? Math.round((errorItems / totalItems) * 100) : 0;
   const reviewPct = totalItems > 0 ? Math.round((manualItems / totalItems) * 100) : 0;
+  const cancelPct = totalItems > 0 ? Math.round((cancelledItems / totalItems) * 100) : 0;
 
   const totalSize = files.reduce((sum, entry) => sum + entry.file.size, 0);
 
@@ -667,6 +716,16 @@ export default function AutomaticGradingPage() {
 
         {/* Cột phải: Tiến độ & Kết quả */}
         <div className="min-w-0 space-y-6">
+          {/* Đặt NGOÀI thẻ tiến độ: sau khi Hủy, phase quay về "idle" nên thẻ đó không còn render */}
+          {stopNotice && (
+            <div className="flex items-start gap-2.5 rounded-xl border border-slate-200 bg-slate-50 p-4 text-slate-600">
+              <Ban size={16} className="mt-0.5 shrink-0 text-slate-400" />
+              <p className="text-xs font-medium leading-relaxed">{stopNotice}</p>
+              <button onClick={() => setStopNotice(null)} className="ml-auto shrink-0 text-slate-300 transition-colors hover:text-slate-500">
+                <X size={14} />
+              </button>
+            </div>
+          )}
           {(phase === "polling" || phase === "done") ? (
             <>
               {/* Thống kê nhanh */}
@@ -721,17 +780,49 @@ export default function AutomaticGradingPage() {
                   <div className="h-full bg-gradient-to-r from-emerald-400 to-emerald-500 transition-all duration-500 ease-out" style={{ width: `${donePct}%` }}></div>
                   <div className="h-full bg-gradient-to-r from-amber-400 to-amber-500 transition-all duration-500 ease-out" style={{ width: `${reviewPct}%` }}></div>
                   <div className="h-full bg-gradient-to-r from-rose-400 to-rose-500 transition-all duration-500 ease-out" style={{ width: `${errPct}%` }}></div>
+                  <div className="h-full bg-gradient-to-r from-slate-300 to-slate-400 transition-all duration-500 ease-out" style={{ width: `${cancelPct}%` }}></div>
                 </div>
                 <div className="mt-3 flex items-center justify-between text-xs text-slate-500">
-                  <span><span className="font-semibold text-emerald-600">{doneItems}</span> xong · <span className="font-semibold text-amber-600">{manualItems}</span> chấm tay · <span className="font-semibold text-rose-600">{errorItems}</span> lỗi</span>
+                  <span>
+                    <span className="font-semibold text-emerald-600">{doneItems}</span> xong · <span className="font-semibold text-amber-600">{manualItems}</span> chấm tay · <span className="font-semibold text-rose-600">{errorItems}</span> lỗi
+                    {cancelledItems > 0 && <> · <span className="font-semibold text-slate-600">{cancelledItems}</span> đã dừng</>}
+                  </span>
                   <span>{processedItems}/{totalItems} đã xử lý</span>
                 </div>
 
-                {phase === "done" && (
-                  <div className="mt-4 flex justify-end border-t border-slate-100 pt-4">
-                    <button onClick={reset} className="rounded-lg bg-indigo-50 px-4 py-2 text-sm font-semibold text-indigo-600 transition-colors hover:bg-indigo-100">
-                      + Chấm kỳ thi mới
-                    </button>
+                {(phase === "polling" || phase === "done") && (
+                  <div className="mt-4 flex flex-wrap items-center justify-end gap-2 border-t border-slate-100 pt-4">
+                    {phase === "polling" && (
+                      <>
+                        <button
+                          onClick={stopGrading}
+                          disabled={batchAction !== null}
+                          title="Ngừng chấm các bài còn lại, giữ nguyên kết quả đã có"
+                          className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-700 transition-colors hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {batchAction === "stop"
+                            ? <Loader2 size={15} className="animate-spin" />
+                            : <StopCircle size={15} />}
+                          Dừng chấm
+                        </button>
+                        <button
+                          onClick={cancelGrading}
+                          disabled={batchAction !== null}
+                          title="Dừng và xóa toàn bộ kết quả + bài nộp của phiên chấm này"
+                          className="flex items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-600 transition-colors hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {batchAction === "cancel"
+                            ? <Loader2 size={15} className="animate-spin" />
+                            : <Trash2 size={15} />}
+                          Hủy phiên chấm
+                        </button>
+                      </>
+                    )}
+                    {phase === "done" && (
+                      <button onClick={reset} className="rounded-lg bg-indigo-50 px-4 py-2 text-sm font-semibold text-indigo-600 transition-colors hover:bg-indigo-100">
+                        + Chấm kỳ thi mới
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
@@ -821,6 +912,7 @@ export default function AutomaticGradingPage() {
                         const isError = r.status === "ERROR";
                         const isManual = r.status === "MANUAL_REVIEW";
                         const isGrading = r.status === "GRADING";
+                        const isCancelled = r.status === "CANCELLED";
                         const ratio = totalCount > 0 ? Math.round((passCount / totalCount) * 100) : 0;
                         const initials = (r.studentName || r.studentId || "?").trim().charAt(0).toUpperCase();
                         const diagnosticScope = r.diagnosticOrigin === "STUDENT" ? "Bài sinh viên" :
@@ -853,7 +945,7 @@ export default function AutomaticGradingPage() {
                                 <span className={`h-1.5 w-1.5 rounded-full ${
                                   isDone ? 'bg-emerald-500' : isManual ? 'bg-amber-500' : isError ? 'bg-rose-500' : isGrading ? 'bg-blue-500 animate-pulse' : 'bg-slate-400'
                                 }`}></span>
-                                {isDone ? 'Đã xong' : isManual ? 'Cần chấm tay' : isError ? 'Lỗi' : isGrading ? 'Đang chấm' : 'Chờ'}
+                                {isDone ? 'Đã xong' : isManual ? 'Cần chấm tay' : isError ? 'Lỗi' : isGrading ? 'Đang chấm' : isCancelled ? 'Đã dừng' : 'Chờ'}
                               </span>
                             </td>
                             <td className="px-3 py-3.5">

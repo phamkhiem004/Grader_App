@@ -26,12 +26,14 @@ spring:
       max-request-size: ${GRADER_MAX_UPLOAD:2GB}   # cho batch lớn
       file-size-threshold: 256KB                    # part lớn ghi ra đĩa tạm, không giữ trong RAM
 
-
-
 server:
   tomcat:
-    # 200 parts = toi da 199 file trong batch vi examId cung la mot multipart part.
-    max-part-count: ${GRADER_MAX_PART_COUNT:200}
+    # Nộp CẢ LỚP trong một lần = mỗi bài một part. Tomcat mặc định chỉ cho 50 part/request,
+    # nên upload 116 bài bị chặn ở tầng Tomcat TRƯỚC khi Spring nhìn thấy: trả 413 và cắt
+    # kết nối, trình duyệt chỉ thấy "Failed to fetch" chứ không có thông báo nào dễ hiểu.
+    # Giới hạn này đếm SỐ FILE chứ không phải dung lượng — 60 file 0.6MB vẫn bị chặn.
+    # Lưu ý: examId cũng chiếm 1 part, nên 1000 = tối đa 999 file mỗi lần nộp.
+    max-part-count: ${GRADER_MAX_PART_COUNT:1000}
 
 grader:
   # Thư mục chứa Dockerfile.base/template, pubspec.base.yaml, scripts, run_grader.sh

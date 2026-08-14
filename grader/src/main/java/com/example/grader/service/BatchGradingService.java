@@ -249,7 +249,14 @@ public class BatchGradingService {
     private void processJob(GradingJob job) {
         boolean success = false;
         boolean manualReview = false;
+        boolean cancelled = false;
         try {
+            // Người dùng bấm Dừng khi job này đã rời hàng đợi nhưng chưa tới lượt chạy.
+            if (gradingService.isCancelled(job.batchId())) {
+                cancelled = true;
+                markResultCancelled(job, "Phiên chấm đã bị dừng trước khi bài này được chấm.");
+                return;
+            }
             log.info("[{}] Chấm: {}", job.batchId(), job.studentId());
             updateStatus(job, GradingStatus.GRADING, null, null, null);
 
@@ -262,7 +269,7 @@ public class BatchGradingService {
             String testcasePath = job.testcasePath() != null ? job.testcasePath()
                     : examRepo.findByExamId(job.examId()).map(Exam::getTestcasePath).orElse(null);
             String resultJson = gradingService.gradeSubmission(
-                    job.studentId(), job.examId(), testcasePath, tempDir, zipPath);
+                    job.batchId(), job.studentId(), job.examId(), testcasePath, tempDir, zipPath);
 
             float score = parseScore(resultJson);
             String fullJson = assembleResultJson(job, resultJson);   // JSON đầy đủ cho lịch sử/năng lực
@@ -282,24 +289,50 @@ public class BatchGradingService {
             }
 
         } catch (Exception e) {
-            GradingDiagnosticException diagnostic = diagnoseException(e);
-            manualReview = diagnostic.manualReview();
-            GradingStatus terminal = manualReview ? GradingStatus.MANUAL_REVIEW : GradingStatus.ERROR;
-            log.error("[{}] {} {} → {}", job.batchId(), terminal, job.studentId(), diagnostic.teacherMessage());
-            try { updateStatus(job, terminal, null, null, null); }
-            catch (Exception ex) {
-                log.warn("[{}] Không ghi được {} cho {}: {}", job.batchId(), terminal,
-                        job.studentId(), ex.getMessage());
+            // Container bị GIẾT vì người dùng bấm Dừng → không có bằng chứng nào về bài nộp,
+            // tuyệt đối không được ghi thành ERROR/0 điểm của sinh viên.
+            if (gradingService.isCancelled(job.batchId())) {
+                cancelled = true;
+                markResultCancelled(job, "Đã dừng khi bài đang được chấm.");
+            } else {
+                GradingDiagnosticException diagnostic = diagnoseException(e);
+                manualReview = diagnostic.manualReview();
+                GradingStatus terminal = manualReview ? GradingStatus.MANUAL_REVIEW : GradingStatus.ERROR;
+                log.error("[{}] {} {} → {}", job.batchId(), terminal, job.studentId(), diagnostic.teacherMessage());
+                try { updateStatus(job, terminal, null, null, null); }
+                catch (Exception ex) {
+                    log.warn("[{}] Không ghi được {} cho {}: {}", job.batchId(), terminal,
+                            job.studentId(), ex.getMessage());
+                }
+                updateDiagnostic(job, diagnostic);
             }
-            updateDiagnostic(job, diagnostic);
         } finally {
             // Bookkeeping luôn chạy & có bọc lỗi → 1 lỗi ghi DB không làm kẹt batch
             try { if (!saveSubmissions) deleteQuietly(Path.of(job.zipPath())); } catch (Exception ignored) {}
-            try { batchRepo.incrementCounts(job.batchId(), success ? 1 : 0,
-                    success || manualReview ? 0 : 1); }
-            catch (Exception ex) { log.warn("[{}] incrementCounts lỗi: {}", job.batchId(), ex.getMessage()); }
+            // Bài bị dừng KHÔNG tính vào done/error — nó chưa từng có kết quả.
+            if (!cancelled) {
+                try { batchRepo.incrementCounts(job.batchId(), success ? 1 : 0,
+                        success || manualReview ? 0 : 1); }
+                catch (Exception ex) { log.warn("[{}] incrementCounts lỗi: {}", job.batchId(), ex.getMessage()); }
+            }
             try { checkBatchComplete(job.batchId()); }
             catch (Exception ex) { log.warn("[{}] checkBatchComplete lỗi: {}", job.batchId(), ex.getMessage()); }
+        }
+    }
+
+    /** Ghi bài về CANCELLED; bọc lỗi vì đây là đường thoát, không được ném ra ngoài worker. */
+    private void markResultCancelled(GradingJob job, String reason) {
+        try {
+            resultRepo.findByStudentIdAndBatchId(job.studentId(), job.batchId()).ifPresent(r -> {
+                r.setStatus(GradingStatus.CANCELLED);
+                r.setScore(null);
+                r.setErrorLog(reason);
+                resultRepo.save(r);
+            });
+            log.info("[{}] CANCELLED {} — {}", job.batchId(), job.studentId(), reason);
+        } catch (Exception e) {
+            log.warn("[{}] Không ghi được CANCELLED cho {}: {}",
+                    job.batchId(), job.studentId(), e.getMessage());
         }
     }
 
@@ -923,6 +956,9 @@ public class BatchGradingService {
                          + resultRepo.countByBatchIdAndStatus(batchId, GradingStatus.GRADING);
             b.setDoneCount((int) done);      // đồng bộ lại bộ đếm hiển thị (thông báo) theo số THẬT
             b.setErrorCount((int) error);
+            // Hết bài chờ/đang chấm ⇒ không worker nào còn cần đọc cờ dừng nữa (bài CANCELLED
+            // không bị nạp lại sau restart) → gỡ cờ, tránh tập này phình theo số phiên đã dừng.
+            if (pending == 0) gradingService.clearCancelled(batchId);
             // Hoàn tất khi KHÔNG còn bài chờ/đang chấm (không phụ thuộc totalFiles có thể lệch).
             // Guard completedAt: chỉ đóng batch + ghi mốc 1 lần (tránh 2 worker cuối đóng 2 lần).
             if (pending == 0 && b.getCompletedAt() == null) {
@@ -1075,7 +1111,9 @@ public class BatchGradingService {
 
     public BatchProgressResponse pauseBatch(String batchId) {
         GradingBatch batch = requireBatch(batchId);
-        if (batch.getStatus() == BatchStatus.COMPLETED || batch.getStatus() == BatchStatus.PARTIAL)
+        if (batch.getStatus() == BatchStatus.COMPLETED
+                || batch.getStatus() == BatchStatus.PARTIAL
+                || batch.getStatus() == BatchStatus.CANCELLED)
             throw new IllegalArgumentException("Phiên chấm đã kết thúc nên không thể tạm dừng.");
         batch.setStatus(BatchStatus.PAUSED);
         batchRepo.save(batch);
@@ -1086,7 +1124,9 @@ public class BatchGradingService {
 
     public BatchProgressResponse resumeBatch(String batchId) {
         GradingBatch batch = requireBatch(batchId);
-        if (batch.getStatus() == BatchStatus.COMPLETED || batch.getStatus() == BatchStatus.PARTIAL)
+        if (batch.getStatus() == BatchStatus.COMPLETED
+                || batch.getStatus() == BatchStatus.PARTIAL
+                || batch.getStatus() == BatchStatus.CANCELLED)
             throw new IllegalArgumentException("Phiên chấm đã kết thúc nên không thể tiếp tục.");
         batch.setStatus(BatchStatus.IN_PROGRESS);
         batchRepo.save(batch);
@@ -1334,6 +1374,121 @@ public class BatchGradingService {
         return regradeStudents(examId, ids, createdBy);
     }
 
+    // ── Dừng / hủy phiên chấm đang chạy ──────────────────────────
+
+    /**
+     * DỪNG phiên chấm: bỏ các bài còn nằm trong hàng đợi, giết container đang chạy, nhưng GIỮ
+     * NGUYÊN kết quả của những bài đã chấm xong. Bài chưa chấm chuyển sang CANCELLED — KHÔNG phải
+     * ERROR, vì không có bằng chứng nào để quy lỗi cho bài nộp.
+     */
+    public Map<String, Object> stopBatch(String batchId) {
+        GradingBatch batch = batchRepo.findByBatchId(batchId)
+                .orElseThrow(() -> new IllegalArgumentException("Không tìm thấy phiên chấm: " + batchId));
+        // Bật cờ TRƯỚC mọi thứ: worker đang cầm job của phiên này phải thấy ngay khi nó bắt lỗi.
+        gradingService.markCancelled(batchId);
+        // Nếu batch đang PAUSED thì phải gỡ cờ này trước khi rút hàng đợi. Nếu không, một worker
+        // vừa lấy job đúng lúc có thể tự đưa job trở lại hàng đợi mãi và phiên không dừng được.
+        pausedBatchIds.remove(batchId);
+
+        // Rút job của phiên này khỏi hàng đợi; job của phiên khác được trả lại nguyên vẹn.
+        List<GradingJob> drained = new ArrayList<>();
+        jobQueue.drainTo(drained);
+        int dequeued = 0;
+        for (GradingJob j : drained) {
+            if (batchId.equals(j.batchId())) dequeued++;
+            else jobQueue.add(j);
+        }
+
+        int cancelledRows = 0;
+        for (ExamResult r : resultRepo.findByBatchIdOrderByStudentId(batchId)) {
+            if (r.getStatus() == GradingStatus.QUEUED) {
+                r.setStatus(GradingStatus.CANCELLED);
+                r.setScore(null);
+                r.setErrorLog("Phiên chấm đã bị dừng theo yêu cầu người dùng.");
+                resultRepo.save(r);
+                cancelledRows++;
+            }
+        }
+
+        // Bài ĐANG chấm: giết container để worker thoát ngay, thay vì chờ hết watchdog từng bài.
+        int killed = gradingService.killRunning(batchId);
+
+        // completedAt != null cũng là chốt chặn để checkBatchComplete không ghi đè trạng thái này.
+        batch.setStatus(BatchStatus.CANCELLED);
+        if (batch.getCompletedAt() == null) batch.setCompletedAt(Instant.now());
+        batchRepo.save(batch);
+
+        log.info("[{}] Dừng phiên chấm: bỏ {} bài trong hàng đợi, {} bài chuyển CANCELLED, giết {} container",
+                batchId, dequeued, cancelledRows, killed);
+
+        Map<String, Object> res = new LinkedHashMap<>();
+        res.put("batchId", batchId);
+        res.put("dequeued", dequeued);
+        res.put("cancelled", cancelledRows);
+        res.put("killedContainers", killed);
+        return res;
+    }
+
+    /**
+     * HỦY phiên chấm: dừng như trên rồi XÓA dữ liệu của phiên — bản ghi kết quả, zip bài nộp và
+     * snapshot testcase — coi như chưa từng chấm.
+     *
+     * <p>Ngoại lệ: bài đã có ĐIỂM CHẤM TAY thì không xóa bản ghi. Các cột manual_* nằm CÙNG HÀNG
+     * với kết quả tự động, xóa hàng là mất luôn công chấm tay của giáo viên; những bài đó chỉ bị
+     * xóa phần kết quả tự động.
+     */
+    public Map<String, Object> cancelBatch(String batchId) {
+        Map<String, Object> res = new LinkedHashMap<>(stopBatch(batchId));
+        GradingBatch batch = batchRepo.findByBatchId(batchId).orElse(null);
+
+        int deleted = 0, keptManual = 0;
+        for (ExamResult r : resultRepo.findByBatchIdOrderByStudentId(batchId)) {
+            boolean hasManual = r.getManualScore() != null
+                    || (r.getManualJson() != null && !r.getManualJson().isBlank());
+            if (hasManual) {
+                r.setStatus(GradingStatus.CANCELLED);
+                r.setScore(null);
+                r.setDetails(null);
+                r.setResultJson(null);
+                r.setErrorLog("Phiên chấm đã bị hủy; chỉ giữ lại phần chấm tay.");
+                resultRepo.save(r);
+                keptManual++;
+            } else {
+                resultRepo.delete(r);
+                deleted++;
+            }
+        }
+
+        // Xóa zip bài nộp + snapshot testcase. Dùng examId/batchId LẤY TỪ DB (không phải chuỗi
+        // người dùng gửi lên) nên đường dẫn chắc chắn nằm trong submissions/.
+        if (batch != null) {
+            deleteDirQuietly(batchDir(batch.getExamId(), batch.getBatchId()));
+            batch.setDoneCount(0);      // bản ghi kết quả đã bị xóa → bộ đếm cũ thành vô nghĩa
+            batch.setErrorCount(0);
+            batchRepo.save(batch);
+        }
+
+        log.info("[{}] Hủy phiên chấm: xóa {} bản ghi, giữ {} bài đã có điểm chấm tay",
+                batchId, deleted, keptManual);
+        res.put("deleted", deleted);
+        res.put("keptManual", keptManual);
+        return res;
+    }
+
+    /** Xóa cả cây thư mục, nuốt mọi lỗi (Windows có thể đang khóa file trong thư mục). */
+    private void deleteDirQuietly(Path dir) {
+        try {
+            if (!Files.exists(dir)) return;
+            try (Stream<Path> walk = Files.walk(dir)) {
+                walk.sorted(java.util.Comparator.reverseOrder()).forEach(p -> {
+                    try { Files.delete(p); } catch (Exception ignored) {}
+                });
+            }
+        } catch (Exception e) {
+            log.warn("Không xóa được thư mục phiên chấm {}: {}", dir, e.getMessage());
+        }
+    }
+
     public BatchProgressResponse getBatchProgress(String batchId) {
         // Đếm trạng thái bằng COUNT ở DB; danh sách dùng projection NHẸ (không kéo result_json) →
         // poll 3s với batch lớn không còn tốn RAM/băng thông.
@@ -1342,11 +1497,13 @@ public class BatchGradingService {
         long queued  = resultRepo.countByBatchIdAndStatus(batchId, GradingStatus.QUEUED);
         long error   = resultRepo.countByBatchIdAndStatus(batchId, GradingStatus.ERROR);
         long review  = resultRepo.countByBatchIdAndStatus(batchId, GradingStatus.MANUAL_REVIEW);
+        long stopped = resultRepo.countByBatchIdAndStatus(batchId, GradingStatus.CANCELLED);
         List<com.example.grader.dto.ResultRow> rows = resultRepo.findRowsByBatchId(batchId);
         String status = batchRepo.findByBatchId(batchId)
                 .map(batch -> batch.getStatus() == null ? BatchStatus.IN_PROGRESS.name() : batch.getStatus().name())
                 .orElse("UNKNOWN");
-        return new BatchProgressResponse(batchId, rows.size(), done, grading, queued, error, review, status, rows);
+        return new BatchProgressResponse(batchId, rows.size(), done, grading, queued, error, review,
+                stopped, status, rows);
     }
 
     // ── Helpers ──────────────────────────────────────────────────

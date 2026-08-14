@@ -66,6 +66,7 @@ function notifStatus(n: BatchNotif) {
   if (n.status === 'PAUSED') return { Icon: Pause, tone: 'text-amber-500', text: `Tạm dừng ${done + err}/${total}` };
   if (n.status === 'COMPLETED') return { Icon: CheckCircle2, tone: 'text-emerald-500', text: `Hoàn tất ${done}/${total} bài` };
   if (n.status === 'PARTIAL') return { Icon: AlertCircle, tone: 'text-amber-500', text: `Xong ${done}/${total}, ${err} lỗi` };
+  if (n.status === 'CANCELLED') return { Icon: AlertCircle, tone: 'text-slate-400', text: `Đã dừng — xong ${done}/${total}` };
   return { Icon: AlertCircle, tone: 'text-slate-400', text: `${done + err}/${total}` };
 }
 

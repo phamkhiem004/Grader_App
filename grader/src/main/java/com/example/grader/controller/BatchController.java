@@ -81,6 +81,30 @@ public class BatchController {
         }
     }
 
+    /** DỪNG phiên chấm: bỏ hàng đợi + giết container đang chạy, GIỮ kết quả đã chấm xong. */
+    @PostMapping("/{batchId}/stop")
+    public ResponseEntity<?> stop(@PathVariable String batchId) {
+        try {
+            return ResponseEntity.ok(batchService.stopBatch(batchId));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    /** HỦY phiên chấm: dừng rồi XÓA kết quả + file bài nộp của phiên (coi như chưa chấm). */
+    @PostMapping("/{batchId}/cancel")
+    public ResponseEntity<?> cancel(@PathVariable String batchId) {
+        try {
+            return ResponseEntity.ok(batchService.cancelBatch(batchId));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
+        }
+    }
+
     /** Thông báo: các phiên chấm gần đây (cho icon chuông ở header). */
     @GetMapping("/recent")
     public ResponseEntity<?> recent() {

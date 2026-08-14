@@ -53,6 +53,22 @@ public class GradingService {
     private final ObjectMapper mapper = new ObjectMapper();
     private final SubmissionPackagePolicy submissionPackagePolicy = new SubmissionPackagePolicy();
 
+    /**
+     * Container ĐANG chấm của từng phiên (batchId → các lượt chạy). Có sổ này thì nút "Dừng chấm"
+     * mới cắt được bài đang dở ngay lập tức; nếu không, người dùng phải chờ hết watchdog
+     * ({@code grader.timeout.seconds}) cho từng bài còn lại.
+     */
+    private final Map<String, Set<RunningContainer>> runningByBatch = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /**
+     * Phiên chấm mà người dùng đã bấm Dừng. Đặt cùng chỗ với sổ container vì cả hai đều là
+     * "quyền kiểm soát lượt chấm đang bay": nhờ vậy lượt chấm còn đang giải nén/vá bài cũng
+     * kịp thoát trước khi tốn thêm một container.
+     */
+    private final Set<String> cancelledBatches = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    private record RunningContainer(String name, Process process) {}
+
     // ── Entry point ──────────────────────────────────────────────
 
 
@@ -119,7 +135,7 @@ public class GradingService {
         }
     }
 
-    public String gradeSubmission(String studentId, String examId, String testcasePath,
+    public String gradeSubmission(String batchId, String studentId, String examId, String testcasePath,
                                   Path tempDir, Path zipPath) throws Exception {
         Path extractDir = tempDir.resolve("extracted");
         Files.createDirectories(extractDir);
@@ -146,8 +162,13 @@ public class GradingService {
 
             log.info("[{}] {} file dart, project root: {}", studentId, dartCount, projectRoot.getFileName());
 
+            // Người dùng bấm Dừng trong lúc giải nén/vá bài: đừng khởi động thêm container nữa.
+            // BatchGradingService thấy cờ này nên sẽ ghi CANCELLED thay vì ERROR.
+            if (isCancelled(batchId))
+                throw new IllegalStateException("Phiên chấm đã bị dừng trước khi container khởi động.");
+
             return runDockerGrader(
-                    studentId, studentLib.toAbsolutePath().toString(),
+                    batchId, studentId, studentLib.toAbsolutePath().toString(),
                     projectRoot.resolve("assets").toAbsolutePath().toString(),
                     prepareRuntimePubspec(
                             tempDir,
@@ -782,8 +803,8 @@ class UserListScreen extends HomeScreen {
     }
 
     // ── Gọi Docker ───────────────────────────────────────────────
-    private String runDockerGrader(String studentId, String libPath, String assetsPath, String pubspecPath,
-                                   String examId, String testcasePath) throws Exception {
+    private String runDockerGrader(String batchId, String studentId, String libPath, String assetsPath,
+                                   String pubspecPath, String examId, String testcasePath) throws Exception {
         // Tách phần mount + ảnh ra để vừa chạy chấm, vừa tái dùng cho probe chẩn đoán khi 0/0.
         List<String> mounts = new ArrayList<>(List.of(
                 "-v", toDockerPath(libPath) + ":/app/lib"));
@@ -846,55 +867,113 @@ class UserListScreen extends HomeScreen {
                     "Không khởi động được container chấm: " + e.getMessage(), e);
         }
 
-        StringBuilder stdout = new StringBuilder();
-        StringBuilder stderr = new StringBuilder();
+        // Ghi sổ NGAY sau khi container khởi động: từ đây tới lúc chạy xong là khoảng thời gian
+        // duy nhất nút "Dừng chấm" có thể can thiệp.
+        RunningContainer handle = new RunningContainer(containerName, process);
+        registerRunning(batchId, handle);
+        try {
+            StringBuilder stdout = new StringBuilder();
+            StringBuilder stderr = new StringBuilder();
 
-        Thread t1 = new Thread(() -> {
-            try (BufferedReader r = new BufferedReader(
-                    new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
-                String line;
-                while ((line = r.readLine()) != null) stdout.append(line).append("\n");
-            } catch (IOException ignored) {
+            Thread t1 = new Thread(() -> {
+                try (BufferedReader r = new BufferedReader(
+                        new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
+                    String line;
+                    while ((line = r.readLine()) != null) stdout.append(line).append("\n");
+                } catch (IOException ignored) {
+                }
+            });
+            Thread t2 = new Thread(() -> {
+                try (BufferedReader r = new BufferedReader(
+                        new InputStreamReader(process.getErrorStream(), StandardCharsets.UTF_8))) {
+                    String line;
+                    while ((line = r.readLine()) != null) stderr.append(line).append("\n");
+                } catch (IOException ignored) {
+                }
+            });
+            t1.start();
+            t2.start();
+
+            boolean finished = process.waitFor(timeoutSeconds, TimeUnit.SECONDS);
+            if (!finished) {
+                process.destroyForcibly();
+                removeContainerQuietly(containerName);
+                throw new GradingDiagnosticException(
+                        "CONTAINER_WATCHDOG_TIMEOUT",
+                        GradingDiagnosticException.Origin.ENVIRONMENT,
+                        "CONTAINER_WATCHDOG",
+                        true,
+                        "Container chấm vượt quá watchdog " + timeoutSeconds
+                                + " giây sau khi timeout nội bộ của testcase lẽ ra đã kết thúc. "
+                                + "Đây là lỗi môi trường/runner; không quy thành 0 điểm sinh viên.");
             }
-        });
-        Thread t2 = new Thread(() -> {
-            try (BufferedReader r = new BufferedReader(
-                    new InputStreamReader(process.getErrorStream(), StandardCharsets.UTF_8))) {
-                String line;
-                while ((line = r.readLine()) != null) stderr.append(line).append("\n");
-            } catch (IOException ignored) {
+
+            t1.join();
+            t2.join();
+
+            String output = stdout.toString();
+            if (process.exitValue() != 0 && !output.contains("GRADE_RESULT_START")) {
+                String compileLog = (stderr + "\n" + output).trim();
+                throw GradingCompileDiagnostic.classify(compileLog);
             }
+
+            String resultJson = parseGraderOutput(output);
+            // 0/0 (không test nào chạy) → coi là LỖI, không phải DONE; chạy probe để lấy LÝ DO THẬT.
+            ensureTestsRan(resultJson, output, mounts, image);
+            return resultJson;
+        } finally {
+            unregisterRunning(batchId, handle);
+        }
+    }
+
+    // ── Dừng chấm giữa chừng ─────────────────────────────────────
+    public void markCancelled(String batchId) {
+        if (batchId != null) cancelledBatches.add(batchId);
+    }
+
+    public void clearCancelled(String batchId) {
+        cancelledBatches.remove(batchId);
+    }
+
+    public boolean isCancelled(String batchId) {
+        return batchId != null && cancelledBatches.contains(batchId);
+    }
+
+    private void registerRunning(String batchId, RunningContainer handle) {
+        if (batchId == null) return;
+        runningByBatch.computeIfAbsent(batchId, k -> java.util.concurrent.ConcurrentHashMap.newKeySet())
+                .add(handle);
+    }
+
+    private void unregisterRunning(String batchId, RunningContainer handle) {
+        if (batchId == null) return;
+        // computeIfPresent để xóa luôn key rỗng — sổ không phình theo số phiên đã chấm.
+        runningByBatch.computeIfPresent(batchId, (k, set) -> {
+            set.remove(handle);
+            return set.isEmpty() ? null : set;
         });
-        t1.start();
-        t2.start();
+    }
 
-        boolean finished = process.waitFor(timeoutSeconds, TimeUnit.SECONDS);
-        if (!finished) {
-            process.destroyForcibly();
-            removeContainerQuietly(containerName);
-            throw new GradingDiagnosticException(
-                    "CONTAINER_WATCHDOG_TIMEOUT",
-                    GradingDiagnosticException.Origin.ENVIRONMENT,
-                    "CONTAINER_WATCHDOG",
-                    true,
-                    "Container chấm vượt quá watchdog " + timeoutSeconds
-                            + " giây sau khi timeout nội bộ của testcase lẽ ra đã kết thúc. "
-                            + "Đây là lỗi môi trường/runner; không quy thành 0 điểm sinh viên.");
+    /**
+     * Giết mọi container đang chấm của 1 phiên. Trả về số container đã giết.
+     *
+     * <p>Phải làm CẢ HAI: {@code destroyForcibly()} chỉ giết tiến trình client `docker run` trên
+     * host, container trong daemon vẫn chạy tiếp — nên cần thêm `docker rm -f` theo tên.
+     */
+    public int killRunning(String batchId) {
+        Set<RunningContainer> running = runningByBatch.get(batchId);
+        if (running == null || running.isEmpty()) return 0;
+        int killed = 0;
+        for (RunningContainer rc : List.copyOf(running)) {
+            try {
+                rc.process().destroyForcibly();
+                removeContainerQuietly(rc.name());
+                killed++;
+            } catch (Exception e) {
+                log.warn("Không dừng được container {}: {}", rc.name(), e.getMessage());
+            }
         }
-
-        t1.join();
-        t2.join();
-
-        String output = stdout.toString();
-        if (process.exitValue() != 0 && !output.contains("GRADE_RESULT_START")) {
-            String compileLog = (stderr + "\n" + output).trim();
-            throw GradingCompileDiagnostic.classify(compileLog);
-        }
-
-        String resultJson = parseGraderOutput(output);
-        // 0/0 (không test nào chạy) → coi là LỖI, không phải DONE; chạy probe để lấy LÝ DO THẬT.
-        ensureTestsRan(resultJson, output, mounts, image);
-        return resultJson;
+        return killed;
     }
 
     /**

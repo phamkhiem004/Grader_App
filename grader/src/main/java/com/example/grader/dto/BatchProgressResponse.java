@@ -15,6 +15,7 @@ public class BatchProgressResponse {
     private long            queued;
     private long            error;
     private long            manualReview;
+    private long            cancelled;
     private String          status;
     private List<ResultRow> results;   // NHẸ: không kèm cột LONGTEXT (xem ResultRow)
 }

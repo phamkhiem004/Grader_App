@@ -53,8 +53,13 @@ grader:
     prefix: ${GRADER_IMAGE_PREFIX:grading-env}
   # Mặc định 3 container để không tranh CPU quá mức khi mỗi container có quota 2 CPU.
   # Máy mạnh có thể tăng bằng GRADER_MAX_CONCURRENT.
+  # LƯU Ý: giá trị ở đây chỉ là MẶC ĐỊNH ban đầu. Giáo viên chỉnh trực tiếp trong trang
+  # "Chấm bài tự động" → thẻ "Hiệu năng chấm"; lựa chọn đó lưu DB (grading_runtime_settings)
+  # và ĐÈ các giá trị max.concurrent / run.cpus / run.memory / timeout.seconds dưới đây.
   max:
     concurrent: ${GRADER_MAX_CONCURRENT:3}
+    # Trần cứng cho ô "số bài chấm song song" trên giao diện (chặn gõ nhầm 999 làm treo máy)
+    concurrent-limit: ${GRADER_MAX_CONCURRENT_LIMIT:16}
   timeout:
     seconds: ${GRADER_TIMEOUT_SECONDS:240}
   runner:

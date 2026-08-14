@@ -4,6 +4,7 @@ import { useState, useRef, useCallback, useEffect } from "react";
 import SidebarLayout from "@/components/layout/SidebarLayout";
 import { API_BASE, PASS_THRESHOLD } from "@/lib/config";
 import ExamCombobox from "@/components/ui/ExamCombobox";
+import PerformanceSettings from "@/components/grading/PerformanceSettings";
 
 // Khóa lưu phiên chấm đang/ vừa chạy → rời trang rồi quay lại KHÔNG mất kết quả
 const ACTIVE_BATCH_KEY = "grader_active_batch";
@@ -683,6 +684,9 @@ export default function AutomaticGradingPage() {
               )}
             </div>
           </div>
+
+          {/* Cấu hình tài nguyên Docker (CPU/RAM mỗi bài + số bài song song) */}
+          <PerformanceSettings running={isRunning} />
 
           {/* Danh sách file đang chọn */}
           {files.length > 0 && phase === "idle" && (

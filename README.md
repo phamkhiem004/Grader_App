@@ -22,7 +22,7 @@ Sau khi **clone repo**, chạy **`grader-setup.cmd`** (tự xin quyền admin �
 
 ### Luồng sử dụng chính
 1. **Cấu hình Đề thi** → upload ZIP testcase (`exam_test.dart`, `grader.dart`, `skills_matrix.json`).
-2. **Chấm bài (Batch)** → nhập mã đề + chọn thư mục chứa các bài `username/solution.zip` → chấm và xem kết quả.
+2. **Chấm bài (Batch)** → nhập mã đề + chọn thư mục chứa các bài `username/<tên-bất-kỳ>.zip` → chấm và xem kết quả.
 
 ### Các file bị `.gitignore` có làm clone về không chạy được không?
 
@@ -139,7 +139,7 @@ Upload file ZIP testcase chứa: `exam_test.dart`, `grader.dart`, `skills_matrix
 
 ### 2. Chấm bài (trang **Chấm bài (Batch)**)
 - Nhập **mã đề** → chọn hoặc kéo thả thư mục cha chứa các thư mục username.
-- Mỗi bài nằm trong thư mục mang tên username và chứa đúng file **`solution.zip`** (vd `khiempghe186137/solution.zip`).
+- Mỗi bài nằm trong thư mục mang tên username và chứa một file **`.zip`** của thư mục `lib`; tên ZIP không bắt buộc (vd `khiempghe186137/bai_lam.zip`).
 - Bấm **Bắt đầu chấm** → theo dõi tiến độ real-time.
 - Rời trang rồi quay lại **vẫn còn kết quả** (tự tải lại từ server).
 - Tải **CSV** (bảng điểm) hoặc xuất thư mục chứa **một JSON cho mỗi sinh viên**.
@@ -256,7 +256,7 @@ Grader_App/
 | Maven báo `No compiler is provided` | Máy đang dùng JRE, thiếu JDK. Chạy lại `grader-setup.cmd`; script sẽ cài/tìm JDK 17+ và set `JAVA_HOME` cho backend |
 | Docker build báo `failed to compute cache key` / `input/output error` | Lỗi storage/cache của Docker Desktop/WSL hoặc ổ Docker thiếu dung lượng. Chạy lại `grader-setup.cmd`; `build-base.ps1` sẽ prune cache, retry `--no-cache`, restart Docker/WSL rồi retry lần cuối |
 | Bài báo `0/0 — không chạy được testcase` | Bài nộp sai tên class/thiếu file so với đề, hoặc lỗi biên dịch |
-| `Mỗi solution.zip phải đi kèm đúng tên thư mục username` | Chọn thư mục cha chứa các nhánh `username/solution.zip` |
+| `Mỗi file .zip phải đi kèm đúng tên thư mục username` | Chọn thư mục cha chứa các nhánh `username/<tên-bất-kỳ>.zip` |
 | Hết RAM khi chấm nhiều | Giảm `GRADER_MAX_CONCURRENT` hoặc `GRADER_RUN_MEMORY` |
 | Mất kết nối DB | Kiểm tra `docker compose ps`, cổng 3306, biến `SPRING_DATASOURCE_*` |
 

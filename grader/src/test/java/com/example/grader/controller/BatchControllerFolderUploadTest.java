@@ -23,7 +23,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class BatchControllerFolderUploadTest {
 
     @Test
-    void bindsEachSolutionZipToItsUsernameFolder() throws Exception {
+    void bindsEachZipToItsUsernameFolderRegardlessOfFileName() throws Exception {
         BatchGradingService service = mock(BatchGradingService.class);
         when(service.enqueueBatch(anyList(), eq(List.of("khiempghe186137")),
                 eq("PE_01"), eq(AppActor.DEFAULT)))
@@ -33,7 +33,7 @@ class BatchControllerFolderUploadTest {
         MockMvc mvc = MockMvcBuilders.standaloneSetup(controller).build();
 
         MockMultipartFile solution = new MockMultipartFile(
-                "files", "solution.zip", "application/zip", new byte[]{1, 2, 3});
+                "files", "bai_lam_bat_ky.zip", "application/zip", new byte[]{1, 2, 3});
 
         mvc.perform(multipart("/api/batch/upload")
                         .file(solution)

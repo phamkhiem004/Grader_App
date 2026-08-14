@@ -20,7 +20,7 @@ const identityFromUsername = (username) => {
 const submissionFromFile = (file, suppliedPath = "") => {
   const relativePath = normalizedPath(suppliedPath || file.webkitRelativePath || file.name);
   const segments = relativePath.split("/").filter(Boolean);
-  if (segments.length < 2 || segments.at(-1)?.toLowerCase() !== "solution.zip") return null;
+  if (segments.length < 2 || !segments.at(-1)?.toLowerCase().endsWith(".zip")) return null;
   const username = segments.at(-2)?.trim();
   if (!username || !/^[A-Za-z0-9_-]{1,60}$/.test(username)) return null;
   return { file, username, relativePath, key: username.toLowerCase() };
@@ -255,7 +255,7 @@ export default function AutomaticGradingPage() {
       : submissionFromFile(value));
     const submissions = candidates.filter(Boolean);
     if (!submissions.length) {
-      setUploadErr("Không tìm thấy bài hợp lệ. Mỗi thư mục sinh viên phải chứa file solution.zip.");
+      setUploadErr("Không tìm thấy bài hợp lệ. Mỗi thư mục sinh viên phải chứa một file .zip của thư mục lib.");
       return;
     }
     setFiles(prev => {
@@ -296,7 +296,7 @@ export default function AutomaticGradingPage() {
     const form = new FormData();
     form.append("examId", examId.trim());
     files.forEach((entry) => {
-      form.append("files", entry.file, "solution.zip");
+      form.append("files", entry.file, entry.file.name);
       form.append("usernames", entry.username);
     });
 
@@ -436,7 +436,7 @@ export default function AutomaticGradingPage() {
       const filename = parts[0] || errStr;
 
       const pathParts = normalizedPath(filename).split('/').filter(Boolean);
-      const username = pathParts.length > 1 && pathParts.at(-1)?.toLowerCase() === "solution.zip"
+      const username = pathParts.length > 1 && pathParts.at(-1)?.toLowerCase().endsWith(".zip")
         ? pathParts.at(-2)
         : filename;
       const { studentId, studentName } = identityFromUsername(username);
@@ -615,7 +615,7 @@ export default function AutomaticGradingPage() {
                       <UploadCloud size={24} className={dragging ? "text-indigo-500" : "text-slate-400"} />
                     </div>
                     <p className="mb-1 text-sm font-semibold text-slate-700">Kéo thả thư mục bài nộp vào đây</p>
-                    <p className="text-xs text-slate-500">Mỗi thư mục mang tên username và chứa <span className="font-mono text-slate-600">solution.zip</span></p>
+                    <p className="text-xs text-slate-500">Mỗi thư mục mang tên username và chứa một file <span className="font-mono text-slate-600">.zip</span> của thư mục lib</p>
                     <input
                       ref={fileRef}
                       type="file"
@@ -702,7 +702,7 @@ export default function AutomaticGradingPage() {
                     </div>
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-medium text-slate-700">{entry.username}</p>
-                      <p className="truncate text-xs text-slate-400">solution.zip · {(entry.file.size / 1024).toFixed(0)} KB</p>
+                      <p className="truncate text-xs text-slate-400">{entry.file.name} · {(entry.file.size / 1024).toFixed(0)} KB</p>
                     </div>
                     <button onClick={() => removeFile(entry.key)} className="p-1 text-slate-300 opacity-0 transition-opacity hover:text-rose-500 group-hover:opacity-100">
                       <X size={16} />
@@ -784,7 +784,7 @@ export default function AutomaticGradingPage() {
                 </div>
                 <div className="mt-3 flex items-center justify-between text-xs text-slate-500">
                   <span>
-                    <span className="font-semibold text-emerald-600">{doneItems}</span> xong · <span className="font-semibold text-amber-600">{manualItems}</span> chấm tay · <span className="font-semibold text-rose-600">{errorItems}</span> lỗi
+                    <span className="font-semibold text-emerald-600">{doneItems}</span> xong · <span className="font-semibold text-rose-600">{errorItems}</span> lỗi
                     {cancelledItems > 0 && <> · <span className="font-semibold text-slate-600">{cancelledItems}</span> đã dừng</>}
                   </span>
                   <span>{processedItems}/{totalItems} đã xử lý</span>
@@ -1030,7 +1030,7 @@ export default function AutomaticGradingPage() {
                 <BarChart2 size={36} />
               </div>
               <h3 className="mb-2 text-base font-bold text-slate-700">Chưa có phiên chấm bài nào</h3>
-              <p className="max-w-sm text-sm text-slate-500">Chọn mã bộ testcase và upload các thư mục username có chứa solution.zip để bắt đầu chấm điểm tự động.</p>
+              <p className="max-w-sm text-sm text-slate-500">Chọn mã bộ testcase và upload các thư mục username có chứa một file .zip của thư mục lib để bắt đầu chấm điểm tự động.</p>
             </div>
           )}
         </div>
@@ -1055,8 +1055,8 @@ function categorizeError(errStr) {
 
   if (/trùng mã sv|cùng lần upload|cùng lần nộp/i.test(msg))
     return { file, type: "Trùng trong lần nộp", detail: "Mã SV xuất hiện nhiều lần trong cùng một lần upload — chỉ giữ 1 bài.", tone: "amber" };
-  if (/sai format|username|solution\.zip|định dạng/i.test(msg))
-    return { file, type: "Sai cấu trúc thư mục", detail: "Mỗi thư mục username phải chứa đúng file solution.zip.", tone: "amber" };
+  if (/sai format|username|\.zip|định dạng/i.test(msg))
+    return { file, type: "Sai cấu trúc thư mục", detail: "Mỗi thư mục username phải chứa một file .zip của thư mục lib.", tone: "amber" };
   if (/chỉ nhận|file rỗng|quá 50mb|rỗng/i.test(msg))
     return { file, type: "File không hợp lệ", detail: msg, tone: "rose" };
   if (/duplicate entry|đã có kết quả/i.test(msg))

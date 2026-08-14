@@ -375,6 +375,86 @@ public class ExamService {
     }
 
     /**
+     * Lưu ĐỀ BÀI + HÌNH MINH HỌA giao diện do trợ lý AI soạn, KHÔNG đụng tới starter/solution
+     * đã có (khác {@link #saveHandout} vốn làm mới cả thư mục handout).
+     *
+     * <p>Hình lưu ở {@code handout/mockup/<id>.svg} và được nhúng vào cuối de_bai.md bằng đường
+     * dẫn tương đối, nên bản đề tải về vẫn xem được hình khi giải nén cùng thư mục.
+     *
+     * @return danh sách tên file đã ghi
+     */
+    public List<String> saveDeBaiWithMockups(String examId, String deBai,
+                                             List<Map<String, String>> mockups) throws Exception {
+        safeId(examId, "đề");
+        if ((deBai == null || deBai.isBlank()) && (mockups == null || mockups.isEmpty()))
+            throw new IllegalArgumentException("Không có nội dung đề bài để lưu.");
+
+        Path handout = handoutDirOf(examId);
+        Files.createDirectories(handout);
+        List<String> written = new ArrayList<>();
+
+        Path mockupDir = handout.resolve("mockup");
+        if (mockups != null && !mockups.isEmpty()) {
+            if (Files.exists(mockupDir)) deleteRecursively(mockupDir);   // bản vẽ cũ không được lẫn vào
+            Files.createDirectories(mockupDir);
+            for (Map<String, String> m : mockups) {
+                String id = m == null ? null : m.get("id");
+                String svg = m == null ? null : m.get("svg");
+                if (id == null || id.isBlank() || svg == null || svg.isBlank()) continue;
+                String name = id.toLowerCase().replaceAll("[^a-z0-9_-]", "-") + ".svg";
+                Path out = mockupDir.resolve(name).normalize();
+                if (!out.startsWith(mockupDir))
+                    throw new IllegalArgumentException("Tên hình không hợp lệ: " + id);
+                Files.writeString(out, svg, StandardCharsets.UTF_8);
+                written.add("mockup/" + name);
+            }
+        }
+
+        if (deBai != null && !deBai.isBlank()) {
+            Files.writeString(handout.resolve("de_bai.md"), deBai, StandardCharsets.UTF_8);
+            written.add("de_bai.md");
+        }
+        log.info("📄 Đã lưu đề bài + {} hình minh họa cho đề {}", written.size(), examId);
+        return written;
+    }
+
+    /**
+     * Lưu KHUNG STARTER (lib/…) phát cho sinh viên. Chỉ làm mới thư mục {@code handout/starter},
+     * giữ nguyên đề bài, hình minh họa và lời giải mẫu đã lưu trước đó.
+     *
+     * @param files danh sách {name, content}; {@code name} là đường dẫn tương đối kiểu lib/…
+     * @return tên các file đã ghi
+     */
+    public List<String> saveStarterFiles(String examId, List<Map<String, String>> files) throws Exception {
+        safeId(examId, "đề");
+        if (files == null || files.isEmpty())
+            throw new IllegalArgumentException("Không có file starter nào để lưu.");
+
+        Path starter = handoutDirOf(examId).resolve("starter");
+        // Kiểm tên TRƯỚC khi động vào đĩa: nếu để writeHandoutFiles ném giữa chừng thì khung cũ
+        // đã bị xoá và khung mới mới ghi được một nửa — giáo viên nhận về bộ starter thiếu file.
+        for (Map<String, String> f : files) {
+            String name = f == null ? null : f.get("name");
+            if (name == null || name.isBlank()) continue;
+            if (!starter.resolve(name).normalize().startsWith(starter))
+                throw new IllegalArgumentException("Tên file không hợp lệ: " + name);
+        }
+
+        if (Files.exists(starter)) deleteRecursively(starter);   // khung cũ không được lẫn vào khung mới
+        Files.createDirectories(starter);
+        if (!writeHandoutFiles(starter, files))
+            throw new IllegalArgumentException("Không có file starter hợp lệ để lưu.");
+
+        List<String> written = new ArrayList<>();
+        for (Map<String, String> f : files) {
+            String name = f == null ? null : f.get("name");
+            if (name != null && !name.isBlank()) written.add(name);
+        }
+        log.info("📦 Đã lưu khung starter ({} file) cho đề {}", written.size(), examId);
+        return written;
+    }
+
+    /**
      * Ghi danh sách file {name, content} (lib/…) vào 1 thư mục con của handout (starter/ hoặc solution/).
      * Chặn path traversal ('../') trong tên file. Trả {@code true} nếu có ghi ít nhất 1 file.
      */

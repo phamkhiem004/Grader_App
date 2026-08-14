@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import SidebarLayout from "@/components/layout/SidebarLayout";
+import AiAuthorPanel, { type AiContractKey, type AiProposedItem } from "@/components/testcases/AiAuthorPanel";
 import { API_BASE } from "@/lib/config";
 import {
   AlertCircle, CheckCircle2, ChevronLeft, ChevronRight, Code2, Eye, GripVertical,
@@ -1369,6 +1370,86 @@ function TestcasesEditor() {
     [items, selectedItemIds],
   );
 
+  /**
+   * Nhận Item Key do trợ lý AI đề xuất vào Khu vực 0. Key trùng thì GHI ĐÈ (giáo viên vừa duyệt
+   * bản mới), key lạ thì thêm vào cuối — không xoá key giáo viên đã tự khai trước đó.
+   */
+  const applyAiContract = (aiKeys: AiContractKey[], aiRequireKeys: boolean) => {
+    setContractKeys((current) => {
+      const merged = [...current];
+      aiKeys.forEach((k) => {
+        const row: ContractKey = {
+          key: k.key.trim(),
+          label: k.label || k.key,
+          required: false,
+          strategy: k.strategy || "key_only",
+          value: k.value || "",
+          index: Number(k.index) || 0,
+        };
+        const at = merged.findIndex((x) => x.key === row.key);
+        if (at >= 0) merged[at] = { ...merged[at], ...row };
+        else merged.push(row);
+      });
+      return merged;
+    });
+    setRequireKeys(aiRequireKeys);
+    setMessage({ type: "ok", text: `Đã đưa ${aiKeys.length} Item Key của AI vào Khu vực 0.` });
+  };
+
+  /**
+   * Nhận testcase do AI đề xuất. AI chỉ trả template_id + tham số, phần còn lại (tên, kỹ năng,
+   * expected, phiên bản template) vẫn dựng từ THƯ VIỆN như khi thêm tay, nên item AI thêm vào
+   * không khác gì item giáo viên tự chọn.
+   */
+  const applyAiItems = (proposals: AiProposedItem[]) => {
+    const usedIds = new Set(items.map((item) => item.instance_id));
+    let nextNumber = items.length + 1;
+    const built: TestcaseItem[] = [];
+    const skipped: string[] = [];
+
+    proposals.forEach((p) => {
+      const template = templateMap.get(p.template_id);
+      if (!template) { skipped.push(p.template_id); return; }
+      let instanceId = `${examId.trim() || "exam"}_item_${pad(nextNumber)}`;
+      while (usedIds.has(instanceId)) {
+        nextNumber += 1;
+        instanceId = `${examId.trim() || "exam"}_item_${pad(nextNumber)}`;
+      }
+      usedIds.add(instanceId);
+      nextNumber += 1;
+      const parameters: JsonMap = { ...cloneParams(template), ...(p.parameters as JsonMap) };
+      built.push({
+        instance_id: instanceId,
+        template_id: template.template_id,
+        template_version: template.template_version,
+        skill_code: template.skill_code,
+        layer: template.layer,
+        testcase_group: testcaseGroup(template),
+        name: template.name,
+        description: template.description,
+        difficulty: template.difficulty,
+        enabled: true,
+        order: 0,
+        weight: Number(p.weight) > 0 ? Number(p.weight) : Number(template.weight_default || 1),
+        parameters,
+        expected: renderExpected(template.expected_template, parameters),
+        expected_custom: false,
+      });
+    });
+
+    if (!built.length) {
+      setMessage({ type: "error", text: "Không thêm được testcase nào: các mẫu AI chọn không còn trong thư viện." });
+      return;
+    }
+    setItems((current) => [...current, ...built].map((item, i) => ({ ...item, order: i + 1 })));
+    setMessage({
+      type: "ok",
+      text: `Đã thêm ${built.length} testcase từ trợ lý AI vào Khu vực 3`
+        + (skipped.length ? ` (bỏ qua ${skipped.length} mẫu không còn trong thư viện)` : "")
+        + ". Hãy kiểm tra lại tham số trước khi lưu.",
+    });
+  };
+
   const addTemplate = (templateId: string) => {
     const template = templateMap.get(templateId);
     if (!template) return;
@@ -2588,6 +2669,15 @@ function TestcasesEditor() {
             <button className="ml-auto" onClick={() => setMessage(null)}><X size={15} /></button>
           </div>
         )}
+
+        {/* Trợ lý AI: soạn đề → Item Key + hình minh họa → bộ testcase. Chỉ đề xuất, giáo viên
+            bấm chấp nhận thì mới đổ xuống Khu vực 0 và Khu vực 3 bên dưới. */}
+        <AiAuthorPanel
+          examId={examId}
+          existingKeys={contractKeys.map((k) => k.key)}
+          onApplyContract={applyAiContract}
+          onApplyItems={applyAiItems}
+        />
 
         {/* Khu vực 0: hợp đồng bài làm — quyết định testcase nhận diện widget thế nào */}
         <section className="card overflow-hidden">

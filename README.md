@@ -22,7 +22,7 @@ Sau khi **clone repo**, chạy **`grader-setup.cmd`** (tự xin quyền admin �
 
 ### Luồng sử dụng chính
 1. **Cấu hình Đề thi** → upload ZIP testcase (`exam_test.dart`, `grader.dart`, `skills_matrix.json`).
-2. **Chấm bài (Batch)** → nhập mã đề + kéo thả ZIP bài nộp (`MaSV_HoTen.zip`) → chấm và xem kết quả.
+2. **Chấm bài (Batch)** → nhập mã đề + chọn thư mục chứa các bài `username/solution.zip` → chấm và xem kết quả.
 
 ### Các file bị `.gitignore` có làm clone về không chạy được không?
 
@@ -138,11 +138,11 @@ notepad frontend/.env.local
 Upload file ZIP testcase chứa: `exam_test.dart`, `grader.dart`, `skills_matrix.json`.
 
 ### 2. Chấm bài (trang **Chấm bài (Batch)**)
-- Nhập **mã đề** → kéo thả các file ZIP bài nộp.
-- Tên file phải đúng định dạng: **`MaSV_HoTen.zip`** (vd `HE123456_Nguyen_Van_A.zip`).
+- Nhập **mã đề** → chọn hoặc kéo thả thư mục cha chứa các thư mục username.
+- Mỗi bài nằm trong thư mục mang tên username và chứa đúng file **`solution.zip`** (vd `khiempghe186137/solution.zip`).
 - Bấm **Bắt đầu chấm** → theo dõi tiến độ real-time.
 - Rời trang rồi quay lại **vẫn còn kết quả** (tự tải lại từ server).
-- Tải **CSV** (bảng điểm) hoặc **JSON** kết quả đầy đủ.
+- Tải **CSV** (bảng điểm) hoặc xuất thư mục chứa **một JSON cho mỗi sinh viên**.
 
 ### 3. Xem lịch sử (trang **Lịch sử chấm**)
 - Chọn đề ở cột trái → xem toàn bộ bài đã chấm (điểm, trạng thái, thời gian).
@@ -256,7 +256,7 @@ Grader_App/
 | Maven báo `No compiler is provided` | Máy đang dùng JRE, thiếu JDK. Chạy lại `grader-setup.cmd`; script sẽ cài/tìm JDK 17+ và set `JAVA_HOME` cho backend |
 | Docker build báo `failed to compute cache key` / `input/output error` | Lỗi storage/cache của Docker Desktop/WSL hoặc ổ Docker thiếu dung lượng. Chạy lại `grader-setup.cmd`; `build-base.ps1` sẽ prune cache, retry `--no-cache`, restart Docker/WSL rồi retry lần cuối |
 | Bài báo `0/0 — không chạy được testcase` | Bài nộp sai tên class/thiếu file so với đề, hoặc lỗi biên dịch |
-| `Sai format — cần MaSV_Ten.zip` | Đổi tên file ZIP đúng định dạng `MaSV_HoTen.zip` |
+| `Mỗi solution.zip phải đi kèm đúng tên thư mục username` | Chọn thư mục cha chứa các nhánh `username/solution.zip` |
 | Hết RAM khi chấm nhiều | Giảm `GRADER_MAX_CONCURRENT` hoặc `GRADER_RUN_MEMORY` |
 | Mất kết nối DB | Kiểm tra `docker compose ps`, cổng 3306, biến `SPRING_DATASOURCE_*` |
 

@@ -1,13 +1,43 @@
 package com.example.grader.controller;
 
+import com.example.grader.entity.ExamResult;
 import org.junit.jupiter.api.Test;
 
+import java.io.ByteArrayInputStream;
 import java.lang.reflect.Method;
+import java.nio.charset.StandardCharsets;
+import java.util.List;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ResultControllerNormalizationTest {
+
+    @Test
+    void exportsOneJsonFilePerStudentInsideResultFolder() throws Exception {
+        ResultController controller = new ResultController();
+        ExamResult row = new ExamResult();
+        row.setStudentId("HE186137");
+        row.setStudentName("khiempghe186137");
+        row.setResultJson("{\"student\":{\"id\":\"HE186137\"},\"optional\":null}");
+
+        byte[] archive = controller.buildBatchResultsArchive("BATCH_01", List.of(row));
+        try (ZipInputStream zip = new ZipInputStream(new ByteArrayInputStream(archive), StandardCharsets.UTF_8)) {
+            ZipEntry folder = zip.getNextEntry();
+            assertEquals("BATCH_01_results/", folder.getName());
+            assertTrue(folder.isDirectory());
+
+            ZipEntry result = zip.getNextEntry();
+            assertEquals("BATCH_01_results/khiempghe186137.json", result.getName());
+            String json = new String(zip.readAllBytes(), StandardCharsets.UTF_8);
+            assertTrue(json.contains("HE186137"));
+            assertFalse(json.contains(": null"));
+            assertEquals(null, zip.getNextEntry());
+        }
+    }
 
     @Test
     void cleansLegacyDownloadedResult() throws Exception {
@@ -69,7 +99,8 @@ class ResultControllerNormalizationTest {
 
         assertTrue(out.contains("\"error_code\" : \"WIDGET_NOT_FOUND\"")
                 || out.contains("\"error_code\":\"WIDGET_NOT_FOUND\""), out);
-        assertTrue(out.contains("\"blocked_by\""), out);
+        assertFalse(out.contains("\"blocked_by\""), "field tùy chọn null không nên xuất hiện: " + out);
+        assertFalse(out.contains(": null"), "JSON tải xuống không nên chứa field null: " + out);
         assertFalse(out.contains("\"executed\""), "không được tự sinh executed cho dữ liệu cũ");
         assertFalse(out.contains("\"schema_version\""), "không được tự gắn schema_version cho dữ liệu cũ");
     }

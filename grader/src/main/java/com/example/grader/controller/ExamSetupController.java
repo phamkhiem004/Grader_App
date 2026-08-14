@@ -237,6 +237,63 @@ public class ExamSetupController {
         }
     }
 
+    /**
+     * Lưu ĐỀ BÀI + HÌNH MINH HỌA (do trợ lý AI soạn, giáo viên đã duyệt) vào bộ phát cho SV.
+     * Body: { de_bai, mockups: [{id, svg}] }. Không đụng tới starter/lời giải mẫu đã có.
+     */
+    @SuppressWarnings("unchecked")
+    @PostMapping("/{examId}/handout")
+    public ResponseEntity<?> saveHandout(@PathVariable String examId,
+                                         @RequestBody Map<String, Object> body) {
+        try {
+            Object rawMockups = body == null ? null : body.get("mockups");
+            java.util.List<Map<String, String>> mockups = rawMockups instanceof java.util.List
+                    ? (java.util.List<Map<String, String>>) rawMockups : java.util.List.of();
+            Object deBai = body == null ? null : body.get("de_bai");
+            java.util.List<String> written = examService.saveDeBaiWithMockups(
+                    examId, deBai == null ? null : String.valueOf(deBai), mockups);
+            return ResponseEntity.ok(Map.of("exam_id", examId, "files", written));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    /**
+     * Lưu KHUNG STARTER (lib/…) phát cho sinh viên. Body: { files: [{name, content}] }.
+     * Chỉ thay thư mục starter, không đụng đề bài/hình/lời giải mẫu.
+     */
+    @SuppressWarnings("unchecked")
+    @PostMapping("/{examId}/starter")
+    public ResponseEntity<?> saveStarter(@PathVariable String examId,
+                                         @RequestBody Map<String, Object> body) {
+        try {
+            Object rawFiles = body == null ? null : body.get("files");
+            java.util.List<Map<String, String>> files = rawFiles instanceof java.util.List
+                    ? (java.util.List<Map<String, String>>) rawFiles : java.util.List.of();
+            return ResponseEntity.ok(Map.of("exam_id", examId,
+                    "files", examService.saveStarterFiles(examId, files)));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    /** Đọc đề bài đã lưu (cho trợ lý AI nạp lại khi mở bộ testcase cũ). */
+    @GetMapping("/{examId}/handout")
+    public ResponseEntity<?> readHandout(@PathVariable String examId) {
+        try {
+            String md = examService.readDeBai(examId);
+            return ResponseEntity.ok(Map.of("exam_id", examId, "de_bai", md == null ? "" : md));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
+        }
+    }
+
     /** Tải ĐỀ BÀI (de_bai.md) phát cho SV. 404 nếu đề chưa lưu kèm. */
     @GetMapping("/{examId}/download/de-bai")
     public ResponseEntity<?> downloadDeBai(@PathVariable String examId) {

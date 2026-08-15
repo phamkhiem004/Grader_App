@@ -16,7 +16,6 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -53,7 +52,8 @@ class TestcaseTemplateClonePreviewTest {
         assertEquals(true, result.get("cloned"));
         assertEquals("SOURCE_01", result.get("source_exam_id"));
         assertEquals("TARGET_01", result.get("exam_id"));
-        assertEquals("PUBLISHED", result.get("status"));
+        // Bản sao dừng ở nháp; người dùng bấm Lưu trong màn sửa mới thành Hoàn tất.
+        assertEquals("DRAFT", result.get("status"));
         assertTrue(Files.exists(target.resolve("exam_test.dart")));
         assertTrue(Files.exists(target.resolve("grader.dart")));
         assertTrue(Files.exists(target.resolve("skills_matrix.json")));
@@ -63,13 +63,17 @@ class TestcaseTemplateClonePreviewTest {
         verify(repository).save(saved.capture());
         assertEquals("TARGET_01", saved.getValue().getExamId());
         assertEquals("Bộ bản sao", saved.getValue().getExamName());
-        assertEquals("PUBLISHED", saved.getValue().getTestcaseStatus());
+        assertEquals("DRAFT", saved.getValue().getTestcaseStatus());
         assertTrue(saved.getValue().getTestcaseConfigJson().contains("require_keys"));
         verify(examService).cloneHandout("SOURCE_01", "TARGET_01");
     }
 
+    /**
+     * Testcase viết tay không có cấu hình builder để clone, nhưng vẫn phải nhân bản được —
+     * ở mức FILE, giữ nguyên si bộ đang chấm thay vì sinh lại từ template.
+     */
     @Test
-    void rejectsCloneForManualZipExam() {
+    void clonesManualZipExamAtFileLevel() {
         Exam manual = sourceExam("MANUAL_ZIP", null);
         ExamRepository repository = mock(ExamRepository.class);
         when(repository.findByExamId("MANUAL_ZIP")).thenReturn(Optional.of(manual));
@@ -78,12 +82,20 @@ class TestcaseTemplateClonePreviewTest {
         ExamService examService = mock(ExamService.class);
         when(examService.testcaseDirectoryForConfiguration("TARGET_02"))
                 .thenReturn(tempDir.resolve("exams/TARGET_02/testcase"));
+        when(examService.cloneImportedExam(any(), any(), any(), any(), any()))
+                .thenReturn(Map.of("exam_id", "TARGET_02", "editable", false));
         TestcaseTemplateService service = service(repository, examService);
 
-        IllegalStateException error = assertThrows(IllegalStateException.class,
-                () -> service.cloneExam("MANUAL_ZIP", Map.of(
-                        "exam_id", "TARGET_02", "exam_name", "Không hợp lệ"), "local-user"));
-        assertTrue(error.getMessage().contains("ZIP"));
+        Map<String, Object> result = service.cloneExam("MANUAL_ZIP", Map.of(
+                "exam_id", "TARGET_02",
+                "exam_name", "Bản sao viết tay",
+                "teacher_note", "Ghi chú mới"), "local-user");
+
+        assertEquals("TARGET_02", result.get("exam_id"));
+        assertEquals(false, result.get("editable"), "FE dựa vào cờ này để KHÔNG mở builder cho bản sao");
+        verify(examService).cloneImportedExam(
+                "MANUAL_ZIP", "TARGET_02", "Bản sao viết tay", "Ghi chú mới", "local-user");
+        // Bản ghi do ExamService tạo trong lúc chép file, service này không được tự lưu thêm.
         verify(repository, never()).save(any(Exam.class));
     }
 

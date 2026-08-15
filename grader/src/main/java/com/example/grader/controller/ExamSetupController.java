@@ -225,15 +225,49 @@ public class ExamSetupController {
         }
     }
 
-    /** Đọc các file testcase của 1 đề (exam_test.dart, skills_matrix.json, grader.dart) — cho trang Kho đề. */
+    /**
+     * Đọc các file testcase của 1 đề (exam_test.dart, skills_matrix.json, grader.dart).
+     *
+     * @param edit true = đọc để SỬA: trả nguyên vẹn, không cắt bớt (bản cắt mà lưu lại là mất dữ liệu)
+     */
     @GetMapping("/{examId}/testcase")
-    public ResponseEntity<?> testcaseFiles(@PathVariable String examId) {
+    public ResponseEntity<?> testcaseFiles(@PathVariable String examId,
+                                           @RequestParam(value = "edit", defaultValue = "false") boolean edit) {
         try {
-            return ResponseEntity.ok(examService.readExamTestcaseFiles(examId));
+            return ResponseEntity.ok(edit
+                    ? examService.readEditableTestcaseFiles(examId)
+                    : examService.readExamTestcaseFiles(examId));
+        } catch (IllegalStateException e) {
+            return ResponseEntity.status(409).body(Map.of("error", e.getMessage()));
         } catch (IllegalArgumentException e) {     // mã đề không hợp lệ (allowlist)
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         } catch (Exception e) {
             return ResponseEntity.internalServerError().body(Map.of("error", "Lỗi máy chủ"));
+        }
+    }
+
+    /**
+     * Sửa trực tiếp file testcase của MỘT bộ bất kỳ. Body: { files: [{name, content}] }.
+     * Bộ dựng bằng builder vẫn sửa được nhưng kèm cảnh báo (lần Lưu sau ở builder sẽ sinh đè).
+     */
+    @SuppressWarnings("unchecked")
+    @PostMapping("/{examId}/testcase")
+    public ResponseEntity<?> saveTestcaseFiles(@PathVariable String examId,
+                                               @RequestBody Map<String, Object> body) {
+        try {
+            Object rawFiles = body == null ? null : body.get("files");
+            java.util.List<Map<String, String>> files = rawFiles instanceof java.util.List
+                    ? (java.util.List<Map<String, String>>) rawFiles : java.util.List.of();
+            Map<String, Object> saved = new java.util.LinkedHashMap<>(
+                    examService.saveExamTestcaseFiles(examId, files));
+            saved.put("exam_id", examId);
+            return ResponseEntity.ok(saved);
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        } catch (IllegalStateException e) {
+            return ResponseEntity.status(409).body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
         }
     }
 

@@ -51,6 +51,20 @@ final class AiModelCatalog {
     }
 
     /**
+     * Đoán hãng từ CHÍNH API KEY, để bắt trường hợp key và model lệch hãng — nguyên nhân của thông
+     * báo lỗi khó hiểu nhất: người dùng dán key Claude nhưng model vẫn là gpt-5, và OpenAI trả về
+     * 401 nói "key OpenAI của bạn sai". Trả {@code null} khi không nhận ra (key của proxy/bên thứ
+     * ba dùng tiền tố riêng) — thà im lặng còn hơn báo động nhầm.
+     */
+    static String vendorOfKey(String apiKey) {
+        String key = apiKey == null ? "" : apiKey.trim();
+        if (key.startsWith("sk-ant-")) return ANTHROPIC;
+        if (key.startsWith("sk-proj-")) return OPENAI;
+        if (key.startsWith("AIza")) return GEMINI;
+        return null;
+    }
+
+    /**
      * Suy ra nhà cung cấp từ mã model. Người dùng gõ tay model lạ (bản self-host, model mới ra)
      * thì rơi về OpenAI-compatible — chuẩn được nhiều nơi dùng lại nhất (Ollama, OpenRouter, Groq).
      */

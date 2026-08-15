@@ -118,8 +118,20 @@ public class AiSettingsService {
 
     // ── Giá trị đang dùng ────────────────────────────────────────
 
-    /** Suy từ mã model — không lưu riêng, nên không bao giờ lệch nhau. */
-    public String provider()  { return AiModelCatalog.providerFor(model()); }
+    /**
+     * Suy từ mã model — không lưu riêng, nên không bao giờ lệch nhau.
+     *
+     * <p>NGOẠI LỆ: đã khai endpoint riêng thì đó là dịch vụ trung gian (relay/proxy, cổng nội bộ
+     * của trường, Ollama…). Các dịch vụ này đều nói GIAO THỨC OpenAI kể cả khi model tên là
+     * {@code claude-*}, nên phải gọi theo kiểu OpenAI chứ không phải kiểu Anthropic.
+     */
+    public String provider()  {
+        return hasCustomBaseUrl() ? AiModelCatalog.OPENAI : AiModelCatalog.providerFor(model());
+    }
+
+    private boolean hasCustomBaseUrl() {
+        return baseUrl != null && !baseUrl.isBlank();
+    }
     public String apiKey()    { return apiKey; }
     public boolean hasApiKey(){ return apiKey != null && !apiKey.isBlank(); }
     public int timeoutSeconds() { return timeoutSeconds > 0 ? timeoutSeconds : 180; }
@@ -139,10 +151,14 @@ public class AiSettingsService {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("model", model());
         m.put("provider", provider());
-        m.put("vendor", AiModelCatalog.vendorLabel(provider()));
-        m.put("keyUrl", AiModelCatalog.keyUrl(provider()));   // chỗ lấy key của đúng hãng đang chọn
+        // Dùng endpoint riêng thì tên hãng không còn đúng — key là của dịch vụ trung gian đó.
+        m.put("vendor", hasCustomBaseUrl()
+                ? "Dịch vụ trung gian (giao thức OpenAI)"
+                : AiModelCatalog.vendorLabel(provider()));
+        m.put("keyUrl", hasCustomBaseUrl() ? null : AiModelCatalog.keyUrl(provider()));
         m.put("hasApiKey", hasApiKey());
         m.put("apiKeyMasked", mask(apiKey));                  // KHÔNG bao giờ trả key nguyên vẹn
+        m.put("keyWarning", keyWarning());
         m.put("timeoutSeconds", timeoutSeconds());
         m.put("models", AiModelCatalog.models());
         m.put("baseUrl", baseUrl());
@@ -173,24 +189,22 @@ public class AiSettingsService {
         if (newTimeout < 30 || newTimeout > 900)
             throw new IllegalArgumentException("Thời gian chờ mỗi lần gọi AI phải trong khoảng 30 – 900 giây");
 
-        // Đổi sang model của HÃNG KHÁC mà không nhập key mới: key cũ chắc chắn không dùng được
-        // (key Claude không phải key OpenAI). Xoá luôn để giao diện báo "chưa có key" ngay, thay vì
-        // để người dùng đâm vào lỗi 401 khó hiểu ở lần sinh đề đầu tiên.
-        String newProvider = AiModelCatalog.providerFor(newModel);
+        // Endpoint riêng dùng cho dịch vụ trung gian bán lại API, cổng nội bộ, Ollama/OpenRouter…
+        // Cho phép với MỌI model: nhiều dịch vụ phục vụ model claude-* qua giao thức OpenAI, chặn
+        // theo tên model là khoá luôn đường dùng hợp lệ đó.
+        boolean custom = newBaseUrl != null && !newBaseUrl.isBlank();
+        if (custom && !newBaseUrl.startsWith("http://") && !newBaseUrl.startsWith("https://"))
+            throw new IllegalArgumentException("Endpoint phải bắt đầu bằng http:// hoặc https://");
+
+        // Đổi sang HÃNG KHÁC mà không nhập key mới: key cũ chắc chắn không dùng được (key Claude
+        // không phải key OpenAI). Xoá luôn để giao diện báo "chưa có key" ngay, thay vì để người
+        // dùng đâm vào lỗi 401 khó hiểu ở lần sinh đề đầu tiên. Phải tính SAU khi biết có endpoint
+        // riêng hay không, vì endpoint riêng đổi luôn giao thức sang OpenAI.
+        String newProvider = custom ? AiModelCatalog.OPENAI : AiModelCatalog.providerFor(newModel);
         boolean vendorChanged = !newProvider.equals(provider());
         String finalKey = clearKey || (vendorChanged && suppliedKey == null)
                 ? null
                 : (suppliedKey != null ? suppliedKey : apiKey);
-
-        // Endpoint riêng chỉ có nghĩa với các bản tương thích OpenAI (Ollama, OpenRouter, Groq).
-        if (newBaseUrl != null && !newBaseUrl.isBlank()) {
-            if (!newBaseUrl.startsWith("http://") && !newBaseUrl.startsWith("https://"))
-                throw new IllegalArgumentException("Endpoint phải bắt đầu bằng http:// hoặc https://");
-            if (!AiModelCatalog.OPENAI.equals(newProvider))
-                throw new IllegalArgumentException(
-                        "Chỉ model tương thích OpenAI mới đặt được endpoint riêng; "
-                                + AiModelCatalog.vendorLabel(newProvider) + " luôn dùng endpoint chính thức.");
-        }
 
         Instant now = Instant.now();
         try {
@@ -216,6 +230,23 @@ public class AiSettingsService {
         updatedBy = actor;
         log.info("Cấu hình AI cập nhật: model={} ({}) (bởi {})", model(), provider(), actor);
         return describe();
+    }
+
+    /**
+     * Cảnh báo (KHÔNG chặn) khi key trông như của hãng khác với model đang chọn. Đây là cái bẫy
+     * hay gặp nhất: dán key Claude nhưng quên đổi model, rồi nhận về lỗi 401 của OpenAI nói
+     * "key OpenAI sai" — người dùng không thể đoán ra là do model.
+     */
+    private String keyWarning() {
+        if (!hasApiKey()) return null;
+        // Qua trung gian thì key là của dịch vụ đó, không việc gì phải giống tiền tố của hãng.
+        if (hasCustomBaseUrl()) return null;
+        String keyVendor = AiModelCatalog.vendorOfKey(apiKey);
+        if (keyVendor == null || keyVendor.equals(provider())) return null;
+        return "API key đang lưu trông giống key của " + AiModelCatalog.vendorLabel(keyVendor)
+                + ", nhưng model đang chọn (" + model() + ") gọi tới "
+                + AiModelCatalog.vendorLabel(provider())
+                + ". Hãy đổi model cho khớp, hoặc dán key của đúng hãng đó.";
     }
 
     /** Che key khi trả về UI: giữ 4 ký tự cuối để người dùng nhận ra mình đang dùng key nào. */

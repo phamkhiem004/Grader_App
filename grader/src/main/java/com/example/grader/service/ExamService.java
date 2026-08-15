@@ -164,9 +164,14 @@ public class ExamService {
             m.put("testcaseStatus", e.getTestcaseStatus() != null ? e.getTestcaseStatus() : "DRAFT");
             m.put("testcaseVersion", e.getTestcaseVersion());
             m.put("hasTestcase", hasTc);
-            // Chỉ bộ testcase dựng từ template mới có config để mở lại trong màn Sửa;
-            // bộ upload bằng ZIP không có → FE ẩn khỏi danh sách chọn để sửa.
-            m.put("editable", e.getTestcaseConfigJson() != null && !e.getTestcaseConfigJson().isBlank());
+            // Mở được màn builder khi có cấu hình, HOẶC matrix còn template_id để dựng lại cấu hình.
+            // Testcase viết tay không có template_id → sửa bằng trình sửa file thay vì builder.
+            boolean hasConfig = e.getTestcaseConfigJson() != null && !e.getTestcaseConfigJson().isBlank();
+            boolean recoverable = !hasConfig && hasTc
+                    && TestcaseConfigRecovery.canRecover(Path.of(e.getTestcasePath()));
+            m.put("editable", hasConfig || recoverable);
+            m.put("configRecovered", recoverable);           // FE báo "dựng lại từ file testcase"
+            m.put("fileEditable", !hasConfig && hasTc);      // sửa thẳng file (testcase viết tay)
             byId.put(e.getExamId(), m);
         }
 
@@ -186,7 +191,13 @@ public class ExamService {
                         m.put("status", "ON_DISK");
                         m.put("testcaseStatus", "PUBLISHED");
                         m.put("hasTestcase", true);
-                        m.put("editable", false);   // chỉ có file trên đĩa, không có config
+                        // Chỉ có thư mục trên đĩa: vẫn sửa được — hệ thống tự đăng ký bản ghi
+                        // ngay lần thao tác đầu tiên (xem ensureExamRecord).
+                        Path onDisk = d.resolve("testcase");
+                        boolean canRebuild = TestcaseConfigRecovery.canRecover(onDisk);
+                        m.put("editable", canRebuild);
+                        m.put("configRecovered", canRebuild);
+                        m.put("fileEditable", !canRebuild);
                         byId.put(id, m);
                     }
                 }
@@ -280,6 +291,257 @@ public class ExamService {
         safeId(examId, "đề");
         Path existing = testcaseDirOf(examId);
         return existing != null ? existing : examsRoot().resolve(examId).resolve("testcase");
+    }
+
+    /** Ba file bắt buộc + hai file hợp đồng — chỉ những file này được sửa trực tiếp. */
+    private static final Set<String> EDITABLE_TESTCASE_FILES = Set.of(
+            "exam_test.dart", "grader.dart", "skills_matrix.json", "contract.json", "contract.md");
+
+    /** Trần an toàn cho trình sửa; file testcase thật lớn nhất mới ~150 KB. */
+    private static final long MAX_EDITABLE_FILE_BYTES = 2L * 1024 * 1024;
+
+    /**
+     * Đọc file testcase để SỬA — khác {@link #readExamTestcaseFiles} ở chỗ trả về NGUYÊN VẸN.
+     *
+     * <p>Hàm đọc để XEM cắt nội dung ở 200.000 ký tự cho nhẹ trang; nếu trình sửa dùng chung hàm
+     * đó thì giáo viên bấm Lưu là ghi đè bản đã bị cắt — mất trắng phần đuôi của file mà không
+     * có dấu hiệu gì. File quá lớn thì báo lỗi thay vì đưa ra bản cụt.
+     */
+    public List<Map<String, String>> readEditableTestcaseFiles(String examId) {
+        safeId(examId, "đề");
+        Path dir = testcaseDirOf(examId);
+        List<Map<String, String>> out = new ArrayList<>();
+        if (dir == null) return out;
+        for (String name : List.of("exam_test.dart", "skills_matrix.json", "grader.dart",
+                "contract.json", "contract.md")) {
+            Path file = dir.resolve(name);
+            if (!Files.isRegularFile(file)) continue;
+            try {
+                if (Files.size(file) > MAX_EDITABLE_FILE_BYTES)
+                    throw new IllegalStateException(name + " lớn hơn 2 MB nên không mở trong trình sửa được; "
+                            + "hãy sửa trực tiếp trên đĩa rồi tải lại.");
+                Map<String, String> m = new LinkedHashMap<>();
+                m.put("name", name);
+                m.put("content", Files.readString(file, StandardCharsets.UTF_8));
+                out.add(m);
+            } catch (IllegalStateException e) {
+                throw e;
+            } catch (Exception e) {
+                throw new IllegalStateException("Không đọc được " + name + ": " + e.getMessage(), e);
+            }
+        }
+        return out;
+    }
+
+    /**
+     * Ghi đè file testcase của một bộ — dùng được cho MỌI bộ, kể cả bộ dựng bằng builder.
+     *
+     * <p>Bộ dựng bằng builder vẫn sinh lại toàn bộ file mỗi lần bấm Lưu trong màn "Tạo bộ testcase",
+     * nên sửa tay ở đây có thể bị ghi đè. Trước đây trường hợp đó bị CHẶN; giờ chỉ cảnh báo, vì
+     * chặn hẳn thì không còn cách nào vá nhanh một dòng trong exam_test.dart đang chấm dở.
+     *
+     * <p>Bản cũ luôn được snapshot trước khi ghi, để sửa hỏng còn đường đối chiếu. Lưu thành công
+     * = bộ chuyển sang PUBLISHED (Hoàn tất) và dựng lại sandbox để chấm được ngay.
+     *
+     * @return { files: tên file đã ghi, status, warning }
+     */
+    public synchronized Map<String, Object> saveExamTestcaseFiles(String examId, List<Map<String, String>> files) {
+        safeId(examId, "đề");
+        Exam exam = ensureExamRecord(examId);   // bộ mới chỉ có trên đĩa vẫn sửa được
+        Path dir = testcaseDirOf(examId);
+        if (dir == null)
+            throw new IllegalStateException("Bộ " + examId + " chưa có thư mục testcase trên đĩa.");
+        // Bộ mở được bằng builder (có config, hoặc dựng lại được từ skills_matrix.json) thì lần Lưu
+        // kế tiếp trong builder sẽ sinh đè file sửa tay — nói trước để giáo viên tự chọn đường sửa.
+        boolean hasConfig = exam.getTestcaseConfigJson() != null && !exam.getTestcaseConfigJson().isBlank();
+        String builderWarning = (hasConfig || TestcaseConfigRecovery.canRecover(dir))
+                ? "Bộ " + examId + " cũng mở được bằng builder. Đã lưu bản sửa tay, nhưng nếu sau này "
+                        + "bấm Lưu trong màn \"Tạo bộ testcase\" thì các file này sẽ bị sinh lại và mất phần sửa tay."
+                : null;
+        if (files == null || files.isEmpty())
+            throw new IllegalArgumentException("Không có nội dung file nào để lưu.");
+
+        // Kiểm tra TOÀN BỘ trước khi ghi: ghi được nửa chừng rồi mới phát hiện JSON hỏng là để lại
+        // một bộ testcase không chấm được.
+        Map<String, String> pending = new LinkedHashMap<>();
+        for (Map<String, String> f : files) {
+            String name = f == null ? null : f.get("name");
+            String content = f == null ? null : f.get("content");
+            if (name == null || name.isBlank() || content == null) continue;
+            String clean = name.trim().replace('\\', '/');
+            if (!EDITABLE_TESTCASE_FILES.contains(clean))
+                throw new IllegalArgumentException("Chỉ sửa được các file: "
+                        + String.join(", ", EDITABLE_TESTCASE_FILES) + " (nhận được: " + name + ")");
+            if (clean.endsWith(".json")) {
+                try {
+                    mapper.readTree(content);
+                } catch (Exception e) {
+                    throw new IllegalArgumentException(clean + " không phải JSON hợp lệ: " + e.getMessage());
+                }
+            }
+            pending.put(clean, content);
+        }
+        if (pending.isEmpty()) throw new IllegalArgumentException("Không có file hợp lệ nào để lưu.");
+        String matrixWarning = pending.containsKey("skills_matrix.json")
+                ? checkEditedSkillsMatrix(dir.resolve("skills_matrix.json"), pending.get("skills_matrix.json"))
+                : null;
+
+        snapshotCurrentTestcase(examId);
+        List<String> written = new ArrayList<>();
+        try {
+            for (Map.Entry<String, String> e : pending.entrySet()) {
+                Files.writeString(dir.resolve(e.getKey()), e.getValue(), StandardCharsets.UTF_8);
+                written.add(e.getKey());
+            }
+        } catch (Exception e) {
+            throw new IllegalStateException("Ghi file testcase thất bại: " + e.getMessage(), e);
+        }
+
+        // Bấm Lưu = chốt bản chính thức: bản nháp (bộ vừa clone) chuyển sang Hoàn tất và
+        // được dựng sandbox ngay, đúng như luồng Lưu bên builder.
+        exam.setTestcaseStatus("PUBLISHED");
+        exam.setTestcaseVersion(exam.getTestcaseVersion() == null ? 1 : exam.getTestcaseVersion() + 1);
+        exam.setTestcasePublishedAt(Instant.now());
+        examRepository.save(exam);
+
+        String sandboxWarning = null;
+        try { buildSandbox(examId); }
+        catch (Exception e) {
+            // Docker tắt thì file đã lưu xong rồi; chỉ là chưa chấm được cho tới khi dựng lại.
+            sandboxWarning = "Đã lưu file nhưng chưa dựng được sandbox: " + e.getMessage();
+            log.warn("Build sandbox sau khi sửa file của {} lỗi: {}", examId, e.getMessage());
+        }
+
+        log.info("✏️ Đã sửa {} file testcase của bộ {}", written.size(), examId);
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("files", written);
+        out.put("status", "PUBLISHED");
+        String warning = ((builderWarning == null ? "" : builderWarning + " ")
+                + (matrixWarning == null ? "" : matrixWarning + " ")
+                + (sandboxWarning == null ? "" : sandboxWarning)).trim();
+        if (!warning.isBlank()) out.put("warning", warning);
+        return out;
+    }
+
+    /**
+     * Nhân bản một bộ NHẬP TỪ ZIP: chép nguyên thư mục testcase + bộ phát cho SV rồi tạo bản ghi
+     * mới. Bộ dựng bằng builder đi đường khác (clone cấu hình rồi sinh lại file).
+     */
+    public synchronized Map<String, Object> cloneImportedExam(String rawSourceId, String rawTargetId,
+                                                              String examName, String teacherNote, String actor) {
+        String sourceId = safeId(rawSourceId, "bộ testcase nguồn");
+        String targetId = safeId(rawTargetId, "bộ testcase mới");
+        if (targetId.length() > 50)
+            throw new IllegalArgumentException("Mã bộ testcase mới không được dài quá 50 ký tự.");
+        if (sourceId.equalsIgnoreCase(targetId))
+            throw new IllegalArgumentException("Mã bộ testcase bản sao phải khác mã bộ nguồn.");
+        if (examName == null || examName.isBlank())
+            throw new IllegalArgumentException("Vui lòng nhập tên bộ testcase bản sao.");
+        if (examRepository.existsByExamId(targetId))
+            throw new IllegalStateException("Mã bộ testcase " + targetId + " đã tồn tại.");
+
+        Exam source = ensureExamRecord(sourceId);   // bộ mới chỉ có trên đĩa vẫn nhân bản được
+        Path sourceDir = testcaseDirOf(sourceId);
+        if (sourceDir == null)
+            throw new IllegalStateException("Bộ " + sourceId + " không còn thư mục testcase để nhân bản.");
+
+        Path targetExamDir = examsRoot().resolve(targetId);
+        if (Files.exists(targetExamDir))
+            throw new IllegalStateException("Thư mục của bộ testcase " + targetId + " đã tồn tại.");
+        Path targetDir = targetExamDir.resolve("testcase");
+
+        try {
+            copyTree(sourceDir, targetDir);
+        } catch (Exception e) {
+            deleteQuietly(targetExamDir);
+            throw new IllegalStateException("Không chép được thư mục testcase: " + e.getMessage(), e);
+        }
+
+        Exam clone = new Exam();
+        clone.setExamId(targetId);
+        clone.setExamName(examName.trim());
+        clone.setTeacherNote(teacherNote == null ? "" : teacherNote.trim());
+        clone.setTestcasePath(targetDir.toAbsolutePath().normalize().toString());
+        clone.setAllowedPackages(source.getAllowedPackages());
+        clone.setStatus(ExamStatus.BUILDING);          // sandbox dựng lại khi bấm Lưu
+        // Bản sao là NHÁP cho tới khi người dùng bấm Lưu trong trình sửa file — giống hệt
+        // luồng clone của bộ dựng bằng builder, để hai loại bộ không hành xử khác nhau.
+        clone.setTestcaseStatus("DRAFT");
+        clone.setTestcaseVersion(1);
+        clone.setCreatedBy(actor);
+        try {
+            examRepository.save(clone);
+        } catch (Exception e) {
+            deleteQuietly(targetExamDir);
+            throw new IllegalStateException("Không lưu được bộ testcase bản sao: " + e.getMessage(), e);
+        }
+
+        try { cloneHandout(sourceId, targetId); }
+        catch (Exception e) { log.warn("Chép bộ phát SV từ {} sang {} lỗi: {}", sourceId, targetId, e.getMessage()); }
+
+        // KHÔNG dựng sandbox ở đây: bản sao còn là nháp, sandbox sẽ dựng lúc bấm Lưu
+        // (xem saveExamTestcaseFiles) — dựng sớm chỉ tốn thời gian cho bản có thể bị sửa tiếp.
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("exam_id", targetId);
+        out.put("exam_name", clone.getExamName());
+        out.put("source_exam_id", sourceId);
+        out.put("editable", false);      // vẫn là bộ file, không có cấu hình builder
+        out.put("status", "DRAFT");
+        log.info("📑 Đã nhân bản bộ testcase {} → {} (nháp)", sourceId, targetId);
+        return out;
+    }
+
+    /**
+     * Lấy bản ghi của một bộ testcase, TỰ ĐĂNG KÝ nếu nó mới chỉ có thư mục trên đĩa.
+     *
+     * <p>Thư mục {@code exams/<id>/testcase} có thể tồn tại mà không có hàng trong bảng exams
+     * (chép tay vào, hoặc bản ghi bị xoá lúc dọn dẹp). Trước đây những bộ đó xem được nhưng
+     * không sửa/đổi tên/nhân bản được. Nhận nuôi ngay lần thao tác đầu tiên để mọi bộ trong Kho
+     * đều dùng được như nhau, thay vì bắt giáo viên xoá đi nhập lại.
+     */
+    public synchronized Exam ensureExamRecord(String examId) {
+        safeId(examId, "đề");
+        Exam existing = examRepository.findByExamId(examId).orElse(null);
+        if (existing != null) return existing;
+
+        Path dir = examsRoot().resolve(examId).resolve("testcase");
+        if (!Files.exists(dir.resolve("skills_matrix.json")))
+            throw new IllegalArgumentException("Không tìm thấy bộ testcase: " + examId);
+
+        Exam adopted = new Exam();
+        adopted.setExamId(examId);
+        adopted.setExamName(examId);
+        adopted.setTeacherNote("");
+        adopted.setTestcasePath(dir.toAbsolutePath().normalize().toString());
+        adopted.setStatus(ExamStatus.BUILDING);      // sandbox dựng lại khi cần chấm
+        adopted.setTestcaseStatus("PUBLISHED");
+        adopted.setTestcaseVersion(1);
+        adopted.setTestcasePublishedAt(Instant.now());
+        Exam saved = examRepository.save(adopted);
+        log.info("📥 Đã đưa bộ testcase {} (chỉ có trên đĩa) vào hệ thống để sửa được", examId);
+        return saved;
+    }
+
+    /** Chép nguyên cây thư mục; chặn đường dẫn thoát ra ngoài đích khi tên file bất thường. */
+    private void copyTree(Path source, Path target) throws Exception {
+        try (Stream<Path> walk = Files.walk(source)) {
+            for (Path path : walk.toList()) {
+                Path output = target.resolve(source.relativize(path)).normalize();
+                if (!output.startsWith(target))
+                    throw new IllegalStateException("Đường dẫn không hợp lệ khi chép: " + path);
+                if (Files.isDirectory(path)) Files.createDirectories(output);
+                else {
+                    Files.createDirectories(output.getParent());
+                    Files.copy(path, output, StandardCopyOption.REPLACE_EXISTING);
+                }
+            }
+        }
+    }
+
+    /** Dọn thư mục vừa tạo dở khi một bước sau đó thất bại; lỗi dọn không được che lỗi gốc. */
+    private void deleteQuietly(Path dir) {
+        try { deleteRecursively(dir); }
+        catch (Exception e) { log.warn("Không dọn được thư mục {}: {}", dir, e.getMessage()); }
     }
 
     /** Sao chép snapshot testcase hiện tại trước khi Publish để đề cũ vẫn đối chiếu được. */
@@ -723,8 +985,7 @@ public class ExamService {
         String newId = safeId(rawNewId, "bộ testcase mới");
         if (newId.length() > 50)
             throw new IllegalArgumentException("Mã bộ testcase mới không được dài quá 50 ký tự.");
-        Exam exam = examRepository.findByExamId(oldId)
-                .orElseThrow(() -> new IllegalArgumentException("Không tìm thấy bộ testcase: " + oldId));
+        Exam exam = ensureExamRecord(oldId);   // bộ mới chỉ có trên đĩa vẫn đổi tên được
         String newName = rawNewName == null ? null : rawNewName.trim();
         if (rawNewName != null && newName.isBlank())
             throw new IllegalArgumentException("Tên bộ testcase không được để trống.");
@@ -1672,8 +1933,53 @@ Future<ProcessResult> _runProcess(
     private void validateSkillCodes(Path testcaseDir) throws Exception {
         Path f = testcaseDir.resolve("skills_matrix.json");
         if (!Files.exists(f)) return;
-        List<Map<String, Object>> problems = syllabusService.validateSkillsMatrix(
-                Files.readString(f, StandardCharsets.UTF_8));
+        checkSkillsMatrixProblems(Files.readString(f, StandardCharsets.UTF_8));
+    }
+
+    /**
+     * Kiểm skill_code khi SỬA FILE — nới hơn lúc upload ZIP một bậc: lỗi ĐÃ CÓ SẴN trong bộ đang
+     * lưu chỉ được cảnh báo. Chặn cứng thì những bộ cũ (mã kỹ năng về sau bị bỏ khỏi syllabus)
+     * không bao giờ lưu lại được, mà bấm Lưu lại chính là bước chuyển Nháp → Hoàn tất: bản clone
+     * của các bộ đó sẽ mắc kẹt ở Nháp vĩnh viễn. Lỗi MỚI phát sinh trong lần sửa này vẫn chặn.
+     *
+     * @return cảnh báo cần hiện cho giáo viên, hoặc null nếu matrix sạch
+     */
+    private String checkEditedSkillsMatrix(Path currentFile, String newJson) {
+        List<Map<String, Object>> problems = skillCodeErrors(newJson);
+        if (problems.isEmpty()) return null;
+
+        Set<String> before = new HashSet<>();
+        try {
+            if (Files.isRegularFile(currentFile))
+                skillCodeErrors(Files.readString(currentFile, StandardCharsets.UTF_8))
+                        .forEach(p -> before.add(problemKey(p)));
+        } catch (Exception ignored) {
+            // Đọc bản cũ hỏng thì coi như không có lỗi cũ → mọi lỗi tính là mới (chặt tay hơn).
+        }
+        List<Map<String, Object>> added = problems.stream()
+                .filter(p -> !before.contains(problemKey(p))).toList();
+        if (!added.isEmpty())
+            throw new IllegalArgumentException(
+                    "skills_matrix.json có skill_code không hợp lệ: " + describeProblems(added));
+
+        List<Map<String, Object>> shown = problems.size() > 5 ? problems.subList(0, 5) : problems;
+        return "Bộ này vẫn còn " + problems.size() + " skill_code không có trong syllabus ("
+                + describeProblems(shown) + (problems.size() > 5 ? "; …" : "")
+                + ") — các tiêu chí đó không vào được bảng năng lực.";
+    }
+
+    private List<Map<String, Object>> skillCodeErrors(String matrixJson) {
+        return syllabusService.validateSkillsMatrix(matrixJson).stream()
+                .filter(p -> !"warning".equals(p.get("severity"))).toList();
+    }
+
+    private String problemKey(Map<String, Object> problem) {
+        return problem.get("testId") + "|" + problem.get("skillCode") + "|" + problem.get("issue");
+    }
+
+    /** Dùng cho lúc upload ZIP — chặt tay: mọi skill_code lạ đều chặn. */
+    private void checkSkillsMatrixProblems(String matrixJson) {
+        List<Map<String, Object>> problems = syllabusService.validateSkillsMatrix(matrixJson);
         if (problems.isEmpty()) return;
 
         // "error" (skill_code sai/deprecated, difficulty không hợp lệ) → CHẶN upload.

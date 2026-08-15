@@ -1141,6 +1141,9 @@ function TestcasesEditor() {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState("");
   const [previewNotice, setPreviewNotice] = useState("");
+  // "Code rỗng" và "chưa gọi được backend" nhìn giống hệt nhau nếu không ghi lại
+  // mã HTTP + số file + số ký tự đã nhận. Giữ lại để soi khi có người báo màn trống.
+  const [previewDiag, setPreviewDiag] = useState("");
 
   // Nạp bộ testcase đang có khi vào chế độ sửa; hỏng/không có config thì báo ngay
   // thay vì để giáo viên sửa trên form rỗng rồi ghi đè mất bộ cũ.
@@ -1189,6 +1192,18 @@ function TestcasesEditor() {
           ? contract.allowed_packages : DEFAULT_GRADING_PACKAGES);
         setLocalPackageNames(Array.isArray(contract.local_package_names)
           ? contract.local_package_names : []);
+        // Bộ nhập bằng ZIP: cấu hình được dựng lại từ skills_matrix.json. Phải nói rõ, vì bấm Lưu
+        // là sinh lại toàn bộ file testcase — giáo viên cần biết mình đang sửa trên bản dựng lại.
+        if (data.recovered) {
+          const warnings: string[] = Array.isArray(data.recovered_warnings) ? data.recovered_warnings : [];
+          setMessage({
+            type: warnings.length ? "error" : "ok",
+            text: `Bộ ${editExamId} được nhập bằng ZIP nên cấu hình đã được dựng lại từ file testcase. `
+              + (warnings.length
+                ? `Kiểm tra lại trước khi lưu — ${warnings.join(" ")}`
+                : `Kiểm tra lại rồi bấm Lưu để hệ thống sinh lại bộ file chấm.`),
+          });
+        }
       })
       .catch((e: unknown) => setMessage({
         type: "error",
@@ -1271,9 +1286,12 @@ function TestcasesEditor() {
         setPreviewFiles(files);
         setPreviewNotice(typeof data.warning === "string" ? data.warning : "");
         setPreviewFile((current) => Math.min(current, Math.max(0, files.length - 1)));
+        const chars = files.reduce((sum, file) => sum + (file.content?.length || 0), 0);
+        setPreviewDiag(`HTTP ${response.status} · ${files.length} file · ${chars.toLocaleString("vi-VN")} ký tự · ${API_BASE}`);
       } catch (error) {
         if (error instanceof DOMException && error.name === "AbortError") return;
         setPreviewNotice("");
+        setPreviewDiag(`Gọi thất bại · ${API_BASE}`);
         setPreviewError(error instanceof Error ? error.message : "Không sinh được code xem trước.");
       } finally {
         if (!controller.signal.aborted) setPreviewLoading(false);
@@ -3170,6 +3188,7 @@ function TestcasesEditor() {
                   <p className="eyebrow">Code sinh theo thời gian thực</p>
                   <h2 id="generated-code-title" className="mt-1 text-lg font-bold text-slate-800">Bộ file chấm hiện tại · {examId.trim()}</h2>
                   <p className="mt-1 text-xs leading-relaxed text-slate-500">Mặc định hiển thị toàn bộ <code className="font-mono">exam_test.dart</code>. Tham số từng testcase nằm trong <code className="font-mono">skills_matrix.json</code> và cũng cập nhật ngay khi form thay đổi.</p>
+                  {previewDiag && <p className="mt-1 font-mono text-[11px] text-slate-400">{previewDiag}</p>}
                 </div>
                 <div className="flex items-center gap-2">
                   {previewLoading && <span className="flex items-center gap-1.5 text-xs font-semibold text-indigo-600"><Loader2 size={14} className="animate-spin" /> Đang cập nhật</span>}

@@ -316,6 +316,56 @@ public class ExamSetupController {
     }
 
     /** Đọc đề bài đã lưu (cho trợ lý AI nạp lại khi mở bộ testcase cũ). */
+    /**
+     * Trang "Xem đề": đề bài + hình minh họa đã gộp thành MỘT tài liệu HTML tự chứa.
+     * Kèm luôn danh sách SVG để trình duyệt đổi sang PNG khi tải bản .docx.
+     */
+    @GetMapping("/{examId}/de-bai/view")
+    public ResponseEntity<?> viewDeBai(@PathVariable String examId) {
+        try {
+            String md = examService.readDeBai(examId);
+            java.util.List<Map<String, String>> mockups = examService.readMockups(examId).stream()
+                    .map(m -> Map.of("id", m.id(), "title", m.title(), "svg", m.svg()))
+                    .toList();
+            Map<String, Object> out = new java.util.LinkedHashMap<>();
+            out.put("exam_id", examId);
+            out.put("has_de_bai", md != null && !md.isBlank());
+            out.put("de_bai", md == null ? "" : md);
+            out.put("html", examService.buildHandoutHtml(examId));
+            out.put("mockups", mockups);
+            return ResponseEntity.ok(out);
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    /**
+     * Tải đề bài dạng .docx. Body: { images: [{ png_base64, width, height }] } — ảnh do trình
+     * duyệt đổi từ SVG sang PNG (máy chủ không có thư viện rasterize). Bỏ trống = chỉ có chữ.
+     */
+    @SuppressWarnings("unchecked")
+    @PostMapping("/{examId}/de-bai/docx")
+    public ResponseEntity<?> downloadDeBaiDocx(@PathVariable String examId,
+                                               @RequestBody(required = false) Map<String, Object> body) {
+        try {
+            Object raw = body == null ? null : body.get("images");
+            java.util.List<Map<String, Object>> images = raw instanceof java.util.List
+                    ? (java.util.List<Map<String, Object>>) raw : java.util.List.of();
+            byte[] docx = examService.buildHandoutDocx(examId, images);
+            return ResponseEntity.ok()
+                    .header("Content-Type", "application/vnd.openxmlformats-officedocument"
+                            + ".wordprocessingml.document")
+                    .header("Content-Disposition", "attachment; filename=\"" + examId + "_de_bai.docx\"")
+                    .body(docx);
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
+        }
+    }
+
     @GetMapping("/{examId}/handout")
     public ResponseEntity<?> readHandout(@PathVariable String examId) {
         try {

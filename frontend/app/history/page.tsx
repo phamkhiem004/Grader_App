@@ -200,6 +200,8 @@ export default function HistoryPage() {
   const [viewRow, setViewRow] = useState<ResultRow | null>(null);
   const [subFiles, setSubFiles] = useState<CodeFile[]>([]);
   const [tcFiles, setTcFiles] = useState<CodeFile[]>([]);
+  /** Lý do không có testcase để xem (bài còn trong hàng đợi / đang chấm) — hiện thay khung code. */
+  const [tcNotice, setTcNotice] = useState<string | null>(null);
   const [viewLoading, setViewLoading] = useState(false);
   const [activeSub, setActiveSub] = useState(0);
   const [activeTc, setActiveTc] = useState(0);
@@ -307,24 +309,31 @@ export default function HistoryPage() {
   };
   const closeDetail = () => { setDetailRow(null); setDetail(null); };
 
+  /** Bài chưa xong một lượt chấm nào: chưa có testcase đã dùng, cũng chưa chấm lại được. */
+  const inFlight = (r: ResultRow) => r.status === "QUEUED" || r.status === "GRADING";
+
   // Mở modal đối chiếu: tải song song mã nguồn SV + testcase đã dùng để chấm
   const openView = async (r: ResultRow) => {
     if (!selected) return;
-    setViewRow(r); setSubFiles([]); setTcFiles([]); setActiveSub(0); setActiveTc(0); setViewLoading(true);
+    setViewRow(r); setSubFiles([]); setTcFiles([]); setActiveSub(0); setActiveTc(0);
+    setTcNotice(null); setViewLoading(true);
     try {
       const [sf, tf] = await Promise.all([
         fetch(`${API_BASE}/batch/submission/${encodeURIComponent(selected)}/${encodeURIComponent(r.studentId)}/files`).then((x) => (x.ok ? x.json() : [])),
-        fetch(`${API_BASE}/batch/testcase/${encodeURIComponent(selected)}/${encodeURIComponent(r.studentId)}/files`).then((x) => (x.ok ? x.json() : [])),
+        // Bài chưa chấm xong → backend trả 409 kèm lý do; hiện thẳng lý do đó thay vì khung trống.
+        fetch(`${API_BASE}/batch/testcase/${encodeURIComponent(selected)}/${encodeURIComponent(r.studentId)}/files`)
+          .then(async (x) => (x.ok ? x.json() : { error: (await x.json().catch(() => ({}))).error })),
       ]);
       setSubFiles(Array.isArray(sf) ? sf : []);
-      setTcFiles(Array.isArray(tf) ? tf : []);
+      if (Array.isArray(tf)) setTcFiles(tf);
+      else setTcNotice(tf?.error || "Không đọc được testcase đã lưu.");
     } catch {
       /* bỏ qua */
     } finally {
       setViewLoading(false);
     }
   };
-  const closeView = () => { setViewRow(null); setSubFiles([]); setTcFiles([]); };
+  const closeView = () => { setViewRow(null); setSubFiles([]); setTcFiles([]); setTcNotice(null); };
 
   // Chấm lại 1 bài từ zip đã lưu, rồi poll tiến độ đến khi xong → refetch danh sách
   const regrade = async (r: ResultRow) => {
@@ -695,7 +704,9 @@ export default function HistoryPage() {
                           </td>
                           <td className="sticky right-0 z-10 border-l border-slate-100 bg-white px-4 py-3.5 transition-colors group-hover:bg-slate-50/70">
                             <div className="flex items-center justify-center gap-1">
-                              <Tooltip label="Xem bài làm & testcase" side="left">
+                              <Tooltip label={inFlight(r)
+                                ? "Xem bài làm (bài chưa chấm xong nên chưa có testcase đã dùng)"
+                                : "Xem bài làm & testcase"} side="left">
                                 <button
                                   onClick={() => openView(r)}
                                   className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-indigo-50 hover:text-indigo-600"
@@ -703,10 +714,12 @@ export default function HistoryPage() {
                                   <FileCode2 size={15} />
                                 </button>
                               </Tooltip>
-                              <Tooltip label="Chấm lại bài này" side="left">
+                              {/* Bài còn trong hàng đợi mà bấm chấm lại là xếp thêm một lượt nữa
+                                  cho chính nó — chặn cho tới khi lượt đang chạy kết thúc. */}
+                              <Tooltip label={inFlight(r) ? "Bài đang chờ/đang chấm — chưa chấm lại được" : "Chấm lại bài này"} side="left">
                                 <button
                                   onClick={() => regrade(r)}
-                                  disabled={regradingId === r.studentId}
+                                  disabled={regradingId === r.studentId || inFlight(r)}
                                   className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-amber-50 hover:text-amber-600 disabled:opacity-50"
                                 >
                                   {regradingId === r.studentId ? <Loader2 size={15} className="animate-spin" /> : <RotateCcw size={15} />}
@@ -898,7 +911,8 @@ export default function HistoryPage() {
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => regrade(viewRow)}
-                  disabled={regradingId === viewRow.studentId}
+                  disabled={regradingId === viewRow.studentId || inFlight(viewRow)}
+                  title={inFlight(viewRow) ? "Bài đang chờ/đang chấm — chưa chấm lại được" : undefined}
                   className="flex items-center gap-1.5 rounded-lg bg-amber-500 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-amber-600 disabled:opacity-50"
                 >
                   {regradingId === viewRow.studentId ? <Loader2 size={14} className="animate-spin" /> : <RotateCcw size={14} />} Chấm lại
@@ -946,6 +960,12 @@ export default function HistoryPage() {
                 </div>
                 {viewLoading ? (
                   <div className="flex h-full items-center justify-center py-10 text-slate-400"><Loader2 size={18} className="animate-spin" /></div>
+                ) : tcNotice ? (
+                  <div className="flex h-full items-center justify-center px-6 py-10 text-center">
+                    <p className="flex items-start gap-2 text-xs leading-relaxed text-amber-700">
+                      <AlertCircle size={14} className="mt-0.5 shrink-0" /> {tcNotice}
+                    </p>
+                  </div>
                 ) : (
                   <FileViewer files={tcFiles} active={activeTc} setActive={setActiveTc}
                     empty="Không đọc được testcase đã lưu." />

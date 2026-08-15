@@ -41,7 +41,7 @@ public class OpenAiClient implements LlmClient {
     @Override
     public String chat(List<LlmMessage> messages) throws Exception {
         if (!settings.hasApiKey())
-            throw new IllegalStateException("Chưa nhập API key cho OpenAI.");
+            throw new IllegalStateException("Chưa nhập API key cho " + settings.endpointLabel("OpenAI") + ".");
 
         List<Map<String, Object>> msgs = new ArrayList<>();
         for (LlmMessage m : messages) msgs.add(Map.of("role", m.role(), "content", m.content()));
@@ -79,18 +79,24 @@ public class OpenAiClient implements LlmClient {
                     JsonNode root = mapper.readTree(res.body());
                     JsonNode text = root.path("choices").path(0).path("message").path("content");
                     if (text.isMissingNode() || text.asText().isBlank())
-                        throw new RuntimeException("OpenAI không trả nội dung: " + excerpt(res.body()));
+                        throw new RuntimeException(settings.endpointLabel("OpenAI")
+                                + " không trả nội dung: " + excerpt(res.body()));
                     return text.asText();
                 }
-                last = new RuntimeException("OpenAI HTTP " + sc + ": " + excerpt(res.body()));
+                // Gọi qua dịch vụ trung gian mà báo "OpenAI HTTP 403" thì người dùng đi tìm nhầm
+                // chỗ — nêu đúng tên miền đang gọi.
+                last = new RuntimeException(settings.endpointLabel("OpenAI")
+                        + " HTTP " + sc + ": " + excerpt(res.body()));
                 if (!(sc == 429 || sc / 100 == 5) || attempt == maxTries) throw last;
             } catch (java.io.IOException ioe) {
-                last = new RuntimeException("OpenAI lỗi mạng: " + ioe.getMessage());
+                last = new RuntimeException(settings.endpointLabel("OpenAI")
+                        + " lỗi mạng: " + ioe.getMessage());
                 if (attempt == maxTries) throw last;
             }
             Thread.sleep(2000L * attempt);
         }
-        throw last != null ? last : new RuntimeException("OpenAI: lỗi không xác định");
+        throw last != null ? last
+                : new RuntimeException(settings.endpointLabel("OpenAI") + ": lỗi không xác định");
     }
 
     /** Họ model "reasoning" cần tham số API khác (max_completion_tokens, không temperature). */

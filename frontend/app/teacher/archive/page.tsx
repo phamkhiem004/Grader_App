@@ -9,7 +9,7 @@ import { API_BASE } from "@/lib/config";
 import {
   Archive, RotateCcw, Trash2, Loader2, AlertTriangle, CheckCircle2,
   Database, FileArchive, Pencil, Plus, X, UploadCloud, Package, ArrowLeft,
-  Copy, ChevronLeft, ChevronRight, PenLine, Pause, Play,
+  Copy, ChevronLeft, ChevronRight, PenLine, Pause, Play, FileText,
 } from "lucide-react";
 import ErrorScreen from "@/components/ui/ErrorScreen";
 import Banner from "@/components/ui/Banner";
@@ -21,6 +21,8 @@ interface ExamRow {
   /** DRAFT = mới tạo, chưa bấm Lưu · PUBLISHED = đã lưu chính thức, dùng chấm được. */
   testcaseStatus?: string;
   hasTestcase?: boolean;
+  /** true = đã có đề bài trong bộ phát cho sinh viên → mở được trang Xem đề. */
+  hasDeBai?: boolean;
   resultCount?: number;
   teacherNote?: string;
   /** true = sửa/clone được (có cấu hình builder, hoặc dựng lại được từ file testcase). */
@@ -575,22 +577,32 @@ export default function ArchivePage() {
                           className={actBtnCls("hover:text-indigo-600")}>
                           <FileArchive size={16} /><span className="sr-only">Tải testcase</span>
                         </button>
-                        {/* Hai đường sửa, bộ nào cũng có ít nhất một: builder (kéo testcase từ thư viện)
-                            cho bộ dựng từ template, và trình sửa file cho mọi bộ. */}
-                        {e.editable !== false && (
+                        {/* Xem đề: đề bài + hình minh họa gộp một tài liệu, tải được .docx. */}
+                        <Link href={`/teacher/exam-view?exam=${encodeURIComponent(e.examId)}`}
+                          title={e.hasDeBai
+                            ? "Xem đề — đề bài kèm hình minh họa, tải được bản .docx"
+                            : "Xem đề — bộ này chưa có đề bài"}
+                          className={actBtnCls(e.hasDeBai ? "hover:text-emerald-600" : "opacity-40")}>
+                          <FileText size={16} /><span className="sr-only">Xem đề</span>
+                        </Link>
+                        {/* MỘT nút Sửa duy nhất mỗi hàng. Bộ dựng từ template mở builder (kéo thêm
+                            testcase từ thư viện); bộ testcase viết tay không có cấu hình builder để
+                            mở nên nút đó phải là trình sửa file, nếu không chúng thành không sửa được. */}
+                        {e.editable !== false ? (
                           <Link href={`/teacher/testcases?exam=${encodeURIComponent(e.examId)}`}
                             title={e.configRecovered
-                              ? "Sửa trong builder — cấu hình được dựng lại từ file testcase đã nhập"
-                              : "Sửa trong builder — đổi mã/tên, kéo thêm testcase từ thư viện, sửa tham số và hợp đồng"}
+                              ? "Sửa — cấu hình được dựng lại từ file testcase đã nhập"
+                              : "Sửa — đổi mã/tên, kéo thêm testcase từ thư viện, sửa tham số và hợp đồng"}
                             className={actBtnCls("hover:text-indigo-600")}>
-                            <Pencil size={16} /><span className="sr-only">Sửa trong builder</span>
+                            <Pencil size={16} /><span className="sr-only">Sửa</span>
                           </Link>
+                        ) : (
+                          <button type="button" onClick={() => openFileEditor(e)} disabled={busy}
+                            title="Sửa — testcase viết tay: đổi mã/tên và sửa thẳng nội dung file"
+                            className={actBtnCls("hover:text-indigo-600")}>
+                            <PenLine size={16} /><span className="sr-only">Sửa</span>
+                          </button>
                         )}
-                        <button type="button" onClick={() => openFileEditor(e)} disabled={busy}
-                          title="Sửa file — đổi mã/tên và sửa thẳng exam_test.dart / grader.dart / skills_matrix.json"
-                          className={actBtnCls("hover:text-indigo-600")}>
-                          <PenLine size={16} /><span className="sr-only">Sửa file</span>
-                        </button>
                         <button
                           onClick={() => regrade ? togglePause(regrade) : doRegrade(e.examId)}
                           title={regrade?.status === "PAUSED"

@@ -1,6 +1,7 @@
 package com.example.grader.controller;
 
 import com.example.grader.entity.ExamResult;
+import com.example.grader.entity.GradingStatus;
 import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayInputStream;
@@ -19,24 +20,55 @@ class ResultControllerNormalizationTest {
     @Test
     void exportsOneJsonFilePerStudentInsideResultFolder() throws Exception {
         ResultController controller = new ResultController();
-        ExamResult row = new ExamResult();
-        row.setStudentId("HE186137");
-        row.setStudentName("khiempghe186137");
-        row.setResultJson("{\"student\":{\"id\":\"HE186137\"},\"optional\":null}");
 
-        byte[] archive = controller.buildBatchResultsArchive("BATCH_01", List.of(row));
+        byte[] archive = controller.buildBatchResultsArchive("BATCH_01", List.of(
+                scored("HE186137", "khiempghe186137", "{\"student\":{\"id\":\"HE186137\"},\"optional\":null}")));
         try (ZipInputStream zip = new ZipInputStream(new ByteArrayInputStream(archive), StandardCharsets.UTF_8)) {
             ZipEntry folder = zip.getNextEntry();
-            assertEquals("BATCH_01_results/", folder.getName());
+            // Giải nén ra đúng "Json/<MSSV>.json" — không chèn thêm lớp thư mục theo lô/đề, và
+            // đặt tên theo MÃ SV chứ không theo tên thư mục sinh viên nộp.
+            assertEquals("Json/", folder.getName());
             assertTrue(folder.isDirectory());
 
             ZipEntry result = zip.getNextEntry();
-            assertEquals("BATCH_01_results/khiempghe186137.json", result.getName());
+            assertEquals("Json/HE186137.json", result.getName());
             String json = new String(zip.readAllBytes(), StandardCharsets.UTF_8);
             assertTrue(json.contains("HE186137"));
             assertFalse(json.contains(": null"));
             assertEquals(null, zip.getNextEntry());
         }
+    }
+
+    /**
+     * Bài máy chấm không cho ra điểm vẫn có thể kịp ghi result_json dở. Xuất kèm nó thì bên nhận
+     * không có cách nào biết file đó là kết quả chưa tin được — thư mục chỉ chứa bài ĐÃ CHẤM XONG.
+     */
+    @Test
+    void skipsSubmissionsThatNeverFinishedGrading() throws Exception {
+        ResultController controller = new ResultController();
+
+        ExamResult blocked = scored("HE000002", "blocked_one", "{\"student\":{\"id\":\"HE000002\"}}");
+        blocked.setStatus(GradingStatus.MANUAL_REVIEW);
+        ExamResult cancelled = scored("HE000003", "cancelled_one", "{\"student\":{\"id\":\"HE000003\"}}");
+        cancelled.setStatus(GradingStatus.CANCELLED);
+
+        byte[] archive = controller.buildBatchResultsArchive("BATCH_02", List.of(
+                scored("HE000001", "done_one", "{\"student\":{\"id\":\"HE000001\"}}"), blocked, cancelled));
+
+        try (ZipInputStream zip = new ZipInputStream(new ByteArrayInputStream(archive), StandardCharsets.UTF_8)) {
+            assertEquals("Json/", zip.getNextEntry().getName());
+            assertEquals("Json/HE000001.json", zip.getNextEntry().getName());
+            assertEquals(null, zip.getNextEntry(), "chỉ bài DONE mới được vào thư mục kết quả");
+        }
+    }
+
+    private static ExamResult scored(String studentId, String studentName, String resultJson) {
+        ExamResult row = new ExamResult();
+        row.setStudentId(studentId);
+        row.setStudentName(studentName);
+        row.setStatus(GradingStatus.DONE);
+        row.setResultJson(resultJson);
+        return row;
     }
 
     @Test

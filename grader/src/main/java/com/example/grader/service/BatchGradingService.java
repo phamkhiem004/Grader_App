@@ -337,7 +337,7 @@ public class BatchGradingService {
             float score = parseScore(resultJson);
             String fullJson = assembleResultJson(job, resultJson);   // JSON đầy đủ cho lịch sử/năng lực
             GradingDiagnosticException diagnostic = diagnoseGraderResult(resultJson, score);
-            if (diagnostic != null && diagnostic.manualReview()) {
+            if (isSystemFault(diagnostic)) {
                 manualReview = true;
                 updateStatus(job, GradingStatus.MANUAL_REVIEW, null, resultJson, fullJson);
                 updateDiagnostic(job, diagnostic);
@@ -353,16 +353,26 @@ public class BatchGradingService {
 
         } catch (Exception e) {
             // Container bị GIẾT vì người dùng bấm Dừng → không có bằng chứng nào về bài nộp,
-            // tuyệt đối không được ghi thành ERROR/0 điểm của sinh viên.
+            // tuyệt đối không được ghi thành 0 điểm của sinh viên (nhánh dưới sẽ làm đúng thế).
             if (gradingService.isCancelled(job.batchId())) {
                 cancelled = true;
                 markResultCancelled(job, "Đã dừng khi bài đang được chấm.");
             } else {
                 GradingDiagnosticException diagnostic = diagnoseException(e);
-                manualReview = diagnostic.manualReview();
-                GradingStatus terminal = manualReview ? GradingStatus.MANUAL_REVIEW : GradingStatus.ERROR;
+                // MỘT TRỤC DUY NHẤT: lỗi quy được cho bài sinh viên là KẾT QUẢ (0 điểm), không
+                // phải sự cố. Trước đây chúng ghi ERROR / score null nên nằm lẫn với Docker chết
+                // trên màn hình người chấm, mà lại KHÔNG có điểm — rơi vào khoảng trống.
+                boolean systemFault = isSystemFault(diagnostic);
+                manualReview = systemFault;
+                GradingStatus terminal = systemFault ? GradingStatus.MANUAL_REVIEW : GradingStatus.DONE;
                 log.error("[{}] {} {} → {}", job.batchId(), terminal, job.studentId(), diagnostic.teacherMessage());
-                try { updateStatus(job, terminal, null, null, null); }
+                try {
+                    updateStatus(job, terminal, systemFault ? null : 0f, null, null);
+                    if (!systemFault) {
+                        examRepo.markHasResults(job.examId());   // 0 điểm vẫn là kết quả hợp lệ
+                        success = true;
+                    }
+                }
                 catch (Exception ex) {
                     log.warn("[{}] Không ghi được {} cho {}: {}", job.batchId(), terminal,
                             job.studentId(), ex.getMessage());
@@ -409,6 +419,21 @@ public class BatchGradingService {
         });
     }
 
+    /**
+     * TRỤC QUYẾT ĐỊNH DUY NHẤT của cả lớp này: sự cố có thuộc về HỆ THỐNG chấm không?
+     *
+     * <p>Chỉ đọc {@code origin}, cố ý KHÔNG đọc {@code manualReview()}. Hai khoá đó từng nói hai
+     * chuyện lệch nhau (vd {@code EXTERNAL_PACKAGE} là lỗi bài nhưng lại xin chấm tay), và mỗi
+     * nơi đọc một khoá là lý do màn hình phải tự suy lại kết luận. Nay cờ {@code manualReview}
+     * chỉ còn là dữ liệu lưu kèm, không điều khiển trạng thái nữa.
+     *
+     * <p>{@code null} = không có sự cố nào ⇒ không phải lỗi hệ thống.
+     */
+    private boolean isSystemFault(GradingDiagnosticException diagnostic) {
+        return diagnostic != null
+                && diagnostic.origin() != GradingDiagnosticException.Origin.STUDENT;
+    }
+
     /** Phân loại exception cấp lượt chấm; không còn biến mọi lỗi thành ERROR 0 điểm giống nhau. */
     private GradingDiagnosticException diagnoseException(Exception error) {
         if (error instanceof GradingDiagnosticException diagnostic) return diagnostic;
@@ -418,6 +443,19 @@ public class BatchGradingService {
         if (low.contains("không tìm thấy thư mục lib") || low.contains("không có file .dart")) {
             return new GradingDiagnosticException("SUBMISSION_STRUCTURE_INVALID",
                     GradingDiagnosticException.Origin.STUDENT, "SUBMISSION_PREFLIGHT", false,
+                    message, error);
+        }
+        // Probe 0/0 đã moi được lỗi biên dịch trong lib/ (xem GradingService#diagnoseZeroTests).
+        // Không bắt câu này thì nó rơi xuống UNCLASSIFIED và báo động như một sự cố hệ thống,
+        // trong khi bằng chứng đã chỉ thẳng vào bài nộp.
+        if (low.contains("không biên dịch được với đề")) {
+            return new GradingDiagnosticException("STUDENT_COMPILE_ERROR",
+                    GradingDiagnosticException.Origin.STUDENT, "SOURCE_COMPILE", false,
+                    message, error);
+        }
+        if (low.contains("mất file bài nộp")) {
+            return new GradingDiagnosticException("SUBMISSION_FILE_LOST",
+                    GradingDiagnosticException.Origin.ENVIRONMENT, "SUBMISSION_STAGING", true,
                     message, error);
         }
         if (low.contains("test/exam_test.dart") || low.contains("test/grader.dart")
@@ -1100,7 +1138,14 @@ public class BatchGradingService {
                             r.getBatchId(), r.getExamId(), zip.toString(), null));
                     recovered++;
                 } else {
-                    r.setStatus(GradingStatus.ERROR);
+                    // Mất file staged là sự cố hạ tầng, không phải lỗi bài nộp → phải nổi lên
+                    // màn hình người chấm kèm mã, đừng để trơ một dòng ERROR không phân loại.
+                    r.setStatus(GradingStatus.MANUAL_REVIEW);
+                    r.setScore(null);
+                    r.setDiagnosticCode("SUBMISSION_FILE_LOST");
+                    r.setDiagnosticOrigin(GradingDiagnosticException.Origin.ENVIRONMENT.name());
+                    r.setDiagnosticStage("SUBMISSION_STAGING");
+                    r.setRequiresManualReview(true);
                     r.setErrorLog("Mất file bài nộp khi khôi phục sau restart");
                     resultRepo.save(r);
                 }
@@ -1570,11 +1615,50 @@ public class BatchGradingService {
         long review  = resultRepo.countByBatchIdAndStatus(batchId, GradingStatus.MANUAL_REVIEW);
         long stopped = resultRepo.countByBatchIdAndStatus(batchId, GradingStatus.CANCELLED);
         List<com.example.grader.dto.ResultRow> rows = resultRepo.findRowsByBatchId(batchId);
-        String status = batchRepo.findByBatchId(batchId)
-                .map(batch -> batch.getStatus() == null ? BatchStatus.IN_PROGRESS.name() : batch.getStatus().name())
-                .orElse("UNKNOWN");
+        GradingBatch batch = batchRepo.findByBatchId(batchId).orElse(null);
+        String status = batch == null || batch.getStatus() == null
+                ? (batch == null ? "UNKNOWN" : BatchStatus.IN_PROGRESS.name())
+                : batch.getStatus().name();
         return new BatchProgressResponse(batchId, rows.size(), done, grading, queued, error, review,
-                stopped, status, rows);
+                stopped, status, rows, error + review, systemIncidents(rows),
+                batch == null ? null : batch.getExamId());
+    }
+
+    /**
+     * Gom bài {@code SYSTEM_BLOCKED} THEO NGUYÊN NHÂN thay vì theo bài.
+     *
+     * <p>Sự cố hạ tầng gần như luôn trúng cả loạt: Docker chết một cái là 20 bài cùng hỏng. Liệt
+     * kê 20 dòng giống nhau bắt người chấm tự nhận ra đó là MỘT sự cố; gom lại thì họ đọc một
+     * dòng, và có sẵn danh sách mã SV để chấm lại đúng nhóm đó sau khi sửa máy.
+     *
+     * <p>Bài {@code SCORED} (kể cả 0 điểm do làm sai) không bao giờ vào đây — đó là kết quả, không
+     * phải sự cố.
+     */
+    private List<Map<String, Object>> systemIncidents(List<com.example.grader.dto.ResultRow> rows) {
+        Map<String, Map<String, Object>> byCode = new LinkedHashMap<>();
+        for (com.example.grader.dto.ResultRow r : rows) {
+            if (r.outcome() != GradingOutcome.SYSTEM_BLOCKED) continue;
+            String code = r.diagnosticCode() == null || r.diagnosticCode().isBlank()
+                    ? "UNCLASSIFIED_GRADING_ERROR" : r.diagnosticCode();
+            Map<String, Object> group = byCode.computeIfAbsent(code, key -> {
+                Map<String, Object> g = new LinkedHashMap<>();
+                g.put("code", key);
+                g.put("origin", r.diagnosticOrigin());
+                g.put("originLabel", SystemIncidentCatalog.originLabel(r.diagnosticOrigin()));
+                g.put("label", SystemIncidentCatalog.label(key, r.diagnosticOrigin()));
+                g.put("message", r.errorLog());
+                g.put("count", 0);
+                g.put("studentIds", new ArrayList<String>());
+                return g;
+            });
+            group.put("count", (int) group.get("count") + 1);
+            @SuppressWarnings("unchecked")
+            List<String> ids = (List<String>) group.get("studentIds");
+            ids.add(r.studentId());
+        }
+        List<Map<String, Object>> out = new ArrayList<>(byCode.values());
+        out.sort((a, b) -> (int) b.get("count") - (int) a.get("count"));   // nhóm to lên trước
+        return out;
     }
 
     // ── Helpers ──────────────────────────────────────────────────

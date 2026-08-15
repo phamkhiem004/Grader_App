@@ -8,6 +8,7 @@ import java.nio.file.Path;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -17,7 +18,7 @@ class SubmissionPackagePolicyTest {
     Path temp;
 
     @Test
-    void externalPackageStopsAutomaticGradingAndRequestsManualReview() throws Exception {
+    void externalPackageIsScoredAsStudentFaultNotASystemIncident() throws Exception {
         Path lib = Files.createDirectories(temp.resolve("lib"));
         Files.writeString(lib.resolve("main.dart"),
                 "import 'package:http/http.dart';\nvoid main() {}\n");
@@ -29,7 +30,9 @@ class SubmissionPackagePolicyTest {
 
         assertEquals("EXTERNAL_PACKAGE", error.code());
         assertEquals(GradingDiagnosticException.Origin.STUDENT, error.origin());
-        assertTrue(error.manualReview());
+        // Khung có sẵn pubspec ⇒ thêm package ngoài là sai hướng dẫn: ghi 0 điểm, KHÔNG báo
+        // lên cột sự cố hệ thống của người chấm.
+        assertFalse(error.manualReview());
     }
 
     @Test

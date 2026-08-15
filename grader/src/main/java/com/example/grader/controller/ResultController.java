@@ -3,6 +3,7 @@ package com.example.grader.controller;
 import com.example.grader.config.AppActor;
 import com.example.grader.dto.ExamHistoryRow;
 import com.example.grader.entity.ExamResult;
+import com.example.grader.entity.GradingStatus;
 import com.example.grader.repository.ExamResultRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ContentDisposition;
@@ -121,6 +122,9 @@ public class ResultController {
             m.put("score", r.score());
             m.put("manualScore", r.manualScore());
             m.put("status", r.status());
+            // Kết luận cho người chấm (SCORED / SYSTEM_BLOCKED / STOPPED). Thiếu nó thì trang
+            // Lịch sử phải tự suy lại từ status như trước — đúng thứ đang gỡ bỏ.
+            m.put("outcome", r.outcome());
             m.put("batchId", r.batchId());
             m.put("submittedAt", r.submittedAt());
             m.put("updatedAt", r.updatedAt());
@@ -211,12 +215,24 @@ public class ResultController {
      */
     @GetMapping(value = "/batch/{batchId}/archive", produces = "application/zip")
     public ResponseEntity<byte[]> getBatchResultsArchive(@PathVariable String batchId) {
-        List<ExamResult> rows = resultRepo.findByBatchIdOrderByStudentId(batchId);
-        if (rows.stream().noneMatch(row -> row.getResultJson() != null && !row.getResultJson().isBlank()))
+        return resultsArchive(batchId, resultRepo.findByBatchIdOrderByStudentId(batchId));
+    }
+
+    /**
+     * Thư mục kết quả theo ĐỀ (mọi lô đã chấm) — bản song sinh của endpoint trên cho trang Lịch sử.
+     * Cũng chỉ gồm bài ĐÃ CHẤM XONG; xem {@link #exportable}.
+     */
+    @GetMapping(value = "/exam/{examId}/archive", produces = "application/zip")
+    public ResponseEntity<byte[]> getExamResultsArchive(@PathVariable String examId) {
+        return resultsArchive(examId, resultRepo.findByExamIdAndModeOrderByUpdatedAtDesc(examId, "submit"));
+    }
+
+    private ResponseEntity<byte[]> resultsArchive(String name, List<ExamResult> rows) {
+        if (rows.stream().noneMatch(ResultController::exportable))
             return ResponseEntity.notFound().build();
         try {
-            byte[] archive = buildBatchResultsArchive(batchId, rows);
-            String downloadName = safeArchivePart(batchId) + "_results.zip";
+            byte[] archive = buildBatchResultsArchive(name, rows);
+            String downloadName = ARCHIVE_ROOT + ".zip";
             return ResponseEntity.ok()
                     .contentType(MediaType.parseMediaType("application/zip"))
                     .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment()
@@ -227,23 +243,40 @@ public class ResultController {
         }
     }
 
+    /**
+     * Chỉ bài CHẤM XONG mới được xuất.
+     *
+     * <p>Trước đây điều kiện chỉ là "có result_json", nên bài {@code MANUAL_REVIEW} — máy chấm
+     * không cho ra điểm nhưng vẫn kịp ghi JSON dở — cũng lọt vào thư mục kết quả. Bên nhận không
+     * có cách nào biết file đó là kết quả chưa tin được.
+     */
+    private static boolean exportable(ExamResult row) {
+        return row.getStatus() == GradingStatus.DONE
+                && row.getResultJson() != null && !row.getResultJson().isBlank();
+    }
+
+    /**
+     * Tên thư mục bên trong ZIP. Cố định "Json" theo đúng cấu trúc đã chốt: giải nén ra là thấy
+     * ngay danh sách file, không phải lách qua một lớp thư mục mang tên lô/đề.
+     */
+    private static final String ARCHIVE_ROOT = "Json";
+
     byte[] buildBatchResultsArchive(String batchId, List<ExamResult> rows) throws Exception {
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
-        String root = safeArchivePart(batchId) + "_results/";
+        String root = ARCHIVE_ROOT + "/";
         Set<String> usedNames = new HashSet<>();
         try (ZipOutputStream zip = new ZipOutputStream(bytes, StandardCharsets.UTF_8)) {
             zip.putNextEntry(new ZipEntry(root));
             zip.closeEntry();
             for (ExamResult row : rows) {
+                if (!exportable(row)) continue;
                 String json = row.getResultJson();
-                if (json == null || json.isBlank()) continue;
-                String preferred = row.getStudentName();
-                if (preferred == null || !preferred.matches("[A-Za-z0-9_-]{1,60}"))
-                    preferred = row.getStudentId();
-                String base = safeArchivePart(preferred == null ? "student" : preferred);
+                // Đặt tên theo MÃ SV, không theo tên thư mục sinh viên nộp: mã là thứ duy nhất
+                // đối chiếu được với bảng điểm, còn tên thư mục mỗi lớp nộp một kiểu.
+                String base = safeArchivePart(row.getStudentId() == null ? "student" : row.getStudentId());
                 String name = base + ".json";
                 if (!usedNames.add(name.toLowerCase())) {
-                    name = base + "_" + safeArchivePart(row.getStudentId()) + ".json";
+                    name = base + "_" + usedNames.size() + ".json";
                     usedNames.add(name.toLowerCase());
                 }
                 zip.putNextEntry(new ZipEntry(root + name));

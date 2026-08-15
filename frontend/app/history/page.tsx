@@ -7,6 +7,7 @@ import { API_BASE, PASS_THRESHOLD } from "@/lib/config";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { Tooltip } from "@/components/ui/Tooltip";
 import CompetencyPanel, { CompetencyItem } from "@/components/grading/CompetencyPanel";
+import { gradingStatusLabel, gradingStatusTone, type GradingOutcome } from "@/lib/gradingStatus";
 import {
   FileJson, DownloadCloud, Search, ChevronRight,
   CheckCircle, AlertCircle, Clock, Users, FileText, FileArchive,
@@ -50,6 +51,8 @@ interface ResultRow {
   studentName: string | null;
   score: number | null;
   status: "DONE" | "ERROR" | "MANUAL_REVIEW" | "GRADING" | "QUEUED" | "CANCELLED";
+  /** Kết luận backend phát hành; vắng mặt ở dữ liệu cũ nên nhãn vẫn suy được từ status. */
+  outcome?: GradingOutcome | null;
   batchId: string | null;
   submittedAt: string | null;
   updatedAt: string | null;
@@ -165,14 +168,9 @@ function csvCell(value: string | number): string {
   return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
-function statusVi(status: ResultRow["status"]): string {
-  if (status === "DONE") return "Đã xong";
-  if (status === "ERROR") return "Lỗi";
-  if (status === "MANUAL_REVIEW") return "Cần chấm tay";
-  if (status === "GRADING") return "Đang chấm";
-  if (status === "QUEUED") return "Đang chờ";
-  if (status === "CANCELLED") return "Đã dừng";
-  return status;
+// Nhãn dùng chung với trang Chấm tự động — xem lib/gradingStatus.
+function statusVi(row: Pick<ResultRow, "status" | "outcome">): string {
+  return gradingStatusLabel(row.status, row.outcome);
 }
 
 function formatHistoryTime(value: string | null): string {
@@ -406,21 +404,26 @@ export default function HistoryPage() {
     }
   };
 
-  // Tải JSON GỘP toàn bộ bài đã chấm xong của đề để lưu trữ/đối chiếu.
-  const downloadAllJson = async () => {
+  /**
+   * Tải về thư mục kết quả: mỗi bài đã chấm xong một file JSON riêng, giải nén ra `Json/<MSSV>.json`
+   * — thay cho bản JSON GỘP trước đây (một file khổng lồ phải tự tách mới dùng được).
+   *
+   * Không dùng `showDirectoryPicker` — xem lý do ở trang Chấm tự động.
+   */
+  const downloadResultsFolder = async () => {
     if (!selected) return;
     try {
-      const res = await fetch(`${API_BASE}/results/exam/${encodeURIComponent(selected)}/full`);
-      if (!res.ok) return;
-      const text = await res.text();
-      const blob = new Blob([text], { type: "application/json" });
+      const res = await fetch(`${API_BASE}/results/exam/${encodeURIComponent(selected)}/archive`);
+      if (res.status === 404) throw new Error("Chưa có bài nào chấm xong để xuất.");
+      if (!res.ok) throw new Error("Không tạo được thư mục kết quả.");
+      const blob = await res.blob();
       const a = document.createElement("a");
       a.href = URL.createObjectURL(blob);
-      const dateStr = new Date().toISOString().split("T")[0];
-      a.download = `${selected}_tatca_${dateStr}.json`;
+      a.download = "Json.zip";
       a.click();
-    } catch {
-      /* bỏ qua */
+      URL.revokeObjectURL(a.href);
+    } catch (error: any) {
+      alert(error?.message || "Không xuất được thư mục JSON.");
     }
   };
 
@@ -446,7 +449,7 @@ export default function HistoryPage() {
           r.studentId,
           r.studentName || "",
           r.score != null ? r.score.toFixed(1) : "",
-          statusVi(r.status),
+          statusVi(r),
           pass,
           total,
           time,
@@ -466,10 +469,13 @@ export default function HistoryPage() {
       title="Lịch sử chấm"
       subtitle="Xem lại kết quả các bài đã chấm theo bộ testcase"
       activePath="/history"
+      /* Cùng khuôn với trang Chấm tự động: nới trần bề ngang và chốt cột trái 320px. Danh sách
+         bộ testcase không dài ra thì cũng không dễ đọc hơn — chỗ dôi ra dồn cho bảng kết quả. */
+      contentClassName="max-w-[1600px]"
     >
-      <div className="grid grid-cols-1 gap-6 xl:grid-cols-4">
+      <div className="grid min-w-0 grid-cols-1 gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">
         {/* Cột trái: danh sách bộ testcase đã chấm */}
-        <div className="xl:col-span-1">
+        <div className="min-w-0">
           <div className="card overflow-hidden">
             <div className="flex items-center gap-2 border-b border-slate-100 bg-slate-50/60 px-5 py-4">
               <FileText size={16} className="text-indigo-500" />
@@ -514,13 +520,14 @@ export default function HistoryPage() {
         </div>
 
         {/* Cột phải: danh sách bài đã chấm của đề */}
-        <div className="space-y-6 xl:col-span-3">
+        <div className="min-w-0 space-y-6">
           {/* Thống kê nhanh */}
-          <div className="grid grid-cols-2 gap-4 md:grid-cols-5">
+          <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
             <MiniStat label="Tổng bài" value={stats.total} icon={Users} tone="slate" />
             <MiniStat label="Đã xong" value={stats.done} icon={CheckCircle} tone="emerald" />
-            <MiniStat label="Cần chấm tay" value={stats.manual} icon={AlertCircle} tone="amber" />
-            <MiniStat label="Lỗi" value={stats.error} icon={AlertCircle} tone="rose" />
+            {/* Gộp ERROR + MANUAL_REVIEW: cả hai đều là "máy chưa cho ra điểm", người chấm xử lý
+                y như nhau. Tách hai ô chỉ bắt họ tự cộng lại. */}
+            <MiniStat label="Lỗi hệ thống" value={stats.manual + stats.error} icon={AlertCircle} tone="amber" />
             <MiniStat label="Điểm TB" value={stats.avg.toFixed(1)} icon={Clock} tone="indigo" />
           </div>
 
@@ -541,12 +548,12 @@ export default function HistoryPage() {
                   />
                 </div>
                 <button
-                  onClick={downloadAllJson}
-                  disabled={!rows.some((r) => r.hasJson)}
-                  title="Tải JSON gộp toàn bộ bài đã chấm của đề"
+                  onClick={downloadResultsFolder}
+                  disabled={!rows.some((r) => r.hasJson && r.outcome === "SCORED")}
+                  title="Xuất thư mục gồm một JSON cho mỗi bài đã chấm xong"
                   className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 shadow-sm transition-all hover:text-slate-900 hover:shadow active:scale-95 disabled:opacity-50"
                 >
-                  <FileArchive size={15} /> JSON
+                  <FileArchive size={15} /> Xuất JSON
                 </button>
                 <button
                   onClick={exportCSV}
@@ -567,11 +574,23 @@ export default function HistoryPage() {
               </div>
             </div>
 
+            {/* table-fixed + colgroup như trang Chấm tự động: cột không tự co giãn theo nội dung
+                nên bảng vừa một màn, không phải kéo ngang. */}
             <div className="overflow-x-auto">
-              <table className="w-full border-collapse text-left">
+              <table className="w-full min-w-[680px] table-fixed border-collapse text-left">
+                <colgroup>
+                  <col className="w-[20%]" />
+                  <col className="w-[13%]" />
+                  <col className="w-[20%]" />
+                  <col className="w-[9%]" />
+                  <col className="w-[20%]" />
+                  {/* Cột cuối chứa 2 nút 28px + padding: hẹp hơn 14% là nút tràn ra ngoài bảng
+                      (table-fixed không nới cột theo nội dung, nó chỉ cho tràn). */}
+                  <col className="w-[18%]" />
+                </colgroup>
                 <thead>
                   <tr className="border-b border-slate-100 bg-white text-xs font-bold uppercase tracking-wider text-slate-500">
-                    <th className="px-6 py-3.5">
+                    <th className="px-6 py-3.5 text-center">
                       <div className="flex items-center gap-2">
                         <input
                           type="checkbox"
@@ -590,9 +609,9 @@ export default function HistoryPage() {
                       </div>
                     </th>
                     <th className="px-6 py-3.5 text-center">Trạng thái</th>
-                    <th className="px-6 py-3.5">Pass</th>
-                    <th className="px-6 py-3.5 text-right">Điểm</th>
-                    <th className="px-6 py-3.5">Thời gian</th>
+                    <th className="px-6 py-3.5 text-center">Pass</th>
+                    <th className="px-6 py-3.5 text-center">Điểm</th>
+                    <th className="px-6 py-3.5 text-center">Thời gian</th>
                     <th className="sticky right-0 z-20 border-l border-slate-100 bg-white px-4 py-3.5 text-center">Chi tiết</th>
                   </tr>
                 </thead>
@@ -621,10 +640,11 @@ export default function HistoryPage() {
                       const isDone = r.status === "DONE";
                       const isError = r.status === "ERROR";
                       const isManual = r.status === "MANUAL_REVIEW";
+                      const statusTone = gradingStatusTone(r.status, r.outcome);
                       const initials = (r.studentName || r.studentId || "?").trim().charAt(0).toUpperCase();
                       return (
                         <tr key={r.id} className="group transition-colors hover:bg-slate-50/70">
-                          <td className="px-6 py-3.5">
+                          <td className="px-6 py-3.5 text-center">
                             <div className="flex items-center gap-3">
                               <input
                                 type="checkbox"
@@ -645,25 +665,13 @@ export default function HistoryPage() {
                           </td>
                           <td className="px-6 py-3.5 text-center">
                             <span
-                              className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${
-                                isDone
-                                  ? "bg-emerald-100 text-emerald-700"
-                                  : isManual
-                                  ? "bg-amber-100 text-amber-800"
-                                  : isError
-                                  ? "bg-rose-100 text-rose-700"
-                                  : "bg-slate-100 text-slate-600"
-                              }`}
+                              className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${statusTone.pill}`}
                             >
-                              <span
-                                className={`h-1.5 w-1.5 rounded-full ${
-                                  isDone ? "bg-emerald-500" : isManual ? "bg-amber-500" : isError ? "bg-rose-500" : "bg-slate-400"
-                                }`}
-                              ></span>
-                              {isDone ? "Đã xong" : isManual ? "Cần chấm tay" : isError ? "Lỗi" : r.status}
+                              <span className={`h-1.5 w-1.5 rounded-full ${statusTone.dot}`}></span>
+                              {gradingStatusLabel(r.status, r.outcome)}
                             </span>
                           </td>
-                          <td className="px-6 py-3.5">
+                          <td className="px-6 py-3.5 text-center">
                             {isDone ? (
                               <div className="flex items-center gap-2">
                                 <div className="h-1.5 w-20 overflow-hidden rounded-full bg-slate-100">
@@ -684,7 +692,7 @@ export default function HistoryPage() {
                               <span className="text-slate-300">—</span>
                             )}
                           </td>
-                          <td className="px-6 py-3.5 text-right">
+                          <td className="px-6 py-3.5 text-center">
                             {r.score != null ? (
                               <span
                                 className={`inline-block rounded-lg px-2.5 py-1 text-sm font-bold ${
@@ -699,7 +707,7 @@ export default function HistoryPage() {
                               <span className="font-medium text-slate-300">—</span>
                             )}
                           </td>
-                          <td className="px-6 py-3.5 text-xs text-slate-500">
+                          <td className="px-6 py-3.5 text-center text-xs text-slate-500">
                             {formatHistoryTime(r.submittedAt || r.updatedAt) || "—"}
                           </td>
                           <td className="sticky right-0 z-10 border-l border-slate-100 bg-white px-4 py-3.5 transition-colors group-hover:bg-slate-50/70">

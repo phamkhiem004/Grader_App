@@ -2802,7 +2802,8 @@ function TestcasesEditor() {
                       className="w-full rounded-lg border border-amber-200 bg-white px-3 py-2 font-mono text-xs outline-none focus:border-amber-400"
                     />
                     <span className="block leading-relaxed">
-                      Bài import package ngoài danh sách này sẽ chuyển sang <strong>Cần chấm tay</strong>, không tự nhận 0 điểm.
+                      Bài import package ngoài danh sách này bị chấm <strong>0 điểm</strong> — khung đề đã khai sẵn
+                      pubspec nên thêm thư viện ngoài là làm sai hướng dẫn.
                     </span>
                   </label>
                   <label className="space-y-1.5 text-xs text-slate-600">

@@ -164,7 +164,7 @@ export default function StatisticsPage() {
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
               <StatusPill icon={CheckCircle2} tone="emerald" label="Đã chấm xong" value={stats.graded} />
               <StatusPill icon={Clock}        tone="amber"   label="Đang chờ / chấm" value={stats.pending} />
-              <StatusPill icon={AlertCircle}  tone="amber"   label="Cần chấm tay" value={stats.manualReview ?? 0} />
+              <StatusPill icon={AlertCircle}  tone="amber"   label="Lỗi hệ thống" value={stats.manualReview ?? 0} />
               <StatusPill icon={XCircle}      tone="rose"    label="Lỗi" value={stats.errors} />
             </div>
 

@@ -160,9 +160,16 @@ export default function WorkspacePage() {
     [rawTotal, sumW]
   );
 
-  // Điểm "Chấm tay" hiển thị: CHƯA chỉnh tay → lấy ĐÚNG điểm đã lưu (manualScore) cho khớp danh sách
-  // (tránh tự suy lại sai khi dữ liệu cũ lưu thiếu tiêu chí); GV bắt đầu chỉnh → lấy total tính trực tiếp.
-  const manualDisplay = touched || detail?.manualScore == null ? total : detail.manualScore;
+  // Giá trị sẽ GHI khi bấm "Lưu điểm", và là số chạy realtime ở dòng "Tổng" cạnh nút đó.
+  // CHƯA chỉnh tay → giữ ĐÚNG điểm đã lưu (tránh tự suy lại sai khi dữ liệu cũ lưu thiếu tiêu chí);
+  // GV bắt đầu chỉnh → lấy total tính trực tiếp.
+  const scoreToSave = touched || detail?.manualScore == null ? total : detail.manualScore;
+
+  // Điểm HIỂN THỊ ở thẻ "Chấm tay" trên đầu trang: CHỈ điểm đã lưu vào DB, chưa lưu thì "—".
+  // Trước đây nó rơi về `total` — mà `total` khởi tạo từ pass/fail của máy — nên bài chưa ai chấm
+  // tay vẫn hiện sẵn đúng bằng điểm tự động, trông như đã chấm rồi. Số đang chỉnh dở vẫn nhìn được
+  // ở dòng "Tổng" phía dưới, nên thẻ này giữ đúng nghĩa "điểm chấm tay đã chốt".
+  const savedManualScore = detail?.manualScore ?? null;
 
   const setPoint = (testId: string, val: number, max: number) => {
     const v = Math.max(0, Math.min(max, round2(isNaN(val) ? 0 : val)));
@@ -188,14 +195,14 @@ export default function WorkspacePage() {
       const res = await fetch(`${API_BASE}/results/${encodeURIComponent(examId)}/${encodeURIComponent(studentId)}/manual`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ score: manualDisplay, criteria: criteriaPayload, note }),
+        body: JSON.stringify({ score: scoreToSave, criteria: criteriaPayload, note }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Lưu thất bại");
-      setSaveMsg({ type: "ok", text: `Đã lưu điểm chấm tay: ${manualDisplay.toFixed(1)}` });
+      setSaveMsg({ type: "ok", text: `Đã lưu điểm chấm tay: ${scoreToSave.toFixed(1)}` });
       // cập nhật badge trong danh sách + detail
-      setStudents((list) => list.map((s) => (s.studentId === studentId ? { ...s, manualScore: manualDisplay } : s)));
-      setDetail((d) => (d ? { ...d, manualScore: manualDisplay } : d));
+      setStudents((list) => list.map((s) => (s.studentId === studentId ? { ...s, manualScore: scoreToSave } : s)));
+      setDetail((d) => (d ? { ...d, manualScore: scoreToSave } : d));
       setTouched(false);
     } catch (e: any) {
       setSaveMsg({ type: "err", text: e?.message || "Lưu thất bại" });
@@ -211,10 +218,13 @@ export default function WorkspacePage() {
       title="Chấm thủ công"
       subtitle="Chọn bộ testcase → xem bài làm sinh viên → chấm thủ công theo từng tiêu chí"
       activePath="/teacher/workspace"
+      /* Cùng khuôn với trang Chấm tự động: trần bề ngang rộng hơn, cột trái chốt 320px.
+         Ở trang này phần dôi ra còn quan trọng hơn — cột phải chứa mã nguồn bài làm. */
+      contentClassName="max-w-[1600px]"
     >
-      <div className="grid grid-cols-1 gap-6 xl:grid-cols-4">
+      <div className="grid min-w-0 grid-cols-1 gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">
         {/* Cột trái: chọn đề + danh sách SV */}
-        <div className="xl:col-span-1">
+        <div className="min-w-0">
           <div className="card overflow-hidden">
             <div className="border-b border-slate-100 bg-slate-50/60 p-4">
               <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500">Bộ testcase</label>
@@ -276,7 +286,7 @@ export default function WorkspacePage() {
         </div>
 
         {/* Cột phải: bài làm + chấm tiêu chí */}
-        <div className="xl:col-span-3">
+        <div className="min-w-0">
           {!studentId ? (
             <div className="flex h-full min-h-[60vh] flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-300/70 bg-white/60 p-12 text-center">
               <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-50 to-blue-50 text-indigo-400">
@@ -300,11 +310,13 @@ export default function WorkspacePage() {
                 </div>
                 <div className="flex items-center gap-5">
                   <ScorePill label="Tự động" value={detail?.autoScore} tone="slate" />
-                  <ScorePill label="Chấm tay" value={manualDisplay} tone="violet" highlight />
+                  <ScorePill label="Chấm tay" value={savedManualScore} tone="violet" highlight />
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+              {/* Mã nguồn cần bề ngang hơn bảng tiêu chí: dòng code dài mà cột hẹp thì phải cuộn
+                  ngang liên tục, trong khi cột tiêu chí chỉ có tên + một ô số. Chia 60/40. */}
+              <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
                 {/* Bài làm: mã nguồn */}
                 <div className="card flex max-h-[70vh] flex-col overflow-hidden">
                   <div className="flex items-center gap-2 border-b border-slate-100 bg-slate-50/60 px-4 py-3">
@@ -434,7 +446,7 @@ export default function WorkspacePage() {
                     <div className="flex items-center justify-between">
                       <div className="text-sm">
                         <span className="text-slate-500">Tổng: </span>
-                        <span className={`text-xl font-bold ${manualDisplay >= PASS_THRESHOLD ? "text-emerald-600" : "text-rose-600"}`}>{manualDisplay.toFixed(1)}</span>
+                        <span className={`text-xl font-bold ${scoreToSave >= PASS_THRESHOLD ? "text-emerald-600" : "text-rose-600"}`}>{scoreToSave.toFixed(1)}</span>
                         <span className="text-slate-400"> / 10</span>
                         {touched && sumW > 0 && Math.abs(sumW - 10) > 0.001 && (
                           <span className="ml-2 text-[11px] text-slate-400">

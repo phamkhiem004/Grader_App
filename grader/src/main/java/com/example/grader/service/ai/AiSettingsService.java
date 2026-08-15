@@ -15,22 +15,26 @@ import java.util.Locale;
 import java.util.Map;
 
 /**
- * Cấu hình LLM đang có hiệu lực: nhà cung cấp, key, model, endpoint.
+ * Cấu hình LLM đang có hiệu lực.
+ *
+ * <p>MODEL là thứ duy nhất người dùng chọn; nhà cung cấp và endpoint được suy ra từ mã model
+ * ({@link AiModelCatalog#providerFor}). Bắt chọn provider rồi gõ endpoint của hãng là thừa —
+ * người dùng chỉ cần biết mình muốn dùng Claude, GPT hay Gemini.
  *
  * <p>Thứ tự ưu tiên: giá trị nhập trên web (DB) → biến môi trường/application.properties.
- * Nhờ vậy máy đã cắm key qua env vẫn chạy như cũ, còn người dùng bình thường chỉ cần dán key
- * vào trang tạo testcase là xong.
+ * Nhờ vậy máy đã cắm key qua env vẫn chạy như cũ.
  */
 @Slf4j
 @Service
 public class AiSettingsService {
 
-    public static final List<String> PROVIDERS = List.of("gemini", "openai");
+    public static final List<String> PROVIDERS = AiModelCatalog.PROVIDERS;
 
     /** Model mặc định cho từng provider khi người dùng để trống. */
     private static final Map<String, String> DEFAULT_MODEL = Map.of(
-            "gemini", "gemini-2.0-flash",
-            "openai", "gpt-4o-mini");
+            AiModelCatalog.ANTHROPIC, "claude-opus-5",
+            AiModelCatalog.GEMINI, "gemini-2.0-flash",
+            AiModelCatalog.OPENAI, "gpt-4o-mini");
 
     @Value("${grader.ai.provider:gemini}")
     private String envProvider;
@@ -46,13 +50,20 @@ public class AiSettingsService {
     private String envOpenAiBaseUrl;
     @Value("${grader.ai.gemini.base-url:https://generativelanguage.googleapis.com/v1beta}")
     private String envGeminiBaseUrl;
+    @Value("${grader.ai.anthropic.api-key:}")
+    private String envAnthropicKey;
+    @Value("${grader.ai.anthropic.model:}")
+    private String envAnthropicModel;
     @Value("${grader.ai.timeout-seconds:180}")
     private int envTimeoutSeconds;
 
     @Autowired
     private AiSettingRepository repo;
 
-    private volatile String provider;
+    /** Mã model chỉ gồm ký tự an toàn — nó được ghép thẳng vào URL của Gemini. */
+    private static final java.util.regex.Pattern SAFE_MODEL =
+            java.util.regex.Pattern.compile("^[A-Za-z0-9][A-Za-z0-9._:-]{0,80}$");
+
     private volatile String model;
     private volatile String baseUrl;
     private volatile String apiKey;
@@ -65,7 +76,6 @@ public class AiSettingsService {
         applyEnvDefaults();
         try {
             repo.findById(AiSetting.SINGLETON_ID).ifPresent(row -> {
-                provider = normalizeProvider(row.getProvider());
                 model = blankToNull(row.getModel());
                 baseUrl = blankToNull(row.getBaseUrl());
                 apiKey = blankToNull(row.getApiKey()) != null ? row.getApiKey() : apiKey;
@@ -76,55 +86,67 @@ public class AiSettingsService {
         } catch (Exception e) {
             log.warn("Không đọc được cấu hình AI từ DB, dùng cấu hình môi trường: {}", e.getMessage());
         }
-        log.info("Cấu hình AI: provider={} model={} {}", provider(), model(),
+        log.info("Cấu hình AI: model={} ({}) {}", model(), provider(),
                 hasApiKey() ? "(đã có API key)" : "(CHƯA có API key)");
     }
 
+    /** Máy đã cắm key qua biến môi trường vẫn chạy y như trước; provider lấy theo cấu hình cũ. */
     private void applyEnvDefaults() {
-        provider = normalizeProvider(envProvider);
+        String envSide = normalizeProvider(envProvider);
         timeoutSeconds = envTimeoutSeconds > 0 ? envTimeoutSeconds : 180;
-        if ("openai".equals(provider)) {
-            apiKey = blankToNull(envOpenAiKey);
-            model = blankToNull(envOpenAiModel);
-            baseUrl = blankToNull(envOpenAiBaseUrl);
-        } else {
-            apiKey = blankToNull(envGeminiKey);
-            model = blankToNull(envGeminiModel);
-            baseUrl = blankToNull(envGeminiBaseUrl);
+        switch (envSide) {
+            case AiModelCatalog.ANTHROPIC -> {
+                apiKey = blankToNull(envAnthropicKey);
+                model = blankToNull(envAnthropicModel);
+                baseUrl = null;                       // dùng endpoint chính thức
+            }
+            case AiModelCatalog.OPENAI -> {
+                apiKey = blankToNull(envOpenAiKey);
+                model = blankToNull(envOpenAiModel);
+                baseUrl = blankToNull(envOpenAiBaseUrl);
+            }
+            default -> {
+                apiKey = blankToNull(envGeminiKey);
+                model = blankToNull(envGeminiModel);
+                baseUrl = blankToNull(envGeminiBaseUrl);
+            }
         }
+        // Không có model trong env thì lấy mặc định của chính nhà cung cấp đó, để provider()
+        // (vốn suy từ model) không nhảy sang hãng khác.
+        if (model == null) model = DEFAULT_MODEL.get(envSide);
     }
 
     // ── Giá trị đang dùng ────────────────────────────────────────
 
-    public String provider()  { return provider == null ? "gemini" : provider; }
+    /** Suy từ mã model — không lưu riêng, nên không bao giờ lệch nhau. */
+    public String provider()  { return AiModelCatalog.providerFor(model()); }
     public String apiKey()    { return apiKey; }
     public boolean hasApiKey(){ return apiKey != null && !apiKey.isBlank(); }
     public int timeoutSeconds() { return timeoutSeconds > 0 ? timeoutSeconds : 180; }
 
     public String model() {
-        if (model != null && !model.isBlank()) return model;
-        return DEFAULT_MODEL.getOrDefault(provider(), "gemini-2.0-flash");
+        return model != null && !model.isBlank() ? model : "claude-opus-5";
     }
 
     public String baseUrl() {
         if (baseUrl != null && !baseUrl.isBlank()) return baseUrl.trim().replaceAll("/+$", "");
-        return "openai".equals(provider())
-                ? "https://api.openai.com/v1"
-                : "https://generativelanguage.googleapis.com/v1beta";
+        return AiModelCatalog.defaultBaseUrl(provider());
     }
 
     // ── API cho controller ───────────────────────────────────────
 
     public Map<String, Object> describe() {
         Map<String, Object> m = new LinkedHashMap<>();
-        m.put("provider", provider());
         m.put("model", model());
-        m.put("baseUrl", baseUrl());
+        m.put("provider", provider());
+        m.put("vendor", AiModelCatalog.vendorLabel(provider()));
+        m.put("keyUrl", AiModelCatalog.keyUrl(provider()));   // chỗ lấy key của đúng hãng đang chọn
         m.put("hasApiKey", hasApiKey());
-        m.put("apiKeyMasked", mask(apiKey));          // KHÔNG bao giờ trả key nguyên vẹn
+        m.put("apiKeyMasked", mask(apiKey));                  // KHÔNG bao giờ trả key nguyên vẹn
         m.put("timeoutSeconds", timeoutSeconds());
-        m.put("providers", PROVIDERS);
-        m.put("defaultModels", DEFAULT_MODEL);
+        m.put("models", AiModelCatalog.models());
+        m.put("baseUrl", baseUrl());
+        m.put("customBaseUrl", baseUrl != null && !baseUrl.isBlank());
         m.put("ready", hasApiKey());
         m.put("updatedAt", updatedAt != null ? updatedAt.toString() : null);
         m.put("updatedBy", updatedBy);
@@ -137,15 +159,13 @@ public class AiSettingsService {
      * {@code clearApiKey: true}.
      */
     public Map<String, Object> update(Map<String, Object> body, String actor) {
-        // KHÔNG chuẩn hoá trước rồi mới kiểm tra: normalizeProvider vốn rơi về "gemini" cho mọi
-        // giá trị lạ, làm phép kiểm tra không bao giờ chạm tới và người dùng gõ sai vẫn lưu êm.
-        String rawProvider = text(body, "provider", null);
-        String newProvider = rawProvider == null ? provider() : rawProvider.toLowerCase(Locale.ROOT);
-        if (!PROVIDERS.contains(newProvider))
-            throw new IllegalArgumentException("Nhà cung cấp không hợp lệ: " + rawProvider
-                    + ". Hợp lệ: " + PROVIDERS);
+        String newModel = text(body, "model", model());
+        if (newModel == null || newModel.isBlank())
+            throw new IllegalArgumentException("Hãy chọn model AI muốn dùng.");
+        if (!SAFE_MODEL.matcher(newModel).matches())
+            throw new IllegalArgumentException("Mã model không hợp lệ: " + newModel
+                    + ". Chỉ gồm chữ, số và các ký tự . _ - :");
 
-        String newModel = text(body, "model", null);
         String newBaseUrl = text(body, "baseUrl", null);
         String suppliedKey = text(body, "apiKey", null);
         boolean clearKey = Boolean.TRUE.equals(body.get("clearApiKey"));
@@ -153,22 +173,30 @@ public class AiSettingsService {
         if (newTimeout < 30 || newTimeout > 900)
             throw new IllegalArgumentException("Thời gian chờ mỗi lần gọi AI phải trong khoảng 30 – 900 giây");
 
-        // Đổi nhà cung cấp mà không nhập key mới: key cũ chắc chắn không dùng được (key Gemini
-        // không phải key OpenAI). Xoá luôn để giao diện báo "chưa có key" ngay, thay vì để người
-        // dùng đâm vào lỗi 401 khó hiểu ở lần sinh đề đầu tiên.
-        boolean providerChanged = !newProvider.equals(provider());
-        String finalKey = clearKey || (providerChanged && suppliedKey == null)
+        // Đổi sang model của HÃNG KHÁC mà không nhập key mới: key cũ chắc chắn không dùng được
+        // (key Claude không phải key OpenAI). Xoá luôn để giao diện báo "chưa có key" ngay, thay vì
+        // để người dùng đâm vào lỗi 401 khó hiểu ở lần sinh đề đầu tiên.
+        String newProvider = AiModelCatalog.providerFor(newModel);
+        boolean vendorChanged = !newProvider.equals(provider());
+        String finalKey = clearKey || (vendorChanged && suppliedKey == null)
                 ? null
                 : (suppliedKey != null ? suppliedKey : apiKey);
-        if (newBaseUrl != null && !newBaseUrl.isBlank()
-                && !newBaseUrl.startsWith("http://") && !newBaseUrl.startsWith("https://"))
-            throw new IllegalArgumentException("Endpoint phải bắt đầu bằng http:// hoặc https://");
+
+        // Endpoint riêng chỉ có nghĩa với các bản tương thích OpenAI (Ollama, OpenRouter, Groq).
+        if (newBaseUrl != null && !newBaseUrl.isBlank()) {
+            if (!newBaseUrl.startsWith("http://") && !newBaseUrl.startsWith("https://"))
+                throw new IllegalArgumentException("Endpoint phải bắt đầu bằng http:// hoặc https://");
+            if (!AiModelCatalog.OPENAI.equals(newProvider))
+                throw new IllegalArgumentException(
+                        "Chỉ model tương thích OpenAI mới đặt được endpoint riêng; "
+                                + AiModelCatalog.vendorLabel(newProvider) + " luôn dùng endpoint chính thức.");
+        }
 
         Instant now = Instant.now();
         try {
             AiSetting row = repo.findById(AiSetting.SINGLETON_ID).orElseGet(AiSetting::new);
             row.setId(AiSetting.SINGLETON_ID);
-            row.setProvider(newProvider);
+            row.setProvider(newProvider);          // lưu để tra cứu/audit; khi đọc vẫn suy từ model
             row.setModel(newModel);
             row.setBaseUrl(newBaseUrl);
             row.setApiKey(finalKey);
@@ -180,14 +208,13 @@ public class AiSettingsService {
             throw new IllegalStateException("Không lưu được cấu hình AI: " + e.getMessage(), e);
         }
 
-        provider = newProvider;
         model = newModel;
         baseUrl = newBaseUrl;
         apiKey = finalKey;
         timeoutSeconds = newTimeout;
         updatedAt = now;
         updatedBy = actor;
-        log.info("Cấu hình AI cập nhật: provider={} model={} (bởi {})", provider(), model(), actor);
+        log.info("Cấu hình AI cập nhật: model={} ({}) (bởi {})", model(), provider(), actor);
         return describe();
     }
 
@@ -199,9 +226,10 @@ public class AiSettingsService {
         return trimmed.substring(0, 3) + "••••" + trimmed.substring(trimmed.length() - 4);
     }
 
+    /** Chỉ dùng để đọc cấu hình MÔI TRƯỜNG cũ; giá trị lạ rơi về gemini như hành vi trước đây. */
     private String normalizeProvider(String raw) {
         String value = raw == null ? "" : raw.trim().toLowerCase(Locale.ROOT);
-        return PROVIDERS.contains(value) ? value : "gemini";
+        return PROVIDERS.contains(value) ? value : AiModelCatalog.GEMINI;
     }
 
     private String blankToNull(String s) {

@@ -117,13 +117,16 @@ final class SubmissionPackagePolicy {
             String evidence = externalUses.entrySet().stream()
                     .map(entry -> entry.getKey() + " tại " + String.join(", ", entry.getValue()))
                     .reduce((a, b) -> a + "; " + b).orElse("");
+            // Đề phát cho sinh viên một khung có sẵn pubspec: thêm package ngoài là làm sai
+            // hướng dẫn, bằng chứng nằm ngay trong lib/. Đây là KẾT QUẢ 0 điểm, không phải sự cố
+            // cần người chấm can thiệp — nên manualReview = false.
             throw new GradingDiagnosticException(
                     "EXTERNAL_PACKAGE",
                     STUDENT,
                     "DEPENDENCY_PREFLIGHT",
-                    true,
+                    false,
                     "Bài dùng package ngoài danh sách đề cho phép: " + packages
-                            + ". Chuyển sang chấm tay. Chi tiết: " + evidence);
+                            + ". Chi tiết: " + evidence);
         }
     }
 

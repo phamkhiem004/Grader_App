@@ -5,10 +5,11 @@ import SidebarLayout from "@/components/layout/SidebarLayout";
 import { API_BASE, PASS_THRESHOLD } from "@/lib/config";
 import ExamCombobox from "@/components/ui/ExamCombobox";
 import PerformanceSettings from "@/components/grading/PerformanceSettings";
+import { gradingStatusLabel, gradingStatusTone } from "@/lib/gradingStatus";
 
 // Khóa lưu phiên chấm đang/ vừa chạy → rời trang rồi quay lại KHÔNG mất kết quả
 const ACTIVE_BATCH_KEY = "grader_active_batch";
-import { UploadCloud, Play, Pause, FileArchive, X, CheckCircle, Clock, AlertCircle, DownloadCloud, Loader2, CheckSquare, BarChart2, Users, TrendingUp, FileJson, StopCircle, Trash2, Ban } from "lucide-react";
+import { UploadCloud, Play, Pause, FileArchive, X, CheckCircle, Clock, AlertCircle, DownloadCloud, Loader2, CheckSquare, BarChart2, Users, TrendingUp, FileJson, StopCircle, Trash2, Ban, RotateCcw, ListFilter, ChevronDown } from "lucide-react";
 
 const normalizedPath = (value) => String(value || "").replace(/\\/g, "/");
 
@@ -59,109 +60,25 @@ export default function AutomaticGradingPage() {
   const [phase, setPhase] = useState("idle"); // idle | uploading | polling | done
   const [uploadErr, setUploadErr] = useState(null);
   const [parseErrors, setParseErrors] = useState([]);
-  const [resultFilter, setResultFilter] = useState("all");
-  const [diagnosticFilter, setDiagnosticFilter] = useState("all");
+  // Một trục lọc duy nhất cho bảng kết quả: all | scored | grading | blocked.
+  const [rowFilter, setRowFilter] = useState("all");
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [regrading, setRegrading] = useState(false);
   const [batchAction, setBatchAction] = useState(null);   // "stop" | "cancel" khi đang gọi API
   const [stopNotice, setStopNotice] = useState(null);
   const fileRef = useRef();
   const pollRef = useRef(null);
+  const filterRef = useRef(null);
 
-  // Keep the diagnostic helpers in the component scope. Next.js Fast Refresh can
-  // replace only the component body during development; module-level helpers added
-  // in the same refresh may otherwise be missing from the temporary eval scope.
-  const diagnosticCategoryLabels = {
-    dependency: "Thư viện ngoài không được phép",
-    testcase_timeout: "Timeout do bộ testcase",
-    compile: "Lỗi biên dịch",
-    structure: "Class/cấu trúc không được phép",
-    crash: "Ứng dụng không thể khởi động",
-    testcase: "Lỗi bộ testcase",
-    environment: "Lỗi môi trường chấm",
-    undetermined: "Chưa xác định nguồn lỗi",
-  };
-
-  const hasLayoutFailureEvidence = (row) => {
-    const directEvidence = `${row?.errorLog || ""} ${row?.diagnosticMessage || ""}`;
-    if (/RenderFlex|overflowed by|LAYOUT_OVERFLOW|LAYOUT_ERROR/i.test(directEvidence)) return true;
-    try {
-      const details = JSON.parse(row?.details || "{}");
-      return (details?.test_cases || []).some((testcase) => {
-        const evidence = `${testcase?.error_code || ""} ${testcase?.actual || ""} ${testcase?.observation?.kind || ""}`;
-        return /RenderFlex|overflowed by|LAYOUT_OVERFLOW|LAYOUT_ERROR/i.test(evidence);
-      });
-    } catch (_) {
-      return false;
-    }
-  };
-
-  const hasSourcePolicyEvidence = (row) => {
-    const directEvidence = `${row?.errorLog || ""} ${row?.diagnosticMessage || ""}`;
-    if (/SOURCE_POLICY_VIOLATION|forbidden token|token bị cấm|class (?:is )?not allowed|class không được phép/i.test(directEvidence)) {
-      return true;
-    }
-    try {
-      const details = JSON.parse(row?.details || "{}");
-      return (details?.test_cases || []).some((testcase) => {
-        const evidence = `${testcase?.error_code || ""} ${testcase?.actual || ""} ${testcase?.observation?.kind || ""}`;
-        return /SOURCE_POLICY_VIOLATION|forbidden token|token bị cấm|class (?:is )?not allowed|class không được phép/i.test(evidence);
-      });
-    } catch (_) {
-      return false;
-    }
-  };
-
-  const getDiagnosticInfo = (row) => {
-    const code = String(row?.diagnosticCode || "").toUpperCase();
-    const origin = String(row?.diagnosticOrigin || "").toUpperCase();
-    const stage = String(row?.diagnosticStage || "").toUpperCase();
-    const status = String(row?.status || "").toUpperCase();
-    if (!code && status !== "ERROR" && status !== "MANUAL_REVIEW") return null;
-    const sourcePolicyViolation = code.includes("SOURCE_POLICY")
-      || code.includes("FORBIDDEN_CLASS")
-      || code.includes("CLASS_NOT_ALLOWED")
-      || code.includes("SUBMISSION_STRUCTURE")
-      || hasSourcePolicyEvidence(row);
-
-    // Đây là cột sự cố của pipeline chấm, không phải bản tóm tắt mọi testcase fail.
-    // Render/validation/behavior sai vẫn được giữ đầy đủ trong JSON và điểm số.
-    const isOrdinaryTestFailure = code.includes("REQUIREMENTS_NOT_MET")
-      || code.includes("TESTS_FAILED")
-      || (code === "CONTRACT_VIOLATION" && !sourcePolicyViolation)
-      || code.includes("LAYOUT_OVERFLOW")
-      || code.includes("BUILD_ERROR");
-    if (isOrdinaryTestFailure || hasLayoutFailureEvidence(row)) return null;
-
-    const runtimeAssertion = ["NULL_ERROR", "TYPE_ERROR", "RANGE_ERROR", "FORMAT_ERROR",
-      "STATE_ERROR", "NO_SUCH_METHOD", "EXCEPTION_THROWN"].some((value) => code.includes(value));
-    if (runtimeAssertion && stage !== "APP_BOOT") return null;
-
-    let category;
-    if (code.includes("EXTERNAL_PACKAGE") || code.includes("DEPENDENCY")) category = "dependency";
-    else if (code.includes("TIMEOUT") || code.includes("WATCHDOG")) {
-      // Timeout trong main(), hàm hoặc thao tác của sinh viên là kết quả bài làm và
-      // đã nằm trong JSON. Cột này chỉ gọi là timeout testcase khi backend đã có
-      // bằng chứng origin=TESTCASE; không suy đoán từ một chuỗi "timed out" chung.
-      if (origin !== "TESTCASE") return null;
-      category = "testcase_timeout";
-    }
-    else if (code.includes("COMPILE")) category = "compile";
-    else if (sourcePolicyViolation) category = "structure";
-    else if (runtimeAssertion && stage === "APP_BOOT") category = "crash";
-    else if (code.includes("CRASH") || code.includes("APP_BOOT_ERROR")) category = "crash";
-    else if (origin === "TESTCASE") category = "testcase";
-    else if (origin === "ENVIRONMENT") category = "environment";
-    else if (origin === "UNDETERMINED" || status === "MANUAL_REVIEW" || status === "ERROR") category = "undetermined";
-    else return null;
-
-    const scope = origin === "STUDENT" ? "student" : "system";
-    const tone = status === "MANUAL_REVIEW" || row?.requiresManualReview
-      ? "border-amber-200 bg-amber-50 text-amber-800"
-      : origin === "TESTCASE" || origin === "ENVIRONMENT" || origin === "UNDETERMINED"
-        ? "border-violet-200 bg-violet-50 text-violet-700"
-        : "border-rose-200 bg-rose-50 text-rose-700";
-
-    return { category, scope, label: diagnosticCategoryLabels[category], tone };
-  };
+  // Người chấm chỉ cần MỘT câu trả lời: bài nào máy chấm không cho ra điểm. Backend phát hành
+  // sẵn kết luận đó ở `outcome` (PENDING | SCORED | SYSTEM_BLOCKED | STOPPED).
+  //
+  // Trước đây chỗ này tự suy lại từ status × diagnostic_origin × diagnostic_code qua ~50 dòng
+  // heuristic, kèm cả việc bới JSON test_cases. Hậu quả đo được: 4 mã timeout của MÔI TRƯỜNG
+  // (GRADER_TOTAL_TIMEOUT, CONTAINER_WATCHDOG_TIMEOUT, TEST_PROCESS_TIMEOUT,
+  // GRADING_TIMEOUT_UNDETERMINED) bị luật "chỉ nhận timeout khi origin=TESTCASE" nuốt mất —
+  // đúng nhóm cần báo thì không hiện. Suy đoán ở FE là nguồn sự thật thứ hai; nay bỏ hẳn.
+  const isBlocked = (row) => row?.outcome === "SYSTEM_BLOCKED";
 
   const formatDiagnosticStage = (stage) => {
     const labels = {
@@ -229,6 +146,19 @@ export default function AutomaticGradingPage() {
   // Dọn interval khi rời trang (tránh setState trên component đã unmount)
   useEffect(() => () => clearInterval(pollRef.current), []);
 
+  // Đóng menu lọc khi bấm ra ngoài hoặc nhấn Esc.
+  useEffect(() => {
+    if (!filterOpen) return;
+    const onDown = (e) => { if (!filterRef.current?.contains(e.target)) setFilterOpen(false); };
+    const onKey = (e) => { if (e.key === "Escape") setFilterOpen(false); };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [filterOpen]);
+
   // Helper function to make error messages human-readable
   const formatErrorMsg = (errStr) => {
     if (typeof errStr !== 'string') return errStr;
@@ -292,7 +222,7 @@ export default function AutomaticGradingPage() {
     if (!examId.trim()) { setUploadErr("Vui lòng nhập mã bộ testcase."); return; }
 
     setPhase("uploading"); setUploadErr(null); setParseErrors([]); setStopNotice(null);
-    setResultFilter("all"); setDiagnosticFilter("all");
+    setRowFilter("all");
 
     const form = new FormData();
     form.append("examId", examId.trim());
@@ -362,7 +292,7 @@ export default function AutomaticGradingPage() {
     try { localStorage.removeItem(ACTIVE_BATCH_KEY); } catch (_) {}
     setFiles([]); setBatchId(null); setProgress(null);
     setPhase("idle"); setUploadErr(null); setParseErrors([]); setStopNotice(null);
-    setResultFilter("all"); setDiagnosticFilter("all");
+    setRowFilter("all");
   };
 
   // ── Dừng / hủy phiên chấm đang chạy ────────────────────────────
@@ -416,10 +346,17 @@ export default function AutomaticGradingPage() {
     // 1. Các bài hợp lệ đã nạp vào server
     const validRows = (progress?.results || []).map(r => {
       let note = "";
-      if (r.status === "ERROR") note = "Lỗi khi chấm (thường do lỗi compile hoặc crash)";
-      if (r.status === "CANCELLED") note = "Chưa chấm — phiên chấm đã bị dừng";
-      if (r.status === "MANUAL_REVIEW") {
-        note = `Cần chấm tay: ${r.diagnosticCode || "UNCLASSIFIED"} · ${r.diagnosticOrigin || "UNDETERMINED"} · ${r.errorLog || ""}`;
+      if (r.outcome === "STOPPED") note = "Chưa chấm — phiên chấm đã bị dừng";
+      // 0 điểm do bài làm KHÔNG lên cột sự cố (người chấm không phải xử lý), nhưng lý do vẫn
+      // phải tra được: đây là thứ duy nhất trả lời được khi sinh viên khiếu nại, và với ca
+      // không biên dịch được thì bảng testcase trống nên không còn chỗ nào khác nói giúp.
+      if (r.outcome === "SCORED" && r.score === 0 && r.diagnosticCode) {
+        note = `0 điểm — ${r.diagnosticCode}: ${r.errorLog || ""}`;
+      }
+      if (r.outcome === "SYSTEM_BLOCKED") {
+        // Bài chưa có điểm vì MÁY, không vì bài làm — phải ghi rõ trong CSV, nếu không người
+        // đọc file sẽ hiểu ô điểm trống là sinh viên bỏ trắng.
+        note = `Lỗi hệ thống, chưa có điểm: ${r.diagnosticCode || "UNCLASSIFIED"} · ${r.diagnosticOrigin || "UNDETERMINED"} · ${r.errorLog || ""}`;
       }
       if (r.status === "DONE") {
         try {
@@ -459,53 +396,28 @@ export default function AutomaticGradingPage() {
     a.click();
   };
 
-  const resultFolderName = () => {
-    const dateStr = new Date().toISOString().split("T")[0];
-    return `${examId}_results_${dateStr}_${batchId}`.replace(/[^A-Za-z0-9_-]/g, "_");
-  };
-
-  const safeResultFileName = (row) => {
-    const studentId = String(row.studentId || "student").replace(/[^A-Za-z0-9_-]/g, "_");
-    const username = String(row.studentName || studentId).replace(/[^A-Za-z0-9_-]/g, "_");
-    const base = username.toLowerCase().endsWith(studentId.toLowerCase())
-      ? username
-      : `${username}_${studentId}`;
-    return `${base}.json`;
-  };
-
-  // Chrome/Edge trên localhost có thể ghi trực tiếp một thư mục. Trình duyệt khác nhận
-  // ZIP vận chuyển chứa đúng một thư mục và các JSON riêng lẻ, không còn JSON gộp.
+  /**
+   * Tải về thư mục kết quả: bấm một cái là tải ngay, giải nén ra `Json/<MSSV>.json`.
+   *
+   * <p>KHÔNG dùng `showDirectoryPicker`: nó bắt người dùng chọn thư mục, và Chrome từ chối phần
+   * lớn thư mục quen tay ("thư mục này chứa tệp hệ thống") nên thao tác hay chết giữa chừng.
+   * Trình duyệt không tải xuống được một thư mục thật, nên ZIP là lớp vận chuyển duy nhất —
+   * bên trong vẫn đúng một thư mục `Json` với các file rời, không phải JSON gộp.
+   */
   const downloadResultsFolder = async () => {
     if (!batchId) return;
     try {
-      if (typeof window.showDirectoryPicker === "function") {
-        const parent = await window.showDirectoryPicker({ mode: "readwrite" });
-        const folder = await parent.getDirectoryHandle(resultFolderName(), { create: true });
-        let written = 0;
-        for (const row of progress?.results || []) {
-          const exId = row.examId || examId;
-          const res = await fetch(`${API_BASE}/results/${encodeURIComponent(exId)}/${encodeURIComponent(row.studentId)}`);
-          if (!res.ok) continue;
-          const handle = await folder.getFileHandle(safeResultFileName(row), { create: true });
-          const writable = await handle.createWritable();
-          await writable.write(await res.text());
-          await writable.close();
-          written++;
-        }
-        if (!written) throw new Error("Chưa có kết quả JSON nào để xuất.");
-        return;
-      }
-
       const res = await fetch(`${API_BASE}/results/batch/${encodeURIComponent(batchId)}/archive`);
+      if (res.status === 404) throw new Error("Chưa có bài nào chấm xong để xuất.");
       if (!res.ok) throw new Error("Không tạo được thư mục kết quả.");
       const blob = await res.blob();
       const a = document.createElement("a");
       a.href = URL.createObjectURL(blob);
-      a.download = `${resultFolderName()}.zip`;
+      a.download = "Json.zip";
       a.click();
       URL.revokeObjectURL(a.href);
     } catch (error) {
-      if (error?.name !== "AbortError") setUploadErr(error?.message || "Không xuất được thư mục JSON.");
+      setUploadErr(error?.message || "Không xuất được thư mục JSON.");
     }
   };
 
@@ -529,49 +441,93 @@ export default function AutomaticGradingPage() {
   const isPaused = p?.status === "PAUSED";
 
   const totalItems = (p?.total || 0) + parseErrors.length;
-  const errorItems = (p?.error || 0) + parseErrors.length;
-  const manualItems = p?.manualReview || 0;
   const doneItems = p?.done || 0;
-  const gradingItems = p?.grading || 0;
   const cancelledItems = p?.cancelled || 0;   // bài bị bỏ do người dùng dừng phiên
+  // Bài máy chấm KHÔNG cho ra điểm. Trước đây tách "lỗi" và "cần chấm tay" thành hai con số,
+  // nhưng người chấm phải xử lý y như nhau nên tách chỉ làm khó đọc. Bài sinh viên làm sai
+  // KHÔNG nằm ở đây — nó đã là 0 điểm trong "Hoàn thành".
+  const blockedItems = p?.blocked ?? ((p?.error || 0) + (p?.manualReview || 0));
+  // File bị loại ngay khi upload (không phải .zip, rỗng, quá 50MB) chưa từng vào hàng đợi.
+  const rejectedItems = parseErrors.length;
 
   // Bài bị dừng cũng là "đã xử lý xong": không tính vào đây thì thanh tiến độ đứng mãi dưới 100%.
-  const processedItems = doneItems + errorItems + manualItems + cancelledItems;
+  const processedItems = doneItems + blockedItems + cancelledItems + rejectedItems;
   const pct = totalItems > 0 ? Math.round((processedItems / totalItems) * 100) : 0;
   const donePct = totalItems > 0 ? Math.round((doneItems / totalItems) * 100) : 0;
-  const errPct = totalItems > 0 ? Math.round((errorItems / totalItems) * 100) : 0;
-  const reviewPct = totalItems > 0 ? Math.round((manualItems / totalItems) * 100) : 0;
+  const blockedPct = totalItems > 0 ? Math.round(((blockedItems + rejectedItems) / totalItems) * 100) : 0;
   const cancelPct = totalItems > 0 ? Math.round((cancelledItems / totalItems) * 100) : 0;
 
   const totalSize = files.reduce((sum, entry) => sum + entry.file.size, 0);
 
   const allResultRows = p?.results || [];
-  // Luôn hiển thị đủ danh mục, kể cả lô hiện tại có 0 bài ở loại đó. Trước đây
-  // "Thư viện ngoài" biến mất khi không có ca vi phạm, khiến người dùng tưởng
-  // hệ thống chưa hỗ trợ nhận diện dependency.
-  const diagnosticCategoryCounts = allResultRows.reduce((counts, row) => {
-    const category = getDiagnosticInfo(row)?.category;
-    if (category) counts[category] = (counts[category] || 0) + 1;
-    return counts;
-  }, {});
-  const availableDiagnosticCategories = Object.keys(diagnosticCategoryLabels);
-  const filteredResultRows = allResultRows.filter((row) => {
-    const diagnostic = getDiagnosticInfo(row);
-    const hasIncident = Boolean(diagnostic);
-    const matchesResult = resultFilter === "all"
-      || (resultFilter === "incidents" && hasIncident)
-      || (resultFilter === "student" && diagnostic?.scope === "student")
-      || (resultFilter === "system" && diagnostic?.scope === "system")
-      || (resultFilter === "manual" && row.status === "MANUAL_REVIEW")
-      || (resultFilter === "error" && row.status === "ERROR");
-    const matchesDiagnostic = diagnosticFilter === "all"
-      || diagnostic?.category === diagnosticFilter;
-    return matchesResult && matchesDiagnostic;
-  });
+  // Sự cố đã được backend GOM THEO NGUYÊN NHÂN: Docker chết một cái là 20 bài cùng hỏng, người
+  // chấm cần đọc một dòng chứ không phải cuộn 20 dòng giống nhau.
+  const incidents = p?.incidents || [];
+  const blockedStudentIds = incidents.flatMap((incident) => incident.studentIds || []);
+  // Đếm trên chính danh sách đang hiển thị để con số trên nút khớp đúng số dòng lọc ra được
+  // (blockedItems của batch còn cộng cả bài không nằm trong bảng).
+  const blockedRowCount = allResultRows.filter(isBlocked).length;
+  // Nhãn tiếng Việt của từng mã lấy luôn từ nhóm sự cố — không dựng bảng tra thứ hai ở FE.
+  const incidentLabelByCode = Object.fromEntries(
+    incidents.map((incident) => [incident.code, incident.label])
+  );
+
+  // Bộ lọc khai BẰNG DỮ LIỆU, không phải bằng chuỗi if: cả menu lọc lẫn 4 thẻ thống kê phía trên
+  // đều đọc từ đây nên số trên thẻ luôn đúng bằng số dòng lọc ra được — không có đường nào để hai
+  // chỗ lệch nhau.
+  const rowFilters = [
+    { key: "all",     label: "Tất cả bài",   count: allResultRows.length,
+      match: () => true },
+    { key: "scored",  label: "Đã chấm",      count: allResultRows.filter((r) => r.outcome === "SCORED").length,
+      match: (r) => r.outcome === "SCORED" },
+    { key: "grading", label: "Đang chấm",    count: allResultRows.filter((r) => r.outcome === "PENDING").length,
+      match: (r) => r.outcome === "PENDING" },
+    { key: "blocked", label: "Lỗi hệ thống", count: blockedRowCount,
+      match: isBlocked },
+  ];
+  const activeFilter = rowFilters.find((f) => f.key === rowFilter) || rowFilters[0];
+  const filteredResultRows = allResultRows.filter(activeFilter.match);
+
+  // Chấm lại đúng nhóm bài hỏng sau khi đã sửa máy/testcase — việc gần như luôn phải làm sau một
+  // sự cố hệ thống, nên đặt ngay cạnh cảnh báo thay vì bắt vào trang Lịch sử bấm từng bài.
+  const regradeBlocked = async () => {
+    if (!blockedStudentIds.length || regrading) return;
+    const targetExam = p?.examId || examId.trim();
+    if (!targetExam) return;
+    setRegrading(true);
+    try {
+      const res = await fetch(`${API_BASE}/batch/regrade-batch/${encodeURIComponent(targetExam)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ studentIds: blockedStudentIds }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { setUploadErr(data?.error || "Không chấm lại được nhóm bài này."); return; }
+      setBatchId(data.batchId);
+      setProgress(null);
+      setRowFilter("all");
+      setStopNotice(`Đang chấm lại ${data.queued || 0} bài bị sự cố hệ thống.`);
+      setPhase("polling");
+      startPolling(data.batchId);
+    } catch (e) {
+      setUploadErr("Không kết nối được server: " + e.message);
+    } finally {
+      setRegrading(false);
+    }
+  };
 
   return (
-    <SidebarLayout title="Chấm bài tự động" subtitle="Chấm tự động bài thi Flutter trong môi trường Docker cô lập" activePath="/teacher/grading">
-      <div className="grid min-w-0 grid-cols-1 gap-6 xl:grid-cols-[minmax(300px,0.75fr)_minmax(0,2.25fr)]">
+    <SidebarLayout
+      title="Chấm bài tự động"
+      subtitle="Chấm tự động bài thi Flutter trong môi trường Docker cô lập"
+      activePath="/teacher/grading"
+      /* Nới trần bề ngang (mặc định max-w-6xl) — bảng kết quả 6 cột không đủ chỗ trong 1152px
+         nên phải kéo ngang; cùng mức với trang Quản lý bộ testcase để hai trang nhìn đồng bộ. */
+      contentClassName="max-w-[1600px]"
+    >
+      {/* Cột trái CỐ ĐỊNH 320px: form thiết lập không dài ra thì cũng không đẹp hơn. Toàn bộ
+          phần dôi ra dồn cho cột kết quả — đó mới là nơi người chấm nhìn lâu nhất. */}
+      <div className="grid min-w-0 grid-cols-1 gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">
 
         {/* Cột trái: Form cấu hình & Upload */}
         <div className="min-w-0 space-y-6">
@@ -732,12 +688,22 @@ export default function AutomaticGradingPage() {
           )}
           {(phase === "polling" || phase === "done") ? (
             <>
-              {/* Thống kê nhanh */}
+              {/* Thống kê nhanh — cũng LÀ bộ lọc: bấm thẻ nào thì bảng dưới hiện đúng nhóm đó,
+                  giống hệt menu lọc. Số lấy từ cùng một khai báo `rowFilters` nên không lệch.
+                  File bị loại ngay khi upload không nằm ở đây; chúng có khối riêng "N file bị bỏ qua". */}
               <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-                <StatCard label="Tổng số bài" value={totalItems} icon={Users} tone="slate" />
-                <StatCard label="Hoàn thành" value={doneItems} icon={CheckCircle} tone="emerald" />
-                <StatCard label="Đang chấm" value={gradingItems} icon={Clock} tone="blue" pulse={gradingItems > 0} />
-                <StatCard label="Bị lỗi" value={errorItems} icon={AlertCircle} tone="rose" />
+                {rowFilters.map((f) => (
+                  <StatCard
+                    key={f.key}
+                    label={f.key === "all" ? "Tổng số bài" : f.label}
+                    value={f.count}
+                    icon={STAT_ICON[f.key]}
+                    tone={STAT_TONE[f.key]}
+                    pulse={f.key === "grading" && f.count > 0}
+                    active={rowFilter === f.key}
+                    onClick={() => setRowFilter(f.key)}
+                  />
+                ))}
               </div>
 
               {/* Thanh tiến độ */}
@@ -782,13 +748,13 @@ export default function AutomaticGradingPage() {
 
                 <div className="flex h-3 w-full overflow-hidden rounded-full bg-slate-100">
                   <div className="h-full bg-gradient-to-r from-emerald-400 to-emerald-500 transition-all duration-500 ease-out" style={{ width: `${donePct}%` }}></div>
-                  <div className="h-full bg-gradient-to-r from-amber-400 to-amber-500 transition-all duration-500 ease-out" style={{ width: `${reviewPct}%` }}></div>
-                  <div className="h-full bg-gradient-to-r from-rose-400 to-rose-500 transition-all duration-500 ease-out" style={{ width: `${errPct}%` }}></div>
+                  <div className="h-full bg-gradient-to-r from-amber-400 to-amber-500 transition-all duration-500 ease-out" style={{ width: `${blockedPct}%` }}></div>
                   <div className="h-full bg-gradient-to-r from-slate-300 to-slate-400 transition-all duration-500 ease-out" style={{ width: `${cancelPct}%` }}></div>
                 </div>
                 <div className="mt-3 flex items-center justify-between text-xs text-slate-500">
                   <span>
-                    <span className="font-semibold text-emerald-600">{doneItems}</span> xong · <span className="font-semibold text-rose-600">{errorItems}</span> lỗi
+                    <span className="font-semibold text-emerald-600">{doneItems}</span> có điểm
+                    {(blockedItems + rejectedItems) > 0 && <> · <span className="font-semibold text-amber-600">{blockedItems + rejectedItems}</span> lỗi hệ thống</>}
                     {cancelledItems > 0 && <> · <span className="font-semibold text-slate-600">{cancelledItems}</span> đã dừng</>}
                   </span>
                   <span>{processedItems}/{totalItems} đã xử lý</span>
@@ -838,7 +804,7 @@ export default function AutomaticGradingPage() {
                   {phase === "done" && (
                     <div className="flex items-center gap-2">
                       <button onClick={downloadResultsFolder} title="Xuất thư mục gồm một JSON cho mỗi sinh viên" className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 shadow-sm transition-all hover:text-slate-900 hover:shadow active:scale-95">
-                        <FileJson size={16} /> Thư mục JSON
+                        <FileJson size={16} /> Xuất JSON
                       </button>
                       <button onClick={downloadCSV} className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 shadow-sm transition-all hover:text-slate-900 hover:shadow active:scale-95">
                         <DownloadCloud size={16} /> Xuất CSV
@@ -847,59 +813,120 @@ export default function AutomaticGradingPage() {
                   )}
                 </div>
 
-                <div className="flex flex-wrap items-end gap-3 border-b border-slate-100 bg-white px-6 py-3">
-                  <label className="min-w-[190px] text-xs font-semibold text-slate-500">
-                    Phạm vi hiển thị
-                    <select
-                      value={resultFilter}
-                      onChange={(event) => setResultFilter(event.target.value)}
-                      className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
-                    >
-                      <option value="all">Tất cả bài</option>
-                      <option value="incidents">Có sự cố chặn chấm</option>
-                      <option value="student">Sự cố từ bài làm</option>
-                      <option value="system">Sự cố testcase/môi trường</option>
-                      <option value="manual">Cần chấm tay</option>
-                      <option value="error">Lỗi thực thi</option>
-                    </select>
-                  </label>
-                  <label className="min-w-[210px] text-xs font-semibold text-slate-500">
-                    Loại sự cố
-                    <select
-                      value={diagnosticFilter}
-                      onChange={(event) => setDiagnosticFilter(event.target.value)}
-                      className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
-                    >
-                      <option value="all">Tất cả loại sự cố</option>
-                      {availableDiagnosticCategories.map((category) => (
-                        <option key={category} value={category}>
-                          {diagnosticCategoryLabels[category] || category} ({diagnosticCategoryCounts[category] || 0})
-                        </option>
+                {/* Sự cố HỆ THỐNG — thứ duy nhất người chấm phải xử lý. Bài 0 điểm do sinh viên
+                    làm sai không xuất hiện ở đây: điểm số đã nói hết. Không có sự cố thì cả khối
+                    này biến mất, màn hình sạch. */}
+                {incidents.length > 0 && (
+                  <div className="border-b border-amber-100 bg-amber-50 px-6 py-4">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="flex items-start gap-2">
+                        <AlertCircle size={16} className="mt-0.5 shrink-0 text-amber-600" />
+                        <div>
+                          <p className="text-sm font-bold text-amber-900">
+                            {blockedItems} bài chưa có điểm do sự cố hệ thống
+                          </p>
+                          <p className="text-xs text-amber-700">
+                            Máy chấm không cho ra kết quả tin được — cần xử lý rồi chấm lại.
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={regradeBlocked}
+                          disabled={regrading || isRunning || !blockedStudentIds.length}
+                          title="Chấm lại đúng nhóm bài bị sự cố, sau khi đã xử lý nguyên nhân"
+                          className="flex items-center gap-2 rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-semibold text-amber-800 transition-colors hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {regrading ? <Loader2 size={14} className="animate-spin" /> : <RotateCcw size={14} />}
+                          Chấm lại {blockedStudentIds.length} bài
+                        </button>
+                      </div>
+                    </div>
+
+                    <ul className="mt-3 space-y-1.5">
+                      {incidents.map((incident) => (
+                        <li
+                          key={incident.code}
+                          className="flex flex-wrap items-baseline gap-x-2 rounded-lg border border-amber-200 bg-white px-3 py-2 text-xs"
+                          title={incident.message || ""}
+                        >
+                          <span className="font-bold text-amber-900">{incident.count} bài</span>
+                          <span className="text-slate-700">· {incident.label}</span>
+                          <span className="text-slate-400">· {incident.originLabel}</span>
+                          <span className="ml-auto truncate font-mono text-[10px] text-slate-400">{incident.code}</span>
+                        </li>
                       ))}
-                    </select>
-                  </label>
-                  <div className="pb-2 text-xs font-medium text-slate-400">
-                    Hiển thị {filteredResultRows.length}/{allResultRows.length} bài
+                    </ul>
                   </div>
+                )}
+
+                {/* Bộ lọc CỐ ĐỊNH, luôn thấy — kể cả khi lô hiện tại sạch. Gom vào một menu thay
+                    vì rải nút: bốn nhóm là bốn lựa chọn loại trừ nhau, menu nói rõ điều đó và
+                    không chiếm thêm bề ngang khi số nhóm tăng. */}
+                <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 bg-white px-6 py-2.5">
+                  <div ref={filterRef} className="relative">
+                    <button
+                      type="button"
+                      onClick={() => setFilterOpen((v) => !v)}
+                      aria-haspopup="listbox"
+                      aria-expanded={filterOpen}
+                      className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50"
+                    >
+                      <ListFilter size={14} className="text-slate-400" />
+                      {activeFilter.label} ({activeFilter.count})
+                      <ChevronDown size={14} className={`text-slate-400 transition-transform ${filterOpen ? "rotate-180" : ""}`} />
+                    </button>
+                    {filterOpen && (
+                      <ul
+                        role="listbox"
+                        className="absolute left-0 top-full z-30 mt-1 w-56 overflow-hidden rounded-xl border border-slate-200 bg-white py-1 shadow-xl"
+                      >
+                        {rowFilters.map((f) => (
+                          <li key={f.key}>
+                            <button
+                              type="button"
+                              role="option"
+                              aria-selected={rowFilter === f.key}
+                              onClick={() => { setRowFilter(f.key); setFilterOpen(false); }}
+                              className={`flex w-full items-center justify-between px-3 py-2 text-left text-xs font-semibold transition-colors ${
+                                rowFilter === f.key
+                                  ? "bg-indigo-50 text-indigo-700"
+                                  : "text-slate-600 hover:bg-slate-50"
+                              }`}
+                            >
+                              <span>{f.label}</span>
+                              <span className="font-mono text-[11px] text-slate-400">{f.count}</span>
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                  <span className="ml-auto text-xs font-medium text-slate-400">
+                    Hiển thị {filteredResultRows.length}/{allResultRows.length} bài
+                  </span>
                 </div>
 
+                {/* Vừa trong một màn: bỏ min-w cứng 900px (thứ ép kéo ngang ở cột hẹp) và chia
+                    lại tỉ lệ theo lượng chữ thật của từng cột. Vẫn giữ overflow-x-auto làm lưới
+                    an toàn cho màn rất hẹp, nhưng ở bố cục mới nó không còn kích hoạt. */}
                 <div className="max-w-full overflow-x-auto">
-                  <table className="w-full min-w-[900px] table-fixed border-collapse text-left">
+                  <table className="w-full min-w-[680px] table-fixed border-collapse text-left">
                     <colgroup>
-                      <col className="w-[24%]" />
+                      <col className="w-[22%]" />
+                      <col className="w-[19%]" />
+                      <col className="w-[14%]" />
+                      <col className="w-[25%]" />
                       <col className="w-[13%]" />
-                      <col className="w-[17%]" />
-                      <col className="w-[28%]" />
-                      <col className="w-[10%]" />
-                      <col className="w-[8%]" />
+                      <col className="w-[7%]" />
                     </colgroup>
                     <thead>
                       <tr className="border-b border-slate-100 bg-white text-xs font-bold uppercase tracking-wider text-slate-500">
-                        <th className="px-4 py-3.5">Sinh viên</th>
+                        <th className="px-3 py-3.5 text-center">Sinh viên</th>
                         <th className="px-3 py-3.5 text-center">Trạng thái</th>
-                        <th className="px-3 py-3.5">Tỉ lệ Pass</th>
-                        <th className="px-3 py-3.5">Sự cố chặn chấm</th>
-                        <th className="px-3 py-3.5 text-right">Điểm số</th>
+                        <th className="px-3 py-3.5 text-center">Tỉ lệ Pass</th>
+                        <th className="px-3 py-3.5 text-center">Sự cố hệ thống</th>
+                        <th className="px-3 py-3.5 text-center">Điểm số</th>
                         <th className="px-3 py-3.5 text-center">JSON</th>
                       </tr>
                     </thead>
@@ -912,22 +939,19 @@ export default function AutomaticGradingPage() {
                           totalCount = d.tongSoTest ?? 0;
                         } catch (_) {}
 
-                        const isDone = r.status === "DONE";
-                        const isError = r.status === "ERROR";
-                        const isManual = r.status === "MANUAL_REVIEW";
-                        const isGrading = r.status === "GRADING";
-                        const isCancelled = r.status === "CANCELLED";
+                        const isDone = r.outcome === "SCORED";
+                        const tone = gradingStatusTone(r.status, r.outcome);
                         const ratio = totalCount > 0 ? Math.round((passCount / totalCount) * 100) : 0;
                         const initials = (r.studentName || r.studentId || "?").trim().charAt(0).toUpperCase();
                         const diagnosticScope = r.diagnosticOrigin === "STUDENT" ? "Bài sinh viên" :
                           r.diagnosticOrigin === "TESTCASE" ? "Bộ testcase" :
                           r.diagnosticOrigin === "ENVIRONMENT" ? "Môi trường chấm" :
                           r.diagnosticOrigin === "UNDETERMINED" ? "Chưa xác định" : "";
-                        const diagnostic = getDiagnosticInfo(r);
+                        const blocked = isBlocked(r);
 
                         return (
                           <tr key={r.id} className="transition-colors hover:bg-slate-50/70">
-                            <td className="px-4 py-3.5">
+                            <td className="px-3 py-3.5 text-center">
                               <div className="flex items-center gap-3">
                                 <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-slate-100 to-slate-200 text-xs font-bold text-slate-500">
                                   {initials}
@@ -939,21 +963,13 @@ export default function AutomaticGradingPage() {
                               </div>
                             </td>
                             <td className="px-3 py-3.5 text-center">
-                              <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${
-                                isDone ? 'bg-emerald-100 text-emerald-700' :
-                                isManual ? 'bg-amber-100 text-amber-800' :
-                                isError ? 'bg-rose-100 text-rose-700' :
-                                isGrading ? 'bg-blue-100 text-blue-700' :
-                                'bg-slate-100 text-slate-600'
-                              }`}>
-                                <span className={`h-1.5 w-1.5 rounded-full ${
-                                  isDone ? 'bg-emerald-500' : isManual ? 'bg-amber-500' : isError ? 'bg-rose-500' : isGrading ? 'bg-blue-500 animate-pulse' : 'bg-slate-400'
-                                }`}></span>
-                                {isDone ? 'Đã xong' : isManual ? 'Cần chấm tay' : isError ? 'Lỗi' : isGrading ? 'Đang chấm' : isCancelled ? 'Đã dừng' : 'Chờ'}
+                              <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${tone.pill}`}>
+                                <span className={`h-1.5 w-1.5 rounded-full ${tone.dot}`}></span>
+                                {gradingStatusLabel(r.status, r.outcome)}
                               </span>
                             </td>
-                            <td className="px-3 py-3.5">
-                              {(isDone || isManual) ? (
+                            <td className="px-3 py-3.5 text-center">
+                              {(isDone || totalCount > 0) ? (
                                 <div className="flex items-center gap-2">
                                   <div className="h-1.5 min-w-8 flex-1 overflow-hidden rounded-full bg-slate-100">
                                     <div className={`h-full rounded-full ${ratio >= 50 ? 'bg-emerald-500' : 'bg-amber-500'}`} style={{ width: `${ratio}%` }}></div>
@@ -962,15 +978,17 @@ export default function AutomaticGradingPage() {
                                 </div>
                               ) : <span className="text-slate-300">—</span>}
                             </td>
-                            <td className="px-3 py-3.5">
-                              {diagnostic ? (
+                            <td className="px-3 py-3.5 text-center">
+                              {blocked ? (
                                 <div
-                                  className={`w-full min-w-0 rounded-lg border px-2.5 py-2 ${diagnostic.tone}`}
+                                  className="w-full min-w-0 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-amber-800"
                                   title={[r.diagnosticCode, diagnosticScope, r.diagnosticStage, r.errorLog].filter(Boolean).join(" · ")}
                                 >
                                   <div className="flex items-center gap-1.5 text-xs font-bold">
                                     <AlertCircle size={13} className="shrink-0" />
-                                    <span className="truncate">{diagnostic.label}</span>
+                                    <span className="truncate">
+                                      {incidentLabelByCode[r.diagnosticCode] || "Sự cố chưa xác định nguồn"}
+                                    </span>
                                   </div>
                                   <p className="mt-1 truncate font-mono text-[10px] opacity-80">
                                     {r.diagnosticCode || "CHƯA PHÂN LOẠI"}
@@ -985,9 +1003,14 @@ export default function AutomaticGradingPage() {
                                 <span className="text-xs text-slate-300">—</span>
                               )}
                             </td>
-                            <td className="px-3 py-3.5 text-right">
+                            <td className="px-3 py-3.5 text-center">
                               {r.score != null ? (
-                                <span className={`inline-block rounded-lg px-2.5 py-1 text-sm font-bold ${r.score >= PASS_THRESHOLD ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'}`}>
+                                <span
+                                  className={`inline-block rounded-lg px-2.5 py-1 text-sm font-bold ${r.score >= PASS_THRESHOLD ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'}`}
+                                  title={r.score === 0 && r.diagnosticCode
+                                    ? `${r.diagnosticCode} · ${r.errorLog || ""}`
+                                    : undefined}
+                                >
                                   {r.score.toFixed(1)}
                                 </span>
                               ) : (
@@ -995,7 +1018,7 @@ export default function AutomaticGradingPage() {
                               )}
                             </td>
                             <td className="px-3 py-3.5 text-center">
-                              {(isDone || isManual) && (
+                              {(isDone || blocked) && (
                                 <button
                                   onClick={() => downloadStudentJson(r)}
                                   title={`Tải JSON của ${r.studentId}`}
@@ -1018,8 +1041,20 @@ export default function AutomaticGradingPage() {
                       )}
                       {allResultRows.length > 0 && filteredResultRows.length === 0 && (
                         <tr>
-                          <td colSpan="6" className="px-6 py-10 text-center text-sm text-slate-500">
-                            Không có bài nào phù hợp với bộ lọc hiện tại.
+                          <td colSpan="6" className="px-6 py-10 text-center text-sm">
+                            {/* Lọc "Lỗi hệ thống" mà rỗng là TIN TỐT, không phải kết quả trống —
+                                nói thẳng ra thay vì để người chấm tự suy từ một bảng trắng. */}
+                            {rowFilter === "blocked" ? (
+                              <span className="inline-flex items-center gap-1.5 font-semibold text-emerald-600">
+                                <CheckCircle size={15} /> Không có bài nào lỗi do hệ thống.
+                              </span>
+                            ) : rowFilter === "grading" ? (
+                              <span className="text-slate-500">Không còn bài nào đang chờ hoặc đang chấm.</span>
+                            ) : rowFilter === "scored" ? (
+                              <span className="text-slate-500">Chưa có bài nào chấm xong.</span>
+                            ) : (
+                              <span className="text-slate-500">Không có bài nào phù hợp với bộ lọc hiện tại.</span>
+                            )}
                           </td>
                         </tr>
                       )}
@@ -1070,8 +1105,12 @@ function categorizeError(errStr) {
   return { file, type: "Lỗi khác", detail: msg || "Không xác định", tone: "slate" };
 }
 
+// Icon/màu của 4 thẻ thống kê, khớp theo khoá bộ lọc (xem `rowFilters`).
+const STAT_ICON = { all: Users, scored: CheckCircle, grading: Clock, blocked: AlertCircle };
+const STAT_TONE = { all: "slate", scored: "emerald", grading: "blue", blocked: "amber" };
+
 // ── Thẻ thống kê nhỏ, tái sử dụng ─────────────────────────────────
-function StatCard({ label, value, icon: Icon, tone, pulse }) {
+function StatCard({ label, value, icon: Icon, tone, pulse, active, onClick }) {
   const tones = {
     slate:   { text: "text-slate-800",  badge: "bg-slate-100 text-slate-500",     border: "border-slate-200" },
     emerald: { text: "text-emerald-600", badge: "bg-emerald-100 text-emerald-600", border: "border-emerald-100" },
@@ -1080,8 +1119,8 @@ function StatCard({ label, value, icon: Icon, tone, pulse }) {
     rose:    { text: "text-rose-600",    badge: "bg-rose-100 text-rose-600",       border: "border-rose-100" },
   };
   const t = tones[tone] || tones.slate;
-  return (
-    <div className="card card-hover p-5">
+  const body = (
+    <>
       <div className="mb-3 flex items-center justify-between">
         <p className="eyebrow">{label}</p>
         <span className={`flex h-8 w-8 items-center justify-center rounded-lg ${t.badge} ${pulse ? "animate-pulse" : ""}`}>
@@ -1089,6 +1128,22 @@ function StatCard({ label, value, icon: Icon, tone, pulse }) {
         </span>
       </div>
       <p className={`text-3xl font-bold tracking-tight ${t.text}`}>{value}</p>
-    </div>
+    </>
+  );
+  if (!onClick) return <div className="card card-hover p-5">{body}</div>;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={!!active}
+      title={`Chỉ hiện nhóm: ${label}`}
+      // Viền đậm + nền nhạt khi đang lọc theo thẻ này — nếu không có dấu hiệu, người dùng bấm
+      // xong thấy bảng đổi mà không biết vì sao.
+      className={`card card-hover p-5 text-left transition-all ${
+        active ? "ring-2 ring-indigo-400 ring-offset-1" : "hover:-translate-y-0.5"
+      }`}
+    >
+      {body}
+    </button>
   );
 }

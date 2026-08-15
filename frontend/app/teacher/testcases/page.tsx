@@ -466,6 +466,23 @@ const SKILL_LABEL: Record<string, string> = {
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
+/** Chuỗi hoá ổn định (khoá đã sắp xếp) để so sánh hai tham số bằng nhau, không phụ thuộc thứ tự khoá. */
+const stableJson = (value: unknown): string => {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  if (value && typeof value === "object")
+    return `{${Object.entries(value as Record<string, unknown>)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([k, v]) => `${k}:${stableJson(v)}`).join(",")}}`;
+  return JSON.stringify(value ?? null);
+};
+
+/**
+ * Chữ ký nhận diện testcase TRÙNG NHAU: cùng mẫu + cùng tham số là một testcase, dù
+ * instance_id khác. Dùng để bấm "thêm testcase AI" nhiều lần không nhân bản Khu vực 3.
+ */
+const itemSignature = (templateId: string, parameters: unknown) =>
+  `${templateId}|${stableJson(parameters)}`;
+
 function renderExpected(template: string, params: JsonMap) {
   return Object.entries(params).reduce(
     (text, [key, value]) => text.replaceAll(`{${key}}`, String(value)), template,
@@ -1213,9 +1230,11 @@ function TestcasesEditor() {
   }, [editExamId]);
 
   useEffect(() => {
-    // Giữ nguyên mã của bộ đang sửa thì trùng là đương nhiên → khỏi kiểm tra.
+    // Mã đang thuộc về CHÍNH bộ này thì trùng là đương nhiên → khỏi kiểm tra. Không chỉ khi
+    // đang sửa: bộ mới cũng được TỰ LƯU NHÁP sau 2 giây, nên mã vừa gõ lập tức "đã tồn tại"
+    // (do chính mình vừa tạo) và nút Lưu bị khoá — bẫy này đã chặn người dùng lưu thật.
     // Gõ mã khác đi = sắp đổi mã, lúc đó vẫn phải kiểm tra trùng như khi tạo mới.
-    if (isEdit && examId.trim() === savedExamId) {
+    if (examId.trim() !== "" && examId.trim() === savedExamId) {
       setExamIdCheck("idle");
       return;
     }
@@ -1421,13 +1440,20 @@ function TestcasesEditor() {
    */
   const applyAiItems = (proposals: AiProposedItem[]) => {
     const usedIds = new Set(items.map((item) => item.instance_id));
+    // Bấm "thêm" nhiều lần thì lần sau KHÔNG được nhân bản: cùng mẫu + cùng tham số = đã có rồi.
+    const seen = new Set(items.map((item) => itemSignature(item.template_id, item.parameters)));
     let nextNumber = items.length + 1;
     const built: TestcaseItem[] = [];
     const skipped: string[] = [];
+    let duplicated = 0;
 
     proposals.forEach((p) => {
       const template = templateMap.get(p.template_id);
       if (!template) { skipped.push(p.template_id); return; }
+      const signature = itemSignature(template.template_id,
+        { ...cloneParams(template), ...(p.parameters as JsonMap) });
+      if (seen.has(signature)) { duplicated += 1; return; }
+      seen.add(signature);
       let instanceId = `${examId.trim() || "exam"}_item_${pad(nextNumber)}`;
       while (usedIds.has(instanceId)) {
         nextNumber += 1;
@@ -1456,13 +1482,16 @@ function TestcasesEditor() {
     });
 
     if (!built.length) {
-      setMessage({ type: "error", text: "Không thêm được testcase nào: các mẫu AI chọn không còn trong thư viện." });
+      setMessage(duplicated > 0
+        ? { type: "ok", text: `Tất cả ${duplicated} testcase AI gợi ý đã có sẵn trong Khu vực 3 — không thêm gì thêm.` }
+        : { type: "error", text: "Không thêm được testcase nào: các mẫu AI chọn không còn trong thư viện." });
       return;
     }
     setItems((current) => [...current, ...built].map((item, i) => ({ ...item, order: i + 1 })));
     setMessage({
       type: "ok",
       text: `Đã thêm ${built.length} testcase từ trợ lý AI vào Khu vực 3`
+        + (duplicated ? ` (bỏ qua ${duplicated} testcase đã có sẵn)` : "")
         + (skipped.length ? ` (bỏ qua ${skipped.length} mẫu không còn trong thư viện)` : "")
         + ". Hãy kiểm tra lại tham số trước khi lưu.",
     });
@@ -2037,7 +2066,10 @@ function TestcasesEditor() {
   // Đang sửa mà gõ mã khác mã trên server = yêu cầu ĐỔI MÃ; mã mới phải chưa tồn tại,
   // đúng như lúc tạo bộ mới, nên dùng chung kết quả kiểm tra trùng.
   const renameTarget = isEdit && examId.trim() && examId.trim() !== savedExamId ? examId.trim() : "";
-  const needsIdCheck = !isEdit || !!renameTarget;
+  // Mã đã là của bộ này (đang sửa, hoặc vừa tự lưu nháp) thì không cần kiểm tra trùng nữa —
+  // nếu không, chính bản nháp vừa tạo làm mã "đã tồn tại" và khoá luôn nút Lưu.
+  const ownsExamId = examId.trim() !== "" && examId.trim() === savedExamId;
+  const needsIdCheck = !ownsExamId && (!isEdit || !!renameTarget);
 
   /**
    * TỰ LƯU NHÁP. Bộ testcase mới phải có mặt trong Kho ngay với trạng thái Nháp, để người
@@ -2610,6 +2642,9 @@ function TestcasesEditor() {
     if (examIdCheck === "available") return renameTarget
       ? { text: `Bấm Lưu để đổi mã thành ${renameTarget} — thư mục, kết quả và lịch sử chấm đi theo.`, tone: "font-semibold text-emerald-600" }
       : { text: "Mã bộ testcase chưa tồn tại, có thể tạo.", tone: "font-semibold text-emerald-600" };
+    // Mã của chính bộ này (bản nháp vừa tự lưu, hoặc bộ đang sửa) — nói rõ để khỏi tưởng bị trùng.
+    if (ownsExamId && !isEdit)
+      return { text: "Mã này đang giữ cho bản nháp của bạn.", tone: "text-slate-400" };
     return { text: "", tone: "text-slate-400" };
   })();
 

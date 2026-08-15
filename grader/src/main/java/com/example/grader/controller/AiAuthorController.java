@@ -3,10 +3,12 @@ package com.example.grader.controller;
 import com.example.grader.config.AppActor;
 import com.example.grader.service.ai.AiExamAuthorService;
 import com.example.grader.service.ai.AiSettingsService;
+import com.example.grader.service.ai.ExamDocumentReader;
 import com.example.grader.service.ai.LlmService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -26,6 +28,7 @@ public class AiAuthorController {
     @Autowired private AiSettingsService settings;
     @Autowired private LlmService llm;
     @Autowired private AiExamAuthorService author;
+    @Autowired private ExamDocumentReader documents;
 
     // ── Cấu hình LLM ─────────────────────────────────────────────
 
@@ -58,6 +61,29 @@ public class AiAuthorController {
     @PostMapping("/exam/revise")
     public ResponseEntity<?> reviseExam(@RequestBody Map<String, Object> body) {
         return handle(() -> author.reviseExam(str(body, "de_bai"), str(body, "instruction")));
+    }
+
+    /**
+     * Nhánh "đã có đề sẵn": tải file đề lên (.docx/.pdf/.txt/.md), bóc chữ ra rồi đi thẳng
+     * sang bước phân tích Item Key — bỏ qua bước nhờ AI soạn đề.
+     *
+     * <p>KHÔNG gọi LLM ở đây: chỉ đọc file, để giáo viên xem lại chữ trước khi tốn một lượt AI.
+     */
+    @PostMapping("/exam/import")
+    public ResponseEntity<?> importExam(@RequestParam("file") MultipartFile file) {
+        return handle(() -> {
+            if (file == null || file.isEmpty())
+                throw new IllegalArgumentException("Chưa chọn file đề để tải lên.");
+            try {
+                Map<String, Object> read = documents.read(file.getOriginalFilename(), file.getBytes());
+                Map<String, Object> out = new LinkedHashMap<>(read);
+                out.put("de_bai", read.get("text"));
+                out.put("file_name", file.getOriginalFilename());
+                return out;
+            } catch (java.io.IOException e) {
+                throw new IllegalStateException("Không đọc được file tải lên: " + e.getMessage());
+            }
+        });
     }
 
     // ── Bước 2: Item Key + hình minh họa ─────────────────────────

@@ -27,9 +27,11 @@ public class MockupRenderer {
     private static final int PAD = 16;
     private static final int APPBAR_H = 48;
     private static final int GAP = 12;
-    private static final int LABEL_GAP = 56;      // khoảng trống cho mũi tên
+    private static final int LABEL_GAP = 84;      // khoảng trống cho mũi tên (đủ dài để nhìn rõ hướng)
     private static final int LABEL_W = 400;       // cột chú thích bên phải
-    private static final int LABEL_MIN_SPACING = 26;
+    /** Cao hơn tổng chiều cao một chú thích (key 13px + mô tả 11px + đệm) → chữ không thể chồng nhau. */
+    private static final int LABEL_MIN_SPACING = 42;
+    private static final int CHIP_PAD_X = 8;      // đệm ngang trong khung nền của chú thích
 
     /** Một chú thích: mũi tên từ (x,y) của widget sang cột chữ bên phải. */
     private record Note(double x, double y, double h, String key, String label) {}
@@ -263,36 +265,62 @@ public class MockupRenderer {
         for (Note note : sorted) {
             double labelY = Math.max(note.y(), lastBottom + LABEL_MIN_SPACING);
             boolean hasSub = note.label() != null && !note.label().isBlank();
-            double bottom = labelY + (hasSub ? 14 : 0);
+            double bottom = labelY + (hasSub ? 16 : 0);
             out.add(new Placed(note, labelY, bottom));
             lastBottom = bottom;
         }
         return out;
     }
 
-    /** Mũi tên đỏ gãy khúc từ nhãn về đúng thành phần, kèm key và nhãn mô tả. */
+    /**
+     * Mũi tên đỏ ĐƯỜNG THẲNG từ chú thích về đúng thành phần, kèm chấm neo tại thành phần.
+     *
+     * <p>Trước đây vẽ đường gãy khúc: nhiều chú thích thì các đoạn dọc nằm đè lên nhau, không
+     * lần ra được đường nào nối với cái gì. Một đoạn thẳng từ mép trái khung chữ tới đúng cạnh
+     * widget thì mắt bám theo được ngay, kể cả khi có chục mũi tên.
+     *
+     * <p>Chữ luôn nằm trong một khung nền trắng bo góc, nên không bao giờ bị đường kẻ cắt ngang.
+     */
     private String drawNotes(List<Placed> placed, double phoneRight) {
         if (placed.isEmpty()) return "";
         double labelX = phoneRight + LABEL_GAP;
         StringBuilder svg = new StringBuilder();
+
+        // Vẽ TẤT CẢ mũi tên trước, rồi mới tới khung chữ: khung chữ luôn nằm trên, không bị cắt.
         for (Placed p : placed) {
             Note note = p.note();
-            // Đường gãy khúc dễ đọc hơn đường xiên dài; đoạn dọc nằm giữa khung máy và cột chữ.
-            double midX = note.x() + LABEL_GAP * 0.55;
-            svg.append("<path d=\"M").append(fmt(labelX - 6)).append(',').append(fmt(p.labelY() - 4))
-               .append(" H").append(fmt(midX))
-               .append(" V").append(fmt(note.y()))
-               .append(" H").append(fmt(note.x() + 4))
-               .append("\" fill=\"none\" stroke=\"#e11d48\" stroke-width=\"1.6\" marker-end=\"url(#arrow)\"/>");
+            double fromX = labelX - CHIP_PAD_X - 4;      // mép trái khung chú thích
+            double fromY = p.labelY() - 4;               // giữa dòng chữ key
+            svg.append("<line x1=\"").append(fmt(fromX)).append("\" y1=\"").append(fmt(fromY))
+               .append("\" x2=\"").append(fmt(note.x() + 5)).append("\" y2=\"").append(fmt(note.y()))
+               .append("\" stroke=\"#e11d48\" stroke-width=\"1.6\" marker-end=\"url(#arrow)\"/>");
+            // Chấm neo: nói rõ mũi tên chỉ vào ĐIỂM nào trên widget.
+            svg.append("<circle cx=\"").append(fmt(note.x() + 2)).append("\" cy=\"").append(fmt(note.y()))
+               .append("\" r=\"2.6\" fill=\"#e11d48\"/>");
+        }
 
+        for (Placed p : placed) {
+            Note note = p.note();
+            String key = esc(note.key());
+            String sub = note.label() == null || note.label().isBlank()
+                    ? "" : esc(shorten(note.label(), 44));
+            boolean hasSub = !sub.isEmpty();
+            // Ước lượng bề rộng: key dùng font monospace 13px (~7.6px/ký tự), mô tả 11px (~5.9px).
+            double chipW = Math.max(note.key().length() * 7.6,
+                    hasSub ? shorten(note.label(), 44).length() * 5.9 : 0) + CHIP_PAD_X * 2;
+            double chipY = p.labelY() - 15;
+            double chipH = hasSub ? 32 : 20;
+
+            svg.append("<rect x=\"").append(fmt(labelX - CHIP_PAD_X)).append("\" y=\"").append(fmt(chipY))
+               .append("\" width=\"").append(fmt(chipW)).append("\" height=\"").append(fmt(chipH))
+               .append("\" rx=\"6\" fill=\"#ffffff\" stroke=\"#fecdd3\"/>");
             svg.append("<text x=\"").append(fmt(labelX)).append("\" y=\"").append(fmt(p.labelY()))
-               .append("\" font-size=\"12\" fill=\"#e11d48\" font-weight=\"bold\" "
+               .append("\" font-size=\"13\" fill=\"#e11d48\" font-weight=\"bold\" "
                        + "font-family=\"Consolas,'Courier New',monospace\">")
-               .append(esc(note.key())).append("</text>");
-            if (note.label() != null && !note.label().isBlank()) {
-                svg.append("<text x=\"").append(fmt(labelX)).append("\" y=\"").append(fmt(p.labelY() + 14))
-                   .append("\" font-size=\"11\" fill=\"#475569\">")
-                   .append(esc(shorten(note.label(), 44))).append("</text>");
+               .append(key).append("</text>");
+            if (hasSub) {
+                svg.append("<text x=\"").append(fmt(labelX)).append("\" y=\"").append(fmt(p.labelY() + 15))
+                   .append("\" font-size=\"11\" fill=\"#475569\">").append(sub).append("</text>");
             }
         }
         return svg.toString();

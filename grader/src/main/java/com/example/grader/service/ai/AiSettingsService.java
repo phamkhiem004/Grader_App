@@ -129,8 +129,21 @@ public class AiSettingsService {
         return hasCustomBaseUrl() ? AiModelCatalog.OPENAI : AiModelCatalog.providerFor(model());
     }
 
-    private boolean hasCustomBaseUrl() {
+    public boolean hasCustomBaseUrl() {
         return baseUrl != null && !baseUrl.isBlank();
+    }
+
+    /**
+     * Tên hiển thị trong THÔNG BÁO LỖI. Gọi qua dịch vụ trung gian mà báo "OpenAI HTTP 403" thì
+     * người dùng đi tìm nhầm chỗ (đã xảy ra thật) — nên lấy đúng tên miền của endpoint đang gọi.
+     */
+    public String endpointLabel(String vendorName) {
+        if (!hasCustomBaseUrl()) return vendorName;
+        try {
+            return java.net.URI.create(baseUrl()).getHost();
+        } catch (Exception e) {
+            return "endpoint riêng";
+        }
     }
     public String apiKey()    { return apiKey; }
     public boolean hasApiKey(){ return apiKey != null && !apiKey.isBlank(); }
@@ -184,6 +197,7 @@ public class AiSettingsService {
 
         String newBaseUrl = text(body, "baseUrl", null);
         String suppliedKey = text(body, "apiKey", null);
+        if (suppliedKey != null) validateSuppliedKey(suppliedKey);
         boolean clearKey = Boolean.TRUE.equals(body.get("clearApiKey"));
         int newTimeout = (int) number(body.get("timeoutSeconds"), timeoutSeconds());
         if (newTimeout < 30 || newTimeout > 900)
@@ -230,6 +244,29 @@ public class AiSettingsService {
         updatedBy = actor;
         log.info("Cấu hình AI cập nhật: model={} ({}) (bởi {})", model(), provider(), actor);
         return describe();
+    }
+
+    /**
+     * Chặn key dán vào bị dính rác ở đầu. Bẫy thật đã gặp: ô nhập là {@code type=password} nên
+     * trình duyệt tự điền mật khẩu đã lưu vào đó, người dùng dán key nối tiếp phía sau và lưu
+     * thành {@code <mật khẩu>sk-ant-…}. Hãng chỉ trả về "invalid x-api-key" — không tài nào đoán
+     * ra là dư ký tự ở đầu, nên phải bắt ngay lúc lưu.
+     *
+     * <p>KHÔNG in phần thừa ra thông báo: nó thường chính là mật khẩu người dùng đã lưu.
+     */
+    private void validateSuppliedKey(String key) {
+        if (key.chars().anyMatch(Character::isWhitespace))
+            throw new IllegalArgumentException(
+                    "API key không được chứa khoảng trắng hay ký tự xuống dòng. Hãy dán lại đúng chuỗi key.");
+        for (String prefix : java.util.List.of("sk-ant-", "sk-proj-", "sk-", "AIza")) {
+            int at = key.indexOf(prefix);
+            if (at == 0) return;                       // đúng dạng key của hãng
+            if (at > 0)
+                throw new IllegalArgumentException("API key đang có " + at + " ký tự thừa ở đầu, trước \""
+                        + prefix + "\" — thường là do trình duyệt tự điền mật khẩu đã lưu vào ô này. "
+                        + "Hãy xoá sạch ô API key rồi dán lại.");
+        }
+        // Key của dịch vụ trung gian có thể không theo tiền tố nào — không chặn.
     }
 
     /**

@@ -676,8 +676,100 @@ public class ExamService {
             Files.writeString(handout.resolve("de_bai.md"), deBai, StandardCharsets.UTF_8);
             written.add("de_bai.md");
         }
+
+        // Bản GỘP: đề bài + hình minh họa trong MỘT file tự chứa, để phát cho sinh viên hay in
+        // ra chỉ cần cầm đúng một file. .md và .svg vẫn giữ vì đó là bản nguồn để sửa tiếp.
+        Files.writeString(handout.resolve("de_bai.html"),
+                buildHandoutHtml(examId), StandardCharsets.UTF_8);
+        written.add("de_bai.html");
+
         log.info("📄 Đã lưu đề bài + {} hình minh họa cho đề {}", written.size(), examId);
         return written;
+    }
+
+    /** Ghép đề bài (.md) và toàn bộ hình (.svg) đang có trên đĩa thành một trang HTML tự chứa. */
+    public String buildHandoutHtml(String examId) throws Exception {
+        safeId(examId, "đề");
+        Exam exam = examRepository.findByExamId(examId).orElse(null);
+        String md = readDeBai(examId);
+        return HandoutDocument.toHtml(examId,
+                exam == null ? null : exam.getExamName(),
+                md == null ? "" : md,
+                readMockups(examId));
+    }
+
+    /** Hình minh họa của một bộ, sắp theo tên file để thứ tự luôn ổn định. */
+    public List<HandoutDocument.Mockup> readMockups(String examId) throws Exception {
+        safeId(examId, "đề");
+        Path dir = handoutDirOf(examId).resolve("mockup");
+        List<HandoutDocument.Mockup> out = new ArrayList<>();
+        if (!Files.isDirectory(dir)) return out;
+        try (Stream<Path> files = Files.list(dir)) {
+            for (Path f : files.filter(p -> p.getFileName().toString().endsWith(".svg"))
+                    .sorted(Comparator.comparing(p -> p.getFileName().toString())).toList()) {
+                String id = f.getFileName().toString().replaceFirst("\\.svg$", "");
+                String svg = Files.readString(f, StandardCharsets.UTF_8);
+                // Tiêu đề hình đã được vẽ trong SVG; ở đây chỉ cần một tên đọc được.
+                out.add(new HandoutDocument.Mockup(id, id.replace('-', ' '), svg));
+            }
+        }
+        return out;
+    }
+
+    /**
+     * Dựng bản .docx tải về: đề bài + hình minh họa.
+     *
+     * @param images ảnh PNG do TRÌNH DUYỆT đổi từ SVG ({@code {id, png_base64, width, height}}).
+     *               Máy chủ không có thư viện rasterize SVG, mà Word thì không hiện SVG ổn định —
+     *               nên phần vẽ ảnh giao cho trình duyệt, nơi vốn đã hiển thị đúng hình đó.
+     *               Bỏ trống = bản .docx chỉ có chữ.
+     */
+    public byte[] buildHandoutDocx(String examId, List<Map<String, Object>> images) throws Exception {
+        safeId(examId, "đề");
+        Exam exam = examRepository.findByExamId(examId).orElse(null);
+        String md = readDeBai(examId);
+        if ((md == null || md.isBlank()) && (images == null || images.isEmpty()))
+            throw new IllegalArgumentException("Bộ " + examId + " chưa có đề bài để tải về.");
+
+        DocxWriter docx = new DocxWriter();
+        docx.heading(exam != null && exam.getExamName() != null && !exam.getExamName().isBlank()
+                ? exam.getExamName() : examId, 1);
+        docx.paragraph("Mã bộ testcase: " + examId);
+
+        int ordered = 0;
+        for (HandoutDocument.Block block : HandoutDocument.parse(md == null ? "" : md)) {
+            switch (block.type()) {
+                case "h1", "h2" -> { docx.heading(block.text(), 2); ordered = 0; }
+                case "h3" -> { docx.heading(block.text(), 3); ordered = 0; }
+                case "li" -> { docx.bullet(block.text(), false, 0); ordered = 0; }
+                case "ol" -> docx.bullet(block.text(), true, ++ordered);
+                case "code" -> { docx.code(block.text()); ordered = 0; }
+                default -> { docx.paragraph(block.text()); ordered = 0; }
+            }
+        }
+
+        if (images != null && !images.isEmpty()) {
+            docx.heading("Hình minh họa giao diện", 2);
+            for (Map<String, Object> image : images) {
+                if (image == null) continue;
+                String base64 = String.valueOf(image.getOrDefault("png_base64", ""));
+                if (base64.isBlank()) continue;
+                // Trình duyệt gửi data URI hay chuỗi base64 thuần đều nhận.
+                int comma = base64.indexOf(',');
+                if (base64.startsWith("data:") && comma > 0) base64 = base64.substring(comma + 1);
+                byte[] png;
+                try { png = java.util.Base64.getDecoder().decode(base64.trim()); }
+                catch (Exception e) { continue; }
+                docx.image(png, (int) toDouble(image.get("width"), 0), (int) toDouble(image.get("height"), 0));
+            }
+        }
+        return docx.build();
+    }
+
+    private double toDouble(Object value, double fallback) {
+        if (value instanceof Number n) return n.doubleValue();
+        try { return Double.parseDouble(String.valueOf(value)); }
+        catch (Exception e) { return fallback; }
     }
 
     /**

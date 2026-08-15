@@ -8,11 +8,12 @@
 // Backend: /api/ai/* (xem AiAuthorController). Testcase do AI đề xuất luôn là template có sẵn
 // trong thư viện nên vẫn đi qua đúng bộ kiểm tra tham số khi lưu.
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
 import { API_BASE } from "@/lib/config";
 import {
   Sparkles, Settings2, KeyRound, Wand2, FileText, Image as ImageIcon, ListChecks,
   Loader2, Check, X, Plus, Trash2, RefreshCw, AlertTriangle, ChevronDown, Save, Info, FileCode2,
+  Upload,
 } from "lucide-react";
 
 export interface AiContractKey {
@@ -72,7 +73,9 @@ export default function AiAuthorPanel({ examId, existingKeys, onApplyContract, o
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
 
-  // Bước 1 — yêu cầu đề
+  // Bước 1 — hai nhánh: nhờ AI soạn đề mới, hay tải đề có sẵn lên rồi phân tích
+  const [source, setSource] = useState<"ai" | "upload">("ai");
+  const [importedName, setImportedName] = useState("");
   const [req, setReq] = useState({
     topic: "", knowledge: "", screens: "", features: "", entity: "",
     difficulty: "Trung bình", duration: "90 phút", note: "",
@@ -186,6 +189,36 @@ export default function AiAuthorPanel({ examId, existingKeys, onApplyContract, o
     if (data) {
       if (data.ok) setInfo(`Kết nối thành công tới ${current.model} (${data.elapsedMs} ms).`);
       else setError(data.message || "Không kết nối được.");
+    }
+  };
+
+  /**
+   * Nhánh "đã có đề sẵn": tải file lên, backend bóc chữ (không tốn lượt AI nào), rồi đi thẳng
+   * sang bước xem lại đề → phân tích Item Key. Bỏ hẳn bước nhờ AI soạn đề.
+   */
+  const importExam = async (file: File) => {
+    setBusy("import");
+    setError(null);
+    setInfo(null);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const res = await fetch(`${API_BASE}/ai/exam/import`, { method: "POST", body: form });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Không đọc được file đề.");
+      setDeBai(String(data.de_bai || ""));
+      setSummary("");
+      setCriteria([]);
+      setExamAccepted(false);
+      setKeys([]); setScreens([]); setProposed([]);
+      setImportedName(String(data.file_name || file.name));
+      const warnings: string[] = Array.isArray(data.warnings) ? data.warnings : [];
+      setInfo(`Đã đọc ${file.name} (${String(data.de_bai || "").length} ký tự).`
+        + (warnings.length ? ` ${warnings.join(" ")}` : " Hãy xem lại đề rồi bấm chấp nhận."));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Không đọc được file đề.");
+    } finally {
+      setBusy(null);
     }
   };
 
@@ -449,14 +482,24 @@ export default function AiAuthorPanel({ examId, existingKeys, onApplyContract, o
                   >
                     <div className="flex items-center gap-2">
                       <KeyRound size={14} className="shrink-0 text-slate-400" />
+                      {/* KHÔNG dùng type="password": trình duyệt tự điền mật khẩu đã lưu vào ô này,
+                          người dùng dán key nối phía sau → lưu thành "<mật khẩu>sk-ant-…" và hãng
+                          chỉ trả về "invalid x-api-key". Che bằng CSS, và dán vào thì cắt sạch
+                          khoảng trắng (key copy từ web hay dính \n ở cuối). */}
                       <input
-                        type="password"
+                        type="text"
+                        name="grader-ai-key"
                         value={apiKeyDraft}
-                        onChange={(e) => setApiKeyDraft(e.target.value)}
+                        onChange={(e) => setApiKeyDraft(e.target.value.replace(/\s+/g, ""))}
                         placeholder={settings?.hasApiKey && !vendorChanged
                           ? settings.apiKeyMasked || "••••" : "Dán API key vào đây"}
                         className={inputClass}
+                        style={{ WebkitTextSecurity: "disc" } as CSSProperties}
                         autoComplete="off"
+                        spellCheck={false}
+                        data-lpignore="true"
+                        data-1p-ignore
+                        data-form-type="other"
                       />
                     </div>
                   </Field>
@@ -511,7 +554,54 @@ export default function AiAuthorPanel({ examId, existingKeys, onApplyContract, o
           </div>
 
           {/* ── Bước 1: yêu cầu ── */}
-          <Step index={1} icon={Wand2} title="Mô tả yêu cầu đề" done={!!deBai}>
+          <Step index={1} icon={Wand2}
+            title={source === "ai" ? "Mô tả yêu cầu đề" : "Tải đề có sẵn lên"} done={!!deBai}>
+            {/* Hai nhánh vào bài: soạn đề mới, hoặc đã có đề rồi thì bỏ qua bước soạn. */}
+            <div className="mb-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
+              {([
+                { id: "ai" as const, icon: Sparkles, title: "Tạo đề bằng AI",
+                  desc: "Mô tả yêu cầu, AI soạn đề rồi bạn sửa lại" },
+                { id: "upload" as const, icon: Upload, title: "Tải đề có sẵn lên",
+                  desc: "PDF, Word (.docx) hoặc .txt — AI đọc rồi phân tích luôn" },
+              ]).map((choice) => (
+                <button key={choice.id} type="button" onClick={() => setSource(choice.id)}
+                  className={`flex items-start gap-2.5 rounded-xl border p-3 text-left transition-colors ${
+                    source === choice.id
+                      ? "border-indigo-300 bg-indigo-50/70 ring-1 ring-indigo-200"
+                      : "border-slate-200 bg-white hover:border-slate-300"}`}>
+                  <choice.icon size={16} className={`mt-0.5 shrink-0 ${
+                    source === choice.id ? "text-indigo-600" : "text-slate-400"}`} />
+                  <span className="min-w-0">
+                    <span className="block text-sm font-bold text-slate-700">{choice.title}</span>
+                    <span className="block text-[11px] leading-relaxed text-slate-500">{choice.desc}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+
+            {source === "upload" ? (
+              <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-5 text-center">
+                <input id="ai-exam-file" type="file" className="hidden"
+                  accept=".pdf,.docx,.txt,.md,.markdown"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    e.target.value = "";        // chọn lại đúng file đó vẫn phải kích hoạt onChange
+                    if (file) importExam(file);
+                  }} />
+                <label htmlFor="ai-exam-file"
+                  className={`${primaryBtn} mx-auto w-fit cursor-pointer ${busy ? "pointer-events-none opacity-60" : ""}`}>
+                  {busy === "import" ? <Loader2 size={15} className="animate-spin" /> : <Upload size={15} />}
+                  Chọn file đề
+                </label>
+                <p className="mt-2.5 text-[11px] leading-relaxed text-slate-500">
+                  Nhận .docx, .pdf, .txt, .md. PDF bản scan (chỉ có ảnh) không bóc được chữ — hãy dùng .docx.
+                </p>
+                {importedName && (
+                  <p className="mt-2 font-mono text-[11px] text-emerald-600">Đã đọc: {importedName}</p>
+                )}
+              </div>
+            ) : (
+            <>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <Field label="Chủ đề / bài toán *">
                 <input value={req.topic} onChange={(e) => setReq({ ...req, topic: e.target.value })}
@@ -554,6 +644,8 @@ export default function AiAuthorPanel({ examId, existingKeys, onApplyContract, o
             <button onClick={draftExam} disabled={busy !== null} className={`${primaryBtn} mt-3`}>
               {busy === "draft" ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />} Sinh đề bài
             </button>
+            </>
+            )}
           </Step>
 
           {/* ── Bước 2: đề bài ── */}
@@ -826,36 +918,57 @@ export default function AiAuthorPanel({ examId, existingKeys, onApplyContract, o
                 </ul>
               )}
 
-              {starterFiles.length > 0 && (
-                <div className="mt-3 space-y-2">
-                  {starterFiles.map((f) => (
-                    <div key={f.path} className="overflow-hidden rounded-xl border border-slate-200">
-                      <button
-                        onClick={() => setOpenFile(openFile === f.path ? null : f.path)}
-                        className="flex w-full items-center gap-2 bg-slate-50 px-3 py-2 text-left"
-                      >
-                        <FileCode2 size={13} className="shrink-0 text-indigo-500" />
-                        <span className="font-mono text-xs font-semibold text-slate-700">{f.path}</span>
-                        <span className="truncate text-[11px] text-slate-400">{f.summary}</span>
-                        <ChevronDown size={14} className={`ml-auto shrink-0 text-slate-400 transition-transform ${openFile === f.path ? "rotate-180" : ""}`} />
-                      </button>
-                      {openFile === f.path && (
+              {/* Trình soạn thảo kiểu IDE: cây file bên trái, code LUÔN hiện bên phải. Kiểu xếp
+                  gấp cũ chỉ thấy tên file nên phải bấm từng cái mới biết AI viết gì. */}
+              {starterFiles.length > 0 && (() => {
+                const active = starterFiles.find((f) => f.path === openFile) || starterFiles[0];
+                const lines = active.content.split("\n");
+                return (
+                  <div className="mt-3 flex min-h-[22rem] overflow-hidden rounded-xl border border-slate-800 bg-slate-900">
+                    <div className="custom-scrollbar w-52 shrink-0 overflow-y-auto border-r border-slate-800 bg-slate-950/60 py-2">
+                      <p className="px-3 pb-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                        {starterFiles.length} file
+                      </p>
+                      {starterFiles.map((f) => (
+                        <button key={f.path} type="button" onClick={() => setOpenFile(f.path)}
+                          title={`${f.path} · ${f.summary}`}
+                          className={`flex w-full items-center gap-1.5 px-3 py-1.5 text-left font-mono text-[11px] transition-colors ${
+                            f.path === active.path
+                              ? "bg-slate-800 text-indigo-300"
+                              : "text-slate-400 hover:bg-slate-800/60 hover:text-slate-200"}`}>
+                          <FileCode2 size={12} className="shrink-0" />
+                          <span className="truncate">{f.path}</span>
+                        </button>
+                      ))}
+                    </div>
+                    <div className="flex min-w-0 flex-1 flex-col">
+                      <div className="flex items-center gap-2 border-b border-slate-800 px-3 py-2">
+                        <span className="font-mono text-[11px] font-semibold text-slate-200">{active.path}</span>
+                        <span className="truncate text-[10px] text-slate-500">{active.summary}</span>
+                        <span className="ml-auto shrink-0 text-[10px] text-slate-600">{lines.length} dòng</span>
+                      </div>
+                      <div className="custom-scrollbar flex min-h-0 flex-1 overflow-auto">
+                        {/* Số dòng bám theo nội dung đang gõ, cuộn chung khung với code. */}
+                        <pre aria-hidden className="select-none border-r border-slate-800 bg-slate-950/40 px-2 py-3 text-right font-mono text-[11px] leading-relaxed text-slate-600">
+                          {lines.map((_, i) => i + 1).join("\n")}
+                        </pre>
                         <textarea
-                          value={f.content}
+                          value={active.content}
                           onChange={(e) => {
                             const content = e.target.value;
-                            setStarterFiles((cur) => cur.map((x) => x.path === f.path ? { ...x, content } : x));
+                            setStarterFiles((cur) => cur.map((x) => x.path === active.path ? { ...x, content } : x));
                             setSyntax(null);   // sửa tay xong thì kết quả kiểm cú pháp cũ không còn đúng
                           }}
-                          rows={Math.min(24, f.content.split("\n").length + 2)}
                           spellCheck={false}
-                          className="custom-scrollbar w-full border-t border-slate-200 bg-slate-900 p-3 font-mono text-[11px] leading-relaxed text-slate-100 outline-none"
+                          wrap="off"
+                          className="min-h-full w-full resize-none bg-transparent px-3 py-3 font-mono text-[11px] leading-relaxed text-slate-100 outline-none"
+                          style={{ minHeight: `${lines.length * 1.5 + 1.5}rem` }}
                         />
-                      )}
+                      </div>
                     </div>
-                  ))}
-                </div>
-              )}
+                  </div>
+                );
+              })()}
             </Step>
           )}
 

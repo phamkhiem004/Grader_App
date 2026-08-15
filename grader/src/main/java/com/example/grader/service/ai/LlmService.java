@@ -49,7 +49,7 @@ public class LlmService {
                     "Chưa nhập API key. Mở phần \"Trợ lý AI\" → Cấu hình để dán key trước khi dùng.");
         String raw;
         try {
-            raw = active().chat(messages);
+            raw = callWithProtocolFallback(messages);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("Đã hủy lời gọi AI.");
@@ -62,6 +62,42 @@ public class LlmService {
             throw new IllegalStateException("AI trả về nội dung không phải JSON hợp lệ. "
                     + "Thử lại hoặc đổi sang model mạnh hơn. Trích đoạn: " + excerpt(raw));
         }
+    }
+
+    /**
+     * Gọi model, có DỰ PHÒNG GIAO THỨC cho endpoint riêng.
+     *
+     * <p>Dịch vụ trung gian bán lại Claude thường mở CẢ HAI đường: {@code /chat/completions}
+     * (giao thức OpenAI) và {@code /messages} (giao thức Anthropic). Cấu hình luôn đi đường
+     * OpenAI trước vì phổ biến nhất; nơi nào không có đường đó sẽ trả 404/405 — khi ấy thử lại
+     * đúng một lần bằng giao thức kia, thay vì bắt giáo viên tự đoán dịch vụ mình mua nói kiểu gì.
+     */
+    private String callWithProtocolFallback(List<LlmMessage> messages) throws Exception {
+        LlmClient primary = active();
+        try {
+            return primary.chat(messages);
+        } catch (Exception first) {
+            LlmClient alternate = alternateProtocol(primary, first);
+            if (alternate == null) throw first;
+            log.warn("Endpoint riêng không nhận giao thức {} ({}) — thử lại bằng {}",
+                    primary.key(), first.getMessage(), alternate.key());
+            try {
+                return alternate.chat(messages);
+            } catch (Exception second) {
+                first.addSuppressed(second);
+                throw first;      // báo lỗi của đường chính, đường dự phòng chỉ là nỗ lực thêm
+            }
+        }
+    }
+
+    /** Chỉ đổi giao thức khi dùng endpoint riêng VÀ lỗi đúng kiểu "không có đường này". */
+    private LlmClient alternateProtocol(LlmClient primary, Exception failure) {
+        if (!settings.hasCustomBaseUrl()) return null;
+        String message = failure.getMessage() == null ? "" : failure.getMessage();
+        if (!message.contains(" 404") && !message.contains(" 405")) return null;
+        String other = AiModelCatalog.OPENAI.equals(primary.key())
+                ? AiModelCatalog.ANTHROPIC : AiModelCatalog.OPENAI;
+        return clients.get(other);
     }
 
     /** Bóc rào ```json … ``` và phần chữ thừa hai đầu để lấy đúng object JSON. */
@@ -87,12 +123,24 @@ public class LlmService {
         out.put("model", settings.model());
         long started = System.currentTimeMillis();
         try {
-            JsonNode res = chatJson(List.of(
+            if (!settings.hasApiKey())
+                throw new IllegalStateException("Chưa nhập API key.");
+            String raw = callWithProtocolFallback(List.of(
                     LlmMessage.system("Bạn trả lời bằng JSON. Chỉ trả về {\"ok\":true}."),
                     LlmMessage.user("Trả về đúng {\"ok\":true}")));
-            out.put("ok", res.path("ok").asBoolean(true));
             out.put("elapsedMs", System.currentTimeMillis() - started);
-            out.put("message", "Kết nối thành công.");
+            // Việc của phép thử này là xác nhận KEY + ENDPOINT + MODEL gọi được. Model trả về chữ
+            // thay vì JSON (hay gặp ở dịch vụ trung gian có chèn sẵn system prompt riêng) là
+            // chuyện khác — vẫn coi là kết nối được, nhưng phải nói rõ để giáo viên biết trước.
+            out.put("ok", true);
+            try {
+                mapper.readTree(stripFence(raw));
+                out.put("message", "Kết nối thành công.");
+            } catch (Exception notJson) {
+                out.put("message", "Gọi được model (key, endpoint và mã model đều đúng) nhưng model "
+                        + "trả lời không phải JSON, nên các bước soạn đề có thể lỗi. Trích đoạn: "
+                        + excerpt(raw));
+            }
         } catch (Exception e) {
             out.put("ok", false);
             out.put("elapsedMs", System.currentTimeMillis() - started);

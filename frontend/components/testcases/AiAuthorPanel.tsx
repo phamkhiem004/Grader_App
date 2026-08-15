@@ -42,10 +42,11 @@ export interface AiProposedItem {
 
 interface MockupScreen { id: string; title: string; svg: string; keys: string[] }
 interface StarterFile { path: string; content: string; summary: string }
+interface AiModel { id: string; label: string; provider: string; vendor: string }
 interface AiSettings {
-  provider: string; model: string; baseUrl: string; hasApiKey: boolean;
-  apiKeyMasked: string | null; timeoutSeconds: number; providers: string[];
-  defaultModels: Record<string, string>; ready: boolean;
+  model: string; provider: string; vendor: string; keyUrl: string;
+  hasApiKey: boolean; apiKeyMasked: string | null; timeoutSeconds: number;
+  models: AiModel[]; ready: boolean;
 }
 
 interface Props {
@@ -63,7 +64,8 @@ export default function AiAuthorPanel({ examId, existingKeys, onApplyContract, o
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settings, setSettings] = useState<AiSettings | null>(null);
   const [apiKeyDraft, setApiKeyDraft] = useState("");
-  const [settingsDraft, setSettingsDraft] = useState({ provider: "gemini", model: "", baseUrl: "", timeoutSeconds: 180 });
+  const [modelDraft, setModelDraft] = useState("");
+  const [customModel, setCustomModel] = useState(false);   // gõ tay mã model không có trong danh sách
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
@@ -108,10 +110,8 @@ export default function AiAuthorPanel({ examId, existingKeys, onApplyContract, o
       const data = (await res.json()) as AiSettings;
       if (!res.ok) throw new Error("Không đọc được cấu hình AI");
       setSettings(data);
-      setSettingsDraft({
-        provider: data.provider, model: data.model || "",
-        baseUrl: data.baseUrl || "", timeoutSeconds: data.timeoutSeconds || 180,
-      });
+      setModelDraft(data.model || "");
+      setCustomModel(!(data.models || []).some((m) => m.id === data.model));
     } catch {
       setSettings(null);
     }
@@ -141,13 +141,15 @@ export default function AiAuthorPanel({ examId, existingKeys, onApplyContract, o
 
   // ── Cấu hình ───────────────────────────────────────────────────
   const saveSettings = async () => {
-    const body: Record<string, unknown> = { ...settingsDraft };
+    const body: Record<string, unknown> = { model: modelDraft.trim() };
     if (apiKeyDraft.trim()) body.apiKey = apiKeyDraft.trim();
     const data = await call<AiSettings>("/ai/settings", body, "settings");
     if (data) {
       setSettings(data);
       setApiKeyDraft("");
-      setInfo("Đã lưu cấu hình AI.");
+      setInfo(data.hasApiKey
+        ? `Đã lưu. Đang dùng ${data.model} (${data.vendor}).`
+        : `Đã chọn ${data.model}. Hãy dán API key của ${data.vendor} rồi lưu lại.`);
     }
   };
 
@@ -304,6 +306,27 @@ export default function AiAuthorPanel({ examId, existingKeys, onApplyContract, o
     if (data) setInfo(`Đã lưu vào bộ phát cho sinh viên: ${data.files.join(", ")}.`);
   };
 
+  // Gom model theo hãng để ô chọn có nhóm Claude / GPT / Gemini rõ ràng.
+  const modelsByVendor = useMemo(() => {
+    const out: Record<string, AiModel[]> = {};
+    (settings?.models || []).forEach((m) => {
+      (out[m.vendor] ||= []).push(m);
+    });
+    return out;
+  }, [settings]);
+
+  /** Hãng của model ĐANG CHỌN trong form (chưa lưu) — suy từ mã model, giống hệt backend. */
+  const draftVendor = useMemo(() => {
+    const id = modelDraft.trim().toLowerCase();
+    if (!id) return "";
+    if (id.startsWith("claude")) return "Claude (Anthropic)";
+    if (id.startsWith("gemini")) return "Gemini (Google)";
+    return "GPT (OpenAI)";
+  }, [modelDraft]);
+
+  // Đổi hãng thì key cũ chắc chắn vô dụng → báo trước thay vì để dính lỗi 401 lúc sinh đề.
+  const vendorChanged = !!settings && !!draftVendor && draftVendor !== settings.vendor;
+
   const totalWeight = useMemo(
     () => proposed.filter((i) => i.enabled).reduce((s, i) => s + Number(i.weight || 0), 0),
     [proposed]);
@@ -327,7 +350,7 @@ export default function AiAuthorPanel({ examId, existingKeys, onApplyContract, o
         {settings && (
           <span className={`hidden shrink-0 rounded-full px-2.5 py-1 text-[11px] font-bold sm:inline ${
             settings.ready ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
-            {settings.ready ? `${settings.provider} · ${settings.model}` : "Chưa có API key"}
+            {settings.ready ? settings.model : "Chưa có API key"}
           </span>
         )}
         <ChevronDown size={18} className={`shrink-0 text-slate-400 transition-transform ${open ? "rotate-180" : ""}`} />
@@ -354,7 +377,7 @@ export default function AiAuthorPanel({ examId, existingKeys, onApplyContract, o
               className="flex w-full items-center gap-2 px-4 py-3 text-left"
             >
               <Settings2 size={15} className="text-slate-500" />
-              <span className="text-sm font-bold text-slate-700">Cấu hình LLM (API key)</span>
+              <span className="text-sm font-bold text-slate-700">Chọn model &amp; API key</span>
               {settings?.hasApiKey && (
                 <span className="ml-2 font-mono text-[11px] text-slate-400">{settings.apiKeyMasked}</span>
               )}
@@ -363,29 +386,31 @@ export default function AiAuthorPanel({ examId, existingKeys, onApplyContract, o
             {settingsOpen && (
               <div className="space-y-3 border-t border-slate-100 p-4">
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <Field label="Nhà cung cấp">
+                  {/* Chỉ cần chọn model: nhà cung cấp và endpoint suy ra từ chính mã model. */}
+                  <Field label="Model AI" hint={draftVendor ? `Sẽ gọi ${draftVendor}` : undefined}>
                     <select
-                      value={settingsDraft.provider}
-                      onChange={(e) => setSettingsDraft((d) => ({ ...d, provider: e.target.value, model: "" }))}
+                      value={customModel ? "__custom__" : modelDraft}
+                      onChange={(e) => {
+                        if (e.target.value === "__custom__") { setCustomModel(true); return; }
+                        setCustomModel(false);
+                        setModelDraft(e.target.value);
+                      }}
                       className={inputClass}
                     >
-                      {(settings?.providers || ["gemini", "openai"]).map((p) => (
-                        <option key={p} value={p}>{p === "gemini" ? "Google Gemini" : "OpenAI / tương thích OpenAI"}</option>
+                      {Object.entries(modelsByVendor).map(([vendor, list]) => (
+                        <optgroup key={vendor} label={vendor}>
+                          {list.map((m) => (
+                            <option key={m.id} value={m.id}>{m.label}</option>
+                          ))}
+                        </optgroup>
                       ))}
+                      <option value="__custom__">Tự nhập mã model khác…</option>
                     </select>
-                  </Field>
-                  <Field label="Model">
-                    <input
-                      value={settingsDraft.model}
-                      onChange={(e) => setSettingsDraft((d) => ({ ...d, model: e.target.value }))}
-                      placeholder={settings?.defaultModels?.[settingsDraft.provider] || ""}
-                      className={inputClass}
-                    />
                   </Field>
                   <Field
                     label="API key"
-                    hint={settingsDraft.provider !== settings?.provider
-                      ? "Đổi nhà cung cấp thì phải nhập key mới của nhà cung cấp đó"
+                    hint={vendorChanged
+                      ? `Đổi sang ${draftVendor} thì phải nhập key mới của hãng đó`
                       : settings?.hasApiKey ? "Để trống = giữ key đang dùng" : "Bắt buộc để dùng trợ lý"}
                   >
                     <div className="flex items-center gap-2">
@@ -394,32 +419,43 @@ export default function AiAuthorPanel({ examId, existingKeys, onApplyContract, o
                         type="password"
                         value={apiKeyDraft}
                         onChange={(e) => setApiKeyDraft(e.target.value)}
-                        placeholder={settings?.hasApiKey ? settings.apiKeyMasked || "••••" : "Dán API key vào đây"}
+                        placeholder={settings?.hasApiKey && !vendorChanged
+                          ? settings.apiKeyMasked || "••••" : "Dán API key vào đây"}
                         className={inputClass}
                         autoComplete="off"
                       />
                     </div>
                   </Field>
-                  {settingsDraft.provider === "openai" && (
-                    <Field label="Endpoint" hint="Đổi để dùng Ollama / OpenRouter / Azure">
-                      <input
-                        value={settingsDraft.baseUrl}
-                        onChange={(e) => setSettingsDraft((d) => ({ ...d, baseUrl: e.target.value }))}
-                        placeholder="https://api.openai.com/v1"
-                        className={inputClass}
-                      />
-                    </Field>
+                  {customModel && (
+                    <div className="sm:col-span-2">
+                      <Field label="Mã model" hint="Bắt đầu bằng claude… / gpt… / gemini… để gọi đúng hãng">
+                        <input
+                          value={modelDraft}
+                          onChange={(e) => setModelDraft(e.target.value)}
+                          placeholder="VD: claude-sonnet-5"
+                          className={`${inputClass} font-mono`}
+                        />
+                      </Field>
+                    </div>
                   )}
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  <button onClick={saveSettings} disabled={busy !== null} className={primaryBtn}>
+                  <button onClick={saveSettings} disabled={busy !== null || !modelDraft.trim()} className={primaryBtn}>
                     {busy === "settings" ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />} Lưu cấu hình
                   </button>
                   <button onClick={testConnection} disabled={busy !== null || !settings?.hasApiKey} className={ghostBtn}>
                     {busy === "test" ? <Loader2 size={15} className="animate-spin" /> : <RefreshCw size={15} />} Kiểm tra kết nối
                   </button>
-                  <span className="text-[11px] text-slate-400">Key chỉ lưu trên máy này (cơ sở dữ liệu cục bộ).</span>
+                  {settings?.keyUrl && (
+                    <a href={settings.keyUrl} target="_blank" rel="noreferrer"
+                      className="text-[11px] font-semibold text-indigo-600 underline-offset-2 hover:underline">
+                      Lấy API key của {settings.vendor}
+                    </a>
+                  )}
                 </div>
+                <p className="text-[11px] text-slate-400">
+                  Key chỉ lưu trên máy này (cơ sở dữ liệu cục bộ) và không bao giờ hiện lại nguyên vẹn.
+                </p>
               </div>
             )}
           </div>

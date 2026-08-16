@@ -161,6 +161,64 @@ class StarterRendererTest {
         assertTrue(code.contains("return const Placeholder();"), "Giao diện vẫn phải để trống");
     }
 
+    /**
+     * Bài thi Flutter nào cũng cần {@code TextEditingController}, {@code GlobalKey<FormState>},
+     * {@code ValueNotifier} và hàm dựng từ Map. Danh sách kiểu dựng sẵn từng thiếu chúng nên khung
+     * bị loại đúng các thành viên quan trọng nhất, kèm cảnh báo đọc như thể AI mô tả sai.
+     */
+    @Test
+    void giuKieuFlutterThongDungVaHamDungCoTen() throws Exception {
+        String flutterish = """
+                {"entry_class":"HomeScreen","files":[
+                  {"path":"lib/models/user.dart","kind":"model","class_name":"User",
+                   "fields":[{"name":"id","type":"int?"},{"name":"fullName","type":"String"}],
+                   "methods":[{"signature":"Map<String, dynamic> toMap()"},
+                              {"signature":"User.fromMap(Map<String, dynamic> map)"}]},
+                  {"path":"lib/viewmodels/user_viewmodel.dart","kind":"viewmodel",
+                   "class_name":"UserViewModel",
+                   "fields":[{"name":"users","type":"ValueNotifier<List<User>>"}]},
+                  {"path":"lib/screens/home_screen.dart","kind":"screen","class_name":"HomeScreen",
+                   "fields":[{"name":"formKey","type":"GlobalKey<FormState>"},
+                             {"name":"fullNameController","type":"TextEditingController"}]}]}
+                """;
+        StarterRenderer.Rendered r = new StarterRenderer().render(spec(flutterish), null, Map.of());
+
+        String model = content(r, "lib/models/user.dart");
+        assertTrue(model.contains("factory User.fromMap(Map<String, dynamic> map) {"),
+                "Hàm dựng có tên phải được giữ, và phải là factory vì thân hàm là TODO: " + model);
+        assertTrue(content(r, "lib/viewmodels/user_viewmodel.dart")
+                .contains("final ValueNotifier<List<User>> users;"));
+        String screen = content(r, "lib/screens/home_screen.dart");
+        assertTrue(screen.contains("final GlobalKey<FormState> formKey;"));
+        assertTrue(screen.contains("final TextEditingController fullNameController;"));
+        assertTrue(r.warnings().isEmpty(), "Kiểu Flutter thông dụng thì KHÔNG được cảnh báo: " + r.warnings());
+    }
+
+    /**
+     * Chú thích hàm do AI viết luôn là CÁC BƯỚC LÀM BÀI ("validate form, gọi ViewModel addUser,
+     * reset form nếu thành công") — chép vào khung thì sinh viên chỉ còn việc gõ lại.
+     */
+    @Test
+    void khongChepCacBuocLamBaiCuaAiVaoKhung() throws Exception {
+        String spoonFed = """
+                {"entry_class":"HomeScreen","files":[
+                  {"path":"lib/screens/home_screen.dart","kind":"screen","class_name":"HomeScreen",
+                   "methods":[
+                     {"signature":"Future<void> handleAddUser()",
+                      "doc":"Xử lý thêm người dùng: validate form bằng formKey.currentState.validate, gọi ViewModel addUser, reset form nếu thành công"},
+                     {"signature":"String? validateEmail(String? value)",
+                      "doc":"Validate email: bắt buộc, phải chứa @ và ., trả về thông báo lỗi nếu không hợp lệ"}]}]}
+                """;
+        String code = content(new StarterRenderer().render(spec(spoonFed), null, Map.of()),
+                "lib/screens/home_screen.dart");
+
+        assertTrue(code.contains("Future<void> handleAddUser() {"), "Chữ ký vẫn giữ để sinh viên biết phải làm gì");
+        assertFalse(code.contains("validate form"), "Không được chép các bước làm bài: " + code);
+        assertFalse(code.contains("bắt buộc, phải chứa"), "Không được chép luật validate vào comment");
+        assertEquals(2, code.split("TODO\\(sinh viên\\): hoàn thiện theo yêu cầu của đề\\.").length - 1,
+                "Mỗi hàm chỉ còn một dòng TODO chung");
+    }
+
     @Test
     void loaiKieuDuLieuKhongCoTrongKhung() throws Exception {
         String risky = """

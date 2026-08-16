@@ -45,6 +45,12 @@ class AiAuthorResponseShapeTest {
         AiExamAuthorService service = new AiExamAuthorService();
         ReflectionTestUtils.setField(service, "llm", llm);
         ReflectionTestUtils.setField(service, "mockupRenderer", new MockupRenderer());
+        // Lượt sửa hình giờ bóc CẢ danh sách key nên phải hỏi thư viện xem có những cách dò nào.
+        // Catalog rỗng là đủ: bộ cách dò rơi về danh sách mặc định trong service.
+        com.example.grader.service.TestcaseTemplateService templates =
+                mock(com.example.grader.service.TestcaseTemplateService.class);
+        when(templates.contractCatalog()).thenReturn(java.util.Map.of());
+        ReflectionTestUtils.setField(service, "templateService", templates);
         return service;
     }
 

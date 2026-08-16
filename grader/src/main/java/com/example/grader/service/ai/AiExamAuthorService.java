@@ -109,6 +109,47 @@ public class AiExamAuthorService {
         return out;
     }
 
+    /**
+     * Ép các tham số ĐI THEO CẶP về cùng số phần tử.
+     *
+     * <p>Nhiều runner nhận danh sách song song: {@code fieldKeys} ↔ {@code invalidValues} ↔
+     * {@code errorKeys}, {@code fieldKeys} ↔ {@code values}… AI rất hay trả 2 ô nhập nhưng chỉ 1
+     * giá trị sai, và lỗi chỉ nổ ra lúc BẤM LƯU cả bộ testcase — lúc đó người dùng phải tự dò
+     * xem "PE_62_item_06" là testcase nào rồi tự đếm lại từng danh sách.
+     *
+     * <p>Thiếu thì bù bằng phần tử cuối (giá trị sai/khoá lỗi lặp lại vẫn kiểm được), thừa thì
+     * cắt bớt theo danh sách gốc. Sửa ngay tại nguồn còn hơn để bộ testcase không lưu nổi.
+     */
+    private void alignPairedLists(Map<String, Object> params, List<Map<String, Object>> schema) {
+        for (Map<String, Object> param : schema) {
+            Object pairWith = param.get("pair_with");
+            if (pairWith == null) continue;
+            String name = String.valueOf(param.get("name"));
+            String source = String.valueOf(pairWith);
+            if (!params.containsKey(name) || !params.containsKey(source)) continue;
+
+            List<String> master = splitCsv(params.get(source));
+            List<String> paired = splitCsv(params.get(name));
+            if (master.isEmpty() || paired.size() == master.size()) continue;
+
+            List<String> fixed = new ArrayList<>();
+            for (int i = 0; i < master.size(); i++) {
+                fixed.add(i < paired.size() ? paired.get(i)
+                        : (paired.isEmpty() ? "" : paired.get(paired.size() - 1)));
+            }
+            params.put(name, String.join(",", fixed));
+        }
+    }
+
+    private List<String> splitCsv(Object raw) {
+        List<String> out = new ArrayList<>();
+        for (String part : String.valueOf(raw == null ? "" : raw).split(",", -1)) {
+            String value = part.trim();
+            if (!value.isEmpty()) out.add(value);
+        }
+        return out;
+    }
+
     /** Bóc danh sách Item Key từ câu trả lời của AI, chuẩn hoá về đúng bộ cách dò hợp lệ. */
     private List<Map<String, Object>> parseKeys(JsonNode res) {
         Set<String> allowedStrategies = new LinkedHashSet<>(strategyCodes());
@@ -295,6 +336,7 @@ public class AiExamAuthorService {
                 rejected.add(reject(templateId, problem));
                 continue;
             }
+            alignPairedLists(params, schema);
             if (!fingerprints.add(templateId + "|" + params)) {
                 rejected.add(reject(templateId, "Trùng hoàn toàn với một testcase khác đã đề xuất."));
                 continue;

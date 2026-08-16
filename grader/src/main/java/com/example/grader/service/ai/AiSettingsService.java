@@ -207,6 +207,9 @@ public class AiSettingsService {
         m.put("keyUrl", hasCustomBaseUrl() ? null : AiModelCatalog.keyUrl(provider()));
         m.put("hasApiKey", hasApiKey());
         m.put("apiKeyMasked", mask(apiKey));                  // KHÔNG bao giờ trả key nguyên vẹn
+        // Độ dài là thứ DUY NHẤT soi được khi key "nhìn thì đúng" mà hãng vẫn từ chối: key Claude
+        // dài ~108 ký tự, thấy 104 hay 112 là biết đã dán thiếu/thừa. Không lộ nội dung key.
+        m.put("apiKeyLength", apiKey == null ? 0 : apiKey.length());
         m.put("keyWarning", keyWarning());
         m.put("timeoutSeconds", timeoutSeconds());
         m.put("models", AiModelCatalog.models());
@@ -232,7 +235,11 @@ public class AiSettingsService {
                     + ". Chỉ gồm chữ, số và các ký tự . _ - :");
 
         String newBaseUrl = text(body, "baseUrl", null);
-        String suppliedKey = text(body, "apiKey", null);
+        String rawKey = text(body, "apiKey", null);
+        // Dọn ký tự vô hình TRƯỚC khi kiểm: dán key dính U+200B thì bộ kiểm cũ cho qua, hãng lại
+        // trả 401 "API key is invalid" và không có cách nào nhìn ra vì ô key luôn hiện dạng che.
+        String suppliedKey = sanitizeKey(rawKey);
+        if (suppliedKey != null && suppliedKey.isBlank()) suppliedKey = null;
         if (suppliedKey != null) validateSuppliedKey(suppliedKey);
         boolean clearKey = Boolean.TRUE.equals(body.get("clearApiKey"));
         int newTimeout = (int) number(body.get("timeoutSeconds"), timeoutSeconds());
@@ -290,6 +297,22 @@ public class AiSettingsService {
      *
      * <p>KHÔNG in phần thừa ra thông báo: nó thường chính là mật khẩu người dùng đã lưu.
      */
+    /**
+     * Gạt bỏ mọi ký tự KHÔNG PHẢI ASCII in được ra khỏi key.
+     *
+     * <p>Đây là nguyên nhân của cảnh "key đúng mà hãng vẫn báo API key is invalid": copy key từ
+     * trang web, email hay khung chat rất hay dính ký tự VÔ HÌNH — zero-width space (U+200B),
+     * BOM (U+FEFF), non-breaking space, soft hyphen. Mắt không thấy, độ dài nhìn cũng như thường,
+     * và {@code Character.isWhitespace} KHÔNG bắt được U+200B/U+FEFF nên bộ kiểm cũ cho lọt.
+     * Key của mọi hãng đều thuần ASCII in được, nên cắt sạch phần còn lại là an toàn.
+     */
+    private String sanitizeKey(String raw) {
+        if (raw == null) return null;
+        StringBuilder clean = new StringBuilder(raw.length());
+        raw.codePoints().filter(c -> c > 0x20 && c < 0x7F).forEach(clean::appendCodePoint);
+        return clean.toString();
+    }
+
     private void validateSuppliedKey(String key) {
         if (key.chars().anyMatch(Character::isWhitespace))
             throw new IllegalArgumentException(

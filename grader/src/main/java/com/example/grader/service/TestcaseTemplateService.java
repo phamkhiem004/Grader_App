@@ -215,6 +215,26 @@ public class TestcaseTemplateService {
     public Map<String, Object> getExamConfig(String examId) {
         Exam exam = examRepository.findByExamId(ExamService.safeId(examId, "đề")).orElse(null);
         if (exam == null || exam.getTestcaseConfigJson() == null || exam.getTestcaseConfigJson().isBlank()) {
+            // Bộ nhập bằng ZIP không có cấu hình builder, nhưng nội dung của nó vẫn do engine này
+            // sinh ra → dựng lại cấu hình từ chính file testcase trên đĩa để vẫn Sửa/Clone được.
+            Map<String, Object> recovered = recoverConfig(examId);
+            if (recovered != null) {
+                Map<String, Object> out = new LinkedHashMap<>(recovered);
+                List<Map<String, Object>> items = normalizeExistingItems(recovered.get("items"));
+                // Cùng schema_version với cấu hình thật: màn Sửa dùng field này để biết bộ có mở
+                // lại được hay không, bản dựng lại cũng mở được nên phải khai giống hệt.
+                out.put("schema_version", 1);
+                out.put("exam_id", examId);
+                out.put("status", exam != null && exam.getTestcaseStatus() != null
+                        ? exam.getTestcaseStatus() : "PUBLISHED");
+                out.put("version", exam != null ? exam.getTestcaseVersion() : null);
+                out.put("template_version", TEMPLATE_VERSION);
+                out.put("items", items);
+                out.put("total_weight", totalWeight(items));
+                out.put("exam_name", exam != null ? exam.getExamName() : examId);
+                out.put("teacher_note", exam != null ? exam.getTeacherNote() : null);
+                return out;
+            }
             Map<String, Object> empty = new LinkedHashMap<>();
             empty.put("exam_id", examId);
             empty.put("status", exam != null && exam.getTestcaseStatus() != null
@@ -240,6 +260,25 @@ public class TestcaseTemplateService {
             return config;
         } catch (Exception e) {
             throw new IllegalStateException("Cấu hình testcase của đề bị hỏng: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Dựng lại cấu hình builder từ file testcase trên đĩa (bộ nhập bằng ZIP). Trả kèm cờ
+     * {@code recovered} + cảnh báo để màn Sửa nói rõ đây là bản dựng lại, không phải cấu hình gốc.
+     */
+    private Map<String, Object> recoverConfig(String examId) {
+        try {
+            TestcaseConfigRecovery.Recovered recovered =
+                    TestcaseConfigRecovery.recover(examService.testcaseDirectoryForConfiguration(examId));
+            if (recovered == null) return null;
+            Map<String, Object> out = new LinkedHashMap<>(recovered.config());
+            out.put("recovered", true);
+            out.put("recovered_warnings", recovered.warnings());
+            return out;
+        } catch (Exception e) {
+            log.warn("Không dựng lại được cấu hình testcase của {}: {}", examId, e.getMessage());
+            return null;
         }
     }
 
@@ -273,17 +312,27 @@ public class TestcaseTemplateService {
         if (targetRoot != null && Files.exists(targetRoot))
             throw new IllegalStateException("Thư mục của bộ testcase " + targetExamId + " đã tồn tại.");
 
+        // Bộ mới chỉ có thư mục trên đĩa (chưa có hàng trong bảng exams) vẫn phải nhân bản được:
+        // ensureExamRecord nhận nuôi nó ngay tại đây thay vì ném "không tìm thấy bộ nguồn".
         Exam source = examRepository.findByExamId(sourceExamId)
-                .orElseThrow(() -> new IllegalArgumentException("Không tìm thấy bộ testcase nguồn: " + sourceExamId));
-        if (!isTemplateCreatedExam(source)) {
-            throw new IllegalStateException("Bộ " + sourceExamId
-                    + " được nhập từ ZIP nên không có cấu hình builder để clone.");
-        }
+                .orElseGet(() -> examService.ensureExamRecord(sourceExamId));
         String examName = firstText(body.get("exam_name"), body.get("examName"));
         if (examName == null || examName.isBlank())
             throw new IllegalArgumentException("Vui lòng nhập tên bộ testcase bản sao.");
 
-        Map<String, Object> sourceConfig = parseConfig(source.getTestcaseConfigJson());
+        // Bộ nhập bằng ZIP không có cấu hình builder → thử dựng lại từ file testcase trên đĩa.
+        // Điều kiện là CÓ CẤU HÌNH hay không, không phải có bao nhiêu testcase: bộ builder mới tạo
+        // còn rỗng vẫn phải clone theo đường builder, nếu không bản sao mất luôn cấu hình.
+        Map<String, Object> sourceConfig = isTemplateCreatedExam(source)
+                ? parseConfig(source.getTestcaseConfigJson())
+                : recoverConfig(sourceExamId);
+        if (sourceConfig == null) {
+            // Testcase viết tay (không dựng từ thư viện template) thì không có cấu hình để clone —
+            // nhân bản ở mức FILE, giữ nguyên si bộ đang chấm.
+            String teacherNoteRaw = firstText(body.get("teacher_note"), body.get("teacherNote"));
+            return examService.cloneImportedExam(sourceExamId, targetExamId,
+                    examName.trim(), teacherNoteRaw, actor);
+        }
         Map<String, Object> cloneBody = new LinkedHashMap<>();
         cloneBody.put("exam_name", examName.trim());
         String teacherNote = firstText(body.get("teacher_note"), body.get("teacherNote"));
@@ -291,9 +340,10 @@ public class TestcaseTemplateService {
         cloneBody.put("items", normalizeExistingItems(sourceConfig.get("items")));
         cloneBody.put("contract", sourceConfig.getOrDefault("contract", Map.of()));
 
-        // Bản clone đã là một bản sao hoàn chỉnh của cấu hình builder. Publish ngay để
-        // có thể build sandbox/chấm trực tiếp; giáo viên vẫn có thể thay đổi bằng nút Sửa.
-        Map<String, Object> result = publish(targetExamId, cloneBody, actor);
+        // Bản clone dừng ở NHÁP: người dùng luôn được đưa vào màn sửa ngay sau khi nhân bản,
+        // bấm Lưu ở đó mới thành Hoàn tất và mới đem chấm được. Draft vẫn sinh đủ file nên
+        // xem/tải code kiểm tra được ngay.
+        Map<String, Object> result = saveDraft(targetExamId, cloneBody, actor);
         try {
             examService.cloneHandout(sourceExamId, targetExamId);
         } catch (Exception copyError) {

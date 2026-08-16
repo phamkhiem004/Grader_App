@@ -148,6 +148,8 @@ public class BatchController {
     public ResponseEntity<?> testcaseFiles(@PathVariable String examId, @PathVariable String studentId) {
         try {
             return ResponseEntity.ok(batchService.readTestcaseFiles(examId, studentId));
+        } catch (IllegalStateException e) {     // bài chưa chấm xong → chưa có bản testcase đã dùng
+            return ResponseEntity.status(409).body(Map.of("error", e.getMessage()));
         } catch (Exception e) {
             return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
         }

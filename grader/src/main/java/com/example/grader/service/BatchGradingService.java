@@ -1407,6 +1407,14 @@ public class BatchGradingService {
         Path dir = null;
 
         ExamResult r = resultRepo.findByStudentIdAndExamIdAndMode(studentId, examId, "submit").orElse(null);
+        // Bài CHƯA chấm xong thì chưa tồn tại "testcase đã dùng để chấm". Trước đây rơi xuống
+        // nhánh dự phòng và trả về bộ testcase HIỆN TẠI của đề — người xem tưởng đó là bản đã
+        // chấm bài này, trong khi bài còn nằm trong hàng đợi và bộ đó vẫn có thể bị sửa trước
+        // khi tới lượt. Chặn thẳng, nói rõ lý do.
+        if (r != null && (r.getStatus() == GradingStatus.QUEUED || r.getStatus() == GradingStatus.GRADING))
+            throw new IllegalStateException("Bài của " + studentId + " đang "
+                    + (r.getStatus() == GradingStatus.QUEUED ? "chờ trong hàng đợi" : "được chấm")
+                    + " nên chưa có bản testcase đã dùng để chấm. Hãy đợi chấm xong rồi mở lại.");
         if (r != null && r.getBatchId() != null) {
             Path snap = batchDir(examId, r.getBatchId()).resolve("_testcase");
             if (Files.exists(snap)) dir = snap;

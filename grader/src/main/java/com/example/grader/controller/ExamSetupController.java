@@ -225,15 +225,49 @@ public class ExamSetupController {
         }
     }
 
-    /** Đọc các file testcase của 1 đề (exam_test.dart, skills_matrix.json, grader.dart) — cho trang Kho đề. */
+    /**
+     * Đọc các file testcase của 1 đề (exam_test.dart, skills_matrix.json, grader.dart).
+     *
+     * @param edit true = đọc để SỬA: trả nguyên vẹn, không cắt bớt (bản cắt mà lưu lại là mất dữ liệu)
+     */
     @GetMapping("/{examId}/testcase")
-    public ResponseEntity<?> testcaseFiles(@PathVariable String examId) {
+    public ResponseEntity<?> testcaseFiles(@PathVariable String examId,
+                                           @RequestParam(value = "edit", defaultValue = "false") boolean edit) {
         try {
-            return ResponseEntity.ok(examService.readExamTestcaseFiles(examId));
+            return ResponseEntity.ok(edit
+                    ? examService.readEditableTestcaseFiles(examId)
+                    : examService.readExamTestcaseFiles(examId));
+        } catch (IllegalStateException e) {
+            return ResponseEntity.status(409).body(Map.of("error", e.getMessage()));
         } catch (IllegalArgumentException e) {     // mã đề không hợp lệ (allowlist)
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         } catch (Exception e) {
             return ResponseEntity.internalServerError().body(Map.of("error", "Lỗi máy chủ"));
+        }
+    }
+
+    /**
+     * Sửa trực tiếp file testcase của MỘT bộ bất kỳ. Body: { files: [{name, content}] }.
+     * Bộ dựng bằng builder vẫn sửa được nhưng kèm cảnh báo (lần Lưu sau ở builder sẽ sinh đè).
+     */
+    @SuppressWarnings("unchecked")
+    @PostMapping("/{examId}/testcase")
+    public ResponseEntity<?> saveTestcaseFiles(@PathVariable String examId,
+                                               @RequestBody Map<String, Object> body) {
+        try {
+            Object rawFiles = body == null ? null : body.get("files");
+            java.util.List<Map<String, String>> files = rawFiles instanceof java.util.List
+                    ? (java.util.List<Map<String, String>>) rawFiles : java.util.List.of();
+            Map<String, Object> saved = new java.util.LinkedHashMap<>(
+                    examService.saveExamTestcaseFiles(examId, files));
+            saved.put("exam_id", examId);
+            return ResponseEntity.ok(saved);
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        } catch (IllegalStateException e) {
+            return ResponseEntity.status(409).body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
         }
     }
 
@@ -282,6 +316,56 @@ public class ExamSetupController {
     }
 
     /** Đọc đề bài đã lưu (cho trợ lý AI nạp lại khi mở bộ testcase cũ). */
+    /**
+     * Trang "Xem đề": đề bài + hình minh họa đã gộp thành MỘT tài liệu HTML tự chứa.
+     * Kèm luôn danh sách SVG để trình duyệt đổi sang PNG khi tải bản .docx.
+     */
+    @GetMapping("/{examId}/de-bai/view")
+    public ResponseEntity<?> viewDeBai(@PathVariable String examId) {
+        try {
+            String md = examService.readDeBai(examId);
+            java.util.List<Map<String, String>> mockups = examService.readMockups(examId).stream()
+                    .map(m -> Map.of("id", m.id(), "title", m.title(), "svg", m.svg()))
+                    .toList();
+            Map<String, Object> out = new java.util.LinkedHashMap<>();
+            out.put("exam_id", examId);
+            out.put("has_de_bai", md != null && !md.isBlank());
+            out.put("de_bai", md == null ? "" : md);
+            out.put("html", examService.buildHandoutHtml(examId));
+            out.put("mockups", mockups);
+            return ResponseEntity.ok(out);
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    /**
+     * Tải đề bài dạng .docx. Body: { images: [{ png_base64, width, height }] } — ảnh do trình
+     * duyệt đổi từ SVG sang PNG (máy chủ không có thư viện rasterize). Bỏ trống = chỉ có chữ.
+     */
+    @SuppressWarnings("unchecked")
+    @PostMapping("/{examId}/de-bai/docx")
+    public ResponseEntity<?> downloadDeBaiDocx(@PathVariable String examId,
+                                               @RequestBody(required = false) Map<String, Object> body) {
+        try {
+            Object raw = body == null ? null : body.get("images");
+            java.util.List<Map<String, Object>> images = raw instanceof java.util.List
+                    ? (java.util.List<Map<String, Object>>) raw : java.util.List.of();
+            byte[] docx = examService.buildHandoutDocx(examId, images);
+            return ResponseEntity.ok()
+                    .header("Content-Type", "application/vnd.openxmlformats-officedocument"
+                            + ".wordprocessingml.document")
+                    .header("Content-Disposition", "attachment; filename=\"" + examId + "_de_bai.docx\"")
+                    .body(docx);
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
+        }
+    }
+
     @GetMapping("/{examId}/handout")
     public ResponseEntity<?> readHandout(@PathVariable String examId) {
         try {
@@ -313,7 +397,7 @@ public class ExamSetupController {
         }
     }
 
-    /** Tải EXAM_TEST: ZIP 3 file testcase (exam_test.dart + grader.dart + skills_matrix.json) — upload lại được. */
+    /** Tải EXAM_TEST: ZIP 4 file, gồm ba file thực thi và contract.json để upload lại không đổi hành vi chấm. */
     @GetMapping("/{examId}/download/exam-test")
     public ResponseEntity<?> downloadExamTest(@PathVariable String examId) {
         try {

@@ -9,7 +9,7 @@ import { API_BASE } from "@/lib/config";
 import {
   Archive, RotateCcw, Trash2, Loader2, AlertTriangle, CheckCircle2,
   Database, FileArchive, Pencil, Plus, X, UploadCloud, Package, ArrowLeft,
-  Copy, ChevronLeft, ChevronRight, PenLine, Pause, Play,
+  Copy, ChevronLeft, ChevronRight, PenLine, Pause, Play, FileText,
 } from "lucide-react";
 import ErrorScreen from "@/components/ui/ErrorScreen";
 import Banner from "@/components/ui/Banner";
@@ -21,11 +21,18 @@ interface ExamRow {
   /** DRAFT = mới tạo, chưa bấm Lưu · PUBLISHED = đã lưu chính thức, dùng chấm được. */
   testcaseStatus?: string;
   hasTestcase?: boolean;
+  /** true = đã có đề bài trong bộ phát cho sinh viên → mở được trang Xem đề. */
+  hasDeBai?: boolean;
   resultCount?: number;
   teacherNote?: string;
-  /** true = bộ dựng từ template nên mở lại sửa được; false = bộ upload ZIP, không có config. */
+  /** true = sửa/clone được (có cấu hình builder, hoặc dựng lại được từ file testcase). */
   editable?: boolean;
+  /** true = cấu hình được dựng lại từ skills_matrix.json vì bộ này nhập bằng ZIP. */
+  configRecovered?: boolean;
+  /** true = testcase viết tay: sửa bằng trình sửa file thay vì builder. */
+  fileEditable?: boolean;
 }
+interface TestcaseFile { name: string; content: string }
 interface RegradeState {
   examId: string;
   batchId: string;
@@ -123,11 +130,15 @@ export default function ArchivePage() {
   const [cloning, setCloning] = useState(false);
   /** Mã bộ vừa clone xong, đang điều hướng sang builder — chỉ để đổi chữ trên nút. */
   const [cloneRedirect, setCloneRedirect] = useState<string | null>(null);
-  const [renameSource, setRenameSource] = useState<ExamRow | null>(null);
-  const [renameExamId, setRenameExamId] = useState("");
-  const [renameExamName, setRenameExamName] = useState("");
-  const [renameError, setRenameError] = useState<string | null>(null);
-  const [renaming, setRenaming] = useState(false);
+  // Trình sửa file cho testcase viết tay (không dựng từ template nên không mở builder được).
+  const [fileEditor, setFileEditor] = useState<ExamRow | null>(null);
+  const [editorFiles, setEditorFiles] = useState<TestcaseFile[]>([]);
+  const [editorActive, setEditorActive] = useState(0);
+  const [editorDirty, setEditorDirty] = useState(false);
+  const [editorBusy, setEditorBusy] = useState<"load" | "save" | null>(null);
+  const [editorError, setEditorError] = useState<string | null>(null);
+  const [editorExamId, setEditorExamId] = useState("");
+  const [editorExamName, setEditorExamName] = useState("");
 
   // Portal modal ra <body> (tránh bị containing-block của .animate-fade-in-up cắt overlay)
   const [mounted, setMounted] = useState(false);
@@ -329,8 +340,8 @@ export default function ArchivePage() {
     }
   };
 
+  // Nhân bản chạy cho CẢ HAI loại bộ: bộ builder clone cấu hình, bộ upload clone nguyên file.
   const openClone = (source: ExamRow) => {
-    if (source.editable === false) return;
     const suffix = "_COPY";
     const root = `${source.examId.slice(0, 50 - suffix.length)}${suffix}`;
     let candidate = root;
@@ -373,9 +384,20 @@ export default function ArchivePage() {
         exam_name: cloneExamName.trim(),
         teacher_note: cloneNote.trim(),
       });
-      // Bản sao dừng ở trạng thái Nháp — mở thẳng builder để người dùng chỉnh tiếp,
+      // Bản sao luôn dừng ở trạng thái Nháp — mở thẳng màn sửa để người dùng chỉnh tiếp,
       // bấm Lưu ở đó mới thành Hoàn tất và đem chấm được.
       const newExamId = String(data.exam_id || normalizedId);
+      const newExamName = cloneExamName.trim();
+      // Bản sao của testcase VIẾT TAY không có cấu hình builder → mở trình sửa file
+      // thay vì builder (builder sẽ ra màn trống), nhưng vẫn là "vào thẳng màn sửa".
+      if (data.editable === false) {
+        setCloneSource(null);
+        setCloning(false);
+        setMsg(`Đã nhân bản ${cloneSource.examId} → ${newExamId}. Bản sao đang là Nháp — bấm Lưu trong trình sửa để chuyển sang Hoàn tất.`);
+        await load();
+        await openFileEditor({ examId: newExamId, examName: newExamName, editable: false });
+        return;
+      }
       setCloneRedirect(newExamId);
       router.push(`/teacher/testcases?exam=${encodeURIComponent(newExamId)}`);
       // KHÔNG tắt cloning / đóng modal ở đây: giữ nguyên màn "đang mở" cho tới lúc
@@ -386,54 +408,85 @@ export default function ArchivePage() {
     }
   };
 
-  const openRename = (source: ExamRow) => {
-    setRenameSource(source);
-    setRenameExamId(source.examId);
-    setRenameExamName(source.examName || source.examId);
-    setRenameError(null);
-  };
-
-  const closeRename = () => {
-    if (renaming) return;
-    setRenameSource(null);
-    setRenameError(null);
-  };
-
-  const renameTestcaseSet = async () => {
-    if (!renameSource) return;
-    const normalizedId = renameExamId.trim().toUpperCase();
-    const normalizedName = renameExamName.trim();
-    if (!/^[A-Z0-9_-]{1,50}$/.test(normalizedId)) {
-      setRenameError("Mã bộ testcase chỉ gồm chữ in hoa, số, _ hoặc - và tối đa 50 ký tự.");
-      return;
-    }
-    if (!normalizedName) {
-      setRenameError("Tên bộ testcase không được để trống.");
-      return;
-    }
-    if (normalizedId === renameSource.examId && normalizedName === (renameSource.examName || renameSource.examId)) {
-      setRenameError("Hãy thay đổi mã hoặc tên bộ testcase trước khi lưu.");
-      return;
-    }
-
-    setRenaming(true);
-    setRenameError(null);
+  // ── Sửa file testcase (bộ viết tay) ─────────────────────────────
+  const openFileEditor = async (row: ExamRow) => {
+    setFileEditor(row);
+    setEditorFiles([]);
+    setEditorActive(0);
+    setEditorDirty(false);
+    setEditorError(null);
+    // Đổi tên nằm NGAY TRONG trình sửa: sửa nội dung và sửa mã/tên là cùng một việc
+    // "sửa bộ testcase", tách ra hai nút chỉ làm người dùng phải nhớ nút nào làm gì.
+    setEditorExamId(row.examId);
+    setEditorExamName(row.examName || row.examId);
+    setEditorBusy("load");
     try {
-      const data = await api(`/exam-setup/${encodeURIComponent(renameSource.examId)}/rename`, "POST", {
-        new_exam_id: normalizedId,
-        exam_name: normalizedName,
+      // edit=true: backend trả NGUYÊN VẸN. Bản đọc-để-xem bị cắt ở 200.000 ký tự, lưu lại là mất đuôi file.
+      const res = await fetch(`${API_BASE}/exam-setup/${encodeURIComponent(row.examId)}/testcase?edit=true`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Không đọc được file testcase.");
+      const editable = Array.isArray(data) ? (data as TestcaseFile[]) : [];
+      if (!editable.length) throw new Error("Bộ này không có file testcase nào sửa được.");
+      setEditorFiles(editable);
+    } catch (e) {
+      setEditorError((e as Error).message);
+    } finally {
+      setEditorBusy(null);
+    }
+  };
+
+  const closeFileEditor = () => {
+    if (editorBusy) return;
+    if (editorDirty && !confirm("Đóng mà không lưu? Các thay đổi trong file sẽ mất.")) return;
+    setFileEditor(null);
+    setEditorFiles([]);
+    setEditorDirty(false);
+    setEditorError(null);
+  };
+
+  const saveFileEditor = async () => {
+    if (!fileEditor) return;
+    const nextId = editorExamId.trim().toUpperCase();
+    const nextName = editorExamName.trim();
+    if (!/^[A-Z0-9_-]{1,50}$/.test(nextId)) {
+      setEditorError("Mã bộ chỉ gồm chữ in hoa, số, _ hoặc - và tối đa 50 ký tự.");
+      return;
+    }
+    if (!nextName) {
+      setEditorError("Tên bộ testcase không được để trống.");
+      return;
+    }
+    const renaming = nextId !== fileEditor.examId || nextName !== (fileEditor.examName || fileEditor.examId);
+
+    setEditorBusy("save");
+    setEditorError(null);
+    try {
+      // Ghi nội dung TRƯỚC rồi mới đổi mã: đổi mã làm thư mục đổi tên theo, ghi file sau đó
+      // sẽ trỏ vào đường dẫn cũ đã biến mất.
+      // Luôn ghi, kể cả khi chưa sửa chữ nào: bấm Lưu là chốt bản chính thức — bộ vừa clone
+      // đang ở Nháp phải chuyển sang Hoàn tất và được dựng sandbox thì mới chấm được.
+      const data = await api(`/exam-setup/${encodeURIComponent(fileEditor.examId)}/testcase`, "POST", {
+        files: editorFiles,
       });
-      setRenameSource(null);
-      setNotice({
-        type: "ok",
-        title: "Đổi tên bộ testcase thành công",
-        text: `Bộ ${renameSource.examId} đã được đổi thành ${data.exam_id || normalizedId} — ${data.exam_name || normalizedName}.`,
-      });
+      const savedCount = (data.files as string[] | undefined)?.length ?? editorFiles.length;
+      const saveWarning = typeof data.warning === "string" ? data.warning : "";
+      if (renaming) {
+        await api(`/exam-setup/${encodeURIComponent(fileEditor.examId)}/rename`, "POST", {
+          new_exam_id: nextId,
+          exam_name: nextName,
+        });
+      }
+      setEditorDirty(false);
+      setFileEditor(null);
+      const done = renaming
+        ? `Đã lưu bộ testcase và đổi thành ${nextId} — ${nextName}. Trạng thái: Hoàn tất.`
+        : `Đã lưu ${savedCount} file của bộ ${fileEditor.examId} — trạng thái Hoàn tất. Bản cũ được giữ trong testcase-archive để đối chiếu.`;
+      setMsg(saveWarning ? `${done} ${saveWarning}` : done);
       await load();
     } catch (e) {
-      setRenameError((e as Error).message);
+      setEditorError((e as Error).message);
     } finally {
-      setRenaming(false);
+      setEditorBusy(null);
     }
   };
 
@@ -516,27 +569,38 @@ export default function ArchivePage() {
                       <span className="font-mono text-xs text-slate-600">{e.resultCount ?? 0}</span>
                     </td>
                     <td className="px-5 py-3 align-middle">
-                      {/* Nhãn chữ đi kèm icon; màn hẹp thì xuống dòng thay vì bị cắt mất nút. */}
+                      {/* Icon + tooltip; đổi tên không còn nút riêng vì đã nằm trong màn Sửa. */}
                       <div className="flex items-center justify-end gap-1.5">
                         <button onClick={() => doDownload(`/exam-setup/${encodeURIComponent(e.examId)}/download/exam-test`, `${e.examId}_exam_test.zip`)}
                           disabled={!e.hasTestcase}
-                          title="Tải testcase: exam_test.dart + grader.dart + skills_matrix.json"
+                          title="Tải testcase: exam_test.dart + grader.dart + skills_matrix.json + contract.json"
                           className={actBtnCls("hover:text-indigo-600")}>
                           <FileArchive size={16} /><span className="sr-only">Tải testcase</span>
                         </button>
-                        {/* Chỉ bộ dựng từ template mới mở lại builder được; bộ upload ZIP không có config. */}
+                        {/* Xem đề: đề bài + hình minh họa gộp một tài liệu, tải được .docx. */}
+                        <Link href={`/teacher/exam-view?exam=${encodeURIComponent(e.examId)}`}
+                          title={e.hasDeBai
+                            ? "Xem đề — đề bài kèm hình minh họa, tải được bản .docx"
+                            : "Xem đề — bộ này chưa có đề bài"}
+                          className={actBtnCls(e.hasDeBai ? "hover:text-emerald-600" : "opacity-40")}>
+                          <FileText size={16} /><span className="sr-only">Xem đề</span>
+                        </Link>
+                        {/* MỘT nút Sửa duy nhất mỗi hàng. Bộ dựng từ template mở builder (kéo thêm
+                            testcase từ thư viện); bộ testcase viết tay không có cấu hình builder để
+                            mở nên nút đó phải là trình sửa file, nếu không chúng thành không sửa được. */}
                         {e.editable !== false ? (
                           <Link href={`/teacher/testcases?exam=${encodeURIComponent(e.examId)}`}
-                            title="Sửa — đổi mã, tên hoặc thêm/bớt testcase trong bộ này"
+                            title={e.configRecovered
+                              ? "Sửa — cấu hình được dựng lại từ file testcase đã nhập"
+                              : "Sửa — đổi mã/tên, kéo thêm testcase từ thư viện, sửa tham số và hợp đồng"}
                             className={actBtnCls("hover:text-indigo-600")}>
                             <Pencil size={16} /><span className="sr-only">Sửa</span>
                           </Link>
                         ) : (
-                          <button type="button" onClick={() => openRename(e)}
-                            disabled={busy || (renaming && renameSource?.examId === e.examId)}
-                            title="Đổi tên — bộ upload ZIP không thể sửa nội dung testcase bằng builder"
-                            className={actBtnCls("hover:text-amber-600")}>
-                            <Pencil size={16} /><span className="sr-only">Đổi tên</span>
+                          <button type="button" onClick={() => openFileEditor(e)} disabled={busy}
+                            title="Sửa — testcase viết tay: đổi mã/tên và sửa thẳng nội dung file"
+                            className={actBtnCls("hover:text-indigo-600")}>
+                            <PenLine size={16} /><span className="sr-only">Sửa</span>
                           </button>
                         )}
                         <button
@@ -561,15 +625,10 @@ export default function ArchivePage() {
                           disabled={busy} className={actBtnCls("text-rose-500 hover:bg-rose-50 hover:text-rose-600")}>
                           <Trash2 size={16} /><span className="sr-only">Xóa</span>
                         </button>
-                        {/* Clone luôn là thao tác cuối; backend cũng kiểm tra editable để không thể clone bộ ZIP. */}
-                        <button
-                          onClick={() => openClone(e)}
-                          disabled={busy || e.editable === false}
-                          title={e.editable === false
-                            ? "Clone — bộ upload ZIP không có cấu hình builder nên không thể clone"
-                            : "Clone — tạo bộ mới chứa toàn bộ testcase, contract và khung code của bộ này"}
-                          className={actBtnCls("hover:text-violet-600")}
-                        >
+                        {/* Nhân bản luôn là thao tác cuối; chạy được cho cả hai loại bộ. */}
+                        <button onClick={() => openClone(e)} disabled={busy}
+                          title="Clone — tạo bộ mới chứa toàn bộ testcase và tài liệu của bộ này"
+                          className={actBtnCls("hover:text-violet-600")}>
                           <Copy size={16} /><span className="sr-only">Clone</span>
                         </button>
                       </div>
@@ -685,7 +744,7 @@ export default function ArchivePage() {
                 </button>
                 <h3 id="create-testcase-title" className="mb-2 text-xl font-bold">Tạo bộ testcase sẵn có</h3>
                 <p className="mb-5 text-sm text-slate-500">
-                  ZIP phải chứa trực tiếp exam_test.dart, grader.dart và skills_matrix.json. ZIP chỉ dùng để import và không được lưu lại.
+                  ZIP phải chứa trực tiếp exam_test.dart, grader.dart, skills_matrix.json và contract.json. ZIP chỉ dùng để import và không được lưu lại.
                 </p>
 
                 <div
@@ -785,34 +844,92 @@ export default function ArchivePage() {
         document.body
       )}
 
-      {/* Bộ ZIP không có cấu hình builder nên nút Sửa chỉ mở phần đổi mã/tên này. */}
-      {mounted && renameSource && createPortal(
-        <div className="animate-modal-overlay fixed inset-0 z-[58] flex items-center justify-center bg-slate-900/65 p-4 backdrop-blur-sm" onClick={closeRename}>
-          <div role="dialog" aria-modal="true" aria-labelledby="rename-title" className="animate-modal-pop relative w-full max-w-xl rounded-2xl bg-white p-6 text-slate-800 shadow-2xl ring-1 ring-black/5" onClick={(event) => event.stopPropagation()}>
-            <button type="button" onClick={closeRename} disabled={renaming} aria-label="Đóng cửa sổ đổi tên" className="absolute right-4 top-4 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:opacity-40"><X size={18} /></button>
-            <div className="mb-5 flex items-start gap-3">
-              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-amber-100 text-amber-600"><PenLine size={22} /></span>
-              <div>
-                <h3 id="rename-title" className="text-xl font-bold">Đổi mã hoặc tên bộ testcase</h3>
+      {/* Trình sửa file: chạy cho MỌI bộ. Bộ dựng từ template vẫn sửa tay được, chỉ kèm cảnh báo
+          vì lần Lưu kế tiếp bên builder sẽ sinh lại file. */}
+      {mounted && fileEditor && createPortal(
+        <div className="animate-modal-overlay fixed inset-0 z-[58] flex items-center justify-center bg-slate-900/65 p-4 backdrop-blur-sm" onClick={closeFileEditor}>
+          <div role="dialog" aria-modal="true" aria-labelledby="file-editor-title"
+            className="animate-modal-pop relative flex h-[85vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-white text-slate-800 shadow-2xl ring-1 ring-black/5"
+            onClick={(event) => event.stopPropagation()}>
+            <div className="flex items-start gap-3 border-b border-slate-100 px-6 py-4">
+              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-indigo-100 text-indigo-600"><PenLine size={22} /></span>
+              <div className="min-w-0 flex-1">
+                <h3 id="file-editor-title" className="text-xl font-bold">Sửa file testcase</h3>
                 <p className="mt-1 text-sm leading-6 text-slate-500">
-                  Bộ upload ZIP không thể sửa nội dung bằng builder, nhưng vẫn có thể đổi mã và tên tại đây. Khi đổi mã, thư mục, bài nộp, kết quả và lịch sử chấm cũng được chuyển sang mã mới.
+                  Sửa thẳng nội dung file; bấm Lưu là bộ chuyển sang <b>Hoàn tất</b> và được dựng lại sandbox.
+                  Bản cũ được lưu vào <span className="font-mono text-xs">testcase-archive/</span> trước khi ghi đè.
                 </p>
+                {/* Bộ mở được bằng builder vẫn sửa tay được, nhưng phải biết trước là sẽ bị sinh đè. */}
+                {fileEditor.editable !== false && (
+                  <p className="mt-1.5 rounded-lg bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">
+                    Bộ này cũng mở được bằng builder. Nếu sau này bấm Lưu trong màn “Tạo bộ testcase”, toàn bộ file sẽ được sinh lại và phần sửa tay ở đây sẽ mất.
+                  </p>
+                )}
               </div>
+              <button type="button" onClick={closeFileEditor} disabled={editorBusy !== null} aria-label="Đóng trình sửa file"
+                className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:opacity-40"><X size={18} /></button>
             </div>
-            <div className="grid gap-4 md:grid-cols-2">
+
+            {/* Đổi mã/tên nằm ngay trong trình sửa — không cần nút riêng ngoài danh sách. */}
+            <div className="grid gap-4 border-b border-slate-100 px-6 py-4 md:grid-cols-2">
               <label className="text-xs font-bold uppercase tracking-wider text-slate-500">Mã bộ testcase
-                <input value={renameExamId} maxLength={50} disabled={renaming} onChange={(event) => { setRenameExamId(event.target.value.toUpperCase().replace(/[^A-Z0-9_-]/g, "")); setRenameError(null); }} className="mt-1.5 w-full rounded-xl border border-slate-200 px-3.5 py-3 font-mono text-sm normal-case tracking-normal outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-100" />
+                <input value={editorExamId} maxLength={50} disabled={editorBusy !== null}
+                  onChange={(event) => { setEditorExamId(event.target.value.toUpperCase().replace(/[^A-Z0-9_-]/g, "")); setEditorError(null); }}
+                  className="mt-1.5 w-full rounded-xl border border-slate-200 px-3.5 py-2.5 font-mono text-sm normal-case tracking-normal outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" />
               </label>
               <label className="text-xs font-bold uppercase tracking-wider text-slate-500">Tên bộ testcase
-                <input value={renameExamName} maxLength={200} disabled={renaming} onChange={(event) => { setRenameExamName(event.target.value); setRenameError(null); }} className="mt-1.5 w-full rounded-xl border border-slate-200 px-3.5 py-3 text-sm font-normal normal-case tracking-normal outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-100" />
+                <input value={editorExamName} maxLength={200} disabled={editorBusy !== null}
+                  onChange={(event) => { setEditorExamName(event.target.value); setEditorError(null); }}
+                  className="mt-1.5 w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm font-normal normal-case tracking-normal outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" />
               </label>
             </div>
-            {renameError && <div className="mt-4 flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700"><AlertTriangle size={17} className="mt-0.5 shrink-0" /> {renameError}</div>}
-            <div className="mt-5 flex justify-end gap-2">
-              <button type="button" onClick={closeRename} disabled={renaming} className="rounded-lg px-4 py-2.5 text-sm font-semibold text-slate-500 hover:bg-slate-100 disabled:opacity-40">Hủy</button>
-              <button type="button" onClick={renameTestcaseSet} disabled={renaming || !renameExamId.trim() || !renameExamName.trim()} className="inline-flex items-center gap-2 rounded-lg bg-amber-500 px-5 py-2.5 text-sm font-semibold text-white hover:bg-amber-600 disabled:cursor-not-allowed disabled:opacity-50">
-                {renaming ? <Loader2 size={16} className="animate-spin" /> : <PenLine size={16} />}
-                {renaming ? "Đang đổi tên..." : "Lưu tên mới"}
+
+            {editorBusy === "load" ? (
+              <div className="flex flex-1 items-center justify-center gap-2 text-sm text-slate-500">
+                <Loader2 size={18} className="animate-spin" /> Đang đọc file testcase…
+              </div>
+            ) : editorFiles.length === 0 ? (
+              <div className="flex flex-1 items-center justify-center px-6 text-center text-sm text-slate-500">
+                {editorError || "Không có file nào để sửa."}
+              </div>
+            ) : (
+              <>
+                <div className="flex gap-1 overflow-x-auto border-b border-slate-100 px-4 py-2">
+                  {editorFiles.map((f, i) => (
+                    <button key={f.name} type="button" onClick={() => setEditorActive(i)}
+                      className={`shrink-0 rounded-lg px-3 py-1.5 font-mono text-xs transition-colors ${
+                        i === editorActive ? "bg-indigo-100 text-indigo-700" : "text-slate-500 hover:bg-slate-100"}`}>
+                      {f.name}
+                    </button>
+                  ))}
+                </div>
+                <textarea
+                  value={editorFiles[editorActive]?.content ?? ""}
+                  onChange={(event) => {
+                    const content = event.target.value;
+                    setEditorFiles((cur) => cur.map((f, i) => (i === editorActive ? { ...f, content } : f)));
+                    setEditorDirty(true);
+                    setEditorError(null);
+                  }}
+                  spellCheck={false}
+                  className="min-h-0 flex-1 resize-none bg-slate-900 p-4 font-mono text-xs leading-relaxed text-slate-100 outline-none"
+                />
+              </>
+            )}
+
+            {editorError && editorFiles.length > 0 && (
+              <div className="flex items-start gap-2 border-t border-rose-100 bg-rose-50 px-6 py-3 text-sm text-rose-700">
+                <AlertTriangle size={17} className="mt-0.5 shrink-0" /> {editorError}
+              </div>
+            )}
+            <div className="flex items-center justify-end gap-2 border-t border-slate-100 px-6 py-4">
+              {editorDirty && <span className="mr-auto text-xs font-semibold text-amber-600">Có thay đổi chưa lưu</span>}
+              <button type="button" onClick={closeFileEditor} disabled={editorBusy !== null}
+                className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-40">Đóng</button>
+              <button type="button" onClick={saveFileEditor}
+                disabled={editorBusy !== null || editorFiles.length === 0}
+                className="flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-40">
+                {editorBusy === "save" ? <Loader2 size={16} className="animate-spin" /> : <PenLine size={16} />} Lưu thay đổi
               </button>
             </div>
           </div>
@@ -829,7 +946,7 @@ export default function ArchivePage() {
               <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-violet-100 text-violet-600"><Copy size={22} /></span>
               <div>
                 <h3 id="clone-title" className="text-xl font-bold">Clone bộ testcase</h3>
-                <p className="mt-1 text-sm leading-6 text-slate-500">Sao chép toàn bộ testcase, contract, code sinh và tài liệu từ <strong className="font-mono text-slate-700">{cloneSource.examId}</strong>. Kết quả là một bộ mới độc lập, tạo xong sẽ mở luôn trình sửa của bản sao.</p>
+                <p className="mt-1 text-sm leading-6 text-slate-500">Sao chép toàn bộ testcase, contract, code sinh và tài liệu từ <strong className="font-mono text-slate-700">{cloneSource.examId}</strong>. Kết quả là một bộ mới độc lập, tạo xong sẽ mở luôn trình sửa của bản sao. Bản sao ở trạng thái <b>Nháp</b> cho tới khi bấm Lưu.</p>
               </div>
             </div>
             <div className="grid gap-4 md:grid-cols-2">

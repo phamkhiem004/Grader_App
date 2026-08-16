@@ -466,6 +466,23 @@ const SKILL_LABEL: Record<string, string> = {
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
+/** Chuỗi hoá ổn định (khoá đã sắp xếp) để so sánh hai tham số bằng nhau, không phụ thuộc thứ tự khoá. */
+const stableJson = (value: unknown): string => {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  if (value && typeof value === "object")
+    return `{${Object.entries(value as Record<string, unknown>)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([k, v]) => `${k}:${stableJson(v)}`).join(",")}}`;
+  return JSON.stringify(value ?? null);
+};
+
+/**
+ * Chữ ký nhận diện testcase TRÙNG NHAU: cùng mẫu + cùng tham số là một testcase, dù
+ * instance_id khác. Dùng để bấm "thêm testcase AI" nhiều lần không nhân bản Khu vực 3.
+ */
+const itemSignature = (templateId: string, parameters: unknown) =>
+  `${templateId}|${stableJson(parameters)}`;
+
 function renderExpected(template: string, params: JsonMap) {
   return Object.entries(params).reduce(
     (text, [key, value]) => text.replaceAll(`{${key}}`, String(value)), template,
@@ -1141,6 +1158,9 @@ function TestcasesEditor() {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState("");
   const [previewNotice, setPreviewNotice] = useState("");
+  // "Code rỗng" và "chưa gọi được backend" nhìn giống hệt nhau nếu không ghi lại
+  // mã HTTP + số file + số ký tự đã nhận. Giữ lại để soi khi có người báo màn trống.
+  const [previewDiag, setPreviewDiag] = useState("");
 
   // Nạp bộ testcase đang có khi vào chế độ sửa; hỏng/không có config thì báo ngay
   // thay vì để giáo viên sửa trên form rỗng rồi ghi đè mất bộ cũ.
@@ -1189,6 +1209,18 @@ function TestcasesEditor() {
           ? contract.allowed_packages : DEFAULT_GRADING_PACKAGES);
         setLocalPackageNames(Array.isArray(contract.local_package_names)
           ? contract.local_package_names : []);
+        // Bộ nhập bằng ZIP: cấu hình được dựng lại từ skills_matrix.json. Phải nói rõ, vì bấm Lưu
+        // là sinh lại toàn bộ file testcase — giáo viên cần biết mình đang sửa trên bản dựng lại.
+        if (data.recovered) {
+          const warnings: string[] = Array.isArray(data.recovered_warnings) ? data.recovered_warnings : [];
+          setMessage({
+            type: warnings.length ? "error" : "ok",
+            text: `Bộ ${editExamId} được nhập bằng ZIP nên cấu hình đã được dựng lại từ file testcase. `
+              + (warnings.length
+                ? `Kiểm tra lại trước khi lưu — ${warnings.join(" ")}`
+                : `Kiểm tra lại rồi bấm Lưu để hệ thống sinh lại bộ file chấm.`),
+          });
+        }
       })
       .catch((e: unknown) => setMessage({
         type: "error",
@@ -1198,9 +1230,11 @@ function TestcasesEditor() {
   }, [editExamId]);
 
   useEffect(() => {
-    // Giữ nguyên mã của bộ đang sửa thì trùng là đương nhiên → khỏi kiểm tra.
+    // Mã đang thuộc về CHÍNH bộ này thì trùng là đương nhiên → khỏi kiểm tra. Không chỉ khi
+    // đang sửa: bộ mới cũng được TỰ LƯU NHÁP sau 2 giây, nên mã vừa gõ lập tức "đã tồn tại"
+    // (do chính mình vừa tạo) và nút Lưu bị khoá — bẫy này đã chặn người dùng lưu thật.
     // Gõ mã khác đi = sắp đổi mã, lúc đó vẫn phải kiểm tra trùng như khi tạo mới.
-    if (isEdit && examId.trim() === savedExamId) {
+    if (examId.trim() !== "" && examId.trim() === savedExamId) {
       setExamIdCheck("idle");
       return;
     }
@@ -1271,9 +1305,12 @@ function TestcasesEditor() {
         setPreviewFiles(files);
         setPreviewNotice(typeof data.warning === "string" ? data.warning : "");
         setPreviewFile((current) => Math.min(current, Math.max(0, files.length - 1)));
+        const chars = files.reduce((sum, file) => sum + (file.content?.length || 0), 0);
+        setPreviewDiag(`HTTP ${response.status} · ${files.length} file · ${chars.toLocaleString("vi-VN")} ký tự · ${API_BASE}`);
       } catch (error) {
         if (error instanceof DOMException && error.name === "AbortError") return;
         setPreviewNotice("");
+        setPreviewDiag(`Gọi thất bại · ${API_BASE}`);
         setPreviewError(error instanceof Error ? error.message : "Không sinh được code xem trước.");
       } finally {
         if (!controller.signal.aborted) setPreviewLoading(false);
@@ -1403,13 +1440,20 @@ function TestcasesEditor() {
    */
   const applyAiItems = (proposals: AiProposedItem[]) => {
     const usedIds = new Set(items.map((item) => item.instance_id));
+    // Bấm "thêm" nhiều lần thì lần sau KHÔNG được nhân bản: cùng mẫu + cùng tham số = đã có rồi.
+    const seen = new Set(items.map((item) => itemSignature(item.template_id, item.parameters)));
     let nextNumber = items.length + 1;
     const built: TestcaseItem[] = [];
     const skipped: string[] = [];
+    let duplicated = 0;
 
     proposals.forEach((p) => {
       const template = templateMap.get(p.template_id);
       if (!template) { skipped.push(p.template_id); return; }
+      const signature = itemSignature(template.template_id,
+        { ...cloneParams(template), ...(p.parameters as JsonMap) });
+      if (seen.has(signature)) { duplicated += 1; return; }
+      seen.add(signature);
       let instanceId = `${examId.trim() || "exam"}_item_${pad(nextNumber)}`;
       while (usedIds.has(instanceId)) {
         nextNumber += 1;
@@ -1438,13 +1482,16 @@ function TestcasesEditor() {
     });
 
     if (!built.length) {
-      setMessage({ type: "error", text: "Không thêm được testcase nào: các mẫu AI chọn không còn trong thư viện." });
+      setMessage(duplicated > 0
+        ? { type: "ok", text: `Tất cả ${duplicated} testcase AI gợi ý đã có sẵn trong Khu vực 3 — không thêm gì thêm.` }
+        : { type: "error", text: "Không thêm được testcase nào: các mẫu AI chọn không còn trong thư viện." });
       return;
     }
     setItems((current) => [...current, ...built].map((item, i) => ({ ...item, order: i + 1 })));
     setMessage({
       type: "ok",
       text: `Đã thêm ${built.length} testcase từ trợ lý AI vào Khu vực 3`
+        + (duplicated ? ` (bỏ qua ${duplicated} testcase đã có sẵn)` : "")
         + (skipped.length ? ` (bỏ qua ${skipped.length} mẫu không còn trong thư viện)` : "")
         + ". Hãy kiểm tra lại tham số trước khi lưu.",
     });
@@ -2019,7 +2066,10 @@ function TestcasesEditor() {
   // Đang sửa mà gõ mã khác mã trên server = yêu cầu ĐỔI MÃ; mã mới phải chưa tồn tại,
   // đúng như lúc tạo bộ mới, nên dùng chung kết quả kiểm tra trùng.
   const renameTarget = isEdit && examId.trim() && examId.trim() !== savedExamId ? examId.trim() : "";
-  const needsIdCheck = !isEdit || !!renameTarget;
+  // Mã đã là của bộ này (đang sửa, hoặc vừa tự lưu nháp) thì không cần kiểm tra trùng nữa —
+  // nếu không, chính bản nháp vừa tạo làm mã "đã tồn tại" và khoá luôn nút Lưu.
+  const ownsExamId = examId.trim() !== "" && examId.trim() === savedExamId;
+  const needsIdCheck = !ownsExamId && (!isEdit || !!renameTarget);
 
   /**
    * TỰ LƯU NHÁP. Bộ testcase mới phải có mặt trong Kho ngay với trạng thái Nháp, để người
@@ -2592,6 +2642,9 @@ function TestcasesEditor() {
     if (examIdCheck === "available") return renameTarget
       ? { text: `Bấm Lưu để đổi mã thành ${renameTarget} — thư mục, kết quả và lịch sử chấm đi theo.`, tone: "font-semibold text-emerald-600" }
       : { text: "Mã bộ testcase chưa tồn tại, có thể tạo.", tone: "font-semibold text-emerald-600" };
+    // Mã của chính bộ này (bản nháp vừa tự lưu, hoặc bộ đang sửa) — nói rõ để khỏi tưởng bị trùng.
+    if (ownsExamId && !isEdit)
+      return { text: "Mã này đang giữ cho bản nháp của bạn.", tone: "text-slate-400" };
     return { text: "", tone: "text-slate-400" };
   })();
 
@@ -3171,6 +3224,7 @@ function TestcasesEditor() {
                   <p className="eyebrow">Code sinh theo thời gian thực</p>
                   <h2 id="generated-code-title" className="mt-1 text-lg font-bold text-slate-800">Bộ file chấm hiện tại · {examId.trim()}</h2>
                   <p className="mt-1 text-xs leading-relaxed text-slate-500">Mặc định hiển thị toàn bộ <code className="font-mono">exam_test.dart</code>. Tham số từng testcase nằm trong <code className="font-mono">skills_matrix.json</code> và cũng cập nhật ngay khi form thay đổi.</p>
+                  {previewDiag && <p className="mt-1 font-mono text-[11px] text-slate-400">{previewDiag}</p>}
                 </div>
                 <div className="flex items-center gap-2">
                   {previewLoading && <span className="flex items-center gap-1.5 text-xs font-semibold text-indigo-600"><Loader2 size={14} className="animate-spin" /> Đang cập nhật</span>}

@@ -27,11 +27,17 @@ public class MockupRenderer {
     private static final int PAD = 16;
     private static final int APPBAR_H = 48;
     private static final int GAP = 12;
-    private static final int LABEL_GAP = 84;      // khoảng trống cho mũi tên (đủ dài để nhìn rõ hướng)
-    private static final int LABEL_W = 400;       // cột chú thích bên phải
+    private static final int LANE = 28;           // làn dọc sát khung máy: mọi mũi tên đi qua đây
+    private static final int LABEL_GAP = 96;      // từ mép phải khung máy tới cột chú thích
     /** Cao hơn tổng chiều cao một chú thích (key 13px + mô tả 11px + đệm) → chữ không thể chồng nhau. */
-    private static final int LABEL_MIN_SPACING = 42;
+    private static final int LABEL_MIN_SPACING = 44;
     private static final int CHIP_PAD_X = 8;      // đệm ngang trong khung nền của chú thích
+    private static final int BADGE_R = 9;         // số thứ tự gắn ở widget và ở đầu chú thích
+    /** Hai mũi tên vào làn cách nhau tối thiểu ngần này → không có hai đoạn nằm đè lên nhau. */
+    private static final int LANE_MIN_GAP = 13;
+    // Ước lượng bề rộng chữ. Rộng dư thì chỉ tốn chỗ trắng, hụt thì chữ tràn khỏi nền → luôn ước dư.
+    private static final double KEY_CHAR_W = 8.0;   // Consolas/Courier 13px
+    private static final double SUB_CHAR_W = 6.3;   // Segoe UI 11px
 
     /** Một chú thích: mũi tên từ (x,y) của widget sang cột chữ bên phải. */
     private record Note(double x, double y, double h, String key, String label) {}
@@ -89,12 +95,15 @@ public class MockupRenderer {
         }
 
         double phoneH = Math.max(360, y - phoneY + PAD);
-        // Xếp chú thích TRƯỚC khi chốt chiều cao: nhiều key thì cột chú thích dài hơn khung máy,
+        // Xếp chú thích TRƯỚC khi chốt kích thước: nhiều key thì cột chú thích dài hơn khung máy,
         // phải nới hình cho vừa. Trước đây kẹp vào đáy nên các nhãn cuối chồng đè lên nhau.
         List<Placed> placed = layoutNotes(notes);
         double notesBottom = placed.isEmpty() ? 0 : placed.get(placed.size() - 1).bottom();
         double svgH = Math.max(phoneY + phoneH + MARGIN + 16, notesBottom + MARGIN);
-        double svgW = MARGIN + PHONE_W + LABEL_GAP + LABEL_W + MARGIN;
+        // Bề rộng bám theo chú thích DÀI NHẤT: cột rộng cố định thì key dài bị cắt cụt ở mép hình.
+        double widestChip = placed.stream().mapToDouble(Placed::width).max().orElse(0);
+        double svgW = Math.max(MARGIN + PHONE_W + LABEL_GAP + widestChip + MARGIN,
+                MARGIN + PHONE_W + LABEL_GAP + 220 + MARGIN);
 
         StringBuilder svg = new StringBuilder();
         svg.append("<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 ")
@@ -131,6 +140,9 @@ public class MockupRenderer {
         String label = text(node.path("label"), "");
         String key = text(node.path("key"), null);
         double h;
+        // Mép phải THẬT của thành phần. Ô nhập/nút chiếm trọn bề ngang nên bằng x+w, còn ô tick hay
+        // dòng chữ ngắn thì hẹp hơn nhiều — neo mũi tên vào x+w là chỉ vào khoảng trắng bên cạnh.
+        double anchorX = x + w;
 
         switch (type) {
             case "textfield", "input", "field" -> {
@@ -169,7 +181,9 @@ public class MockupRenderer {
                    .append("\" rx=\"12\" fill=\"none\" stroke=\"#94a3b8\" stroke-dasharray=\"4 3\"/>");
                 if (key != null) {
                     keys.add(key);
-                    notes.add(new Note(x + w + 4, listTop + listH / 2, listH, key,
+                    // Neo ở góc TRÊN-PHẢI của cả khung danh sách: neo vào giữa thì số thứ tự của
+                    // danh sách rơi trúng số của item đứng giữa, hai vòng tròn đè lên nhau.
+                    notes.add(new Note(x + w + 4, listTop + 6, listH, key,
                             label.isBlank() ? "Danh sách" : label));
                 }
                 return rowY;
@@ -183,29 +197,38 @@ public class MockupRenderer {
                    .append("\" r=\"7\" fill=\"#cbd5e1\"/>");
                 if (!label.isBlank())
                     svg.append(textEl(x + 96, y + 46, esc(label), 12, "#475569", "normal", "start"));
+                anchorX = x + 84;
             }
             case "checkbox", "switch" -> {
                 h = 32;
                 svg.append(box(x, y + 6, 20, 20, 4, "#ffffff", "#94a3b8"));
                 svg.append(textEl(x + 30, y + 21, esc(label), 12, "#334155", "normal", "start"));
+                anchorX = Math.min(x + w, x + 30 + textWidth(label, 6.4));
             }
             case "error" -> {
                 h = 24;
-                svg.append(textEl(x, y + 16, esc(label.isBlank() ? "Thông báo lỗi" : label),
-                        11, "#dc2626", "normal", "start"));
+                String message = label.isBlank() ? "Thông báo lỗi" : label;
+                svg.append(textEl(x, y + 16, esc(message), 11, "#dc2626", "normal", "start"));
+                anchorX = Math.min(x + w, x + textWidth(message, 5.9));
             }
             default -> {                                       // text, title, message…
                 h = 26;
                 svg.append(textEl(x, y + 17, esc(label), 13, "#0f172a",
                         "title".equals(type) ? "bold" : "normal", "start"));
+                anchorX = Math.min(x + w, x + textWidth(label, 7.0));
             }
         }
 
         if (key != null) {
             keys.add(key);
-            notes.add(new Note(x + w, y + h / 2, h, key, label.isBlank() ? type : label));
+            notes.add(new Note(anchorX, y + h / 2, h, key, label.isBlank() ? type : label));
         }
         return y + h;
+    }
+
+    /** Ước lượng bề ngang một dòng chữ đã vẽ, để neo mũi tên vào đúng mép chữ. */
+    private double textWidth(String label, double perChar) {
+        return (label == null ? 0 : label.length()) * perChar;
     }
 
     /** Một dòng trong danh sách: avatar + 2 dòng chữ + các nút hành động bên phải. */
@@ -236,7 +259,9 @@ public class MockupRenderer {
                 keys.add(actionKey);
                 // Mũi tên của nút nhỏ đi thẳng từ chính nút đó, không phải từ cạnh dòng, để
                 // người đọc thấy rõ key gắn vào NÚT chứ không phải vào cả item.
-                notes.add(new Note(ax + 8, y + 28, 16, actionKey,
+                // Neo lệch sang phải icon một chút: đặt đúng tâm icon thì số thứ tự che mất hình
+                // cái bút / thùng rác, mà chính hình đó mới nói nút này làm gì.
+                notes.add(new Note(ax + 11, y + 28, 16, actionKey,
                         text(action.path("label"), "Nút trong mục")));
             }
             ax -= 30;
@@ -244,46 +269,78 @@ public class MockupRenderer {
 
         if (key != null) {
             keys.add(key);
-            notes.add(new Note(x + w, y + h / 2, h, key, label));
+            // Góc dưới-phải của dòng: các nút hành động đã chiếm giữa dòng bên phải.
+            notes.add(new Note(x + w + 2, y + h - 8, h, key, label));
         }
         return y + h;
     }
 
-    /** Một chú thích đã chốt vị trí dòng chữ; {@code bottom} là mép dưới để tính chiều cao hình. */
-    private record Placed(Note note, double labelY, double bottom) {}
+    /**
+     * Một chú thích đã chốt vị trí: {@code laneY} là chỗ mũi tên rẽ khỏi làn dọc, {@code labelY} là
+     * dòng chữ key, {@code bottom} là mép dưới (để tính chiều cao hình).
+     */
+    private record Placed(Note note, int number, double laneY, double labelY, double bottom, double width) {}
 
     /**
-     * Xếp chỗ cho cột chú thích: mỗi nhãn cố bám ngang thành phần nó chỉ vào, nhưng luôn cách
-     * nhãn trước ít nhất {@code LABEL_MIN_SPACING} để hai chú thích không đè chữ lên nhau.
+     * Xếp chỗ cho cột chú thích. Hai ràng buộc phải giữ cùng lúc:
+     *
+     * <ul>
+     *   <li>Chữ không đè nhau → mỗi nhãn cách nhãn trước ít nhất {@code LABEL_MIN_SPACING}.</li>
+     *   <li>Mũi tên không đè nhau → điểm rẽ vào làn (laneY) cũng phải cách nhau. Hai nút cùng một
+     *       dòng danh sách có ĐÚNG một y, trước đây hai mũi tên nằm chồng khít lên nhau nên nhìn
+     *       như một đường; giờ tách ra nên vẫn lần ra được nút nào ứng với key nào.</li>
+     * </ul>
+     *
+     * <p>Cả laneY và labelY đều tăng dần theo thứ tự đã sắp, nên các đoạn chéo nối hai cột không
+     * thể cắt nhau — đây là điểm khiến hình hết rối khi đề có nhiều key.
      */
     private List<Placed> layoutNotes(List<Note> notes) {
         List<Note> sorted = new ArrayList<>(notes);
-        sorted.sort((a, b) -> Double.compare(a.y(), b.y()));
+        sorted.sort((a, b) -> a.y() != b.y() ? Double.compare(a.y(), b.y()) : Double.compare(a.x(), b.x()));
 
         List<Placed> out = new ArrayList<>();
+        double lastLane = -100;
         double lastBottom = -100;
+        int number = 0;
         for (Note note : sorted) {
-            double labelY = Math.max(note.y(), lastBottom + LABEL_MIN_SPACING);
+            number++;
+            double laneY = Math.max(note.y(), lastLane + LANE_MIN_GAP);
+            double labelY = Math.max(laneY, lastBottom + LABEL_MIN_SPACING);
             boolean hasSub = note.label() != null && !note.label().isBlank();
-            double bottom = labelY + (hasSub ? 16 : 0);
-            out.add(new Placed(note, labelY, bottom));
+            double bottom = labelY + (hasSub ? 17 : 0);
+            out.add(new Placed(note, number, laneY, labelY, bottom, chipWidth(note)));
+            lastLane = laneY;
             lastBottom = bottom;
         }
         return out;
     }
 
+    /** Bề rộng khung nền của một chú thích (đã tính chỗ cho số thứ tự). */
+    private double chipWidth(Note note) {
+        String sub = shorten(note.label(), 44);
+        double text = Math.max(note.key().length() * KEY_CHAR_W,
+                sub.isBlank() ? 0 : sub.length() * SUB_CHAR_W);
+        return BADGE_R * 2 + 6 + text + CHIP_PAD_X * 2;
+    }
+
     /**
-     * Mũi tên đỏ ĐƯỜNG THẲNG từ chú thích về đúng thành phần, kèm chấm neo tại thành phần.
+     * Mũi tên đỏ từ chú thích về đúng thành phần, kèm SỐ THỨ TỰ gắn ngay tại thành phần.
      *
-     * <p>Trước đây vẽ đường gãy khúc: nhiều chú thích thì các đoạn dọc nằm đè lên nhau, không
-     * lần ra được đường nào nối với cái gì. Một đoạn thẳng từ mép trái khung chữ tới đúng cạnh
-     * widget thì mắt bám theo được ngay, kể cả khi có chục mũi tên.
+     * <p>Đường đi gồm hai chặng: đoạn chéo từ khung chữ về một làn dọc sát khung máy, rồi đoạn
+     * ngắn từ làn đâm vào widget. Vì cả hai đầu đều đã sắp tăng dần theo y (xem
+     * {@link #layoutNotes}) nên các đoạn chéo không cắt nhau — trước đây mỗi mũi tên bắn thẳng từ
+     * cột chữ vào widget, đề nhiều key thì chúng cắt chéo nhau chằng chịt.
      *
-     * <p>Chữ luôn nằm trong một khung nền trắng bo góc, nên không bao giờ bị đường kẻ cắt ngang.
+     * <p>Số thứ tự là chốt chặn cuối: kể cả khi in mờ hay thu nhỏ, vẫn tra được key nào thuộc
+     * thành phần nào mà không cần dò theo đường kẻ.
+     *
+     * <p>Chữ nằm trong khung nền trắng VÀ có viền trắng quanh nét chữ (paint-order), nên không bao
+     * giờ bị đường kẻ cắt ngang dù ước lượng bề rộng có lệch.
      */
     private String drawNotes(List<Placed> placed, double phoneRight) {
         if (placed.isEmpty()) return "";
         double labelX = phoneRight + LABEL_GAP;
+        double laneX = phoneRight + LANE;
         StringBuilder svg = new StringBuilder();
 
         // Vẽ TẤT CẢ mũi tên trước, rồi mới tới khung chữ: khung chữ luôn nằm trên, không bị cắt.
@@ -291,12 +348,21 @@ public class MockupRenderer {
             Note note = p.note();
             double fromX = labelX - CHIP_PAD_X - 4;      // mép trái khung chú thích
             double fromY = p.labelY() - 4;               // giữa dòng chữ key
-            svg.append("<line x1=\"").append(fmt(fromX)).append("\" y1=\"").append(fmt(fromY))
-               .append("\" x2=\"").append(fmt(note.x() + 5)).append("\" y2=\"").append(fmt(note.y()))
-               .append("\" stroke=\"#e11d48\" stroke-width=\"1.6\" marker-end=\"url(#arrow)\"/>");
-            // Chấm neo: nói rõ mũi tên chỉ vào ĐIỂM nào trên widget.
-            svg.append("<circle cx=\"").append(fmt(note.x() + 2)).append("\" cy=\"").append(fmt(note.y()))
-               .append("\" r=\"2.6\" fill=\"#e11d48\"/>");
+            svg.append("<path d=\"M").append(fmt(fromX)).append(',').append(fmt(fromY))
+               .append(" L").append(fmt(laneX)).append(',').append(fmt(p.laneY()))
+               .append(" L").append(fmt(note.x() + BADGE_R + 2)).append(',').append(fmt(note.y()))
+               .append("\" fill=\"none\" stroke=\"#e11d48\" stroke-width=\"1.5\" "
+                       + "stroke-linejoin=\"round\" marker-end=\"url(#arrow)\"/>");
+        }
+
+        // Số thứ tự gắn tại widget — vẽ sau mũi tên để luôn nằm trên.
+        for (Placed p : placed) {
+            Note note = p.note();
+            svg.append("<circle cx=\"").append(fmt(note.x())).append("\" cy=\"").append(fmt(note.y()))
+               .append("\" r=\"").append(BADGE_R).append("\" fill=\"#e11d48\" stroke=\"#ffffff\" stroke-width=\"1.6\"/>");
+            svg.append("<text x=\"").append(fmt(note.x())).append("\" y=\"").append(fmt(note.y() + 3.6))
+               .append("\" font-size=\"10\" fill=\"#ffffff\" font-weight=\"bold\" text-anchor=\"middle\">")
+               .append(p.number()).append("</text>");
         }
 
         for (Placed p : placed) {
@@ -305,22 +371,29 @@ public class MockupRenderer {
             String sub = note.label() == null || note.label().isBlank()
                     ? "" : esc(shorten(note.label(), 44));
             boolean hasSub = !sub.isEmpty();
-            // Ước lượng bề rộng: key dùng font monospace 13px (~7.6px/ký tự), mô tả 11px (~5.9px).
-            double chipW = Math.max(note.key().length() * 7.6,
-                    hasSub ? shorten(note.label(), 44).length() * 5.9 : 0) + CHIP_PAD_X * 2;
             double chipY = p.labelY() - 15;
-            double chipH = hasSub ? 32 : 20;
+            double chipH = hasSub ? 33 : 21;
+            double badgeX = labelX + BADGE_R - 2;
+            double textX = labelX + BADGE_R * 2 + 4;
 
             svg.append("<rect x=\"").append(fmt(labelX - CHIP_PAD_X)).append("\" y=\"").append(fmt(chipY))
-               .append("\" width=\"").append(fmt(chipW)).append("\" height=\"").append(fmt(chipH))
+               .append("\" width=\"").append(fmt(p.width())).append("\" height=\"").append(fmt(chipH))
                .append("\" rx=\"6\" fill=\"#ffffff\" stroke=\"#fecdd3\"/>");
-            svg.append("<text x=\"").append(fmt(labelX)).append("\" y=\"").append(fmt(p.labelY()))
+            svg.append("<circle cx=\"").append(fmt(badgeX)).append("\" cy=\"").append(fmt(p.labelY() - 4))
+               .append("\" r=\"").append(BADGE_R).append("\" fill=\"#e11d48\"/>");
+            svg.append("<text x=\"").append(fmt(badgeX)).append("\" y=\"").append(fmt(p.labelY() - 0.4))
+               .append("\" font-size=\"10\" fill=\"#ffffff\" font-weight=\"bold\" text-anchor=\"middle\">")
+               .append(p.number()).append("</text>");
+            svg.append("<text x=\"").append(fmt(textX)).append("\" y=\"").append(fmt(p.labelY()))
                .append("\" font-size=\"13\" fill=\"#e11d48\" font-weight=\"bold\" "
-                       + "font-family=\"Consolas,'Courier New',monospace\">")
+                       + "font-family=\"Consolas,'Courier New',monospace\" "
+                       + "stroke=\"#ffffff\" stroke-width=\"3\" paint-order=\"stroke\">")
                .append(key).append("</text>");
             if (hasSub) {
-                svg.append("<text x=\"").append(fmt(labelX)).append("\" y=\"").append(fmt(p.labelY() + 15))
-                   .append("\" font-size=\"11\" fill=\"#475569\">").append(sub).append("</text>");
+                svg.append("<text x=\"").append(fmt(textX)).append("\" y=\"").append(fmt(p.labelY() + 15))
+                   .append("\" font-size=\"11\" fill=\"#475569\" "
+                           + "stroke=\"#ffffff\" stroke-width=\"3\" paint-order=\"stroke\">")
+                   .append(sub).append("</text>");
             }
         }
         return svg.toString();

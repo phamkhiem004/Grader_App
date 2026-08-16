@@ -30,12 +30,29 @@ public class StarterRenderer {
     private static final Pattern CLASS_NAME = Pattern.compile("^[A-Z][A-Za-z0-9_]*$");
     private static final Pattern MEMBER_NAME = Pattern.compile("^[a-z_][A-Za-z0-9_]*$");
     private static final Pattern TYPE = Pattern.compile("^[A-Za-z_][A-Za-z0-9_]*(?:<[A-Za-z0-9_<>,?\\s]*>)?\\??$");
+    /** Chữ ký GETTER trần: "int get count", "List&lt;User&gt; get users". */
+    private static final Pattern GETTER = Pattern.compile(
+            "^[A-Za-z_][A-Za-z0-9_<>,?\\s]*?\\s+get\\s+(?<name>[a-z_][A-Za-z0-9_]*)$");
 
-    /** Kiểu dựng sẵn của Dart/Flutter được phép xuất hiện mà không cần import thêm. */
+    /**
+     * Kiểu dựng sẵn của Dart/Flutter được phép xuất hiện mà không cần import thêm.
+     *
+     * <p>Danh sách này từng chỉ có kiểu Dart lõi, nên khung starter bị loại đúng những thứ bài thi
+     * Flutter nào cũng cần — {@code TextEditingController}, {@code GlobalKey<FormState>},
+     * {@code ValueNotifier} — kèm một loạt cảnh báo "không có trong khung starter" đọc như thể AI
+     * mô tả sai. Tất cả đều có sẵn trong {@code package:flutter/material.dart}.
+     */
     private static final Set<String> BUILTIN_TYPES = Set.of(
             "int", "double", "num", "String", "bool", "void", "dynamic", "Object", "DateTime",
             "List", "Map", "Set", "Iterable", "Future", "Stream", "Widget", "BuildContext",
-            "Key", "ValueKey", "Duration", "Uri");
+            "Key", "ValueKey", "Duration", "Uri",
+            // Form & nhập liệu
+            "GlobalKey", "FormState", "TextEditingController", "FocusNode", "ScrollController",
+            // Quản lý trạng thái sẵn có trong Flutter
+            "ValueNotifier", "ChangeNotifier", "Listenable",
+            // Khung widget
+            "StatelessWidget", "StatefulWidget", "State", "MaterialApp", "Scaffold",
+            "TextStyle", "EdgeInsets", "Color", "IconData", "Size");
 
     private static final Set<String> SCREEN_KINDS = Set.of("screen", "page", "view", "widget");
 
@@ -127,7 +144,7 @@ public class StarterRenderer {
         imports.forEach(i -> out.append("import '").append(i).append("';\n"));
         if (!imports.isEmpty()) out.append('\n');
 
-        String doc = text(file.path("doc"), describeKind(kind, className));
+        String doc = oneLineDoc(text(file.path("doc"), describeKind(kind, className)));
         out.append("/// ").append(doc).append('\n');
         List<String> keys = textList(file.path("keys"));
         if (!keys.isEmpty()) {
@@ -244,7 +261,7 @@ public class StarterRenderer {
             Map<String, String> row = new LinkedHashMap<>();
             row.put("name", name);
             row.put("type", type);
-            row.put("doc", text(f.path("doc"), ""));
+            row.put("doc", oneLineDoc(text(f.path("doc"), "")));
             out.add(row);
         }
         return out;
@@ -259,19 +276,44 @@ public class StarterRenderer {
             // Chữ ký phải là chữ ký TRẦN. Có '{', '=>' hay ';' nghĩa là AI đang cố nhét thân hàm.
             if (signature.isEmpty() || signature.contains("{") || signature.contains("}")
                     || signature.contains("=>") || signature.contains(";")
-                    || signature.contains("\n") || !signature.endsWith(")")) {
+                    || signature.contains("\n")) {
                 warnings.add("Bỏ hàm ở " + className + " vì chữ ký không hợp lệ hoặc kèm sẵn code: "
                         + shorten(signature));
                 continue;
             }
-            int paren = signature.indexOf('(');
-            String head = paren < 0 ? "" : signature.substring(0, paren).trim();
-            int space = head.lastIndexOf(' ');
-            if (space <= 0) {
-                warnings.add("Bỏ hàm ở " + className + " vì thiếu kiểu trả về: " + shorten(signature));
+
+            // GETTER ("int get count") không có ngoặc — đòi nó kết thúc bằng ')' là loại oan một
+            // dạng thành viên hoàn toàn hợp lệ, mà `count`/`isEditMode` lại đúng là thứ khung
+            // starter cần khai để sinh viên biết phải tự tính.
+            java.util.regex.Matcher getter = GETTER.matcher(signature);
+            String name;
+            boolean factory = false;
+            if (getter.matches()) {
+                name = getter.group("name");
+            } else if (signature.endsWith(")")) {
+                int paren = signature.indexOf('(');
+                String head = paren < 0 ? "" : signature.substring(0, paren).trim();
+                int space = head.lastIndexOf(' ');
+                if (space <= 0) {
+                    // CONSTRUCTOR CÓ TÊN ("User.fromMap(Map<String, dynamic> map)") — không có kiểu
+                    // trả về là ĐÚNG cú pháp Dart, loại nó đi là bỏ mất hàm dựng từ SQLite mà đề
+                    // nào cũng cần. Sinh dạng factory: constructor thường bắt buộc gán hết field
+                    // final ngay tại chỗ, mà thân hàm ở đây luôn là TODO.
+                    if (head.startsWith(className + ".") && head.length() > className.length() + 1) {
+                        name = head.substring(className.length() + 1).trim();
+                        factory = true;
+                    } else {
+                        warnings.add("Bỏ hàm ở " + className + " vì thiếu kiểu trả về: " + shorten(signature));
+                        continue;
+                    }
+                } else {
+                    name = head.substring(space + 1).trim();
+                }
+            } else {
+                warnings.add("Bỏ hàm ở " + className + " vì chữ ký không hợp lệ hoặc kèm sẵn code: "
+                        + shorten(signature));
                 continue;
             }
-            String name = head.substring(space + 1).trim();
             if (!MEMBER_NAME.matcher(name).matches() || "build".equals(name)) {
                 warnings.add("Bỏ hàm không hợp lệ ở " + className + ": " + shorten(signature));
                 continue;
@@ -285,9 +327,12 @@ public class StarterRenderer {
             if (!names.add(name)) continue;
             Map<String, String> row = new LinkedHashMap<>();
             row.put("name", name);
-            row.put("signature", signature);
+            row.put("signature", factory ? "factory " + signature : signature);
             row.put("types", types);
-            row.put("doc", text(m.path("doc"), ""));
+            // Chú thích của AI KHÔNG được giữ: nó luôn là các bước làm bài ("validate form, gọi
+            // ViewModel addUser, reset form nếu thành công") — chép nguyên vào khung thì sinh viên
+            // chỉ còn việc gõ lại. Khung chỉ nói CHỖ NÀY PHẢI LÀM GÌ qua chính tên hàm.
+            row.put("doc", "");
             out.add(row);
         }
         return out;
@@ -371,5 +416,28 @@ public class StarterRenderer {
     private String shorten(String s) {
         if (s == null) return "";
         return s.length() <= 60 ? s : s.substring(0, 59) + "…";
+    }
+
+    /**
+     * Chú thích rút về MỘT dòng ngắn.
+     *
+     * <p>Thân hàm đã bị ép thành TODO, nên chỗ duy nhất còn lại để AI tuồn lời giải vào khung là
+     * ô "doc": một đoạn mô tả dài kèm từng bước làm cũng chẳng khác gì bài mẫu chép sẵn. Khung
+     * starter chỉ cần một câu nói file/hàm này để làm gì.
+     */
+    private String oneLineDoc(String raw) {
+        if (raw == null) return "";
+        String one = raw.replaceAll("\\s+", " ").trim();
+        // Lấy CÂU ĐẦU: phần sau dấu chấm đầu tiên gần như luôn là các bước làm bài.
+        int stop = one.indexOf(". ");
+        if (stop > 0) one = one.substring(0, stop + 1);
+        // Cắt ở dấu hiệu CODE: chú thích có "(", ";" hay "=>" là AI đang viết code bằng lời —
+        // "Gọi Navigator.push(context, MaterialPageRoute(...))" chính là lời giải, chỉ khác chỗ đặt.
+        for (String marker : new String[]{"=>", "(", ";"}) {
+            int at = one.indexOf(marker);
+            if (at > 0) one = one.substring(0, at).trim();
+        }
+        one = one.replaceAll("[\\s,:-]+$", "");
+        return one.length() <= 100 ? one : one.substring(0, 99) + "…";
     }
 }

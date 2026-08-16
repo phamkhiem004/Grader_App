@@ -158,6 +158,42 @@ public class AiSettingsService {
         return AiModelCatalog.defaultBaseUrl(provider());
     }
 
+    /**
+     * Chạy một việc trên cấu hình NHÁP (model/key/endpoint đang gõ) rồi trả lại nguyên trạng —
+     * KHÔNG ghi gì xuống DB.
+     *
+     * <p>Dùng cho nút "Kiểm tra kết nối": trước đây muốn thử thì phải lưu trước, nên key sai vẫn
+     * bị ghi đè lên key đang dùng được. Giờ thử trên bản nháp, thử xong thấy tốt mới bấm Lưu.
+     *
+     * <p>Ô nào để trống thì GIỮ giá trị đã lưu — gõ mỗi mã model mới, không nhập lại key, vẫn thử
+     * được bằng key cũ.
+     *
+     * <p>{@code synchronized} + khôi phục trong {@code finally}: app chỉ chạy localhost một người
+     * dùng, nhưng một lượt soạn đề chạy song song mà vớ phải key nháp thì rất khó lần ra.
+     */
+    public synchronized Map<String, Object> withDraft(String draftModel, String draftApiKey,
+                                                      String draftBaseUrl,
+                                                      java.util.function.Supplier<Map<String, Object>> action) {
+        String savedModel = model, savedKey = apiKey, savedBaseUrl = baseUrl;
+        try {
+            if (draftModel != null && !draftModel.isBlank()) {
+                String candidate = draftModel.trim();
+                if (!SAFE_MODEL.matcher(candidate).matches())
+                    throw new IllegalArgumentException("Mã model không hợp lệ: " + candidate);
+                model = candidate;
+            }
+            if (draftApiKey != null && !draftApiKey.isBlank()) apiKey = draftApiKey.trim();
+            // Chuỗi rỗng ở đây là CÓ Ý: "quay lại endpoint chính thức của hãng", khác với null
+            // (không đụng tới). Đúng quy ước của ô nhập bên giao diện.
+            if (draftBaseUrl != null) baseUrl = draftBaseUrl.trim();
+            return action.get();
+        } finally {
+            model = savedModel;
+            apiKey = savedKey;
+            baseUrl = savedBaseUrl;
+        }
+    }
+
     // ── API cho controller ───────────────────────────────────────
 
     public Map<String, Object> describe() {

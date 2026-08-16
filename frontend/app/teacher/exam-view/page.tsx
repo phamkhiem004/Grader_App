@@ -13,33 +13,10 @@ import { ArrowLeft, Download, FileText, Loader2, Printer } from "lucide-react";
 import SidebarLayout from "@/components/layout/SidebarLayout";
 import Banner from "@/components/ui/Banner";
 import { API_BASE } from "@/lib/config";
+import { svgToPng } from "@/lib/mockup-image";
 
 interface Mockup { id: string; title: string; svg: string }
 interface ViewData { exam_id: string; has_de_bai: boolean; de_bai: string; html: string; mockups: Mockup[] }
-
-/** Vẽ một chuỗi SVG ra PNG bằng canvas. Trả về data URI + kích thước thật để đặt vào .docx. */
-function svgToPng(svg: string): Promise<{ png: string; width: number; height: number }> {
-  return new Promise((resolve, reject) => {
-    const image = new Image();
-    // Nhân 2 cho nét khi in; SVG không có tài nguyên ngoài nên canvas không bị "nhiễm bẩn".
-    const scale = 2;
-    image.onload = () => {
-      const width = image.width || 900;
-      const height = image.height || 600;
-      const canvas = document.createElement("canvas");
-      canvas.width = width * scale;
-      canvas.height = height * scale;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) { reject(new Error("Trình duyệt không hỗ trợ canvas.")); return; }
-      ctx.fillStyle = "#ffffff";
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
-      resolve({ png: canvas.toDataURL("image/png"), width, height });
-    };
-    image.onerror = () => reject(new Error("Không dựng được ảnh từ hình minh họa."));
-    image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
-  });
-}
 
 function ExamView() {
   const examId = (useSearchParams().get("exam") || "").trim();

@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
@@ -417,6 +417,13 @@ const TESTCASE_GROUP_LABEL: Record<string, string> = {
   BEHAVIOR: "Testcase Behavior",
 };
 
+/** Màu của từng loại trong thanh cơ cấu ở Khu vực 3. */
+const GROUP_MIX_BAR: Record<string, string> = {
+  LOGIC: "bg-indigo-500",
+  WIDGET: "bg-amber-500",
+  BEHAVIOR: "bg-emerald-500",
+};
+
 const RUNNER_LABEL: Record<string, string> = {
   APP_BOOT: "Mở ứng dụng",
   WIDGET_VISIBLE: "Kiểm tra thành phần hiển thị",
@@ -689,6 +696,28 @@ const SINGLE_KEY_PARAMS = new Set([
 const MULTI_KEY_PARAMS = new Set(["fieldKeys", "errorKeys", "itemKeys"]);
 
 const splitCsv = (value: unknown) => String(value ?? "").split(",").map((v) => v.trim()).filter(Boolean);
+
+/**
+ * Mọi semantic key mà một nhóm testcase đang trỏ tới, theo thứ tự gặp.
+ *
+ * <p>Tham số mặc định của mẫu cũng tính (vd testcase sửa item dùng sẵn `item.old`) — đó chính là
+ * loại key làm bước Lưu báo "chưa công bố key testcase đang dùng" dù giáo viên chưa gõ nó bao giờ.
+ */
+const collectItemKeys = (rows: { parameters?: JsonMap }[]): string[] => {
+  const ordered: string[] = [];
+  const seen = new Set<string>();
+  rows.forEach((item) => {
+    Object.entries(item.parameters || {}).forEach(([name, raw]) => {
+      const values = SINGLE_KEY_PARAMS.has(name)
+        ? [String(raw ?? "").trim()]
+        : MULTI_KEY_PARAMS.has(name) ? splitCsv(raw) : [];
+      values.filter(Boolean).forEach((key) => {
+        if (!seen.has(key)) { seen.add(key); ordered.push(key); }
+      });
+    });
+  });
+  return ordered;
+};
 
 /** Ép một CSV về đúng số phần tử; ô trống được điền mặc định theo vị trí. */
 const resizeCsv = (current: string, count: number, fill: (index: number) => string) => {
@@ -998,11 +1027,10 @@ function CodeEditor({ value, onChange, rows = 14, bare = false, language = "dart
               style={{
                 lineHeight: `${EDITOR_LINE_HEIGHT}px`,
                 tabSize: 2,
-                // BẮT BUỘC để ở inline style: globals.css có rule KHÔNG nằm trong @layer
-                // `select, input, textarea { color: var(--foreground) }`, mà style không phân
-                // lớp thì thắng mọi utility của Tailwind — kể cả text-transparent. Hậu quả:
-                // chữ thô của textarea bị vẽ đè lên lớp tô màu (nền sáng thì thành chữ đen
-                // chồng chữ màu → nhìn mờ nhòe). Inline style mới chặn được rule đó.
+                // Giữ ở inline style: chữ thô của textarea phải trong suốt để không vẽ đè
+                // lên lớp tô màu bên dưới. (Rule `select, input, textarea { color: … }` trong
+                // globals.css đã chuyển vào @layer base nên utility cũng đủ thắng, nhưng inline
+                // là chắc chắn nhất — đây là thứ dễ vô tình bị một rule khác ghi đè.)
                 color: "transparent",
                 WebkitTextFillColor: "transparent",
               }}
@@ -1391,6 +1419,36 @@ function TestcasesEditor() {
   // nếu không một mục code tay đứng đầu sẽ làm mất luôn nút gộp của cả đề.
   const supportsGrouping = items.some((item) => templateMap.get(item.template_id)?.engine_type === "COMMON_V1");
   const totalWeight = items.reduce((sum, item) => item.enabled ? sum + Number(item.weight || 0) : sum, 0);
+
+  /**
+   * Cơ cấu bộ testcase theo loại (Logic · Widget · Behavior), tính theo TRỌNG SỐ.
+   *
+   * <p>Tính theo số testcase thì 10 testcase widget 0.2 điểm nhìn "áp đảo" 3 testcase logic 2
+   * điểm, trong khi điểm thật thì ngược lại — mà cái giáo viên cần cân là điểm.
+   */
+  const groupMix = useMemo(() => {
+    const enabled = items.filter((item) => item.enabled);
+    const total = enabled.reduce((sum, item) => sum + Number(item.weight || 0), 0);
+    if (!enabled.length || total <= 0) return [];
+    const byGroup = new Map<string, { count: number; weight: number }>();
+    enabled.forEach((item) => {
+      const template = templateMap.get(item.template_id);
+      const code = item.testcase_group || (template ? testcaseGroup(template) : "LOGIC");
+      const row = byGroup.get(code) || { count: 0, weight: 0 };
+      row.count += 1;
+      row.weight += Number(item.weight || 0);
+      byGroup.set(code, row);
+    });
+    return [...byGroup.entries()]
+      .map(([code, row]) => ({
+        code,
+        label: (TESTCASE_GROUP_LABEL[code] || code).replace(/^Testcase /, ""),
+        count: row.count,
+        weight: row.weight,
+        percent: Math.round((row.weight / total) * 100),
+      }))
+      .sort((a, b) => b.weight - a.weight);
+  }, [items, templateMap]);
   const groupSummaries = useMemo(() => {
     const map = new Map<string, { name: string; count: number; weight: number }>();
     items.forEach((item) => {
@@ -1432,6 +1490,20 @@ function TestcasesEditor() {
     setRequireKeys(aiRequireKeys);
     setMessage({ type: "ok", text: `Đã đưa ${aiKeys.length} Item Key của AI vào Khu vực 0.` });
   };
+
+  /**
+   * Testcase AI gợi ý này ĐÃ có trong Khu vực 3 chưa?
+   *
+   * <p>Trợ lý AI không biết thư viện mẫu nên không tự dựng được chữ ký so sánh (tham số mặc định
+   * của mẫu nằm ở đây). Trang này trả lời hộ, nhờ vậy nút "Chấp nhận" tắt đi khi không còn gì
+   * để thêm và sáng lại ngay khi Khu vực 3 thiếu một testcase.
+   */
+  const hasProposedItem = useCallback((templateId: string, parameters: Record<string, unknown>) => {
+    const template = templateMap.get(templateId);
+    if (!template) return false;
+    const signature = itemSignature(templateId, { ...cloneParams(template), ...(parameters as JsonMap) });
+    return items.some((item) => itemSignature(item.template_id, item.parameters) === signature);
+  }, [items, templateMap]);
 
   /**
    * Nhận testcase do AI đề xuất. AI chỉ trả template_id + tham số, phần còn lại (tên, kỹ năng,
@@ -1488,11 +1560,31 @@ function TestcasesEditor() {
       return;
     }
     setItems((current) => [...current, ...built].map((item, i) => ({ ...item, order: i + 1 })));
+
+    // Khai luôn key mà mấy testcase vừa thêm đang dùng. Tham số MẶC ĐỊNH của mẫu cũng mang key
+    // (vd `item.old` của testcase sửa item) — giáo viên không hề gõ nó, nên bắt họ tự đoán rồi
+    // thêm tay ở Khu vực 0 mới lưu được là bắt sửa một lỗi họ không gây ra.
+    const declared = new Set(contractKeys.map((row) => row.key.trim()).filter(Boolean));
+    const autoKeys = collectItemKeys(built).filter((key) => !declared.has(key));
+    if (autoKeys.length) {
+      setContractKeys((current) => [
+        ...current,
+        ...autoKeys.filter((key) => !current.some((row) => row.key === key)).map((key) => {
+          const preset = contractCatalog?.default_keys.find((row) => row.key === key);
+          return preset ? { ...preset, required: true } : {
+            key, label: key, required: true, strategy: "key_only",
+            value: "", text: "", index: 0,
+          } as ContractKey;
+        }),
+      ]);
+    }
+
     setMessage({
       type: "ok",
       text: `Đã thêm ${built.length} testcase từ trợ lý AI vào Khu vực 3`
         + (duplicated ? ` (bỏ qua ${duplicated} testcase đã có sẵn)` : "")
         + (skipped.length ? ` (bỏ qua ${skipped.length} mẫu không còn trong thư viện)` : "")
+        + (autoKeys.length ? ` · đã tự khai ${autoKeys.length} key vào Khu vực 0: ${autoKeys.join(", ")}` : "")
         + ". Hãy kiểm tra lại tham số trước khi lưu.",
     });
   };
@@ -1765,21 +1857,10 @@ function TestcasesEditor() {
   }, [declaredKeys]);
 
   /** Key mà các testcase đang bật thực sự dùng; dùng để chặn contract thiếu địa chỉ. */
-  const usedTestcaseKeys = useMemo(() => {
-    const ordered: string[] = [];
-    const seen = new Set<string>();
-    items.filter((item) => item.enabled).forEach((item) => {
-      Object.entries(item.parameters || {}).forEach(([name, raw]) => {
-        const values = SINGLE_KEY_PARAMS.has(name)
-          ? [String(raw ?? "").trim()]
-          : MULTI_KEY_PARAMS.has(name) ? splitCsv(raw) : [];
-        values.filter(Boolean).forEach((key) => {
-          if (!seen.has(key)) { seen.add(key); ordered.push(key); }
-        });
-      });
-    });
-    return ordered;
-  }, [items]);
+  const usedTestcaseKeys = useMemo(
+    () => collectItemKeys(items.filter((item) => item.enabled)),
+    [items],
+  );
 
   const missingContractKeys = useMemo(() => {
     const declared = new Set(declaredKeys.map((row) => row.key));
@@ -1802,18 +1883,6 @@ function TestcasesEditor() {
     });
     setContractOpen(true);
     setMessage({ type: "ok", text: `Đã thêm ${missingContractKeys.length} key mà testcase đang dùng vào contract.` });
-  };
-
-  /** Thêm nốt các thành phần chưa khai, giữ nguyên những dòng giáo viên đã chỉnh. */
-  const loadDefaultContract = () => {
-    if (!contractCatalog) return;
-    setContractKeys((current) => [
-      ...current,
-      ...contractCatalog.default_keys
-        .filter((row) => !current.some((existing) => existing.key === row.key))
-        .map((row) => ({ ...row })),
-    ]);
-    setContractOpen(true);
   };
 
   /** Thêm một thành phần có sẵn (đã điền sẵn cách dò) hoặc một dòng trống để tự khai. */
@@ -2728,6 +2797,7 @@ function TestcasesEditor() {
         <AiAuthorPanel
           examId={examId}
           existingKeys={contractKeys.map((k) => k.key)}
+          hasItem={hasProposedItem}
           onApplyContract={applyAiContract}
           onApplyItems={applyAiItems}
         />
@@ -2918,11 +2988,11 @@ function TestcasesEditor() {
                             <option key={option.key} value={option.key}>{option.label} — {option.key}</option>
                           ))}
                       </select>
-                      <button onClick={() => addContractKey()} className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50">
-                        Dòng trống
-                      </button>
-                      <button onClick={loadDefaultContract} className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50">
-                        Thêm tất cả
+                      {/* MỘT nút thêm key tự khai. "Dòng trống" không nói được nó làm gì, còn
+                          "Thêm tất cả" đổ nguyên danh mục mặc định vào — gần như luôn phải xoá bớt. */}
+                      <button onClick={() => addContractKey()}
+                        className="flex shrink-0 items-center gap-1.5 rounded-lg border border-indigo-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-50">
+                        <Plus size={13} /> Thêm key
                       </button>
                     </div>
 
@@ -3096,6 +3166,29 @@ function TestcasesEditor() {
             <div className="border-b border-slate-100 bg-slate-50/70 px-4 py-3">
               <div className="flex flex-wrap items-center justify-between gap-3"><div><p className="eyebrow">Khu vực 3</p><h2 className="mt-1 text-sm font-bold text-slate-800">Testcase trong bộ</h2></div><div className="flex items-center gap-2"><span className="rounded-full bg-indigo-100 px-2.5 py-1 text-xs font-bold text-indigo-700">{items.length} mục</span>{supportsGrouping && selectedItemIds.length >= 2 && <button onClick={openGroupModal} className="rounded-lg bg-indigo-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700">Gộp thành testcase lớn</button>}{items.length > 0 && <button onClick={clearAllItems} className="flex items-center gap-1 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-100" title="Xóa toàn bộ testcase"><Trash2 size={13} /> Xóa tất cả</button>}</div></div>
               <div className="mt-3 flex items-center justify-between text-xs"><span className="text-slate-500">Tổng trọng số</span><strong className="text-indigo-700">{totalWeight.toFixed(2)}</strong></div>
+
+              {/* Cơ cấu bộ testcase theo LOẠI. Tổng số mục không nói được bộ đang lệch về đâu —
+                  một bộ toàn Widget và một bộ toàn Logic đều hiện "20 mục" y như nhau. Tỉ lệ tính
+                  theo TRỌNG SỐ (điểm), không theo số testcase: đó mới là thứ quyết định điểm. */}
+              {groupMix.length > 0 && (
+                <div className="mt-3 space-y-1.5">
+                  <div className="flex h-2 overflow-hidden rounded-full bg-slate-100">
+                    {groupMix.map((row) => (
+                      <div key={row.code} className={GROUP_MIX_BAR[row.code] || "bg-slate-400"}
+                        style={{ width: `${row.percent}%` }} title={`${row.label}: ${row.percent}%`} />
+                    ))}
+                  </div>
+                  <div className="flex flex-wrap gap-x-3 gap-y-1">
+                    {groupMix.map((row) => (
+                      <span key={row.code} className="flex items-center gap-1.5 text-[11px] text-slate-500">
+                        <span className={`h-2 w-2 rounded-full ${GROUP_MIX_BAR[row.code] || "bg-slate-400"}`} />
+                        {row.label}: <strong className="text-slate-700">{row.percent}%</strong>
+                        <span className="text-slate-400">({row.count} mục · {row.weight.toFixed(2)} điểm)</span>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
             <div
               className="min-h-[360px] space-y-2 p-3"

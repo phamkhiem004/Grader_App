@@ -1420,6 +1420,59 @@ public class ExamService {
 
     private Path basePubspec() { return locateTemplateDir().resolve("pubspec.base.yaml"); }
 
+    /**
+     * Hai file dự án cho KHUNG STARTER phát cho sinh viên: {@code pubspec.yaml} và (nếu lấy được)
+     * {@code pubspec.lock}.
+     *
+     * <p>pubspec lấy NGUYÊN VĂN từ {@code pubspec.base.yaml} — cùng nguồn với môi trường chấm.
+     * Chép tay một bản khác là mở đường cho cảnh "máy em chạy được mà chấm 0 điểm": bài dùng
+     * package không có trong ảnh chấm sẽ trượt, còn tên dự án lệch thì import
+     * {@code package:exam_project/…} gãy.
+     *
+     * <p>pubspec.lock KHÔNG viết tay được (cần đúng phiên bản đã resolve + hash), nên lấy thẳng
+     * bản đã resolve trong ảnh chấm. Không có Docker/ảnh thì bỏ qua file này — sinh viên chạy
+     * {@code flutter pub get} là có; thà thiếu còn hơn phát một lock sai làm build hỏng.
+     */
+    public List<Map<String, String>> starterProjectFiles() {
+        List<Map<String, String>> out = new ArrayList<>();
+        try {
+            Path pubspec = basePubspec();
+            if (!Files.exists(pubspec)) return out;
+            out.add(Map.of(
+                    "name", "pubspec.yaml",
+                    "content", "# Khai sẵn theo đúng môi trường chấm — KHÔNG thêm package ngoài danh sách này.\n"
+                            + Files.readString(pubspec, StandardCharsets.UTF_8)));
+        } catch (Exception e) {
+            log.warn("Không đọc được pubspec.base.yaml cho khung starter: {}", e.getMessage());
+            return out;
+        }
+        String lock = readLockFromBaseImage();
+        if (lock != null && !lock.isBlank()) {
+            out.add(Map.of("name", "pubspec.lock", "content", lock));
+        }
+        return out;
+    }
+
+    /** Đọc /app/pubspec.lock trong ảnh nền; null khi không có Docker hoặc chưa build ảnh. */
+    private String readLockFromBaseImage() {
+        if (!dockerImageExists(baseImage)) return null;
+        try {
+            Process pr = new ProcessBuilder("docker", "run", "--rm", baseImage,
+                    "cat", "/app/pubspec.lock").start();
+            StringBuilder sb = new StringBuilder();
+            try (BufferedReader r = new BufferedReader(
+                    new InputStreamReader(pr.getInputStream(), StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = r.readLine()) != null) sb.append(line).append('\n');
+            }
+            if (!pr.waitFor(60, TimeUnit.SECONDS) || pr.exitValue() != 0) return null;
+            return sb.toString();
+        } catch (Exception e) {
+            log.warn("Không lấy được pubspec.lock từ ảnh nền: {}", e.getMessage());
+            return null;
+        }
+    }
+
     /** Danh sách package trong khối dependencies: [{name, version, protected}]. `flutter` = lõi (không xóa). */
     public List<Map<String, Object>> listManagedPackages() {
         List<Map<String, Object>> out = new ArrayList<>();

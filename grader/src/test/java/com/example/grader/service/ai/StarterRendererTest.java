@@ -106,6 +106,61 @@ class StarterRendererTest {
                 "Ba chữ ký hỏng phải được báo: " + r.warnings());
     }
 
+    /**
+     * Getter là chữ ký TRẦN hợp lệ của Dart, chỉ khác ở chỗ không có ngoặc. Luật "phải kết thúc
+     * bằng ')'" từng loại oan đúng những thành viên khung starter cần khai nhất — `count` của
+     * ViewModel, `isEditMode` của màn hình form — kèm cảnh báo đọc như thể AI viết sai.
+     */
+    @Test
+    void giuLaiGetterVaVanDeThanHamLaTodo() throws Exception {
+        String withGetters = """
+                {"entry_class":"HomeScreen","files":[
+                  {"path":"lib/models/user.dart","kind":"model","class_name":"User",
+                   "fields":[{"name":"id","type":"int?"}]},
+                  {"path":"lib/viewmodels/user_viewmodel.dart","kind":"viewmodel",
+                   "class_name":"UserViewModel","methods":[
+                    {"signature":"int get count","doc":"số người dùng hiện có"},
+                    {"signature":"List<User> get users"}]},
+                  {"path":"lib/screens/home_screen.dart","kind":"screen","class_name":"HomeScreen",
+                   "methods":[{"signature":"bool get isEditMode"}]}]}
+                """;
+        StarterRenderer.Rendered r = new StarterRenderer().render(spec(withGetters), null, Map.of());
+
+        String vm = content(r, "lib/viewmodels/user_viewmodel.dart");
+        assertTrue(vm.contains("int get count {"), "Getter phải được sinh ra: " + vm);
+        assertTrue(vm.contains("List<User> get users {"), "Getter kiểu generic cũng phải qua");
+        assertTrue(vm.contains("UserViewModel.count"), "Thân getter vẫn là TODO ném lỗi");
+        assertEquals(2, vm.split("throw UnimplementedError\\(").length - 1);
+        assertTrue(vm.contains("import '../models/user.dart';"), "Kiểu trong getter vẫn phải kéo import");
+
+        assertTrue(content(r, "lib/screens/home_screen.dart").contains("bool get isEditMode {"));
+        assertTrue(r.warnings().isEmpty(), "Getter hợp lệ thì KHÔNG được cảnh báo: " + r.warnings());
+    }
+
+    /**
+     * Thân hàm đã bị ép thành TODO, nên đường cuối cùng để AI tuồn lời giải vào khung là ô "doc".
+     * Chú thích phải rút về một dòng ngắn, không thành bài mẫu chép sẵn trong comment.
+     */
+    @Test
+    void chuThichBiRutVeMotDongNgan() throws Exception {
+        String chatty = """
+                {"entry_class":"HomeScreen","files":[
+                  {"path":"lib/screens/home_screen.dart","kind":"screen","class_name":"HomeScreen",
+                   "doc":"Màn hình danh sách.\\nBước 1: dựng Scaffold với AppBar tiêu đề 'Danh sách người dùng (n)'.\\nBước 2: thân là ListView.builder duyệt viewModel.users, mỗi item là Card chứa ListTile.\\nBước 3: FloatingActionButton điều hướng sang form bằng Navigator.push.",
+                   "methods":[{"signature":"void openForm()",
+                     "doc":"Gọi Navigator.push(context, MaterialPageRoute(builder: (_) => UserFormScreen())) rồi setState để làm mới danh sách sau khi quay lại màn hình trước đó"}]}]}
+                """;
+        String code = content(new StarterRenderer().render(spec(chatty), null, Map.of()),
+                "lib/screens/home_screen.dart");
+
+        assertFalse(code.contains("Bước 2"), "Chú thích nhiều dòng phải bị rút gọn: " + code);
+        assertFalse(code.contains("MaterialPageRoute"), "Không được để lộ nguyên lời giải trong comment");
+        for (String line : code.split("\n")) {
+            assertTrue(line.length() <= 140, "Dòng quá dài (chú thích chưa được cắt): " + line);
+        }
+        assertTrue(code.contains("return const Placeholder();"), "Giao diện vẫn phải để trống");
+    }
+
     @Test
     void loaiKieuDuLieuKhongCoTrongKhung() throws Exception {
         String risky = """

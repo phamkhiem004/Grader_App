@@ -8,7 +8,7 @@ import PerformanceSettings from "@/components/grading/PerformanceSettings";
 import { gradingStatusLabel, gradingStatusTone } from "@/lib/gradingStatus";
 // Kho phiên chấm dùng chung với trang Lịch sử (nút "Chấm lại" bên đó ghi vào cùng chỗ này).
 import { readStoredSessions, writeStoredSessions } from "@/lib/gradingSessions";
-import { UploadCloud, Play, Pause, FileArchive, X, CheckCircle, Clock, AlertCircle, Loader2, CheckSquare, BarChart2, Users, TrendingUp, StopCircle, Trash2, Ban, RotateCcw, ListFilter, ChevronDown } from "lucide-react";
+import { UploadCloud, Play, Pause, FileArchive, X, CheckCircle, Clock, AlertCircle, Loader2, CheckSquare, BarChart2, Users, TrendingUp, StopCircle, Ban, RotateCcw, ListFilter, ChevronDown } from "lucide-react";
 
 const normalizedPath = (value) => String(value || "").replace(/\\/g, "/");
 
@@ -49,7 +49,7 @@ export default function AutomaticGradingPage() {
   // MỖI BỘ MỘT PHIÊN: exam → { batchId, phase: "uploading"|"polling"|"done", progress, parseErrors }.
   // Một biến phase/progress toàn cục là lý do chấm bộ 2 xong quay lại bộ 1 thì mọi số liệu biến
   // mất — phiên mới ghi đè phiên cũ. Giữ theo map thì đổi khung nhìn chỉ là đổi khoá đọc; dữ liệu
-  // một bộ chỉ mất khi chính bộ ĐÓ bắt đầu lượt chấm mới (hoặc Hủy phiên).
+  // một bộ chỉ mất khi chính bộ ĐÓ bắt đầu lượt chấm mới.
   const [sessions, setSessions] = useState({});
   // Bài đã chọn nhưng CHƯA upload — cũng theo từng bộ, để soạn sẵn bài cho bộ 2 trong lúc bộ 1
   // đang chấm mà hai danh sách không lẫn vào nhau.
@@ -158,21 +158,28 @@ export default function AutomaticGradingPage() {
     const entries = Object.entries(saved.sessions);
     if (!entries.length) { restoredRef.current = true; return; }
 
+    // Ba kết cục khác nhau, và phải phân biệt: "backend nói phiên này không còn" thì XÓA khỏi kho,
+    // còn "không hỏi được backend" thì GIỮ NGUYÊN — backend đang khởi động lại mà đi dọn thì mất
+    // trắng phiên chấm thật.
     Promise.all(entries.map(async ([exam, info]) => {
-      if (!exam || !info?.batchId) return null;
+      if (!exam || !info?.batchId) return { exam, verdict: "gone" };
       try {
         const data = await fetch(`${API_BASE}/batch/progress/${info.batchId}`).then((r) => r.json());
-        if (!data || data.total == null) return null;
+        if (!data || data.total == null) return { exam, verdict: "unreachable", info };
+        // Bộ testcase bị xóa → backend xóa luôn phiên chấm và trả `status: "UNKNOWN"`. Không bỏ
+        // phiên ở đây thì batchId cũ nằm lại localStorage và cứ mỗi lần F5 lại dựng lại nguyên
+        // màn hình chấm của một bộ không còn tồn tại.
+        if (data.status === "UNKNOWN") return { exam, verdict: "gone" };
         const pending = (data.queued || 0) + (data.grading || 0);
-        return [exam, {
+        return { exam, verdict: "live", info, session: {
           batchId: info.batchId,
           phase: pending > 0 ? "polling" : "done",
           progress: data,
           parseErrors: info.parseErrors || [],
-        }];
-      } catch { return null; }
-    })).then((results) => {
-      const valid = results.filter(Boolean);
+        } };
+      } catch { return { exam, verdict: "unreachable", info }; }
+    })).then((outcomes) => {
+      const valid = outcomes.filter((o) => o.verdict === "live").map((o) => [o.exam, o.session]);
       if (valid.length) {
         setSessions(Object.fromEntries(valid));
         const running = valid.find(([, s]) => s.phase === "polling");
@@ -182,6 +189,17 @@ export default function AutomaticGradingPage() {
         if (running) startPolling(running[1].batchId, running[0]);
       }
       restoredRef.current = true;
+
+      // Dọn kho ngay tại đây. Effect ghi kho bên dưới chỉ chạy khi `sessions` đổi, mà phiên chết
+      // thì không vào `sessions` — không tự ghi lại thì batchId chết nằm mãi trong localStorage.
+      const dropped = outcomes.filter((o) => o.verdict === "gone");
+      if (!dropped.length) return;
+      const kept = {};
+      for (const o of outcomes) {
+        if (o.verdict === "live") kept[o.exam] = { batchId: o.session.batchId, parseErrors: o.session.parseErrors };
+        else if (o.verdict === "unreachable") kept[o.exam] = o.info;
+      }
+      writeStoredSessions({ lastExam: kept[saved.lastExam] ? saved.lastExam : undefined, sessions: kept });
     });
   }, []);
 
@@ -389,7 +407,7 @@ export default function AutomaticGradingPage() {
   /**
    * "+ Chấm kỳ thi mới": chỉ RỜI khung nhìn về form trắng (bỏ chọn bộ testcase) — KHÔNG xoá dữ
    * liệu của bất kỳ phiên nào. Chọn lại một bộ đã từng chấm là thấy lại nguyên kết quả của nó;
-   * dữ liệu phiên chỉ mất khi chính bộ đó bắt đầu lượt chấm mới hoặc bấm Hủy phiên.
+   * dữ liệu phiên chỉ mất khi chính bộ đó bắt đầu lượt chấm mới.
    */
   const startNewView = () => {
     setExamId("");
@@ -397,9 +415,10 @@ export default function AutomaticGradingPage() {
     setRowFilter("all");
   };
 
-  // ── Dừng / hủy phiên chấm đang chạy ────────────────────────────
-  // Dừng  = bỏ các bài chưa chấm + giết container đang chạy, GIỮ kết quả đã có.
-  // Hủy   = dừng rồi XÓA sạch kết quả và file bài nộp của phiên này (không hoàn tác được).
+  // ── Dừng phiên chấm đang chạy ──────────────────────────────────
+  // Dừng = bỏ các bài chưa chấm + giết container đang chạy, GIỮ kết quả đã có; phiên vẫn nhận
+  // thêm bài để chấm tiếp. (Nút "Hủy phiên chấm" — xóa sạch kết quả — đã bỏ theo yêu cầu:
+  // quá gần một thao tác không hoàn tác được, ai cần xóa thì xóa cả bộ ở Quản lý bộ testcase.)
   const stopGrading = async () => {
     if (!batchId || batchAction) return;
     setBatchAction("stop");
@@ -410,34 +429,10 @@ export default function AutomaticGradingPage() {
       const skipped = (data.dequeued || 0) + (data.cancelled || 0);
       setStopNotice(`Đã dừng phiên chấm: ${skipped} bài chưa chấm bị bỏ qua`
         + (data.killedContainers ? `, ${data.killedContainers} bài đang chấm bị ngắt` : "")
-        + ". Kết quả của các bài đã chấm xong vẫn được giữ nguyên.");
+        + ". Kết quả đã có vẫn giữ nguyên — nạp thêm bài ở ô “Thêm bài làm” để chấm tiếp.");
       // GIỮ phiên lưu: bài đã chấm xong vẫn còn đó, và giáo viên còn nạp thêm bài vào phiên này.
       // KHÔNG tự chuyển sang "done" ở đây: vòng poll sẵn có sẽ tự kết thúc khi container cuối
       // cùng thực sự thoát — nếu giết hụt thì người dùng phải thấy nó vẫn đang chạy.
-    } catch (e) {
-      setUploadErr("Không kết nối được server: " + e.message);
-    } finally {
-      setBatchAction(null);
-    }
-  };
-
-  const cancelGrading = async () => {
-    if (!batchId || batchAction) return;
-    if (!confirm("Hủy phiên chấm này?\n\nToàn bộ kết quả đã chấm và file bài nộp của phiên sẽ bị XÓA "
-      + "(bài đã có điểm chấm tay được giữ lại). Thao tác này không hoàn tác được.")) return;
-    setBatchAction("cancel");
-    try {
-      const res = await fetch(`${API_BASE}/batch/${batchId}/cancel`, { method: "POST" });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) { setUploadErr(data.error || "Không hủy được phiên chấm."); return; }
-      // Hủy = dữ liệu phía server đã bị XÓA thật → gỡ phiên của đúng bộ này khỏi màn hình.
-      const exam = examId.trim();
-      if (runningExam === exam) clearInterval(pollRef.current);
-      dropSession(exam);
-      setFilesFor(exam, []);
-      setRowFilter("all");
-      setStopNotice(`Đã hủy phiên chấm và xóa ${data.deleted || 0} bản ghi kết quả`
-        + (data.keptManual ? `, giữ lại ${data.keptManual} bài đã chấm tay` : "") + ".");
     } catch (e) {
       setUploadErr("Không kết nối được server: " + e.message);
     } finally {
@@ -847,19 +842,6 @@ export default function AutomaticGradingPage() {
                     </p>
                   </div>
                   <div className="flex items-end gap-3 text-right">
-                    {phase === "polling" && (
-                      <button
-                        type="button"
-                        onClick={toggleBatchPause}
-                        className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-100"
-                        title={isPaused
-                          ? "Tiếp tục đưa bài đang chờ vào máy chấm"
-                          : "Tạm dừng sau khi các bài đang chạy hoàn tất"}
-                      >
-                        {isPaused ? <Play size={14} /> : <Pause size={14} />}
-                        {isPaused ? "Tiếp tục" : "Tạm dừng"}
-                      </button>
-                    )}
                     <div>
                     <span className="text-3xl font-bold text-slate-800">{pct}<span className="text-lg text-slate-400">%</span></span>
                     {phase === "polling" && (
@@ -894,26 +876,26 @@ export default function AutomaticGradingPage() {
                     {phase === "polling" && (
                       <>
                         <button
+                          type="button"
+                          onClick={toggleBatchPause}
+                          title={isPaused
+                            ? "Tiếp tục đưa bài đang chờ vào máy chấm"
+                            : "Tạm dừng sau khi các bài đang chạy hoàn tất"}
+                          className="flex items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-2 text-sm font-semibold text-indigo-700 transition-colors hover:bg-indigo-100"
+                        >
+                          {isPaused ? <Play size={15} /> : <Pause size={15} />}
+                          {isPaused ? "Tiếp tục" : "Tạm dừng"}
+                        </button>
+                        <button
                           onClick={stopGrading}
                           disabled={batchAction !== null}
-                          title="Ngừng chấm các bài còn lại, giữ nguyên kết quả đã có"
+                          title="Ngừng chấm các bài còn lại, giữ kết quả đã có; vẫn nạp thêm bài chấm tiếp được"
                           className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-700 transition-colors hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
                         >
                           {batchAction === "stop"
                             ? <Loader2 size={15} className="animate-spin" />
                             : <StopCircle size={15} />}
                           Dừng chấm
-                        </button>
-                        <button
-                          onClick={cancelGrading}
-                          disabled={batchAction !== null}
-                          title="Dừng và xóa toàn bộ kết quả + bài nộp của phiên chấm này"
-                          className="flex items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-600 transition-colors hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
-                        >
-                          {batchAction === "cancel"
-                            ? <Loader2 size={15} className="animate-spin" />
-                            : <Trash2 size={15} />}
-                          Hủy phiên chấm
                         </button>
                       </>
                     )}

@@ -29,4 +29,8 @@ public interface GradingBatchRepository extends JpaRepository<GradingBatch,Long>
 
     // ── Thông báo: các phiên chấm gần đây ────────────────────────
     List<GradingBatch> findTop10ByOrderByCreatedAtDesc();
+
+    // Dò phiên chấm mồ côi (bộ testcase đã bị xóa) — xem ExamService.purgeOrphanGradingData
+    @Query("select distinct b.examId from GradingBatch b where b.examId is not null")
+    List<String> findDistinctExamIds();
 }

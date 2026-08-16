@@ -1640,8 +1640,11 @@ public class BatchGradingService {
         // Bài ĐANG chấm: giết container để worker thoát ngay, thay vì chờ hết watchdog từng bài.
         int killed = gradingService.killRunning(batchId);
 
+        // PARTIAL chứ KHÔNG phải CANCELLED: Dừng = kết thúc sớm nhưng GIỮ kết quả, và giáo viên
+        // còn được nạp thêm bài để chấm tiếp (addToBatch chỉ từ chối CANCELLED). Trước đây đặt
+        // CANCELLED nên bấm Dừng xong là phiên bị khóa vĩnh viễn — đúng lỗi đã gặp.
         // completedAt != null cũng là chốt chặn để checkBatchComplete không ghi đè trạng thái này.
-        batch.setStatus(BatchStatus.CANCELLED);
+        batch.setStatus(BatchStatus.PARTIAL);
         if (batch.getCompletedAt() == null) batch.setCompletedAt(Instant.now());
         batchRepo.save(batch);
 
@@ -1690,6 +1693,7 @@ public class BatchGradingService {
         // người dùng gửi lên) nên đường dẫn chắc chắn nằm trong submissions/.
         if (batch != null) {
             deleteDirQuietly(batchDir(batch.getExamId(), batch.getBatchId()));
+            batch.setStatus(BatchStatus.CANCELLED);   // stopBatch chỉ đặt PARTIAL; Hủy mới là CANCELLED
             batch.setDoneCount(0);      // bản ghi kết quả đã bị xóa → bộ đếm cũ thành vô nghĩa
             batch.setErrorCount(0);
             batchRepo.save(batch);

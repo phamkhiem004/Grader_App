@@ -108,6 +108,16 @@ public class ExamResult {
     @Column(name = "updated_at")
     private Instant updatedAt;
 
+    // ── Mốc thời gian của LƯỢT CHẤM ─────────────────────────────────────────────
+    // submittedAt là lúc bài vào hàng đợi, updatedAt là lần ghi cuối (chấm tay cũng đổi nó) —
+    // cả hai đều KHÔNG trả lời được "máy chấm bài này mất bao lâu". Hai cột dưới mới trả lời được,
+    // và đó là thứ bảng điểm xuất ra cần.
+    @Column(name = "grading_started_at")
+    private Instant gradingStartedAt;
+
+    @Column(name = "grading_finished_at")
+    private Instant gradingFinishedAt;
+
     @PrePersist
     protected void onCreate() {
         submittedAt = Instant.now();

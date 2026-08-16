@@ -21,8 +21,8 @@ public interface ExamResultRepository extends JpaRepository<ExamResult, Long> {
     // NHẸ cho /batch/progress (poll 3s): bỏ cột LONGTEXT result_json/manual_json
     @Query("select new com.example.grader.dto.ResultRow(r.id, r.studentId, r.studentName, " +
            "r.status, r.score, r.details, r.errorLog, r.diagnosticCode, r.diagnosticOrigin, " +
-           "r.diagnosticStage, r.requiresManualReview) from ExamResult r " +
-           "where r.batchId = :batchId order by r.studentId")
+           "r.diagnosticStage, r.requiresManualReview, r.gradingStartedAt, r.gradingFinishedAt) " +
+           "from ExamResult r where r.batchId = :batchId order by r.studentId")
     List<com.example.grader.dto.ResultRow> findRowsByBatchId(@Param("batchId") String batchId);
 
     // NHẸ cho Thống kê: chỉ điểm/trạng thái/mốc thời gian (không kéo LONGTEXT)
@@ -90,6 +90,7 @@ public interface ExamResultRepository extends JpaRepository<ExamResult, Long> {
             r.batchId, r.submittedAt, r.updatedAt, r.details, r.errorLog,
             r.diagnosticCode, r.diagnosticOrigin, r.diagnosticStage, r.requiresManualReview,
             case when r.resultJson is null then false else true end,
+            r.gradingStartedAt, r.gradingFinishedAt,
             r.manualJson, r.previousScore
         )
         from ExamResult r

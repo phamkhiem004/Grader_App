@@ -71,7 +71,11 @@ public class BatchGradingService {
     /** Bộ đếm đảm bảo batchId DUY NHẤT ngay cả khi 2 request cùng mili-giây (cùng cột UNIQUE ở DB). */
     private static final java.util.concurrent.atomic.AtomicLong BATCH_SEQ =
             new java.util.concurrent.atomic.AtomicLong();
-    private static final Pattern STUDENT_ID_SUFFIX = Pattern.compile("(?i)([a-z]{2}\\d{6,})$");
+    /**
+     * Mã SV nằm ở BẤT KỲ đâu trong tên thư mục: "Nguyen Van A (HE123456)", "PE_ca1-he150123",
+     * "khiempghe186137". Không đặt \b ở đầu vì mã thường dính liền tên tài khoản.
+     */
+    private static final Pattern STUDENT_ID_ANYWHERE = Pattern.compile("(?i)([a-z]{2}\\d{6,})(?!\\d)");
     private static String genBatchId() {
         return "BATCH_" + System.currentTimeMillis() + "_" + Long.toHexString(BATCH_SEQ.incrementAndGet());
     }
@@ -273,6 +277,8 @@ public class BatchGradingService {
                 placeholder.setDiagnosticOrigin(null);
                 placeholder.setDiagnosticStage(null);
                 placeholder.setRequiresManualReview(false);
+                placeholder.setGradingStartedAt(null);    // mốc của lượt chấm CŨ không được dính sang
+                placeholder.setGradingFinishedAt(null);
                 resultRepo.save(placeholder);
 
                 pendingJobs.add(new GradingJob(
@@ -495,6 +501,16 @@ public class BatchGradingService {
     private void updateStatus(GradingJob job, GradingStatus status, Float score, String details, String fullJson) {
         resultRepo.findByStudentIdAndBatchId(job.studentId(), job.batchId()).ifPresent(r -> {
             r.setStatus(status);
+            // Mốc thời gian ghi ngay tại chỗ đổi trạng thái — đây là nơi DUY NHẤT biết lượt chấm
+            // thật sự bắt đầu và kết thúc lúc nào (updatedAt không dùng được: chấm tay cũng đổi nó).
+            if (status == GradingStatus.GRADING) {
+                r.setGradingStartedAt(Instant.now());
+                r.setGradingFinishedAt(null);        // chấm lại: xoá mốc kết thúc của lượt trước
+            } else if (status == GradingStatus.DONE
+                    || status == GradingStatus.ERROR
+                    || status == GradingStatus.MANUAL_REVIEW) {
+                r.setGradingFinishedAt(Instant.now());
+            }
             if (score    != null) r.setScore(score);
             if (details  != null) r.setDetails(details);
             if (fullJson != null) r.setResultJson(fullJson);
@@ -1761,20 +1777,48 @@ public class BatchGradingService {
         return (createdBy == null || createdBy.isBlank()) ? "unknown" : createdBy.trim();
     }
 
+    /**
+     * Suy mã SV + tên hiển thị từ TÊN THƯ MỤC bài nộp.
+     *
+     * <p>Tên thư mục KHÔNG bị ràng buộc: giáo viên tải về từ LMS thì thư mục hay mang tên kiểu
+     * "Nguyễn Văn A (HE123456)", "PE_ca1 - he150123", có dấu, có khoảng trắng, có ngoặc. Trước
+     * đây {@code safeId} chặn thẳng những tên đó và cả lô bài bị từ chối. Giờ:
+     * <ol>
+     *   <li>mã SV lấy theo mẫu 2 chữ + ≥6 số ở BẤT KỲ đâu trong tên (HE123456, he150123…);</li>
+     *   <li>không có mẫu đó thì rút gọn cả tên thành mã an toàn (bỏ dấu, thay ký tự lạ bằng "_").</li>
+     * </ol>
+     * Tên gốc luôn được giữ nguyên ở {@code studentName} để hiện lên bảng điểm.
+     *
+     * <p>Mã SV còn dùng làm TÊN THƯ MỤC khi lưu bài và là cột {@code student_id} varchar(20),
+     * nên bắt buộc cắt ở 20 ký tự và chỉ chứa ký tự an toàn.
+     */
     StudentInfo parseStudentInfo(String username) {
         String normalized = username == null ? "" : username.trim();
-        ExamService.safeId(normalized, "username");
-        Matcher matcher = STUDENT_ID_SUFFIX.matcher(normalized);
-        String studentId = matcher.find() ? matcher.group(1) : normalized;
-        return new StudentInfo(
-                ExamService.safeId(studentId.toUpperCase(), "SV"),
-                normalized
-        );
+        if (normalized.isEmpty())
+            throw new IllegalArgumentException("Thiếu tên thư mục bài nộp.");
+
+        Matcher matcher = STUDENT_ID_ANYWHERE.matcher(normalized);
+        String studentId = matcher.find() ? matcher.group(1) : slugStudentId(normalized);
+        studentId = studentId.toUpperCase(java.util.Locale.ROOT);
+        if (studentId.length() > 20) studentId = studentId.substring(0, 20);
+        if (studentId.isBlank())
+            throw new IllegalArgumentException("Không suy được mã SV từ tên thư mục: " + normalized);
+        return new StudentInfo(studentId, normalized);
+    }
+
+    /** Bỏ dấu tiếng Việt rồi thay mọi ký tự ngoài [A-Za-z0-9_-] bằng "_". */
+    private String slugStudentId(String raw) {
+        String noAccent = java.text.Normalizer.normalize(raw, java.text.Normalizer.Form.NFD)
+                .replaceAll("\\p{M}+", "")
+                .replace('đ', 'd').replace('Đ', 'D');
+        return noAccent.replaceAll("[^A-Za-z0-9_-]+", "_")
+                .replaceAll("[_-]{2,}", "_")            // "B - ca" → "B_ca", không để "_-_"
+                .replaceAll("^[_-]+|[_-]+$", "");
     }
 
     void validateZip(MultipartFile f, String name) throws Exception {
         if (name == null || !name.toLowerCase(java.util.Locale.ROOT).endsWith(".zip"))
-            throw new IllegalArgumentException("Thư mục username phải chứa một file .zip");
+            throw new IllegalArgumentException("Mỗi thư mục bài nộp phải chứa một file .zip (thường là lib.zip)");
         if (f.isEmpty())                          throw new IllegalArgumentException("File rỗng");
         if (f.getSize() > 50L * 1024 * 1024)     throw new IllegalArgumentException("Quá 50MB");
     }

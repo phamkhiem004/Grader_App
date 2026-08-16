@@ -88,6 +88,29 @@ public class AiExamAuthorService {
                 LlmMessage.system(AiPrompts.keysSystem(strategyCodes(), suggestedKeys())),
                 LlmMessage.user(AiPrompts.keysUser(deBai))));
 
+        List<Map<String, Object>> keys = parseKeys(res);
+        if (keys.isEmpty())
+            throw new IllegalStateException("AI không tìm được thành phần giao diện nào trong đề. "
+                    + "Hãy bổ sung mô tả giao diện ở mục 3 rồi thử lại.");
+
+        Map<String, Object> contract = new LinkedHashMap<>();
+        contract.put("require_keys", res.path("require_keys").asBoolean(true));
+        contract.put("keys", keys);
+
+        JsonNode spec = res.path("mockup");
+        List<Map<String, Object>> screens = mockupRenderer.render(spec);
+
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("contract", contract);
+        out.put("mockup_spec", plain(spec.isMissingNode() ? mapper.createObjectNode() : spec));
+        out.put("screens", screens);
+        out.put("notes", textList(res.path("notes")));
+        out.put("unused_keys", unusedKeys(keys, screens));
+        return out;
+    }
+
+    /** Bóc danh sách Item Key từ câu trả lời của AI, chuẩn hoá về đúng bộ cách dò hợp lệ. */
+    private List<Map<String, Object>> parseKeys(JsonNode res) {
         Set<String> allowedStrategies = new LinkedHashSet<>(strategyCodes());
         List<Map<String, Object>> keys = new ArrayList<>();
         Set<String> seen = new LinkedHashSet<>();
@@ -109,24 +132,7 @@ public class AiExamAuthorService {
             row.put("evidence", text(k.path("evidence"), ""));
             keys.add(row);
         }
-        if (keys.isEmpty())
-            throw new IllegalStateException("AI không tìm được thành phần giao diện nào trong đề. "
-                    + "Hãy bổ sung mô tả giao diện ở mục 3 rồi thử lại.");
-
-        Map<String, Object> contract = new LinkedHashMap<>();
-        contract.put("require_keys", res.path("require_keys").asBoolean(true));
-        contract.put("keys", keys);
-
-        JsonNode spec = res.path("mockup");
-        List<Map<String, Object>> screens = mockupRenderer.render(spec);
-
-        Map<String, Object> out = new LinkedHashMap<>();
-        out.put("contract", contract);
-        out.put("mockup_spec", spec.isMissingNode() ? mapper.createObjectNode() : spec);
-        out.put("screens", screens);
-        out.put("notes", textList(res.path("notes")));
-        out.put("unused_keys", unusedKeys(keys, screens));
-        return out;
+        return keys;
     }
 
     /** Vẽ lại hình từ bản mô tả đã có — dùng khi giáo viên sửa key xong, KHÔNG gọi lại AI. */
@@ -137,6 +143,81 @@ public class AiExamAuthorService {
             throw new IllegalArgumentException("Bản mô tả giao diện trống hoặc sai định dạng.");
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("screens", screens);
+        return out;
+    }
+
+    /**
+     * Sửa hình theo lời giáo viên ("bỏ ô số điện thoại", "tách màn chi tiết ra riêng"…).
+     *
+     * <p>AI chỉ sửa BẢN MÔ TẢ, {@link MockupRenderer} vẫn là nơi tính toạ độ — nên hình sau khi
+     * sửa giữ nguyên phong cách và không thể lệch/chồng chữ. Bản mô tả mới được trả về kèm để lần
+     * sửa sau nối tiếp được từ đúng bản này.
+     */
+    public Map<String, Object> reviseMockup(Object rawSpec, String instruction, Object rawContract) {
+        if (instruction == null || instruction.isBlank())
+            throw new IllegalArgumentException("Hãy mô tả bạn muốn sửa gì trên hình.");
+        JsonNode current = mapper.valueToTree(rawSpec);
+        if (current == null || current.isMissingNode() || current.isNull() || current.isEmpty())
+            throw new IllegalArgumentException("Chưa có hình để sửa — hãy phân tích đề trước.");
+
+        List<String> contractKeys = contractKeyList(rawContract);
+        JsonNode res = llm.chatJson(List.of(
+                LlmMessage.system(AiPrompts.mockupReviseSystem()),
+                LlmMessage.user(AiPrompts.mockupReviseUser(current.toString(),
+                        String.join(", ", contractKeys), instruction))));
+
+        // AI hay trả thẳng {"screens": [...]} thay vì bọc trong "mockup" — nhận cả hai kiểu còn
+        // hơn bắt giáo viên bấm lại và tốn thêm một lượt gọi.
+        JsonNode spec = res.path("mockup");
+        if (!spec.has("screens") && res.has("screens")) spec = res;
+
+        List<Map<String, Object>> screens = mockupRenderer.render(spec);
+        if (screens.isEmpty())
+            throw new IllegalStateException("AI trả về bản mô tả giao diện không vẽ được. "
+                    + "Hãy nói rõ hơn yêu cầu rồi thử lại; hình cũ vẫn còn nguyên.");
+
+        // Sửa hình là sửa CẢ danh sách key: bỏ một thành phần khỏi hình mà key của nó còn nằm
+        // trong hợp đồng thì bộ chấm đi tìm một widget không còn trên đề. AI trả danh sách key mới
+        // thì dùng; model cũ/không trả thì giữ nguyên hợp đồng đang có.
+        List<Map<String, Object>> revisedKeys = parseKeys(res);
+        List<Map<String, Object>> keysForCheck = revisedKeys.isEmpty()
+                ? keyRows(rawContract) : revisedKeys;
+
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("mockup_spec", plain(spec));
+        out.put("screens", screens);
+        out.put("notes", textList(res.path("notes")));
+        out.put("unused_keys", unusedKeys(keysForCheck, screens));
+        if (!revisedKeys.isEmpty()) {
+            Map<String, Object> contract = new LinkedHashMap<>();
+            contract.put("require_keys", res.path("require_keys").asBoolean(true));
+            contract.put("keys", revisedKeys);
+            out.put("contract", contract);
+        }
+        return out;
+    }
+
+    /**
+     * Đổi cây JsonNode (Jackson 2) sang Map/List thuần trước khi trả cho client.
+     *
+     * <p>Classpath có CẢ Jackson 2 lẫn Jackson 3 (xem CLAUDE.md). Bộ chuyển đổi HTTP của Spring
+     * Boot 4 là Jackson 3, nó không nhận ra JsonNode của Jackson 2 nên serialize như một bean:
+     * client nhận về {"array":false,"boolean":false,"nodeType":"OBJECT",…} thay vì nội dung thật.
+     * Hậu quả là mọi thứ gửi bản mô tả ngược lên máy chủ (vẽ lại hình, nhờ AI sửa) đều gãy.
+     */
+    private Object plain(JsonNode node) {
+        if (node == null || node.isMissingNode() || node.isNull()) return Map.of();
+        return mapper.convertValue(node, Object.class);
+    }
+
+    /** Hợp đồng key ở dạng hàng {key,label} — dùng lại được cho unusedKeys sau khi sửa hình. */
+    private List<Map<String, Object>> keyRows(Object rawContract) {
+        List<Map<String, Object>> out = new ArrayList<>();
+        for (String key : contractKeyList(rawContract)) {
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("key", key);
+            out.add(row);
+        }
         return out;
     }
 
@@ -274,15 +355,63 @@ public class AiExamAuthorService {
                         contractKeys.isEmpty() ? "(chưa khai key nào)" : String.join(", ", contractKeys))),
                 LlmMessage.user(AiPrompts.starterUser(deBai))));
 
+        return starterResult(res, rawContract);
+    }
+
+    /**
+     * Sửa khung starter theo lời giáo viên ("thêm màn chi tiết", "bỏ repository", "đổi tên hàm").
+     *
+     * <p>Đi qua BẢN MÔ TẢ chứ không cho AI sửa thẳng code: {@link StarterRenderer} vẫn là nơi sinh
+     * code và luôn để thân hàm là TODO, nên lượt sửa cũng không thể lén cài sẵn lời giải.
+     *
+     * <p>Hệ quả cần nói rõ trên giao diện: lượt sửa SINH LẠI toàn bộ file, phần giáo viên gõ tay
+     * trong trình soạn thảo sẽ bị thay.
+     */
+    public Map<String, Object> reviseStarter(String deBai, Object rawSpec, String instruction,
+                                             Object rawContract) {
+        if (deBai == null || deBai.isBlank())
+            throw new IllegalArgumentException("Chưa có đề bài để sửa khung starter.");
+        if (instruction == null || instruction.isBlank())
+            throw new IllegalArgumentException("Hãy mô tả bạn muốn sửa gì trong khung starter.");
+        JsonNode current = mapper.valueToTree(rawSpec);
+        if (current == null || current.isMissingNode() || current.isNull() || !current.has("files"))
+            throw new IllegalArgumentException("Chưa có khung starter để sửa — hãy sinh khung trước.");
+
+        List<String> contractKeys = contractKeyList(rawContract);
+        JsonNode res = llm.chatJson(List.of(
+                LlmMessage.system(AiPrompts.starterReviseSystem(
+                        contractKeys.isEmpty() ? "(chưa khai key nào)" : String.join(", ", contractKeys))),
+                LlmMessage.user(AiPrompts.starterReviseUser(deBai, current.toString(), instruction))));
+        return starterResult(res, rawContract);
+    }
+
+    /** Dựng code + kiểm cú pháp cho cả lượt sinh mới lẫn lượt sửa. */
+    private Map<String, Object> starterResult(JsonNode res, Object rawContract) {
         StarterRenderer.Rendered rendered = starterRenderer.render(
                 res, examKeysDart(rawContract), keyLabels(rawContract));
         if (rendered.files().isEmpty())
             throw new IllegalStateException("AI không mô tả được file nào hợp lệ cho khung starter.");
 
+        // pubspec đi kèm khung: thiếu nó sinh viên không chạy nổi dự án, mà tự viết thì hay khai
+        // package ảnh chấm không có → bài đúng vẫn 0 điểm.
+        List<Map<String, Object>> files = new ArrayList<>();
+        for (Map<String, String> project : examService.starterProjectFiles()) {
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("path", project.get("name"));
+            row.put("content", project.get("content"));
+            row.put("summary", "pubspec.yaml".equals(project.get("name"))
+                    ? "Khai thư viện đúng bằng môi trường chấm (không sửa)"
+                    : "Phiên bản đã khoá của môi trường chấm");
+            files.add(row);
+        }
+        files.addAll(rendered.files());
+
         Map<String, Object> out = new LinkedHashMap<>();
-        out.put("files", rendered.files());
+        out.put("files", files);
         out.put("warnings", rendered.warnings());
         out.put("notes", textList(res.path("notes")));
+        // Trả kèm bản mô tả để lượt sửa sau nối tiếp từ đúng bản này thay vì dựng lại từ đầu.
+        out.put("spec", plain(res));
         out.putAll(checkStarterSyntax(rendered.files()));
         return out;
     }
@@ -292,6 +421,9 @@ public class AiExamAuthorService {
         Map<String, Object> out = new LinkedHashMap<>();
         StringBuilder source = new StringBuilder();
         for (Map<String, Object> file : files) {
+            // CHỈ ghép file .dart: pubspec.yaml đi kèm khung mà lọt vào đây thì trình phân tích
+            // Dart báo sai cú pháp cho một file YAML hoàn toàn đúng.
+            if (!String.valueOf(file.get("path")).toLowerCase().endsWith(".dart")) continue;
             for (String line : String.valueOf(file.get("content")).split("\n", -1)) {
                 if (line.startsWith("import ") || line.startsWith("export ")) continue;
                 source.append(line).append('\n');

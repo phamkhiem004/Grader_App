@@ -43,10 +43,22 @@ public class AiAuthorController {
         return handle(() -> settings.update(body, AppActor.DEFAULT));
     }
 
-    /** Gọi thử một lượt ngắn để biết key/model dùng được không. Luôn trả 200 kèm {ok,message}. */
+    /**
+     * Gọi thử một lượt ngắn để biết key/model dùng được không. Luôn trả 200 kèm {ok,message}.
+     *
+     * <p>Body {model, apiKey, baseUrl} là cấu hình ĐANG GÕ: thử trên bản nháp và KHÔNG lưu gì.
+     * Bỏ trống body thì thử chính cấu hình đã lưu. Trước đây phép thử buộc phải lưu trước, nên
+     * gõ nhầm một ký tự trong key là mất luôn key đang dùng được.
+     */
     @PostMapping("/settings/test")
-    public ResponseEntity<?> testConnection() {
-        return ResponseEntity.ok(llm.testConnection());
+    public ResponseEntity<?> testConnection(@RequestBody(required = false) Map<String, Object> body) {
+        try {
+            return ResponseEntity.ok(settings.withDraft(
+                    str(body, "model"), str(body, "apiKey"), str(body, "baseUrl"),
+                    () -> llm.testConnection()));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.ok(Map.of("ok", false, "message", e.getMessage()));
+        }
     }
 
     // ── Bước 1: đề bài ───────────────────────────────────────────
@@ -101,6 +113,18 @@ public class AiAuthorController {
                 body == null ? null : body.getOrDefault("mockup_spec", body)));
     }
 
+    /**
+     * Body: { mockup_spec, instruction, contract } → nhờ AI sửa hình bằng lời
+     * ("bỏ ô số điện thoại", "thêm màn hình chi tiết"). Trả về bản mô tả mới + hình đã vẽ lại.
+     */
+    @PostMapping("/keys/mockup/revise")
+    public ResponseEntity<?> reviseMockup(@RequestBody Map<String, Object> body) {
+        return handle(() -> author.reviseMockup(
+                body == null ? null : body.get("mockup_spec"),
+                str(body, "instruction"),
+                body == null ? null : body.get("contract")));
+    }
+
     // ── Bước 3: bộ testcase ──────────────────────────────────────
 
     /** Body: { de_bai, contract } → { items[], rejected[], missing_keys[], notes[], total_weight }. */
@@ -131,6 +155,62 @@ public class AiAuthorController {
             return author.checkStarterSyntax(files instanceof java.util.List
                     ? (java.util.List<Map<String, Object>>) files : java.util.List.of());
         });
+    }
+
+    /**
+     * Body: { de_bai, spec, instruction, contract } → nhờ AI sửa khung bằng lời.
+     * Lượt sửa SINH LẠI toàn bộ file (thân hàm vẫn luôn là TODO).
+     */
+    @PostMapping("/starter/revise")
+    public ResponseEntity<?> reviseStarter(@RequestBody Map<String, Object> body) {
+        return handle(() -> author.reviseStarter(
+                str(body, "de_bai"),
+                body == null ? null : body.get("spec"),
+                str(body, "instruction"),
+                body == null ? null : body.get("contract")));
+    }
+
+    /**
+     * Body: { files: [{path, content}], exam_id? } → ZIP khung starter ĐANG SOẠN để tải về ngay,
+     * không cần lưu vào bộ testcase trước. Giáo viên hay muốn cầm file đi thử build trên máy
+     * trước khi chốt bộ.
+     */
+    @SuppressWarnings("unchecked")
+    @PostMapping("/starter/download")
+    public ResponseEntity<?> downloadStarter(@RequestBody Map<String, Object> body) {
+        Object raw = body == null ? null : body.get("files");
+        java.util.List<Map<String, Object>> files = raw instanceof java.util.List
+                ? (java.util.List<Map<String, Object>>) raw : java.util.List.of();
+        if (files.isEmpty())
+            return ResponseEntity.badRequest().body(Map.of("error", "Chưa có file khung starter để tải."));
+
+        String examId = str(body, "exam_id");
+        String name = examId == null || examId.isBlank() ? "starter" : examId.trim() + "_starter";
+        try {
+            var bos = new java.io.ByteArrayOutputStream();
+            try (var zos = new java.util.zip.ZipOutputStream(bos)) {
+                for (Map<String, Object> file : files) {
+                    String path = file == null ? null : String.valueOf(file.get("path"));
+                    if (path == null || path.isBlank() || path.equals("null")) continue;
+                    // Tên file đến từ trình duyệt: '..' hay '/' đầu dòng sẽ ghi ra ngoài thư mục
+                    // giải nén trên máy người nhận (zip slip) → chặn ngay tại đây.
+                    String clean = path.replace('\\', '/').trim();
+                    if (clean.startsWith("/") || clean.contains("../"))
+                        return ResponseEntity.badRequest().body(Map.of("error", "Tên file không hợp lệ: " + path));
+                    zos.putNextEntry(new java.util.zip.ZipEntry(clean));
+                    Object content = file.get("content");
+                    zos.write((content == null ? "" : String.valueOf(content))
+                            .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                    zos.closeEntry();
+                }
+            }
+            return ResponseEntity.ok()
+                    .header("Content-Type", "application/zip")
+                    .header("Content-Disposition", "attachment; filename=\"" + name + ".zip\"")
+                    .body(bos.toByteArray());
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().body(Map.of("error", "Không nén được khung starter."));
+        }
     }
 
     private String str(Map<String, Object> body, String key) {

@@ -8,12 +8,14 @@
 // Backend: /api/ai/* (xem AiAuthorController). Testcase do AI đề xuất luôn là template có sẵn
 // trong thư viện nên vẫn đi qua đúng bộ kiểm tra tham số khi lưu.
 
-import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { API_BASE } from "@/lib/config";
+import { downloadBlob, downloadText, imageFileToSvg, svgToPng } from "@/lib/mockup-image";
+import { clearAiDraft, readAiDraft, writeAiDraft } from "@/lib/aiAuthorDrafts";
 import {
   Sparkles, Settings2, KeyRound, Wand2, FileText, Image as ImageIcon, ListChecks,
   Loader2, Check, X, Plus, Trash2, RefreshCw, AlertTriangle, ChevronDown, Save, Info, FileCode2,
-  Upload,
+  Upload, Download, RotateCcw,
 } from "lucide-react";
 
 export interface AiContractKey {
@@ -41,8 +43,19 @@ export interface AiProposedItem {
   reason?: string;
 }
 
-interface MockupScreen { id: string; title: string; svg: string; keys: string[] }
+interface MockupScreen {
+  id: string; title: string; svg: string; keys: string[];
+  /** Hình do AI vẽ — giữ lại để hoàn tác khi giáo viên thay bằng ảnh của mình. */
+  aiSvg?: string;
+  /** Có giá trị = đang dùng ảnh giáo viên tải lên chứ không phải hình AI vẽ. */
+  uploadName?: string;
+}
 interface StarterFile { path: string; content: string; summary: string }
+/** Kết quả một lượt sinh/sửa khung starter; `spec` là bản mô tả để lượt sửa sau nối tiếp. */
+interface StarterResult {
+  files: StarterFile[]; warnings: string[]; notes: string[]; spec: unknown;
+  syntax_ok: boolean | null; syntax_message: string;
+}
 interface AiModel { id: string; label: string; provider: string; vendor: string }
 interface AiSettings {
   model: string; provider: string; vendor: string; keyUrl: string | null;
@@ -55,13 +68,15 @@ interface Props {
   examId: string;
   /** Các key đã khai ở Khu vực 0 — để biết key nào AI đề xuất là mới. */
   existingKeys: string[];
+  /** Testcase này đã nằm trong Khu vực 3 chưa (trang cha trả lời, xem hasProposedItem). */
+  hasItem?: (templateId: string, parameters: Record<string, unknown>) => boolean;
   onApplyContract: (keys: AiContractKey[], requireKeys: boolean) => void;
   onApplyItems: (items: AiProposedItem[]) => void;
 }
 
 const STRATEGIES = ["key_only", "auto", "widget_type", "icon", "tooltip", "text", "button_text", "type_with_text"];
 
-export default function AiAuthorPanel({ examId, existingKeys, onApplyContract, onApplyItems }: Props) {
+export default function AiAuthorPanel({ examId, existingKeys, hasItem, onApplyContract, onApplyItems }: Props) {
   const [open, setOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settings, setSettings] = useState<AiSettings | null>(null);
@@ -69,6 +84,11 @@ export default function AiAuthorPanel({ examId, existingKeys, onApplyContract, o
   const [modelDraft, setModelDraft] = useState("");
   const [baseUrlDraft, setBaseUrlDraft] = useState("");    // dịch vụ trung gian / cổng nội bộ
   const [customModel, setCustomModel] = useState(false);   // gõ tay mã model không có trong danh sách
+  /**
+   * Cấu hình ĐANG GÕ vừa thử kết nối thành công chưa. Chỉ khi true mới lưu được — và mỗi lần sửa
+   * model/key/endpoint là mất hiệu lực, vì bản vừa thử không còn là bản đang gõ nữa.
+   */
+  const [testedOk, setTestedOk] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
@@ -78,13 +98,16 @@ export default function AiAuthorPanel({ examId, existingKeys, onApplyContract, o
   const [importedName, setImportedName] = useState("");
   const [req, setReq] = useState({
     topic: "", knowledge: "", screens: "", features: "", entity: "",
+    architecture: "MVVM + Riverpod (tùy chọn)", storage: "SQLite",
     difficulty: "Trung bình", duration: "90 phút", note: "",
   });
 
   // Bước 2 — đề bài
   const [deBai, setDeBai] = useState("");
   const [summary, setSummary] = useState("");
-  const [criteria, setCriteria] = useState<{ name: string; points: number }[]>([]);
+  // Thang điểm AI trả về KHÔNG hiện thành dòng riêng nữa (đã nằm trong mục 5 của đề); vẫn giữ
+  // state để reset khi sinh đề mới, tránh số liệu của đề cũ dính sang.
+  const [, setCriteria] = useState<{ name: string; points: number }[]>([]);
   const [revisePrompt, setRevisePrompt] = useState("");
   const [examAccepted, setExamAccepted] = useState(false);
 
@@ -95,19 +118,34 @@ export default function AiAuthorPanel({ examId, existingKeys, onApplyContract, o
   const [screens, setScreens] = useState<MockupScreen[]>([]);
   const [keyNotes, setKeyNotes] = useState<string[]>([]);
   const [keysAccepted, setKeysAccepted] = useState(false);
+  const [mockupPrompt, setMockupPrompt] = useState("");
+  /** Màn hình đang chờ nhận ảnh từ máy — một ô chọn file dùng chung cho mọi hình. */
+  const [uploadTarget, setUploadTarget] = useState<string | null>(null);
+  const mockupFileRef = useRef<HTMLInputElement | null>(null);
 
   // Bước 4 — testcase
   const [proposed, setProposed] = useState<AiProposedItem[]>([]);
   const [rejected, setRejected] = useState<{ template_id: string; reason: string }[]>([]);
-  const [tcNotes, setTcNotes] = useState<string[]>([]);
   const [missingKeys, setMissingKeys] = useState<string[]>([]);
 
   // Bước 5 — khung starter phát cho sinh viên
   const [starterFiles, setStarterFiles] = useState<StarterFile[]>([]);
   const [starterWarnings, setStarterWarnings] = useState<string[]>([]);
-  const [starterNotes, setStarterNotes] = useState<string[]>([]);
   const [syntax, setSyntax] = useState<{ ok: boolean | null; message: string } | null>(null);
   const [openFile, setOpenFile] = useState<string | null>(null);
+  const [starterPrompt, setStarterPrompt] = useState("");
+  /** Bản mô tả khung AI trả về — gửi lại cho lượt "nhờ AI sửa" để sửa tiếp từ đúng bản này. */
+  const [starterSpec, setStarterSpec] = useState<unknown>(null);
+  /** true = giáo viên đã gõ tay vào code, lượt AI sửa kế tiếp sẽ ghi đè. */
+  const [starterEdited, setStarterEdited] = useState(false);
+
+  // ── Bản nháp: giữ nguyên bước đang dở khi tải lại trang / quay lại sau ──
+  /** Nháp của bộ nào đã nạp xong. Chưa nạp mà đã ghi thì lần mount đầu (state rỗng) xoá sạch nháp. */
+  const restoredFor = useRef<string | null>(null);
+  /** Mốc thời gian của bản nháp vừa khôi phục — để báo cho giáo viên biết họ đang tiếp tục dở dang. */
+  const [restoredAt, setRestoredAt] = useState<number | null>(null);
+  /** Phần bị bỏ bớt khi ghi nháp vì localStorage đầy (thường là hình minh họa). */
+  const [draftTrimmed, setDraftTrimmed] = useState<string[]>([]);
 
   const loadSettings = useCallback(async () => {
     try {
@@ -124,6 +162,93 @@ export default function AiAuthorPanel({ examId, existingKeys, onApplyContract, o
   }, []);
 
   useEffect(() => { if (open && !settings) loadSettings(); }, [open, settings, loadSettings]);
+
+  /**
+   * Khôi phục bản nháp của bộ đang mở.
+   *
+   * <p>Chạy khi đổi mã bộ testcase — mở lại trang, bấm "Sửa" đúng bộ đó, hay gõ lại mã đều rơi
+   * vào đây. Có nháp thì mở sẵn panel: đang làm dở mà panel đóng im thì người dùng tưởng mất hết.
+   */
+  useEffect(() => {
+    const exam = examId.trim();
+    if (!exam || restoredFor.current === exam) return;
+    restoredFor.current = exam;
+    setDraftTrimmed([]);
+
+    const draft = readAiDraft(exam);
+    if (!draft) {                          // đổi sang bộ chưa có nháp → dọn màn về trắng
+      setRestoredAt(null);
+      resetWizard();
+      return;
+    }
+    const s = draft.state as Record<string, never>;
+    setSource(s.source ?? "ai");
+    setImportedName(s.importedName ?? "");
+    if (s.req) setReq((cur) => ({ ...cur, ...(s.req as object) }));
+    setDeBai(s.deBai ?? "");
+    setSummary(s.summary ?? "");
+    setExamAccepted(!!s.examAccepted);
+    setKeys(s.keys ?? []);
+    setRequireKeys(s.requireKeys ?? true);
+    setMockupSpec(s.mockupSpec ?? null);
+    setScreens(s.screens ?? []);
+    setKeyNotes(s.keyNotes ?? []);
+    setKeysAccepted(!!s.keysAccepted);
+    setProposed(s.proposed ?? []);
+    setRejected(s.rejected ?? []);
+    setMissingKeys(s.missingKeys ?? []);
+    setStarterFiles(s.starterFiles ?? []);
+    setStarterSpec(s.starterSpec ?? null);
+    setStarterWarnings(s.starterWarnings ?? []);
+    setSyntax(s.syntax ?? null);
+    setOpenFile(s.openFile ?? null);
+    setRestoredAt(draft.updatedAt);
+    setOpen(true);
+  }, [examId]);
+
+  /** Về màn trắng (đổi sang bộ chưa có nháp, hoặc người dùng bấm "Bắt đầu lại"). */
+  const resetWizard = () => {
+    setDeBai(""); setSummary(""); setCriteria([]); setExamAccepted(false);
+    setKeys([]); setRequireKeys(true); setMockupSpec(null); setScreens([]);
+    setKeyNotes([]); setKeysAccepted(false);
+    setProposed([]); setRejected([]); setMissingKeys([]);
+    setStarterFiles([]); setStarterSpec(null); setStarterWarnings([]);
+    setSyntax(null); setOpenFile(null); setStarterEdited(false);
+    setImportedName(""); setRevisePrompt(""); setMockupPrompt(""); setStarterPrompt("");
+  };
+
+  /**
+   * Ghi nháp mỗi khi có thay đổi đáng kể. Hoãn 800ms: gõ sửa đề trong ô textarea đổi state theo
+   * từng ký tự, ghi thẳng là serialize cả bộ hình + khung starter sau mỗi phím.
+   */
+  useEffect(() => {
+    const exam = examId.trim();
+    if (!exam || restoredFor.current !== exam) return;      // chưa khôi phục xong thì chưa được ghi
+    const empty = !deBai && !keys.length && !screens.length
+      && !proposed.length && !starterFiles.length;
+    const timer = setTimeout(() => {
+      if (empty) { clearAiDraft(exam); setRestoredAt(null); return; }
+      setDraftTrimmed(writeAiDraft(exam, {
+        source, importedName, req, deBai, summary, examAccepted,
+        keys, requireKeys, mockupSpec, screens, keyNotes, keysAccepted,
+        proposed, rejected, missingKeys,
+        starterFiles, starterSpec, starterWarnings, syntax, openFile,
+      }));
+    }, 800);
+    return () => clearTimeout(timer);
+  }, [examId, source, importedName, req, deBai, summary, examAccepted,
+    keys, requireKeys, mockupSpec, screens, keyNotes, keysAccepted,
+    proposed, rejected, missingKeys, starterFiles, starterSpec, starterWarnings, syntax, openFile]);
+
+  /** Bỏ hẳn bản nháp và làm lại từ đầu cho bộ này. */
+  const discardDraft = () => {
+    if (!confirm("Bỏ bản nháp của bộ này và bắt đầu lại từ đầu?")) return;
+    clearAiDraft(examId.trim());
+    resetWizard();
+    setRestoredAt(null);
+    setDraftTrimmed([]);
+    setInfo("Đã bỏ bản nháp. Bắt đầu lại từ bước soạn đề.");
+  };
 
   /** Gọi API AI: gom mọi lỗi về một chỗ để mọi bước báo lỗi giống nhau. */
   const call = async <T,>(path: string, body: unknown, label: string): Promise<T | null> => {
@@ -163,32 +288,42 @@ export default function AiAuthorPanel({ examId, existingKeys, onApplyContract, o
     return data;
   };
 
+  /** Chỉ lưu được sau khi chính cấu hình ĐANG GÕ vừa thử kết nối thành công. */
   const saveSettings = async () => {
+    if (!testedOk) return;                       // nút đã tắt, đây chỉ là lưới an toàn
     const data = await persistSettings("settings");
     if (data) {
-      setInfo(data.hasApiKey
-        ? `Đã lưu. Đang dùng ${data.model} (${data.vendor}).`
-        : `Đã chọn ${data.model}. Hãy dán API key của ${data.vendor} rồi lưu lại.`);
+      setTestedOk(false);                        // đã lưu xong thì không còn gì để lưu nữa
+      setInfo(`Đã lưu. Đang dùng ${data.model} (${data.vendor}).`);
     }
   };
 
+  /**
+   * Thử kết nối trên cấu hình ĐANG GÕ, KHÔNG lưu gì.
+   *
+   * <p>Trước đây muốn thử thì phải lưu trước, nên gõ nhầm một ký tự trong key là ghi đè mất key
+   * đang chạy được. Giờ thử trên bản nháp; thử thành công mới mở nút Lưu cấu hình.
+   */
   const testConnection = async () => {
-    // Phép thử luôn chạy trên cấu hình ĐÃ LƯU. Chưa lưu mà bấm thử thì hoá ra đang kiểm tra key
-    // cũ của hãng cũ — lỗi 401 trả về sẽ nói về hãng mà người dùng tưởng mình đã đổi khỏi.
-    let current = settings;
-    if (settingsDirty) {
-      current = await persistSettings("test");
-      if (!current) return;
-    }
-    if (!current?.hasApiKey) {
-      setError(`Chưa có API key cho ${current?.vendor || "model đang chọn"}. Hãy dán key rồi thử lại.`);
+    if (!apiKeyDraft.trim() && !settings?.hasApiKey) {
+      setError(`Chưa có API key cho ${draftVendor}. Hãy dán key rồi thử lại.`);
       return;
     }
     const data = await call<{ ok: boolean; message: string; elapsedMs: number }>(
-      "/ai/settings/test", {}, "test");
-    if (data) {
-      if (data.ok) setInfo(`Kết nối thành công tới ${current.model} (${data.elapsedMs} ms).`);
-      else setError(data.message || "Không kết nối được.");
+      "/ai/settings/test",
+      {
+        model: modelDraft.trim(),
+        apiKey: apiKeyDraft.trim(),              // rỗng = dùng key đã lưu
+        baseUrl: baseUrlDraft.trim(),            // rỗng = endpoint chính thức của hãng
+      },
+      "test");
+    if (!data) return;
+    setTestedOk(data.ok);
+    if (data.ok) {
+      setInfo(`Kết nối thành công tới ${modelDraft.trim() || settings?.model} (${data.elapsedMs} ms). `
+        + "Bấm “Lưu cấu hình” để dùng cấu hình này.");
+    } else {
+      setError(data.message || "Không kết nối được.");
     }
   };
 
@@ -260,16 +395,96 @@ export default function AiAuthorPanel({ examId, existingKeys, onApplyContract, o
       setRequireKeys(data.contract?.require_keys ?? true);
       setMockupSpec(data.mockup_spec);
       setScreens(data.screens || []);
-      setKeyNotes([...(data.notes || []),
-        ...(data.unused_keys?.length ? [`Key chưa xuất hiện trên hình: ${data.unused_keys.join(", ")}`] : [])]);
+      setKeyNotes(data.unused_keys?.length
+        ? [`Key chưa xuất hiện trên hình: ${data.unused_keys.join(", ")}`] : []);
       setKeysAccepted(false);
     }
   };
 
+  /**
+   * Giữ lại ảnh giáo viên đã tải lên khi hình được vẽ lại: họ chọn ảnh đó là có chủ ý, một lần
+   * bấm "vẽ lại" không được âm thầm quăng nó đi. Bản AI mới vẫn nằm trong aiSvg để hoàn tác.
+   */
+  const keepUploads = (next: MockupScreen[]) =>
+    setScreens((prev) => next.map((fresh) => {
+      const old = prev.find((s) => s.id === fresh.id);
+      return old?.uploadName
+        ? { ...fresh, svg: old.svg, uploadName: old.uploadName, aiSvg: fresh.svg }
+        : fresh;
+    }));
+
   const redrawMockup = async () => {
     const data = await call<{ screens: MockupScreen[] }>("/ai/keys/mockup", { mockup_spec: mockupSpec }, "mockup");
-    if (data) { setScreens(data.screens || []); setInfo("Đã vẽ lại hình từ bản mô tả hiện tại."); }
+    if (data) {
+      keepUploads(data.screens || []);
+      setInfo("Đã vẽ lại hình từ bản mô tả hiện tại.");
+    }
   };
+
+  /** Nhờ AI sửa BỐ CỤC hình bằng lời; toạ độ vẫn do máy chủ tính nên hình không bao giờ rối. */
+  const reviseMockup = async () => {
+    if (!mockupPrompt.trim()) { setError("Hãy mô tả bạn muốn sửa gì trên hình."); return; }
+    const data = await call<{
+      mockup_spec: unknown; screens: MockupScreen[]; notes: string[]; unused_keys: string[];
+      contract?: { require_keys: boolean; keys: AiContractKey[] };
+    }>("/ai/keys/mockup/revise",
+      { mockup_spec: mockupSpec, instruction: mockupPrompt, contract: { keys } }, "mockup-revise");
+    if (data) {
+      setMockupSpec(data.mockup_spec);
+      keepUploads(data.screens || []);
+      // Sửa hình là sửa CẢ danh sách key — bỏ ô nhập khỏi hình mà key của nó còn nằm trong hợp
+      // đồng thì bộ chấm đi tìm một widget không còn trên đề.
+      let keyNote = "";
+      if (data.contract?.keys?.length) {
+        const before = keys.length;
+        setKeys(data.contract.keys);
+        setRequireKeys(data.contract.require_keys ?? true);
+        setKeysAccepted(false);            // key đổi rồi thì phải chấp nhận lại vào Khu vực 0
+        keyNote = ` Danh sách Item Key cập nhật theo hình: ${before} → ${data.contract.keys.length} key`
+          + " — bấm “Chấp nhận Item Key” để đưa vào Khu vực 0.";
+      }
+      setKeyNotes(data.unused_keys?.length
+        ? [`Key chưa xuất hiện trên hình: ${data.unused_keys.join(", ")}`] : []);
+      setMockupPrompt("");
+      setInfo("AI đã sửa hình." + keyNote);
+    }
+  };
+
+  const downloadScreenSvg = (screen: MockupScreen) =>
+    downloadText(screen.svg, `${screen.id}.svg`, "image/svg+xml;charset=utf-8");
+
+  const downloadScreenPng = async (screen: MockupScreen) => {
+    try {
+      const shot = await svgToPng(screen.svg);
+      const binary = atob(shot.png.split(",")[1] || "");
+      const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
+      downloadBlob(new Blob([bytes], { type: "image/png" }), `${screen.id}.png`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Không tải được ảnh PNG.");
+    }
+  };
+
+  /** Thay hình AI bằng ảnh giáo viên tự vẽ/chụp — ảnh nhúng thẳng vào SVG nên vẫn tự chứa. */
+  const applyUploadedImage = async (file: File) => {
+    const id = uploadTarget;
+    setUploadTarget(null);
+    if (!id) return;
+    setError(null);
+    try {
+      const { svg } = await imageFileToSvg(file);
+      setScreens((cur) => cur.map((s) => (s.id === id
+        ? { ...s, svg, uploadName: file.name, aiSvg: s.aiSvg ?? s.svg }
+        : s)));
+      setInfo(`Đã thay hình "${id}" bằng ${file.name}. Bấm "Lưu đề bài + hình" để phát cho sinh viên.`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Không đọc được ảnh.");
+    }
+  };
+
+  const revertScreen = (screen: MockupScreen) =>
+    setScreens((cur) => cur.map((s) => (s.id === screen.id && s.aiSvg
+      ? { ...s, svg: s.aiSvg, uploadName: undefined }
+      : s)));
 
   const updateKey = (i: number, patch: Partial<AiContractKey>) =>
     setKeys((cur) => cur.map((k, idx) => (idx === i ? { ...k, ...patch } : k)));
@@ -314,30 +529,75 @@ export default function AiAuthorPanel({ examId, existingKeys, onApplyContract, o
     if (data) {
       setProposed(data.items || []);
       setRejected(data.rejected || []);
-      setTcNotes(data.notes || []);
       setMissingKeys(data.missing_keys || []);
     }
   };
 
+  /**
+   * Testcase đang chọn mà Khu vực 3 CHƯA có. Đây là thứ nút "Chấp nhận" thực sự thêm vào — thêm
+   * lại cái đã có chỉ tạo bản trùng, nên hết cái thiếu là nút phải tắt.
+   */
+  const missingProposals = useMemo(
+    () => proposed.filter((item) => item.enabled
+      && !(hasItem?.(item.template_id, item.parameters) ?? false)),
+    [proposed, hasItem],
+  );
+
+  /**
+   * Khai ngay các key mà testcase đang dùng nhưng Khu vực 0 chưa có.
+   *
+   * <p>Thêm vào cả bảng key của bước 3 lẫn Khu vực 0 — hai chỗ lệch nhau thì lần "chấp nhận Item
+   * Key" sau lại xoá mất key vừa khai.
+   */
+  const declareMissingKeys = () => {
+    if (!missingKeys.length) return;
+    const added: AiContractKey[] = missingKeys.map((key) => ({
+      key, label: key, strategy: "key_only", value: "", index: 0,
+    }));
+    setKeys((cur) => [...cur, ...added.filter((row) => !cur.some((x) => x.key === row.key))]);
+    onApplyContract(added, requireKeys);
+    setMissingKeys([]);
+    setInfo(`Đã khai ${added.length} key vào Khu vực 0: ${added.map((k) => k.key).join(", ")}.`);
+  };
+
   const acceptItems = () => {
-    const enabled = proposed.filter((i) => i.enabled);
-    if (!enabled.length) { setError("Chưa chọn testcase nào để thêm."); return; }
-    onApplyItems(enabled);
-    setInfo(`Đã thêm ${enabled.length} testcase vào Khu vực 3 — bạn vẫn sửa tham số được ở đó.`);
+    if (!proposed.some((i) => i.enabled)) { setError("Chưa chọn testcase nào để thêm."); return; }
+    if (!missingProposals.length) return;         // nút đã tắt, đây chỉ là lưới an toàn
+    onApplyItems(missingProposals);
+    setInfo(`Đã thêm ${missingProposals.length} testcase vào Khu vực 3 — bạn vẫn sửa tham số được ở đó.`);
   };
 
   // ── Bước 5: khung starter ──────────────────────────────────────
+  const takeStarter = (data: StarterResult) => {
+    setStarterFiles(data.files || []);
+    setStarterWarnings(data.warnings || []);
+    setStarterSpec(data.spec ?? null);
+    setSyntax({ ok: data.syntax_ok, message: data.syntax_message });
+    setOpenFile(data.files?.[0]?.path ?? null);
+    setStarterEdited(false);
+  };
+
   const proposeStarter = async () => {
-    const data = await call<{
-      files: StarterFile[]; warnings: string[]; notes: string[];
-      syntax_ok: boolean | null; syntax_message: string;
-    }>("/ai/starter/propose", { de_bai: deBai, contract: { keys } }, "starter");
+    const data = await call<StarterResult>(
+      "/ai/starter/propose", { de_bai: deBai, contract: { keys } }, "starter");
+    if (data) takeStarter(data);
+  };
+
+  /**
+   * Nhờ AI sửa khung bằng lời. Máy chủ sinh lại TOÀN BỘ file từ bản mô tả đã sửa nên phần giáo
+   * viên gõ tay bị thay — hỏi trước cho chắc, mất code vừa gõ là bực nhất.
+   */
+  const reviseStarter = async () => {
+    if (!starterPrompt.trim()) { setError("Hãy mô tả bạn muốn AI sửa gì trong khung starter."); return; }
+    if (starterEdited && !confirm(
+      "AI sẽ sinh lại toàn bộ khung, phần code bạn vừa sửa tay sẽ bị thay. Tiếp tục?")) return;
+    const data = await call<StarterResult>("/ai/starter/revise",
+      { de_bai: deBai, spec: starterSpec, instruction: starterPrompt, contract: { keys } },
+      "starter-revise");
     if (data) {
-      setStarterFiles(data.files || []);
-      setStarterWarnings(data.warnings || []);
-      setStarterNotes(data.notes || []);
-      setSyntax({ ok: data.syntax_ok, message: data.syntax_message });
-      setOpenFile(data.files?.[0]?.path ?? null);
+      takeStarter(data);
+      setStarterPrompt("");
+      setInfo("AI đã sửa khung starter. Xem lại code rồi lưu cho sinh viên.");
     }
   };
 
@@ -347,23 +607,93 @@ export default function AiAuthorPanel({ examId, existingKeys, onApplyContract, o
     if (data) setSyntax({ ok: data.syntax_ok, message: data.syntax_message });
   };
 
-  const saveStarter = async () => {
+  /**
+   * MỘT nút cho khung starter: lưu vào bộ testcase RỒI tải luôn .zip về máy.
+   *
+   * <p>Trước đây tách hai nút "Lưu khung cho SV" và "Tải khung (.zip)" — cùng một bộ file, khác
+   * mỗi chỗ đến, nên ai cũng phải bấm cả hai và không rõ hai nút khác nhau ở đâu. Gộp lại: bấm
+   * một cái là bộ testcase có khung để phát, và máy có file để đem đi thử build.
+   */
+  const saveAndDownloadStarter = async () => {
     if (!examId.trim()) { setError("Hãy nhập mã bộ testcase trước khi lưu khung starter."); return; }
-    const data = await call<{ files: string[] }>(
-      `/exam-setup/${encodeURIComponent(examId.trim())}/starter`,
-      { files: starterFiles.map((f) => ({ name: f.path, content: f.content })) },
-      "starter-save");
-    if (data) setInfo(`Đã lưu khung starter (${data.files.length} file). Tải về ở trang Kho đề → Starter.`);
+    setBusy("starter-save"); setError(null); setInfo(null);
+    try {
+      const saveRes = await fetch(`${API_BASE}/exam-setup/${encodeURIComponent(examId.trim())}/starter`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ files: starterFiles.map((f) => ({ name: f.path, content: f.content })) }),
+      });
+      const saved = await saveRes.json().catch(() => ({}));
+      if (!saveRes.ok) throw new Error(saved?.error || "Không lưu được khung starter.");
+
+      // Tải bản ĐANG HIỂN THỊ (đã gồm cả phần giáo viên vừa gõ tay) — cùng nội dung vừa lưu.
+      const zipRes = await fetch(`${API_BASE}/ai/starter/download`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ exam_id: examId.trim(), files: starterFiles }),
+      });
+      if (!zipRes.ok) {
+        const data = await zipRes.json().catch(() => ({}));
+        throw new Error(data?.error || "Đã lưu nhưng không tải được file .zip.");
+      }
+      downloadBlob(await zipRes.blob(), `${examId.trim()}_starter.zip`);
+      setInfo(`Đã lưu khung starter (${saved.files?.length ?? starterFiles.length} file) vào bộ `
+        + `${examId.trim()} và tải .zip về máy.`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Không lưu/tải được khung starter.");
+    } finally {
+      setBusy(null);
+    }
   };
 
   // ── Lưu bộ phát cho SV ─────────────────────────────────────────
+  /**
+   * Lưu đề bài + hình vào bộ testcase RỒI tải luôn bản .docx về máy.
+   *
+   * <p>Trước đây bấm xong chỉ hiện một dòng chữ "đã lưu", muốn cầm đề phải sang trang Kho đề mở
+   * tiếp — mà việc ngay sau khi chốt đề bao giờ cũng là đem đề đi phát.
+   *
+   * <p>Hình đổi SVG → PNG NGAY TRONG TRÌNH DUYỆT trước khi gửi: máy chủ không có thư viện
+   * rasterize, còn Word thì không hiển thị SVG ổn định (xem lib/mockup-image.ts).
+   */
   const saveHandout = async () => {
     if (!examId.trim()) { setError("Hãy nhập mã bộ testcase trước khi lưu đề bài."); return; }
-    const data = await call<{ files: string[] }>(
-      `/exam-setup/${encodeURIComponent(examId.trim())}/handout`,
-      { de_bai: deBai, mockups: screens.map((s) => ({ id: s.id, svg: s.svg })) },
-      "handout");
-    if (data) setInfo(`Đã lưu vào bộ phát cho sinh viên: ${data.files.join(", ")}.`);
+    const exam = examId.trim();
+    setBusy("handout"); setError(null); setInfo(null);
+    try {
+      const saveRes = await fetch(`${API_BASE}/exam-setup/${encodeURIComponent(exam)}/handout`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ de_bai: deBai, mockups: screens.map((s) => ({ id: s.id, svg: s.svg })) }),
+      });
+      const saved = await saveRes.json().catch(() => ({}));
+      if (!saveRes.ok) throw new Error(saved?.error || "Không lưu được đề bài.");
+
+      const images: { png_base64: string; width: number; height: number }[] = [];
+      for (const screen of screens) {
+        try {
+          const shot = await svgToPng(screen.svg);
+          images.push({ png_base64: shot.png, width: shot.width, height: shot.height });
+        } catch {
+          // Một hình lỗi không được làm hỏng cả bản tải về — bỏ qua đúng hình đó thôi.
+        }
+      }
+      const docxRes = await fetch(`${API_BASE}/exam-setup/${encodeURIComponent(exam)}/de-bai/docx`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ images }),
+      });
+      if (!docxRes.ok) {
+        const data = await docxRes.json().catch(() => ({}));
+        throw new Error(data?.error || "Đã lưu nhưng không tải được bản .docx.");
+      }
+      downloadBlob(await docxRes.blob(), `${exam}_de_bai.docx`);
+      setInfo(`Đã lưu đề bài + ${screens.length} hình vào bộ ${exam} và tải bản .docx về máy.`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Không lưu/tải được đề bài.");
+    } finally {
+      setBusy(null);
+    }
   };
 
   // Gom model theo hãng để ô chọn có nhóm Claude / GPT / Gemini rõ ràng.
@@ -388,11 +718,6 @@ export default function AiAuthorPanel({ examId, existingKeys, onApplyContract, o
   // Đổi hãng thì key cũ chắc chắn vô dụng → báo trước thay vì để dính lỗi 401 lúc sinh đề.
   const vendorChanged = !!settings && !!draftVendor && draftVendor !== settings.vendor;
 
-  /** Còn thứ chưa lưu: model vừa đổi, endpoint vừa sửa, hoặc key vừa dán. */
-  const settingsDirty = !!settings
-    && (modelDraft.trim() !== settings.model
-      || apiKeyDraft.trim().length > 0
-      || baseUrlDraft.trim() !== (settings.customBaseUrl ? settings.baseUrl : ""));
 
   const totalWeight = useMemo(
     () => proposed.filter((i) => i.enabled).reduce((s, i) => s + Number(i.weight || 0), 0),
@@ -436,6 +761,26 @@ export default function AiAuthorPanel({ examId, existingKeys, onApplyContract, o
               <Check size={14} className="mt-0.5 shrink-0" /> {info}
             </p>
           )}
+          {/* Bản nháp: nói rõ đang tiếp tục dở dang, kèm đường lùi về làm lại từ đầu. Không có
+              dòng này thì người dùng thấy đề cũ hiện sẵn mà tưởng hệ thống nhớ nhầm bộ khác. */}
+          {restoredAt !== null && (
+            <div className="flex flex-wrap items-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 p-3 text-xs text-indigo-800">
+              <RotateCcw size={14} className="shrink-0" />
+              <span className="font-medium">
+                Đang tiếp tục bản soạn dở của bộ <span className="font-mono font-bold">{examId.trim()}</span>
+                {" · lưu lúc "}{new Date(restoredAt).toLocaleString("vi-VN")}
+              </span>
+              {draftTrimmed.length > 0 && (
+                <span className="rounded bg-amber-100 px-1.5 py-0.5 font-semibold text-amber-800">
+                  Bộ nhớ trình duyệt đầy nên không giữ được {draftTrimmed.join(" và ")} — bấm “Vẽ lại hình” hoặc “Sinh lại khung” khi cần.
+                </span>
+              )}
+              <button onClick={discardDraft}
+                className="ml-auto rounded-lg border border-indigo-200 bg-white px-2.5 py-1 font-semibold text-indigo-700 hover:bg-indigo-100">
+                Bắt đầu lại
+              </button>
+            </div>
+          )}
 
           {/* ── Cấu hình LLM ── */}
           <div className="rounded-2xl border border-slate-200">
@@ -460,7 +805,7 @@ export default function AiAuthorPanel({ examId, existingKeys, onApplyContract, o
                       onChange={(e) => {
                         if (e.target.value === "__custom__") { setCustomModel(true); return; }
                         setCustomModel(false);
-                        setModelDraft(e.target.value);
+                        setModelDraft(e.target.value); setTestedOk(false);
                       }}
                       className={inputClass}
                     >
@@ -490,7 +835,7 @@ export default function AiAuthorPanel({ examId, existingKeys, onApplyContract, o
                         type="text"
                         name="grader-ai-key"
                         value={apiKeyDraft}
-                        onChange={(e) => setApiKeyDraft(e.target.value.replace(/\s+/g, ""))}
+                        onChange={(e) => { setApiKeyDraft(e.target.value.replace(/\s+/g, "")); setTestedOk(false); }}
                         placeholder={settings?.hasApiKey && !vendorChanged
                           ? settings.apiKeyMasked || "••••" : "Dán API key vào đây"}
                         className={inputClass}
@@ -519,7 +864,7 @@ export default function AiAuthorPanel({ examId, existingKeys, onApplyContract, o
                     <Field label="Endpoint riêng (tùy chọn)">
                       <input
                         value={baseUrlDraft}
-                        onChange={(e) => setBaseUrlDraft(e.target.value)}
+                        onChange={(e) => { setBaseUrlDraft(e.target.value); setTestedOk(false); }}
                         placeholder="https://api.dich-vu-cua-ban.com/v1"
                         className={`${inputClass} font-mono`}
                       />
@@ -531,16 +876,21 @@ export default function AiAuthorPanel({ examId, existingKeys, onApplyContract, o
                     <AlertTriangle size={13} className="mt-0.5 shrink-0" /> {settings.keyWarning}
                   </p>
                 )}
+                {/* Thứ tự bắt buộc: THỬ trước, LƯU sau. Phép thử chạy trên cấu hình đang gõ và
+                    không ghi gì, nên gõ nhầm key cũng không mất key đang dùng được. */}
                 <div className="flex flex-wrap items-center gap-2">
-                  <button onClick={saveSettings} disabled={busy !== null || !modelDraft.trim() || !settingsDirty}
-                    className={primaryBtn}>
-                    {busy === "settings" ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />} Lưu cấu hình
-                  </button>
                   <button onClick={testConnection}
                     disabled={busy !== null || (!settings?.hasApiKey && !apiKeyDraft.trim())}
-                    className={ghostBtn}>
+                    className={primaryBtn}>
                     {busy === "test" ? <Loader2 size={15} className="animate-spin" /> : <RefreshCw size={15} />}
-                    {settingsDirty ? "Lưu & kiểm tra kết nối" : "Kiểm tra kết nối"}
+                    Kiểm tra kết nối
+                  </button>
+                  <button onClick={saveSettings} disabled={busy !== null || !testedOk}
+                    title={testedOk
+                      ? "Lưu cấu hình vừa thử thành công"
+                      : "Bấm “Kiểm tra kết nối” thành công trước đã"}
+                    className={ghostBtn}>
+                    {busy === "settings" ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />} Lưu cấu hình
                   </button>
                   {settings?.keyUrl && (
                     <a href={settings.keyUrl} target="_blank" rel="noreferrer"
@@ -623,6 +973,16 @@ export default function AiAuthorPanel({ examId, existingKeys, onApplyContract, o
                 <input value={req.features} onChange={(e) => setReq({ ...req, features: e.target.value })}
                   placeholder="Thêm, sửa, xóa có xác nhận, điều hướng sang chi tiết" className={inputClass} />
               </Field>
+              {/* Hai ô này đi thẳng vào mục 1 của khuôn "Yêu cầu kỹ thuật" — trước đây phải nhét
+                  vào ô "Kiến thức" nên đề ra hay thiếu hoặc tự bịa công nghệ khác. */}
+              <Field label="Kiến trúc & quản lý trạng thái">
+                <input value={req.architecture} onChange={(e) => setReq({ ...req, architecture: e.target.value })}
+                  placeholder="MVVM + Riverpod (tùy chọn)" className={inputClass} />
+              </Field>
+              <Field label="Lưu trữ dữ liệu">
+                <input value={req.storage} onChange={(e) => setReq({ ...req, storage: e.target.value })}
+                  placeholder="SQLite / File / SharedPreferences" className={inputClass} />
+              </Field>
               <div className="grid grid-cols-2 gap-3">
                 <Field label="Độ khó">
                   <select value={req.difficulty} onChange={(e) => setReq({ ...req, difficulty: e.target.value })} className={inputClass}>
@@ -651,13 +1011,9 @@ export default function AiAuthorPanel({ examId, existingKeys, onApplyContract, o
           {/* ── Bước 2: đề bài ── */}
           {!!deBai && (
             <Step index={2} icon={FileText} title="Xem lại &amp; sửa đề bài" done={examAccepted}>
+              {/* Bỏ dòng "Thang điểm AI đề xuất: …": bảng thang điểm đã nằm ngay trong mục 5 của
+                  đề bên dưới, nhắc lại thành một dòng dài chỉ làm rối chỗ cần đọc. */}
               {summary && <p className="mb-2 rounded-xl bg-slate-50 p-3 text-xs leading-relaxed text-slate-600">{summary}</p>}
-              {criteria.length > 0 && (
-                <p className="mb-2 text-[11px] text-slate-500">
-                  Thang điểm AI đề xuất: {criteria.map((c) => `${c.name} (${c.points})`).join(" · ")}
-                  {" · Tổng "}<strong>{criteria.reduce((s, c) => s + Number(c.points || 0), 0)}</strong>
-                </p>
-              )}
               <textarea
                 value={deBai}
                 onChange={(e) => { setDeBai(e.target.value); setExamAccepted(false); }}
@@ -773,11 +1129,71 @@ export default function AiAuthorPanel({ examId, existingKeys, onApplyContract, o
               )}
 
               {screens.map((s) => (
-                <figure key={s.id} className="mt-4 overflow-x-auto rounded-xl border border-slate-200 bg-white p-3">
-                  <figcaption className="mb-2 text-xs font-bold text-slate-600">{s.title}</figcaption>
-                  <div className="min-w-[720px]" dangerouslySetInnerHTML={{ __html: s.svg }} />
+                <figure key={s.id} className="mt-4 rounded-xl border border-slate-200 bg-white p-3">
+                  <figcaption className="mb-2 flex flex-wrap items-center gap-2">
+                    <span className="text-xs font-bold text-slate-600">{s.title}</span>
+                    {s.uploadName && (
+                      <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">
+                        Ảnh của bạn · {s.uploadName}
+                      </span>
+                    )}
+                    <span className="ml-auto flex flex-wrap items-center gap-1">
+                      <button type="button" onClick={() => downloadScreenSvg(s)} className={miniBtn} title="Tải bản vẽ gốc (.svg)">
+                        <Download size={12} /> SVG
+                      </button>
+                      <button type="button" onClick={() => downloadScreenPng(s)} className={miniBtn} title="Tải ảnh .png để dán vào đề Word">
+                        <Download size={12} /> PNG
+                      </button>
+                      <button type="button" className={miniBtn} title="Dùng ảnh tự vẽ/chụp từ máy thay cho hình AI"
+                        onClick={() => { setUploadTarget(s.id); mockupFileRef.current?.click(); }}>
+                        <Upload size={12} /> Ảnh của tôi
+                      </button>
+                      {s.uploadName && s.aiSvg && (
+                        <button type="button" onClick={() => revertScreen(s)} className={miniBtn} title="Bỏ ảnh tải lên, quay lại hình AI vẽ">
+                          <RotateCcw size={12} /> Hình AI
+                        </button>
+                      )}
+                    </span>
+                  </figcaption>
+                  {/* SVG do máy chủ dựng, hoặc ảnh của giáo viên đã bọc trong thẻ <image> (chạy ở
+                      chế độ tĩnh, không thực thi script) — xem lib/mockup-image.ts. */}
+                  <div className="custom-scrollbar overflow-x-auto">
+                    <div className="min-w-[720px] [&>svg]:h-auto [&>svg]:max-w-full"
+                      dangerouslySetInnerHTML={{ __html: s.svg }} />
+                  </div>
                 </figure>
               ))}
+
+              {/* Một ô chọn file dùng chung cho mọi hình — uploadTarget nhớ đang thay hình nào. */}
+              <input ref={mockupFileRef} type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = "";           // chọn lại đúng file đó lần nữa vẫn nhận
+                  if (file) applyUploadedImage(file);
+                }} />
+
+              {screens.length > 0 && (
+                <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                  <p className="mb-2 text-[11px] leading-relaxed text-slate-500">
+                    Chưa ưng bố cục? Nói bằng lời để AI sửa — hệ thống vẽ lại theo bản mô tả mới nên
+                    hình luôn cùng một phong cách, không bao giờ chồng chữ.
+                  </p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <input
+                      value={mockupPrompt}
+                      onChange={(e) => setMockupPrompt(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); reviseMockup(); } }}
+                      placeholder="VD: bỏ ô số điện thoại, thêm màn hình chi tiết, đổi nút Add User thành FAB…"
+                      className={`${inputClass} min-w-[240px] flex-1`}
+                    />
+                    <button onClick={reviseMockup} disabled={busy !== null} className={ghostBtn}>
+                      {busy === "mockup-revise" ? <Loader2 size={15} className="animate-spin" /> : <Wand2 size={15} />}
+                      Nhờ AI sửa hình
+                    </button>
+                  </div>
+                </div>
+              )}
             </Step>
           )}
 
@@ -789,11 +1205,18 @@ export default function AiAuthorPanel({ examId, existingKeys, onApplyContract, o
                 {proposed.length ? "Đề xuất lại" : "Đề xuất bộ testcase"}
               </button>
 
+              {/* Key thiếu thì khai luôn tại chỗ. Bắt quay lại bước 3, sửa bảng, rồi chấp nhận lại
+                  chỉ để thêm một dòng key là ba thao tác cho một việc máy tự làm được. */}
               {missingKeys.length > 0 && (
-                <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
-                  Testcase đang dùng key chưa khai ở Khu vực 0: <strong>{missingKeys.join(", ")}</strong>.
-                  Hãy thêm vào bước 3 rồi chấp nhận lại, nếu không sẽ không lưu được bộ testcase.
-                </p>
+                <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+                  <span>
+                    Testcase đang dùng key chưa khai ở Khu vực 0: <strong>{missingKeys.join(", ")}</strong>.
+                  </span>
+                  <button onClick={declareMissingKeys}
+                    className="ml-auto flex items-center gap-1.5 rounded-lg border border-amber-300 bg-white px-2.5 py-1 font-semibold text-amber-800 hover:bg-amber-100">
+                    <Plus size={13} /> Khai {missingKeys.length} key này vào Khu vực 0
+                  </button>
+                </div>
               )}
               {rejected.length > 0 && (
                 <ul className="mt-3 space-y-1">
@@ -804,16 +1227,6 @@ export default function AiAuthorPanel({ examId, existingKeys, onApplyContract, o
                   ))}
                 </ul>
               )}
-              {tcNotes.length > 0 && (
-                <ul className="mt-3 space-y-1">
-                  {tcNotes.map((n, i) => (
-                    <li key={i} className="flex items-start gap-2 rounded-lg bg-slate-50 p-2 text-[11px] leading-relaxed text-slate-600">
-                      <Info size={12} className="mt-0.5 shrink-0" /> {n}
-                    </li>
-                  ))}
-                </ul>
-              )}
-
               {proposed.length > 0 && (
                 <>
                   <div className="mt-3 space-y-2">
@@ -852,9 +1265,17 @@ export default function AiAuthorPanel({ examId, existingKeys, onApplyContract, o
                   <div className="mt-3 flex flex-wrap items-center gap-3">
                     <span className="text-xs text-slate-500">
                       {proposed.filter((i) => i.enabled).length} testcase · tổng điểm <strong>{Math.round(totalWeight * 100) / 100}</strong>
+                      {!missingProposals.length && proposed.some((i) => i.enabled) && (
+                        <span className="ml-1.5 font-semibold text-emerald-600">· đã có đủ trong Khu vực 3</span>
+                      )}
                     </span>
-                    <button onClick={acceptItems} className={`${primaryBtn} ml-auto`}>
+                    <button onClick={acceptItems} disabled={!missingProposals.length}
+                      title={missingProposals.length
+                        ? `Thêm ${missingProposals.length} testcase Khu vực 3 chưa có`
+                        : "Khu vực 3 đã có đủ các testcase đang chọn — sửa/bỏ chọn testcase hoặc xoá bên Khu vực 3 thì nút sáng lại"}
+                      className={`${primaryBtn} ml-auto`}>
                       <Check size={15} /> Chấp nhận &amp; thêm vào bộ testcase
+                      {missingProposals.length > 0 && ` (${missingProposals.length})`}
                     </button>
                   </div>
                 </>
@@ -882,9 +1303,10 @@ export default function AiAuthorPanel({ examId, existingKeys, onApplyContract, o
                       {busy === "starter-check" ? <Loader2 size={15} className="animate-spin" /> : <RefreshCw size={15} />}
                       Kiểm tra cú pháp
                     </button>
-                    <button onClick={saveStarter} disabled={busy !== null || !examId.trim()} className={ghostBtn}>
-                      {busy === "starter-save" ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />}
-                      Lưu khung cho SV
+                    <button onClick={saveAndDownloadStarter} disabled={busy !== null || !examId.trim()} className={ghostBtn}
+                      title="Lưu khung vào bộ testcase (phát cho SV ở trang Kho đề) và tải .zip về máy">
+                      {busy === "starter-save" ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />}
+                      Lưu &amp; tải khung (.zip)
                     </button>
                   </>
                 )}
@@ -901,25 +1323,10 @@ export default function AiAuthorPanel({ examId, existingKeys, onApplyContract, o
                 </p>
               )}
 
-              {starterWarnings.length > 0 && (
-                <ul className="mt-3 space-y-1">
-                  {starterWarnings.map((w, i) => (
-                    <li key={i} className="rounded-lg bg-amber-50 p-2 text-[11px] leading-relaxed text-amber-800">{w}</li>
-                  ))}
-                </ul>
-              )}
-              {starterNotes.length > 0 && (
-                <ul className="mt-3 space-y-1">
-                  {starterNotes.map((n, i) => (
-                    <li key={i} className="flex items-start gap-2 rounded-lg bg-slate-50 p-2 text-[11px] leading-relaxed text-slate-600">
-                      <Info size={12} className="mt-0.5 shrink-0" /> {n}
-                    </li>
-                  ))}
-                </ul>
-              )}
-
               {/* Trình soạn thảo kiểu IDE: cây file bên trái, code LUÔN hiện bên phải. Kiểu xếp
-                  gấp cũ chỉ thấy tên file nên phải bấm từng cái mới biết AI viết gì. */}
+                  gấp cũ chỉ thấy tên file nên phải bấm từng cái mới biết AI viết gì.
+                  (Danh sách "Bỏ hàm/Bỏ thuộc tính…" không hiện nữa — code sinh ra mới là thứ cần
+                  nhìn, còn thành phần bị loại thì thêm tay ngay trong khung nhanh hơn đọc cảnh báo.) */}
               {starterFiles.length > 0 && (() => {
                 const active = starterFiles.find((f) => f.path === openFile) || starterFiles[0];
                 const lines = active.content.split("\n");
@@ -958,6 +1365,7 @@ export default function AiAuthorPanel({ examId, existingKeys, onApplyContract, o
                             const content = e.target.value;
                             setStarterFiles((cur) => cur.map((x) => x.path === active.path ? { ...x, content } : x));
                             setSyntax(null);   // sửa tay xong thì kết quả kiểm cú pháp cũ không còn đúng
+                            setStarterEdited(true);
                           }}
                           spellCheck={false}
                           wrap="off"
@@ -969,6 +1377,29 @@ export default function AiAuthorPanel({ examId, existingKeys, onApplyContract, o
                   </div>
                 );
               })()}
+
+              {starterFiles.length > 0 && (
+                <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                  <p className="mb-2 text-[11px] leading-relaxed text-slate-500">
+                    Sửa thẳng trong khung code ở trên, hoặc nói bằng lời để AI sửa hộ.
+                    {starterEdited && <span className="font-semibold text-amber-700"> Bạn đang có sửa tay chưa lưu — lượt AI sửa sẽ sinh lại toàn bộ file và thay phần đó.</span>}
+                  </p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <input
+                      value={starterPrompt}
+                      onChange={(e) => setStarterPrompt(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); reviseStarter(); } }}
+                      placeholder="VD: thêm màn hình chi tiết, bỏ lớp repository, đổi User.phone sang String?…"
+                      className={`${inputClass} min-w-[240px] flex-1`}
+                    />
+                    <button onClick={reviseStarter} disabled={busy !== null || !starterSpec} className={ghostBtn}
+                      title={starterSpec ? undefined : "Hãy bấm Sinh khung starter trước"}>
+                      {busy === "starter-revise" ? <Loader2 size={15} className="animate-spin" /> : <Wand2 size={15} />}
+                      Nhờ AI sửa khung
+                    </button>
+                  </div>
+                </div>
+              )}
             </Step>
           )}
 
@@ -978,12 +1409,13 @@ export default function AiAuthorPanel({ examId, existingKeys, onApplyContract, o
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-bold text-slate-700">Bộ phát cho sinh viên</p>
                 <p className="text-[11px] leading-relaxed text-slate-500">
-                  Lưu đề bài + hình minh họa vào bộ testcase <span className="font-mono">{examId.trim() || "(chưa có mã)"}</span>;
-                  tải lại ở trang Kho đề bằng nút “Đề bài”.
+                  Lưu đề bài + hình minh họa vào bộ testcase <span className="font-mono">{examId.trim() || "(chưa có mã)"}</span>
+                  {" "}và tải luôn bản <span className="font-mono">.docx</span> về máy; xem lại bất cứ lúc nào ở trang Kho đề bằng nút “Đề bài”.
                 </p>
               </div>
               <button onClick={saveHandout} disabled={busy !== null || !examId.trim()} className={primaryBtn}>
-                {busy === "handout" ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />} Lưu đề bài + hình
+                {busy === "handout" ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />}
+                Lưu &amp; tải đề (.docx)
               </button>
             </div>
           )}
@@ -999,6 +1431,9 @@ const primaryBtn =
   "flex items-center gap-2 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 px-3.5 py-2 text-xs font-semibold text-white shadow-sm transition-all hover:from-violet-700 hover:to-indigo-700 active:scale-[0.98] disabled:cursor-not-allowed disabled:from-slate-300 disabled:to-slate-300";
 const ghostBtn =
   "flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-50 disabled:opacity-50";
+/** Nút nhỏ trên thanh công cụ của từng hình minh họa. */
+const miniBtn =
+  "inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[10px] font-semibold text-slate-600 transition-colors hover:bg-slate-50 disabled:opacity-50";
 
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
@@ -1010,21 +1445,40 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
   );
 }
 
+/**
+ * Một bước của trợ lý — THU GỌN ĐƯỢC.
+ *
+ * <p>Cả năm bước mở cùng lúc thì trang dài mấy màn hình: xong bước 2 vẫn phải cuộn qua nguyên đề
+ * bài mới tới được bước 3. Bước nào đã chốt (done) thì tự gập lại, bấm tiêu đề là mở lại.
+ */
 function Step({ index, icon: Icon, title, done, children }: {
   index: number; icon: React.ComponentType<{ size?: number; className?: string }>;
   title: string; done: boolean; children: React.ReactNode;
 }) {
+  const [collapsed, setCollapsed] = useState(false);
+  const wasDone = useRef(done);
+  useEffect(() => {
+    // Chỉ gập ở ĐÚNG lúc bước chuyển sang xong, không gập lại mỗi lần render — người dùng mở ra
+    // xem lại thì phải giữ nguyên trạng thái họ chọn.
+    if (done && !wasDone.current) setCollapsed(true);
+    wasDone.current = done;
+  }, [done]);
+
   return (
     <div className="rounded-2xl border border-slate-200 p-4">
-      <div className="mb-3 flex items-center gap-2">
-        <span className={`flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-bold ${
+      <button type="button" onClick={() => setCollapsed((v) => !v)}
+        aria-expanded={!collapsed}
+        className={`flex w-full items-center gap-2 text-left ${collapsed ? "" : "mb-3"}`}>
+        <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold ${
           done ? "bg-emerald-100 text-emerald-700" : "bg-indigo-100 text-indigo-700"}`}>
           {done ? <Check size={13} /> : index}
         </span>
-        <Icon size={15} className="text-indigo-500" />
+        <Icon size={15} className="shrink-0 text-indigo-500" />
         <h3 className="text-sm font-bold text-slate-800">{title}</h3>
-      </div>
-      {children}
+        <ChevronDown size={16}
+          className={`ml-auto shrink-0 text-slate-400 transition-transform ${collapsed ? "-rotate-90" : ""}`} />
+      </button>
+      {!collapsed && children}
     </div>
   );
 }

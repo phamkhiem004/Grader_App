@@ -8,9 +8,10 @@ import { Skeleton } from "@/components/ui/Skeleton";
 import { Tooltip } from "@/components/ui/Tooltip";
 import CompetencyPanel, { CompetencyItem } from "@/components/grading/CompetencyPanel";
 import { gradingStatusLabel, gradingStatusTone, type GradingOutcome } from "@/lib/gradingStatus";
+import { csvRow, downloadCsv, formatGradingTime } from "@/lib/csv";
 import { findRunningSession, upsertStoredSession } from "@/lib/gradingSessions";
 import {
-  FileJson, DownloadCloud, Search, ChevronRight,
+  FileJson, Search, ChevronRight,
   AlertCircle, Clock, Users, FileText, FileArchive,
   BarChart3, X, Loader2, FileCode2, RotateCcw, PenLine, AlertTriangle,
 } from "lucide-react";
@@ -64,6 +65,9 @@ interface ResultRow {
   batchId: string | null;
   submittedAt: string | null;
   updatedAt: string | null;
+  /** Máy bắt đầu / kết thúc chấm bài này; null với dữ liệu chấm trước khi có hai cột này. */
+  gradingStartedAt: string | null;
+  gradingFinishedAt: string | null;
   details: string | null;
   errorLog: string | null;
   diagnosticCode: string | null;
@@ -544,63 +548,34 @@ export default function HistoryPage() {
   };
 
   /**
-   * Xuất bảng điểm — theo ĐÚNG danh sách đang hiển thị (đã qua lọc), "cái bạn thấy là cái bạn
-   * tải về".
-   *
-   * <p>Xuất dạng bảng HTML lưu đuôi .xls thay vì CSV thuần: yêu cầu là dòng đã sửa điểm phải TÔ
-   * VÀNG, mà CSV là văn bản trần không mang được màu. Excel/LibreOffice/Google Sheets đều mở
-   * bảng HTML này và giữ nguyên màu nền; Excel có thể hỏi xác nhận đuôi file — bấm Yes là mở.
+   * Bảng điểm CSV — theo ĐÚNG danh sách đang hiển thị (đã qua lọc), cùng cột với CSV của trang
+   * Chấm tự động để hai file ghép được vào nhau.
    */
-  const exportExcel = () => {
+  const exportCSV = () => {
     if (!filtered.length) return;
-    const esc = (v: string | number) =>
-      String(v).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    // Cỡ chữ phải khai bằng ĐƠN VỊ pt: Excel đọc px sai (12px ra cỡ 6), còn bỏ trống thì nó rơi
-    // về mặc định 10 của bộ nhập HTML.
-    const BASE = "border:1px solid #CBD5E1;font-size:12.0pt;";
-    // `mso-number-format:'\@'` = ép ô dạng CHỮ. CHỈ dùng cho ô thật sự là chuỗi ("13/30", "1.6/1.4",
-    // mốc thời gian) — thiếu nó thì Excel đổi "12/30" thành ngày 30 tháng 12. Áp nhầm vào một con
-    // số đơn thuần thì ngược lại: Excel gắn cờ "số lưu dạng chữ" (tam giác xanh góc ô).
-    const td = (v: string | number, opts: { yellow?: boolean; text?: boolean } = {}) =>
-      `<td style="${BASE}${opts.yellow ? "background:#FEF08A;" : ""}${
-        opts.text ? "mso-number-format:'\\@';" : ""}">${esc(v)}</td>`;
-    const headerCells = ["STT", "Mã SV", "Điểm", "Trạng thái", "TC RATE", "Thời gian chấm"]
-      .map((h) => `<th style="${BASE}background:#EEF2FF">${h}</th>`)
-      .join("");
-    const bodyRows = filtered
-      .map((r, idx) => {
-        const { pass, total } = passInfo(r.details);
-        const edited = r.manualScore != null;
-        // Điểm: bài đã sửa ghi "mới/cũ" để nhìn phát biết cả hai; bài thường giữ một số.
-        const score = edited
+    const header = csvRow([
+      "STT", "Tên người dùng", "Điểm", "Trạng thái",
+      "Số câu đúng", "Tổng số câu", "Bắt đầu chấm", "Chấm xong",
+    ]);
+    const body = filtered.map((r, idx) => {
+      const { pass, total } = passInfo(r.details);
+      const edited = r.manualScore != null;
+      return csvRow([
+        idx + 1,
+        r.studentName || r.studentId,            // tên thư mục bài nộp
+        // Bài đã sửa điểm tay: ghi "mới/cũ" để không mất dấu điểm tự động ban đầu.
+        edited
           ? `${r.manualScore!.toFixed(1)}/${r.score != null ? r.score.toFixed(1) : "—"}`
-          : r.score != null ? r.score.toFixed(1) : "";
-        const tcPass = edited && r.manualTotal ? (r.manualPass ?? 0) : pass;
-        const tcTotal = edited && r.manualTotal ? r.manualTotal : total;
-        // Vàng tô TỪNG Ô, không tô <tr>: nền đặt ở hàng bị Excel kéo dài hết chiều ngang sheet.
-        const y = { yellow: edited };
-        const cells = [
-          td(idx + 1, y),
-          td(r.studentId, y),
-          // Bài đã sửa: "1.6/1.4" là chuỗi thật → ép chữ. Bài thường: để nguyên SỐ, có vậy Excel
-          // mới canh phải và không gắn cờ "số lưu dạng chữ".
-          td(score, edited ? { ...y, text: true } : y),
-          td(statusVi(r), y),
-          td(`${tcPass}/${tcTotal}`, { ...y, text: true }),
-          td(formatHistoryTime(r.updatedAt || r.submittedAt), { ...y, text: true }),
-        ].join("");
-        return `<tr>${cells}</tr>`;
-      })
-      .join("");
-    const html = `﻿<html><head><meta charset="utf-8"></head><body>` +
-      `<table style="border-collapse:collapse">` +
-      `<thead><tr>${headerCells}</tr></thead><tbody>${bodyRows}</tbody></table></body></html>`;
-    const blob = new Blob([html], { type: "application/vnd.ms-excel;charset=utf-8" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
+          : r.score != null ? r.score.toFixed(1) : "",
+        statusVi(r),
+        edited && r.manualTotal ? (r.manualPass ?? 0) : pass,
+        edited && r.manualTotal ? r.manualTotal : total,
+        formatGradingTime(r.gradingStartedAt),
+        formatGradingTime(r.gradingFinishedAt),
+      ]);
+    });
     const dateStr = new Date().toISOString().split("T")[0];
-    a.download = `${selected}_lichsu_${dateStr}.xls`;
-    a.click();
+    downloadCsv([header, ...body].join("\n"), `${selected}_lichsu_${dateStr}.csv`);
   };
 
   return (
@@ -787,12 +762,12 @@ export default function HistoryPage() {
                   <FileArchive size={15} /> Xuất JSON
                 </button>
                 <button
-                  onClick={exportExcel}
-                  disabled={!rows.length}
-                  title="Xuất bảng điểm Excel — dòng đã sửa điểm được tô vàng"
+                  onClick={exportCSV}
+                  disabled={!filtered.length}
+                  title="Xuất bảng điểm CSV của đúng danh sách đang hiển thị"
                   className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 shadow-sm transition-all hover:text-slate-900 hover:shadow active:scale-95 disabled:opacity-50"
                 >
-                  <DownloadCloud size={15} /> Xuất Excel
+                  <FileText size={15} /> Xuất CSV
                 </button>
                 {selectedIds.size > 0 && (
                   <button
@@ -843,7 +818,7 @@ export default function HistoryPage() {
                     <th className="px-6 py-3.5 text-center">Trạng thái</th>
                     <th className="px-6 py-3.5 text-center">Pass</th>
                     <th className="px-6 py-3.5 text-center">Điểm</th>
-                    <th className="px-6 py-3.5 text-center">Thời gian</th>
+                    <th className="px-6 py-3.5 text-center">Chấm xong</th>
                     <th className="sticky right-0 z-20 border-l border-slate-100 bg-white px-4 py-3.5 text-center">Chi tiết</th>
                   </tr>
                 </thead>
@@ -998,7 +973,7 @@ export default function HistoryPage() {
                             )}
                           </td>
                           <td className="px-6 py-3.5 text-center text-xs text-slate-500">
-                            {formatHistoryTime(r.submittedAt || r.updatedAt) || "—"}
+                            {formatGradingTime(r.gradingFinishedAt || r.submittedAt || r.updatedAt) || "—"}
                           </td>
                           <td className="sticky right-0 z-10 border-l border-slate-100 bg-white px-4 py-3.5 transition-colors group-hover:bg-slate-50/70">
                             <div className="flex items-center justify-center gap-1">

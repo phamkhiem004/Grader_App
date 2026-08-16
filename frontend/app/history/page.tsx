@@ -12,7 +12,7 @@ import { findRunningSession, upsertStoredSession } from "@/lib/gradingSessions";
 import {
   FileJson, DownloadCloud, Search, ChevronRight,
   AlertCircle, Clock, Users, FileText, FileArchive,
-  BarChart3, X, Loader2, FileCode2, RotateCcw, PenLine, AlertTriangle,
+  BarChart3, X, Loader2, FileCode2, RotateCcw, PenLine, AlertTriangle, FolderDown,
 } from "lucide-react";
 
 interface ExamOption { examId: string; examName: string; }
@@ -535,6 +535,27 @@ export default function HistoryPage() {
   };
 
   /**
+   * HỒ SƠ PHÁT CHO SINH VIÊN: Result_of_<đề>/<MSSV>/{json, xls, feedback.txt, logs/} — backend
+   * dựng cả gói, ZIP chỉ là lớp vận chuyển thư mục.
+   */
+  const downloadReportPackage = async () => {
+    if (!selected) return;
+    try {
+      const res = await fetch(`${API_BASE}/results/exam/${encodeURIComponent(selected)}/report-package`);
+      if (res.status === 404) throw new Error("Chưa có bài nào chấm xong để xuất hồ sơ.");
+      if (!res.ok) throw new Error("Không tạo được gói hồ sơ.");
+      const blob = await res.blob();
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `Result_of_${selected}.zip`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    } catch (error: any) {
+      alert(error?.message || "Không xuất được gói hồ sơ.");
+    }
+  };
+
+  /**
    * Xuất bảng điểm — theo ĐÚNG danh sách đang hiển thị (đã qua lọc), "cái bạn thấy là cái bạn
    * tải về".
    *
@@ -776,6 +797,14 @@ export default function HistoryPage() {
                   className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 shadow-sm transition-all hover:text-slate-900 hover:shadow active:scale-95 disabled:opacity-50"
                 >
                   <FileArchive size={15} /> Xuất JSON
+                </button>
+                <button
+                  onClick={downloadReportPackage}
+                  disabled={!rows.some((r) => r.hasJson && r.outcome === "SCORED")}
+                  title="Mỗi SV một thư mục: JSON + Excel testcase + feedback.txt + logs"
+                  className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 shadow-sm transition-all hover:text-slate-900 hover:shadow active:scale-95 disabled:opacity-50"
+                >
+                  <FolderDown size={15} /> Hồ sơ SV
                 </button>
                 <button
                   onClick={exportExcel}

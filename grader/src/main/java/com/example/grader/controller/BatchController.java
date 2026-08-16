@@ -38,6 +38,24 @@ public class BatchController {
         }
     }
 
+    /** Nạp THÊM bài vào phiên chấm đã có (thu bài nhiều đợt) — kể cả phiên đã chấm xong. */
+    @PostMapping("/{batchId}/add")
+    public ResponseEntity<?> addToBatch(
+            @PathVariable String batchId,
+            @RequestParam("files") List<MultipartFile> files,
+            @RequestParam(value = "usernames", required = false) List<String> usernames) {
+
+        if (files == null || files.isEmpty())
+            return ResponseEntity.badRequest().body(Map.of("error", "Không có file"));
+        try {
+            return ResponseEntity.ok(batchService.addToBatch(files, usernames, batchId));
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
+        }
+    }
+
     @GetMapping("/progress/{batchId}")
     public ResponseEntity<?> getProgress(@PathVariable String batchId) {
         try {

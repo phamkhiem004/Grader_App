@@ -5,15 +5,18 @@ import SidebarLayout from "@/components/layout/SidebarLayout";
 import { API_BASE, PASS_THRESHOLD } from "@/lib/config";
 import { Skeleton, SkeletonRow } from "@/components/ui/Skeleton";
 import { Tooltip } from "@/components/ui/Tooltip";
+import SelectMenu from "@/components/ui/SelectMenu";
 import {
   FileCode2, ClipboardCheck, Save, Loader2, CheckCircle2, AlertCircle, XCircle,
-  Users, Award, RotateCcw,
+  Users, Award, RotateCcw, FileText,
 } from "lucide-react";
 
 interface ExamOption { examId: string; examName: string; }
 interface StudentRow {
   studentId: string; studentName: string | null; status: string;
   score: number | null; manualScore: number | null;
+  /** Kết luận backend (SCORED / SYSTEM_BLOCKED / ...) — vắng ở dữ liệu cũ thì suy từ status. */
+  outcome?: string | null;
 }
 interface Criterion {
   testId: string; name: string; skill: string; weight: number;
@@ -29,7 +32,11 @@ interface CodeFile { name: string; content: string; }
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
-export default function WorkspacePage() {
+// Kênh nhận lệnh "mở bài của SV này" từ ô tìm kiếm header — chuỗi phải khớp SidebarLayout.gotoResult.
+const OPEN_SUBMISSION_KEY = "grader_open_submission";
+const OPEN_SUBMISSION_EVENT = "grader:open-submission";
+
+function WorkspaceContent() {
   const [exams, setExams] = useState<ExamOption[]>([]);
   const [examId, setExamId] = useState<string>("");
   const [students, setStudents] = useState<StudentRow[]>([]);
@@ -42,11 +49,49 @@ export default function WorkspacePage() {
   const [activeFile, setActiveFile] = useState(0);
   const [loadingDetail, setLoadingDetail] = useState(false);
 
+  // Lọc danh sách bài bên trái: all | blocked (lỗi hệ thống) | manual (đã chấm tay)
+  const [listFilter, setListFilter] = useState<"all" | "blocked" | "manual">("all");
+  // SV cần mở sẵn khi được điều hướng tới từ ô tìm kiếm header (?examId=..&studentId=..)
+  const [pendingStudent, setPendingStudent] = useState<string | null>(null);
+
   const [points, setPoints] = useState<Record<string, number>>({});
   const [touched, setTouched] = useState(false);   // GV đã chỉnh điểm tiêu chí chưa
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
+
+  // Lệnh "mở bài của SV này" từ ô tìm kiếm header — truyền qua localStorage + custom event thay
+  // vì query string: đứng sẵn ở trang này thì điều hướng chỉ đổi query nên effect mount không
+  // chạy lại, còn useSearchParams thì kéo theo Suspense cho cả trang. Consume cả lúc mount
+  // (đi từ trang khác tới) lẫn khi event bắn (đang đứng ngay tại trang).
+  useEffect(() => {
+    const consume = () => {
+      try {
+        const raw = localStorage.getItem(OPEN_SUBMISSION_KEY);
+        if (!raw) return;
+        localStorage.removeItem(OPEN_SUBMISSION_KEY);
+        const target = JSON.parse(raw);
+        if (target?.examId) {
+          setExamId(target.examId);
+          setPendingStudent(target.studentId || null);
+        }
+      } catch { /* bỏ qua */ }
+    };
+    consume();
+    window.addEventListener(OPEN_SUBMISSION_EVENT, consume);
+    return () => window.removeEventListener(OPEN_SUBMISSION_EVENT, consume);
+  }, []);
+
+  // Danh sách SV của đề nạp xong thì mới chọn được bài đang chờ mở. CHỈ tiêu pending khi chọn
+  // được: lúc mount effect này chạy trước khi list kịp load (students còn rỗng, loadingStudents
+  // còn false) — xoá pending ở nhánh không-tìm-thấy là lệnh mở bài từ ô tìm kiếm bị nuốt mất.
+  useEffect(() => {
+    if (!pendingStudent || loadingStudents) return;
+    if (students.some((s) => s.studentId === pendingStudent)) {
+      setStudentId(pendingStudent);
+      setPendingStudent(null);
+    }
+  }, [pendingStudent, loadingStudents, students]);
 
   // Nạp danh sách bộ testcase đã chấm
   useEffect(() => {
@@ -65,6 +110,7 @@ export default function WorkspacePage() {
     let ignore = false;
     setLoadingStudents(true);
     setStudentId(null); setDetail(null); setFiles([]);
+    setListFilter("all");   // filter của đề trước dễ ra danh sách trống khó hiểu ở đề mới
     Promise.all([
       fetch(`${API_BASE}/results/exam/${encodeURIComponent(examId)}`).then((r) => (r.ok ? r.json() : [])),
       fetch(`${API_BASE}/exam-setup/criteria/${encodeURIComponent(examId)}`).then((r) => (r.ok ? r.json() : [])),
@@ -213,6 +259,20 @@ export default function WorkspacePage() {
 
   const selectedStudent = students.find((s) => s.studentId === studentId);
 
+  // ── Lọc + sắp xếp danh sách bài bên trái ──
+  const isBlockedRow = (s: StudentRow) =>
+    s.outcome ? s.outcome === "SYSTEM_BLOCKED" : s.status === "ERROR" || s.status === "MANUAL_REVIEW";
+  const manualCount = students.filter((s) => s.manualScore != null).length;
+  const blockedCount = students.filter(isBlockedRow).length;
+  const visibleStudents = useMemo(() => {
+    const base =
+      listFilter === "manual" ? students.filter((s) => s.manualScore != null)
+      : listFilter === "blocked" ? students.filter(isBlockedRow)
+      : students;
+    // Bài ĐÃ chấm tay dồn lên đầu — sort ổn định nên phần còn lại giữ nguyên thứ tự cũ.
+    return [...base].sort((a, b) => Number(b.manualScore != null) - Number(a.manualScore != null));
+  }, [students, listFilter]);
+
   return (
     <SidebarLayout
       title="Chấm thủ công"
@@ -226,35 +286,61 @@ export default function WorkspacePage() {
         {/* Cột trái: chọn đề + danh sách SV */}
         <div className="min-w-0">
           <div className="card overflow-hidden">
-            <div className="border-b border-slate-100 bg-slate-50/60 p-4">
-              <label className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500">Bộ testcase</label>
-              <select
-                value={examId}
-                onChange={(e) => setExamId(e.target.value)}
-                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-800 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
-              >
-                {exams.length === 0 && <option value="">— Chưa có bộ testcase đã chấm —</option>}
-                {exams.map((e) => (
-                  <option key={e.examId} value={e.examId}>{e.examName} ({e.examId})</option>
-                ))}
-              </select>
-              <div className="mt-2 flex items-center gap-1.5 text-xs text-slate-400">
-                <Users size={13} /> {students.length} sinh viên
+            {/* Hai ô CHỈ CHỌN, dựng từ cùng một component nên hình dáng khớp nhau và khớp ô chọn
+                bộ testcase bên trang Chấm tự động: cao bằng nhau, bo lg, viền slate-200, icon
+                trái, mũi tên phải, danh sách xổ ra cùng một kiểu. */}
+            <div className="space-y-4 border-b border-slate-100 bg-slate-50/60 p-5">
+              <div>
+                <label className="mb-2 block text-xs font-bold uppercase tracking-wider text-slate-500">Bộ testcase</label>
+                <SelectMenu
+                  icon={FileText}
+                  ariaLabel="Bộ testcase"
+                  value={examId}
+                  // Đổi bộ thì huỷ lệnh mở bài đang chờ, kẻo nó "cướp" lựa chọn về sau.
+                  onChange={(v) => { setExamId(v); setPendingStudent(null); }}
+                  placeholder="— Chọn bộ testcase —"
+                  emptyText="Chưa có bộ testcase đã chấm"
+                  options={exams.map((e) => ({
+                    value: e.examId,
+                    label: e.examId,
+                    sublabel: e.examName,
+                    badge: e.examId.slice(0, 2).toUpperCase(),
+                  }))}
+                />
+              </div>
+
+              <div>
+                <label className="mb-2 block text-xs font-bold uppercase tracking-wider text-slate-500">Danh sách bài</label>
+                <SelectMenu
+                  icon={Users}
+                  ariaLabel="Lọc danh sách bài"
+                  value={listFilter}
+                  onChange={(v) => setListFilter(v as "all" | "blocked" | "manual")}
+                  options={[
+                    { value: "all", label: `Tất cả (${students.length})` },
+                    { value: "blocked", label: `Lỗi hệ thống (${blockedCount})` },
+                    { value: "manual", label: `Đã được chấm tay (${manualCount})` },
+                  ]}
+                />
               </div>
             </div>
             <div className="custom-scrollbar max-h-[68vh] overflow-y-auto p-2">
               {loadingStudents ? (
                 Array.from({ length: 6 }).map((_, i) => <SkeletonRow key={i} />)
-              ) : students.length === 0 ? (
-                <div className="p-6 text-center text-sm text-slate-400">Chưa có bài nộp.</div>
+              ) : visibleStudents.length === 0 ? (
+                <div className="p-6 text-center text-sm text-slate-400">
+                  {students.length === 0 ? "Chưa có bài nộp."
+                    : listFilter === "manual" ? "Chưa có bài nào được chấm tay."
+                    : "Không có bài nào lỗi hệ thống."}
+                </div>
               ) : (
-                students.map((s) => {
+                visibleStudents.map((s) => {
                   const active = s.studentId === studentId;
                   const initials = (s.studentName || s.studentId || "?").trim().charAt(0).toUpperCase();
                   return (
                     <button
                       key={s.studentId}
-                      onClick={() => setStudentId(s.studentId)}
+                      onClick={() => { setStudentId(s.studentId); setPendingStudent(null); }}
                       className={`mb-1 flex w-full items-center gap-3 rounded-lg p-2.5 text-left transition-colors ${
                         active ? "bg-indigo-50 ring-1 ring-indigo-200" : "hover:bg-slate-50"
                       }`}
@@ -263,7 +349,10 @@ export default function WorkspacePage() {
                         {initials}
                       </div>
                       <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-semibold text-slate-800">{s.studentName || "—"}</p>
+                        {/* Tím = đã có điểm chấm tay, cùng tông với badge điểm bên phải. */}
+                        <p className={`truncate text-sm font-semibold ${s.manualScore != null ? "text-violet-700" : "text-slate-800"}`}>
+                          {s.studentName || "—"}
+                        </p>
                         <p className="truncate font-mono text-xs text-slate-400">{s.studentId}</p>
                       </div>
                       <div className="shrink-0 text-right">
@@ -477,6 +566,10 @@ export default function WorkspacePage() {
       </div>
     </SidebarLayout>
   );
+}
+
+export default function WorkspacePage() {
+  return <WorkspaceContent />;
 }
 
 function ScorePill({ label, value, tone, highlight }: {

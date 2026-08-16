@@ -170,11 +170,19 @@ export default function SidebarLayout({ children, activePath = '/', title, subti
     }, 300);
   };
 
+  // Bấm một kết quả = MỞ BÀI LÀM của sinh viên đó ở trang Chấm thủ công (xem code + chấm tay),
+  // không phải nhảy về bảng Lịch sử rồi tự tìm lại lần nữa. Lệnh truyền qua localStorage + event
+  // (không qua query string) để cả khi ĐANG đứng ở trang đó, bài vẫn được mở — điều hướng cùng
+  // route chỉ đổi query sẽ không remount trang.
   const gotoResult = (r: SearchRow) => {
     setSearchOpen(false);
     setQ("");
     setResults([]);
-    router.push(`/history?exam=${encodeURIComponent(r.examId)}&q=${encodeURIComponent(r.studentId)}`);
+    try {
+      localStorage.setItem("grader_open_submission", JSON.stringify({ examId: r.examId, studentId: r.studentId }));
+    } catch { /* bỏ qua */ }
+    window.dispatchEvent(new Event("grader:open-submission"));
+    router.push("/teacher/workspace");
   };
 
   const onSearchSubmit = (e: React.FormEvent) => {

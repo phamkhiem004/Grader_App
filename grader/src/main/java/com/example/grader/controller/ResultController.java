@@ -121,6 +121,7 @@ public class ResultController {
             m.put("studentName", r.studentName());
             m.put("score", r.score());
             m.put("manualScore", r.manualScore());
+            m.put("previousScore", r.previousScore());
             m.put("status", r.status());
             // Kết luận cho người chấm (SCORED / SYSTEM_BLOCKED / STOPPED). Thiếu nó thì trang
             // Lịch sử phải tự suy lại từ status như trước — đúng thứ đang gỡ bỏ.
@@ -137,9 +138,38 @@ public class ResultController {
             m.put("diagnosticStage", r.diagnosticStage());
             m.put("requiresManualReview", r.requiresManualReview());
             m.put("hasJson", Boolean.TRUE.equals(r.hasJson()));
+            // Số tiêu chí ĐẠT sau chấm tay — để trang Lịch sử hiện "pass mới" cạnh "pass cũ".
+            // Đếm tại đây rồi bỏ manualJson, không phát hành nguyên văn breakdown ra API này.
+            int[] manualPass = manualPassCounts(r.manualJson());
+            m.put("manualPass", manualPass == null ? null : manualPass[0]);
+            m.put("manualTotal", manualPass == null ? null : manualPass[1]);
             out.add(m);
         }
         return ResponseEntity.ok(out);
+    }
+
+    /**
+     * Đếm tiêu chí đạt TRỌN điểm trong manual_json → {đạt, tổng}; null khi chưa chấm tay
+     * hoặc JSON không đọc được. Bản lưu cũ có thể thiếu maxPoints — khi đó tin cờ `passed`
+     * (trạng thái tự động lúc lưu) thay vì đoán thang điểm.
+     */
+    private int[] manualPassCounts(String manualJson) {
+        if (manualJson == null || manualJson.isBlank()) return null;
+        try {
+            JsonNode criteria = mapper.readTree(manualJson).path("criteria");
+            if (!criteria.isArray() || criteria.isEmpty()) return null;
+            int pass = 0;
+            for (JsonNode c : criteria) {
+                double max = c.path("maxPoints").asDouble(0);
+                boolean ok = max > 0
+                        ? c.path("points").asDouble(0) >= max - 1e-6
+                        : c.path("passed").asBoolean(false);
+                if (ok) pass++;
+            }
+            return new int[]{pass, criteria.size()};
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     /** JSON GỘP toàn bộ bài đã chấm xong của 1 ĐỀ: { examId, count, results:[...] } — in đẹp. */

@@ -7,9 +7,8 @@ import ExamCombobox from "@/components/ui/ExamCombobox";
 import PerformanceSettings from "@/components/grading/PerformanceSettings";
 import { csvRow, downloadCsv, formatGradingTime } from "@/lib/csv";
 import { gradingStatusLabel, gradingStatusTone } from "@/lib/gradingStatus";
-
-// Khóa lưu phiên chấm đang/ vừa chạy → rời trang rồi quay lại KHÔNG mất kết quả
-const ACTIVE_BATCH_KEY = "grader_active_batch";
+// Kho phiên chấm dùng chung với trang Lịch sử (nút "Chấm lại" bên đó ghi vào cùng chỗ này).
+import { readStoredSessions, writeStoredSessions } from "@/lib/gradingSessions";
 import { UploadCloud, Play, FileArchive, X, CheckCircle, Clock, AlertCircle, DownloadCloud, Loader2, CheckSquare, BarChart2, Users, TrendingUp, FileJson, StopCircle, Trash2, Ban, RotateCcw, ListFilter, ChevronDown } from "lucide-react";
 
 const normalizedPath = (value) => String(value || "").replace(/\\/g, "/");
@@ -138,27 +137,70 @@ export default function AutomaticGradingPage() {
   const [examId, setExamId] = useState("");
   const [examOptions, setExamOptions] = useState([]);
   const [examOptionsLoading, setExamOptionsLoading] = useState(true);
-  const [files, setFiles] = useState([]);
+  // MỖI BỘ MỘT PHIÊN: exam → { batchId, phase: "uploading"|"polling"|"done", progress, parseErrors }.
+  // Một biến phase/progress toàn cục là lý do chấm bộ 2 xong quay lại bộ 1 thì mọi số liệu biến
+  // mất — phiên mới ghi đè phiên cũ. Giữ theo map thì đổi khung nhìn chỉ là đổi khoá đọc; dữ liệu
+  // một bộ chỉ mất khi chính bộ ĐÓ bắt đầu lượt chấm mới (hoặc Hủy phiên).
+  const [sessions, setSessions] = useState({});
+  // Bài đã chọn nhưng CHƯA upload — cũng theo từng bộ, để soạn sẵn bài cho bộ 2 trong lúc bộ 1
+  // đang chấm mà hai danh sách không lẫn vào nhau.
+  const [filesByExam, setFilesByExam] = useState({});
   const [dragging, setDragging] = useState(false);
-  const [batchId, setBatchId] = useState(null);
-  const [progress, setProgress] = useState(null);
-  const [phase, setPhase] = useState("idle"); // idle | uploading | polling | done
   const [uploadErr, setUploadErr] = useState(null);
   const [uploadInfo, setUploadInfo] = useState(null);   // tóm tắt lần thêm thư mục gần nhất
   const [scanning, setScanning] = useState(false);      // đang đọc cây thư mục (lớp đông thì lâu)
-  const [parseErrors, setParseErrors] = useState([]);
+  // parseErrors KHÔNG còn là state riêng: nó thuộc về phiên của từng bộ (viewSession.parseErrors).
   // Một trục lọc duy nhất cho bảng kết quả: all | scored | grading | blocked.
   const [rowFilter, setRowFilter] = useState("all");
   const [filterOpen, setFilterOpen] = useState(false);
   const [regrading, setRegrading] = useState(false);
   const [batchAction, setBatchAction] = useState(null);   // "stop" | "cancel" khi đang gọi API
   const [stopNotice, setStopNotice] = useState(null);
+  const [addingFiles, setAddingFiles] = useState(false);
+  const [addNotice, setAddNotice] = useState(null);   // { type: "ok" | "err", text }
+  // Bộ VỪA chấm xong (đặt lúc phiên chuyển polling→done). Banner không được lặng lẽ biến mất
+  // khi máy chấm xong — nó đổi sang trạng thái "đã chấm xong" cho tới khi người dùng đóng.
+  const [finishedNotice, setFinishedNotice] = useState(null);
   const fileRef = useRef();
   const pollRef = useRef(null);
   const filterRef = useRef(null);
-  // Bản sao của files cho addFiles: thêm nhiều đợt liên tiếp thì phải biết đợt trước đã có ai,
-  // mà useCallback([]) thì đọc state cũ.
+  // Bản sao files CỦA BỘ ĐANG XEM cho addFiles: thêm nhiều đợt liên tiếp thì phải biết đợt trước
+  // đã có ai, mà useCallback([]) thì đọc state cũ.
   const filesRef = useRef([]);
+  const addFileRef = useRef(null);
+  // Chặn effect ghi localStorage chạy TRƯỚC khi khôi phục xong — không thì lần mount đầu
+  // (sessions còn rỗng) sẽ xoá sạch phiên đã lưu trước cả khi kịp đọc lại.
+  const restoredRef = useRef(false);
+
+  // ── Helpers cho map phiên/file theo bộ ──
+  const patchSession = (exam, patch) => setSessions((all) => ({
+    ...all,
+    [exam]: typeof patch === "function" ? patch(all[exam]) : { ...all[exam], ...patch },
+  }));
+  const dropSession = (exam) => setSessions((all) => {
+    const next = { ...all };
+    delete next[exam];
+    return next;
+  });
+  const setFilesFor = (exam, updater) => setFilesByExam((all) => ({
+    ...all,
+    [exam]: typeof updater === "function" ? updater(all[exam] || []) : updater,
+  }));
+
+  // ── Khung nhìn = bộ đang chọn trong combobox; các biến dưới đây đều là CỦA BỘ ĐÓ ──
+  const trimmedExam = examId.trim();
+  const viewSession = sessions[trimmedExam] || null;
+  const phase = viewSession?.phase || "idle";          // idle | uploading | polling | done
+  const batchId = viewSession?.batchId || null;
+  const progress = viewSession?.progress || null;
+  const parseErrors = viewSession?.parseErrors || [];
+  const files = filesByExam[trimmedExam] || [];
+  // Bộ (bất kỳ) đang chấm — toàn trang chỉ cho MỘT phiên chạy tại một thời điểm.
+  const runningExam = Object.keys(sessions).find(
+    (exam) => sessions[exam]?.phase === "uploading" || sessions[exam]?.phase === "polling"
+  ) || null;
+  const runningSession = runningExam ? sessions[runningExam] : null;
+  const blockedByRunningSession = !!runningExam && runningExam !== trimmedExam;
 
   // Người chấm chỉ cần MỘT câu trả lời: bài nào máy chấm không cho ra điểm. Backend phát hành
   // sẵn kết luận đó ở `outcome` (PENDING | SCORED | SYSTEM_BLOCKED | STOPPED).
@@ -205,33 +247,53 @@ export default function AutomaticGradingPage() {
     return () => { cancelled = true; };
   }, []);
 
-  // ── Khôi phục phiên chấm khi quay lại trang — CHỈ khi batch còn ĐANG chấm dở ──
-  // Batch đã chấm XONG (hoặc rỗng/đã xóa) sẽ KHÔNG khôi phục → F5 cho ra trang nhập mới;
-  // muốn xem lại kết quả thì vào trang Lịch sử.
+  // ── Khôi phục phiên chấm khi quay lại trang ──
+  // Giữ NGUYÊN màn hình sau F5 hoặc rời trang, kể cả khi đã chấm xong. Lưu dạng map nhiều phiên
+  // (v2); vẫn đọc được bản lưu một-phiên cũ. Phiên nào batch đã bị hủy/xóa thì rơi rụng tự nhiên.
   useEffect(() => {
-    let saved = null;
-    try { saved = JSON.parse(localStorage.getItem(ACTIVE_BATCH_KEY) || "null"); } catch {}
-    if (!saved?.batchId) return;
+    const saved = readStoredSessions();
+    const entries = Object.entries(saved.sessions);
+    if (!entries.length) { restoredRef.current = true; return; }
 
-    fetch(`${API_BASE}/batch/progress/${saved.batchId}`)
-      .then(r => r.json())
-      .then(data => {
-        const pending = (data?.queued || 0) + (data?.grading || 0);
-        // Lỗi đọc tiến độ / batch rỗng-đã xóa / đã chấm xong → bỏ phiên lưu, giữ nguyên trang nhập mới.
-        if (!data || data.total == null || pending === 0) {
-          try { localStorage.removeItem(ACTIVE_BATCH_KEY); } catch {}
-          return;
-        }
-        // Còn bài đang/chờ chấm → khôi phục để theo dõi tiếp tiến độ.
-        setExamId(saved.examId || "");
-        setParseErrors(saved.parseErrors || []);
-        setBatchId(saved.batchId);
-        setProgress(data);
-        setPhase("polling");
-        startPolling(saved.batchId);
-      })
-      .catch(() => {});
+    Promise.all(entries.map(async ([exam, info]) => {
+      if (!exam || !info?.batchId) return null;
+      try {
+        const data = await fetch(`${API_BASE}/batch/progress/${info.batchId}`).then((r) => r.json());
+        if (!data || data.total == null) return null;
+        const pending = (data.queued || 0) + (data.grading || 0);
+        return [exam, {
+          batchId: info.batchId,
+          phase: pending > 0 ? "polling" : "done",
+          progress: data,
+          parseErrors: info.parseErrors || [],
+        }];
+      } catch { return null; }
+    })).then((results) => {
+      const valid = results.filter(Boolean);
+      if (valid.length) {
+        setSessions(Object.fromEntries(valid));
+        const running = valid.find(([, s]) => s.phase === "polling");
+        // Ưu tiên mở đúng bộ đang chấm dở; không thì bộ dùng gần nhất.
+        const focus = running?.[0] || saved.lastExam || valid[valid.length - 1][0];
+        setExamId((prev) => prev || focus);
+        if (running) startPolling(running[1].batchId, running[0]);
+      }
+      restoredRef.current = true;
+    });
   }, []);
+
+  // Ghi lại map phiên mỗi khi nó đổi (batchId là đủ để dựng lại; progress đọc lại từ backend).
+  useEffect(() => {
+    if (!restoredRef.current) return;
+    const out = {};
+    for (const [exam, s] of Object.entries(sessions)) {
+      if (s?.batchId) out[exam] = { batchId: s.batchId, parseErrors: s.parseErrors || [] };
+    }
+    writeStoredSessions({ lastExam: examId.trim(), sessions: out });
+  }, [sessions, examId]);
+
+  // Đổi bộ đang xem → thông báo của bộ trước không được dính sang bộ sau.
+  useEffect(() => { setUploadErr(null); setAddNotice(null); setStopNotice(null); setRowFilter("all"); }, [examId]);
 
   // Dọn interval khi rời trang (tránh setState trên component đã unmount)
   useEffect(() => () => clearInterval(pollRef.current), []);
@@ -249,7 +311,7 @@ export default function AutomaticGradingPage() {
     };
   }, [filterOpen]);
 
-  // Helper function to make error messages human-readable
+  // Đổi thông báo lỗi của server sang câu người đọc hiểu được — dùng cho cột Ghi chú của CSV.
   const formatErrorMsg = (errStr) => {
     if (typeof errStr !== 'string') return errStr;
     const parts = errStr.split(': ');
@@ -302,8 +364,11 @@ export default function AutomaticGradingPage() {
         : "Không tìm thấy file .zip nào trong thư mục vừa chọn.");
       return;
     }
+    // File chọn vào BỘ ĐANG XEM — không có bộ thì chưa biết cất vào đâu.
+    const exam = examId.trim();
+    if (!exam) { setUploadErr("Chọn mã bộ testcase trước khi thêm bài."); return; }
 
-    if (fresh.length) setFiles((prev) => [...prev, ...fresh]);
+    if (fresh.length) setFilesFor(exam, (prev) => [...prev, ...fresh]);
     setUploadErr(null);
     const parts = [`Đã thêm ${fresh.length} bài`];
     if (duplicates) parts.push(`bỏ qua ${duplicates} bài trùng tên với bài đã có`);
@@ -313,7 +378,7 @@ export default function AutomaticGradingPage() {
         + (emptyFolders.length > 5 ? "…" : ""));
     }
     setUploadInfo(parts.join(" · "));
-  }, []);
+  }, [examId]);
 
   const onDrop = useCallback(async (e) => {
     e.preventDefault(); setDragging(false);
@@ -375,22 +440,28 @@ export default function AutomaticGradingPage() {
   }, [addFiles]);
 
   const removeFile = (key) => {
-    setFiles((current) => current.filter((entry) => entry.key !== key));
+    setFilesFor(examId.trim(), (current) => current.filter((entry) => entry.key !== key));
     setUploadInfo(null);           // tóm tắt của lần thêm trước không còn đúng nữa
   };
 
   // Upload + poll
   const execute = async () => {
-    if (phase === "uploading" || phase === "polling") return;   // chống bấm nhiều lần
-    if (!files.length) { setUploadErr("Chưa có file nào để chấm."); return; }
-    if (!examId.trim()) { setUploadErr("Vui lòng nhập mã bộ testcase."); return; }
+    // CHỐT exam ngay đầu hàm: mọi bước sau dùng đúng giá trị lúc bấm nút, kể cả khi combobox đổi
+    // giữa chừng.
+    const exam = examId.trim();
+    if (!exam) { setUploadErr("Vui lòng nhập mã bộ testcase."); return; }
+    // MỖI LÚC MỘT PHIÊN trên toàn trang (nút cũng đã khoá — đây là lưới an toàn).
+    if (runningExam) return;
+    const staged = filesByExam[exam] || [];
+    if (!staged.length) { setUploadErr("Chưa có file nào để chấm."); return; }
 
-    setPhase("uploading"); setUploadErr(null); setUploadInfo(null); setParseErrors([]); setStopNotice(null);
-    setRowFilter("all");
+    setUploadErr(null); setUploadInfo(null); setStopNotice(null); setAddNotice(null); setRowFilter("all");
+    // Phiên MỚI của chính bộ này thay phiên cũ CỦA NÓ — dữ liệu các bộ khác không bị đụng tới.
+    setSessions((all) => ({ ...all, [exam]: { batchId: null, phase: "uploading", progress: null, parseErrors: [] } }));
 
     const form = new FormData();
-    form.append("examId", examId.trim());
-    files.forEach((entry) => {
+    form.append("examId", exam);
+    staged.forEach((entry) => {
       form.append("files", entry.file, entry.file.name);
       form.append("usernames", entry.username);
     });
@@ -399,49 +470,106 @@ export default function AutomaticGradingPage() {
       const res = await fetch(`${API_BASE}/batch/upload`, { method: "POST", body: form });
       const data = await res.json();
 
-      if (!res.ok) { setUploadErr(data.error || "Lỗi server."); setPhase("idle"); return; }
+      // Upload hỏng → bỏ phiên nháp nhưng GIỮ danh sách file đã chọn để sửa rồi bấm lại.
+      if (!res.ok) { setUploadErr(data.error || "Lỗi server."); dropSession(exam); return; }
 
-      setBatchId(data.batchId);
-      if (data.parseErrors?.length) setParseErrors(data.parseErrors);
-
-      // Lưu lại để khi rời trang → quay lại vẫn còn kết quả (đọc lại từ backend)
-      try {
-        localStorage.setItem(ACTIVE_BATCH_KEY, JSON.stringify({
-          batchId: data.batchId, examId: examId.trim(), parseErrors: data.parseErrors || [],
-        }));
-      } catch (_) {}
-
-      setPhase("polling");
-      startPolling(data.batchId);
+      setFilesFor(exam, []);   // đã upload — danh sách chờ của bộ này về rỗng
+      patchSession(exam, { batchId: data.batchId, phase: "polling", parseErrors: data.parseErrors || [] });
+      startPolling(data.batchId, exam);
     } catch (e) {
       setUploadErr("Không kết nối được server: " + e.message);
-      setPhase("idle");
+      dropSession(exam);
     }
   };
 
-  const startPolling = (bid) => {
-    clearInterval(pollRef.current);   // tránh chạy 2 interval song song
+  /**
+   * Nạp THÊM bài vào phiên đang mở — thu bài làm nhiều đợt mà không phải tạo phiên mới.
+   *
+   * <p>Gửi thẳng lên `/batch/{id}/add` chứ không gom vào `files` như màn hình đầu: ở đây phiên đã
+   * chạy rồi, thêm một bước "chọn xong rồi bấm Bắt đầu" chỉ tạo cơ hội quên bấm.
+   */
+  const addMoreSubmissions = async (incoming) => {
+    const exam = examId.trim();
+    const bid = sessions[exam]?.batchId;
+    if (!bid || addingFiles) return;
+    // Bộ khác đang chấm: nạp thêm vào phiên này sẽ thành hai bộ chạy song song — chặn.
+    if (runningExam && runningExam !== exam) {
+      setAddNotice({ type: "err", text: `Bộ ${runningExam} đang được chấm — đợi xong mới nạp thêm bài cho bộ này.` });
+      return;
+    }
+    const submissions = Array.from(incoming || [])
+      .map((value) => (value?.file ? submissionFromFile(value.file, value.relativePath) : submissionFromFile(value)))
+      .filter(Boolean);
+    if (!submissions.length) {
+      setAddNotice({ type: "err", text: "Không tìm thấy bài hợp lệ. Mỗi thư mục sinh viên phải chứa một file .zip." });
+      return;
+    }
+
+    setAddingFiles(true);
+    setAddNotice(null);
+    const form = new FormData();
+    submissions.forEach((entry) => {
+      form.append("files", entry.file, entry.file.name);
+      form.append("usernames", entry.username);
+    });
+    try {
+      const res = await fetch(`${API_BASE}/batch/${encodeURIComponent(bid)}/add`, { method: "POST", body: form });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { setAddNotice({ type: "err", text: data?.error || "Không thêm được bài vào phiên chấm." }); return; }
+
+      if (data.parseErrors?.length) {
+        patchSession(exam, (s) => ({ ...s, parseErrors: [...(s?.parseErrors || []), ...data.parseErrors] }));
+      }
+      // `BatchSubmitResponse.totalQueued` — KHÔNG phải `queued`. Đọc sai khoá thì `undefined > 0`
+      // luôn false, nên trước đây thông báo hiện "0 bài" VÀ vòng poll không được bật lại: bài vẫn
+      // vào hàng đợi và chấm bình thường dưới Docker, chỉ có màn hình là đứng im.
+      const queued = data.totalQueued ?? 0;
+      setAddNotice({ type: "ok", text: `Đã đưa ${queued} bài vào hàng đợi chấm.` });
+      if (queued > 0) {
+        patchSession(exam, (s) => ({ ...s, phase: "polling" }));
+        await refreshProgress(bid, exam);   // cập nhật con số NGAY, không chờ hết nhịp 3 giây
+        startPolling(bid, exam);
+      }
+    } catch (e) {
+      setAddNotice({ type: "err", text: "Không kết nối được server: " + e.message });
+    } finally {
+      setAddingFiles(false);
+    }
+  };
+
+  /** Đọc tiến độ MỘT lần cho phiên của `exam`. Trả về số bài còn chờ/đang chấm (-1 nếu lỗi). */
+  const refreshProgress = async (bid, exam) => {
+    try {
+      const res = await fetch(`${API_BASE}/batch/progress/${bid}`);
+      const data = await res.json();
+      patchSession(exam, (s) => ({ ...s, progress: data }));
+      return (data.queued || 0) + (data.grading || 0);
+    } catch (_) {
+      return -1;
+    }
+  };
+
+  const startPolling = (bid, exam) => {
+    clearInterval(pollRef.current);   // toàn trang chỉ một phiên chạy → một interval là đủ
     pollRef.current = setInterval(async () => {
-      try {
-        const res = await fetch(`${API_BASE}/batch/progress/${bid}`);
-        const data = await res.json();
-        setProgress(data);
-        const pending = data.queued + data.grading;
-        if (pending === 0) {
-          clearInterval(pollRef.current);
-          setPhase("done");
-          // Đã chấm xong → xóa phiên lưu để lần F5 sau ra trang mới (kết quả vẫn xem ở trang Lịch sử).
-          try { localStorage.removeItem(ACTIVE_BATCH_KEY); } catch (_) {}
-        }
-      } catch (_) { }
+      const pending = await refreshProgress(bid, exam);
+      if (pending === 0) {
+        clearInterval(pollRef.current);
+        patchSession(exam, (s) => ({ ...s, phase: "done" }));
+        // GIỮ phiên trong map + localStorage: F5 hay đổi bộ xong quay lại vẫn thấy nguyên kết quả.
+        setFinishedNotice(exam);   // banner chuyển sang "đã chấm xong", không lặng lẽ biến mất
+      }
     }, 3000);
   };
 
-  const reset = () => {
-    clearInterval(pollRef.current);
-    try { localStorage.removeItem(ACTIVE_BATCH_KEY); } catch (_) {}
-    setFiles([]); setBatchId(null); setProgress(null);
-    setPhase("idle"); setUploadErr(null); setParseErrors([]); setStopNotice(null);
+  /**
+   * "+ Chấm kỳ thi mới": chỉ RỜI khung nhìn về form trắng (bỏ chọn bộ testcase) — KHÔNG xoá dữ
+   * liệu của bất kỳ phiên nào. Chọn lại một bộ đã từng chấm là thấy lại nguyên kết quả của nó;
+   * dữ liệu phiên chỉ mất khi chính bộ đó bắt đầu lượt chấm mới hoặc bấm Hủy phiên.
+   */
+  const startNewView = () => {
+    setExamId("");
+    setUploadErr(null); setStopNotice(null); setAddNotice(null);
     setRowFilter("all");
   };
 
@@ -459,7 +587,7 @@ export default function AutomaticGradingPage() {
       setStopNotice(`Đã dừng phiên chấm: ${skipped} bài chưa chấm bị bỏ qua`
         + (data.killedContainers ? `, ${data.killedContainers} bài đang chấm bị ngắt` : "")
         + ". Kết quả của các bài đã chấm xong vẫn được giữ nguyên.");
-      try { localStorage.removeItem(ACTIVE_BATCH_KEY); } catch (_) {}
+      // GIỮ phiên lưu: bài đã chấm xong vẫn còn đó, và giáo viên còn nạp thêm bài vào phiên này.
       // KHÔNG tự chuyển sang "done" ở đây: vòng poll sẵn có sẽ tự kết thúc khi container cuối
       // cùng thực sự thoát — nếu giết hụt thì người dùng phải thấy nó vẫn đang chạy.
     } catch (e) {
@@ -478,7 +606,12 @@ export default function AutomaticGradingPage() {
       const res = await fetch(`${API_BASE}/batch/${batchId}/cancel`, { method: "POST" });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) { setUploadErr(data.error || "Không hủy được phiên chấm."); return; }
-      reset();
+      // Hủy = dữ liệu phía server đã bị XÓA thật → gỡ phiên của đúng bộ này khỏi màn hình.
+      const exam = examId.trim();
+      if (runningExam === exam) clearInterval(pollRef.current);
+      dropSession(exam);
+      setFilesFor(exam, []);
+      setRowFilter("all");
       setStopNotice(`Đã hủy phiên chấm và xóa ${data.deleted || 0} bản ghi kết quả`
         + (data.keptManual ? `, giữ lại ${data.keptManual} bài đã chấm tay` : "") + ".");
     } catch (e) {
@@ -588,7 +721,6 @@ export default function AutomaticGradingPage() {
     } catch (_) {}
   };
 
-  const isRunning = phase === "uploading" || phase === "polling";
   const p = progress;
   const isPaused = p?.status === "PAUSED";
 
@@ -643,8 +775,8 @@ export default function AutomaticGradingPage() {
   // Chấm lại đúng nhóm bài hỏng sau khi đã sửa máy/testcase — việc gần như luôn phải làm sau một
   // sự cố hệ thống, nên đặt ngay cạnh cảnh báo thay vì bắt vào trang Lịch sử bấm từng bài.
   const regradeBlocked = async () => {
-    if (!blockedStudentIds.length || regrading) return;
-    const targetExam = p?.examId || examId.trim();
+    if (!blockedStudentIds.length || regrading || runningExam) return;
+    const targetExam = p?.examId || trimmedExam;
     if (!targetExam) return;
     setRegrading(true);
     try {
@@ -655,12 +787,13 @@ export default function AutomaticGradingPage() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) { setUploadErr(data?.error || "Không chấm lại được nhóm bài này."); return; }
-      setBatchId(data.batchId);
-      setProgress(null);
       setRowFilter("all");
       setStopNotice(`Đang chấm lại ${data.queued || 0} bài bị sự cố hệ thống.`);
-      setPhase("polling");
-      startPolling(data.batchId);
+      // Batch chấm lại THAY phiên hiện tại của đúng bộ này.
+      setSessions((all) => ({ ...all, [targetExam]: {
+        batchId: data.batchId, phase: "polling", progress: null, parseErrors: [],
+      } }));
+      startPolling(data.batchId, targetExam);
     } catch (e) {
       setUploadErr("Không kết nối được server: " + e.message);
     } finally {
@@ -698,11 +831,12 @@ export default function AutomaticGradingPage() {
             <div className="space-y-4 p-6">
               <div>
                 <label className="mb-2 block text-xs font-bold uppercase tracking-wider text-slate-500">Mã Bộ Testcase</label>
+                {/* Không khoá lúc đang chấm — đổi bộ chỉ đổi KHUNG NHÌN; phiên đang chạy vẫn
+                    chạy ngầm và quay lại đúng bộ đó là thấy lại tiến độ. */}
                 <ExamCombobox
                   options={examOptions}
                   value={examId}
                   onChange={setExamId}
-                  disabled={isRunning}
                   ariaLabel="Mã bộ testcase"
                   placeholder={examOptionsLoading ? "Đang tải danh sách bộ testcase..." : "Nhập hoặc chọn mã bộ testcase..."}
                 />
@@ -761,7 +895,7 @@ export default function AutomaticGradingPage() {
                 </div>
               )}
 
-              {/* File bị bỏ qua — phân loại rõ từng loại lỗi */}
+              {/* File bị bỏ qua — parseErrors giờ nằm TRONG phiên của từng bộ */}
               {parseErrors.length > 0 && (
                 <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
                   <h3 className="mb-3 flex items-center gap-2 text-sm font-bold text-amber-800">
@@ -785,11 +919,24 @@ export default function AutomaticGradingPage() {
                 </div>
               )}
 
+              {/* Đang xem bộ KHÁC trong khi một phiên còn chấm dở: chọn file trước được, nhưng
+                  chưa bắt đầu được — mỗi lúc chỉ một bộ được chấm. */}
+              {blockedByRunningSession && phase === "idle" && (
+                <div className="flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 p-3.5 text-amber-800">
+                  <Clock size={15} className="mt-0.5 shrink-0" />
+                  <p className="text-xs font-medium leading-relaxed">
+                    Bộ <span className="font-mono font-bold">{runningExam}</span> đang được chấm.
+                    Cứ chọn bài sẵn — đợi phiên đó hoàn tất là bấm chấm được ngay.
+                  </p>
+                </div>
+              )}
+
               {/* Nút Execute */}
               {phase === "idle" && (
                 <button
                   onClick={execute}
-                  disabled={files.length === 0}
+                  disabled={files.length === 0 || blockedByRunningSession}
+                  title={blockedByRunningSession ? `Đang chấm bộ ${runningExam} — đợi xong mới chấm bộ khác` : undefined}
                   className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-indigo-600 to-blue-600 px-4 py-3.5 font-semibold text-white shadow-sm shadow-indigo-600/20 transition-all hover:from-indigo-700 hover:to-blue-700 active:scale-[0.98] disabled:cursor-not-allowed disabled:from-slate-300 disabled:to-slate-300 disabled:shadow-none"
                 >
                   <Play size={18} />
@@ -808,8 +955,53 @@ export default function AutomaticGradingPage() {
             </div>
           </div>
 
+          {/* Thêm bài vào phiên ĐANG mở — thu bài nhiều đợt. Hiện cả khi đã chấm xong: bài mới
+              được đẩy vào hàng đợi và phiên tự mở lại, không phải tạo phiên khác rồi tự ghép
+              kết quả của hai phiên. */}
+          {(phase === "polling" || phase === "done") && (
+            <div className="card overflow-hidden">
+              <div className="flex items-center gap-2 border-b border-slate-100 bg-slate-50/60 px-5 py-3.5">
+                <UploadCloud size={16} className="text-indigo-500" />
+                <h3 className="text-sm font-bold text-slate-700">Thêm bài làm</h3>
+              </div>
+              <div className="space-y-3 p-4">
+                <button
+                  onClick={() => addFileRef.current?.click()}
+                  disabled={addingFiles || blockedByRunningSession}
+                  title={blockedByRunningSession ? `Đang chấm bộ ${runningExam} — đợi xong mới nạp thêm bài cho bộ này` : undefined}
+                  className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed border-slate-200 bg-slate-50 px-4 py-4 text-sm font-semibold text-slate-600 transition-all hover:border-indigo-300 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {addingFiles
+                    ? <><Loader2 size={16} className="animate-spin" /> Đang tải lên…</>
+                    : <><UploadCloud size={16} className="text-slate-400" /> Chọn thêm thư mục bài nộp</>}
+                </button>
+                <p className="text-xs text-slate-500">
+                  Bài mới được đưa vào cuối hàng đợi của phiên này. Sinh viên đã có kết quả mà nộp lại
+                  thì kết quả cũ bị ghi đè.
+                </p>
+                {addNotice && (
+                  <p className={`flex items-center gap-1.5 text-xs font-semibold ${
+                    addNotice.type === "ok" ? "text-emerald-600" : "text-rose-600"
+                  }`}>
+                    {addNotice.type === "ok" ? <CheckCircle size={13} /> : <AlertCircle size={13} />}
+                    {addNotice.text}
+                  </p>
+                )}
+                <input
+                  ref={addFileRef}
+                  type="file"
+                  multiple
+                  webkitdirectory=""
+                  directory=""
+                  className="hidden"
+                  onChange={(event) => { addMoreSubmissions(event.target.files); event.target.value = ""; }}
+                />
+              </div>
+            </div>
+          )}
+
           {/* Cấu hình tài nguyên Docker (CPU/RAM mỗi bài + số bài song song) */}
-          <PerformanceSettings running={isRunning} />
+          <PerformanceSettings running={!!runningExam} />
 
           {/* Danh sách file đang chọn */}
           {files.length > 0 && phase === "idle" && (
@@ -819,7 +1011,7 @@ export default function AutomaticGradingPage() {
                   <span className="text-xs font-bold uppercase tracking-wider text-slate-500">Bài nộp đã chọn ({files.length})</span>
                   <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500">{(totalSize / 1024 / 1024).toFixed(1)} MB</span>
                 </div>
-                <button onClick={() => setFiles([])} className="text-xs font-semibold text-rose-500 transition-colors hover:text-rose-700">Xóa hết</button>
+                <button onClick={() => setFilesFor(trimmedExam, [])} className="text-xs font-semibold text-rose-500 transition-colors hover:text-rose-700">Xóa hết</button>
               </div>
               <div className="custom-scrollbar overflow-y-auto p-2">
                 {files.map((entry) => (
@@ -853,6 +1045,67 @@ export default function AutomaticGradingPage() {
               </button>
             </div>
           )}
+          {/* Banner phiên chạy ngầm — nằm NGOÀI ternary để hiện ở MỌI khung nhìn không phải phiên
+              đó, phía trên các thẻ thống kê. Hai trạng thái: ĐANG chấm (indigo đậm) và VỪA chấm
+              xong (emerald) — chấm xong không được lặng lẽ biến mất, chỉ đóng khi người dùng bấm X
+              hoặc mở xem kết quả. */}
+          {blockedByRunningSession ? (
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-gradient-to-r from-indigo-600 to-blue-600 p-4 text-white shadow-lg shadow-indigo-600/25">
+              <div className="flex items-start gap-3">
+                <span className="relative mt-0.5 flex h-4 w-4 shrink-0">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-white/60"></span>
+                  <Loader2 size={16} className="relative animate-spin" />
+                </span>
+                <div>
+                  <p className="text-sm font-bold">
+                    Bộ <span className="rounded bg-white/20 px-1.5 py-0.5 font-mono">{runningExam}</span> đang được chấm
+                  </p>
+                  <p className="mt-0.5 text-xs text-indigo-100">
+                    {(runningSession?.progress?.done || 0) + (runningSession?.progress?.error || 0) + (runningSession?.progress?.manualReview || 0)}
+                    /{runningSession?.progress?.total || 0} bài đã xử lý — phiên vẫn chạy khi bạn xem bộ khác.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setExamId(runningExam)}
+                className="rounded-lg bg-white px-3.5 py-2 text-xs font-bold text-indigo-700 shadow-sm transition-all hover:bg-indigo-50 active:scale-95"
+              >
+                Xem phiên này
+              </button>
+            </div>
+          ) : finishedNotice && finishedNotice !== trimmedExam && sessions[finishedNotice] ? (
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 p-4 text-white shadow-lg shadow-emerald-500/25">
+              <div className="flex items-start gap-3">
+                <CheckCircle size={17} className="mt-0.5 shrink-0" />
+                <div>
+                  <p className="text-sm font-bold">
+                    Bộ <span className="rounded bg-white/20 px-1.5 py-0.5 font-mono">{finishedNotice}</span> đã chấm xong
+                  </p>
+                  <p className="mt-0.5 text-xs text-emerald-50">
+                    {sessions[finishedNotice]?.progress?.done || 0}/{sessions[finishedNotice]?.progress?.total || 0} bài
+                    có điểm{(sessions[finishedNotice]?.progress?.blocked || 0) > 0
+                      ? ` · ${sessions[finishedNotice].progress.blocked} bài lỗi hệ thống`
+                      : ""} — mở xem để tải kết quả hoặc chấm tiếp.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setExamId(finishedNotice)}
+                  className="rounded-lg bg-white px-3.5 py-2 text-xs font-bold text-emerald-700 shadow-sm transition-all hover:bg-emerald-50 active:scale-95"
+                >
+                  Xem kết quả
+                </button>
+                <button
+                  onClick={() => setFinishedNotice(null)}
+                  title="Đóng thông báo"
+                  className="rounded-lg p-2 text-emerald-100 transition-colors hover:bg-white/15 hover:text-white"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            </div>
+          ) : null}
           {(phase === "polling" || phase === "done") ? (
             <>
               {/* Thống kê nhanh — cũng LÀ bộ lọc: bấm thẻ nào thì bảng dưới hiện đúng nhóm đó,
@@ -945,7 +1198,7 @@ export default function AutomaticGradingPage() {
                       </>
                     )}
                     {phase === "done" && (
-                      <button onClick={reset} className="rounded-lg bg-indigo-50 px-4 py-2 text-sm font-semibold text-indigo-600 transition-colors hover:bg-indigo-100">
+                      <button onClick={startNewView} className="rounded-lg bg-indigo-50 px-4 py-2 text-sm font-semibold text-indigo-600 transition-colors hover:bg-indigo-100">
                         + Chấm kỳ thi mới
                       </button>
                     )}
@@ -989,7 +1242,7 @@ export default function AutomaticGradingPage() {
                       <div className="flex items-center gap-2">
                         <button
                           onClick={regradeBlocked}
-                          disabled={regrading || isRunning || !blockedStudentIds.length}
+                          disabled={regrading || !!runningExam || !blockedStudentIds.length}
                           title="Chấm lại đúng nhóm bài bị sự cố, sau khi đã xử lý nguyên nhân"
                           className="flex items-center gap-2 rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-semibold text-amber-800 transition-colors hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
                         >
@@ -1070,11 +1323,11 @@ export default function AutomaticGradingPage() {
                   <table className="w-full min-w-[680px] table-fixed border-collapse text-left">
                     <colgroup>
                       <col className="w-[22%]" />
-                      <col className="w-[19%]" />
+                      <col className="w-[18%]" />
                       <col className="w-[14%]" />
                       <col className="w-[25%]" />
                       <col className="w-[13%]" />
-                      <col className="w-[7%]" />
+                      <col className="w-[8%]" />
                     </colgroup>
                     <thead>
                       <tr className="border-b border-slate-100 bg-white text-xs font-bold uppercase tracking-wider text-slate-500">
@@ -1083,7 +1336,7 @@ export default function AutomaticGradingPage() {
                         <th className="px-3 py-3.5 text-center">Tỉ lệ Pass</th>
                         <th className="px-3 py-3.5 text-center">Sự cố hệ thống</th>
                         <th className="px-3 py-3.5 text-center">Điểm số</th>
-                        <th className="px-3 py-3.5 text-center">JSON</th>
+                        <th className="px-3 py-3.5 text-center"></th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
@@ -1220,12 +1473,14 @@ export default function AutomaticGradingPage() {
               </div>
             </>
           ) : (
-            <div className="flex h-full flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-300/70 bg-white/60 p-12 text-center backdrop-blur-sm">
-              <div className="mb-4 flex h-20 w-20 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-50 to-blue-50 text-indigo-400">
-                <BarChart2 size={36} />
+            <div className="space-y-4">
+              <div className="flex h-full min-h-[320px] flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-300/70 bg-white/60 p-12 text-center backdrop-blur-sm">
+                <div className="mb-4 flex h-20 w-20 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-50 to-blue-50 text-indigo-400">
+                  <BarChart2 size={36} />
+                </div>
+                <h3 className="mb-2 text-base font-bold text-slate-700">Chưa có phiên chấm bài nào cho bộ này</h3>
+                <p className="max-w-sm text-sm text-slate-500">Chọn mã bộ testcase và upload các thư mục username có chứa một file .zip của thư mục lib để bắt đầu chấm điểm tự động.</p>
               </div>
-              <h3 className="mb-2 text-base font-bold text-slate-700">Chưa có phiên chấm bài nào</h3>
-              <p className="max-w-sm text-sm text-slate-500">Chọn mã bộ testcase và upload các thư mục bài nộp để bắt đầu chấm điểm tự động.</p>
             </div>
           )}
         </div>

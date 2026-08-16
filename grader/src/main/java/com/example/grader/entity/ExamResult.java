@@ -43,6 +43,14 @@ public class ExamResult {
     @Column(name = "score")
     private Float score;
 
+    /**
+     * Điểm của lần chấm TRƯỚC, chỉ ghi khi bấm "Chấm lại" (xem {@code BatchGradingService}).
+     * Có nó thì màn hình Lịch sử mới so được lần chấm mới với lần cũ để cảnh báo lệch điểm —
+     * luồng chấm lại vốn xoá {@code score} về null trước khi chấm nên số cũ sẽ mất hẳn.
+     */
+    @Column(name = "previous_score")
+    private Float previousScore;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "status", length = 20)
     private GradingStatus status;

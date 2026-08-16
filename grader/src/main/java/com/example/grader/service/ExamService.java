@@ -828,7 +828,13 @@ public class ExamService {
         return any;
     }
 
-    /** ZIP 3 file testcase (exam_test.dart + grader.dart + skills_matrix.json) để tải về / upload lại; null nếu thiếu. */
+    /**
+     * ZIP testcase có thể tải về rồi upload lại mà không đổi hành vi chấm.
+     *
+     * <p>Ba file thực thi chưa đủ với common engine vì {@code contract.json} còn quyết định
+     * có bắt buộc ValueKey hay không và policy package của bài sinh viên. Bộ cũ chưa có
+     * contract được xuất kèm một contract tương thích với hành vi fallback hiện tại.</p>
+     */
     public byte[] zipTestcase(String examId) throws Exception {
         safeId(examId, "đề");
         Path dir = testcaseDirOf(examId);
@@ -836,9 +842,14 @@ public class ExamService {
         Map<String, String> files = new LinkedHashMap<>();
         for (String f : List.of("exam_test.dart", "grader.dart", "skills_matrix.json")) {
             Path p = dir.resolve(f);
-            if (Files.exists(p)) files.put(f, Files.readString(p, StandardCharsets.UTF_8));
+            if (!Files.isRegularFile(p)) return null;
+            files.put(f, Files.readString(p, StandardCharsets.UTF_8));
         }
-        return files.isEmpty() ? null : zipBytes(files);
+        Path contract = dir.resolve("contract.json");
+        files.put("contract.json", Files.exists(contract)
+                ? Files.readString(contract, StandardCharsets.UTF_8)
+                : "{\n  \"schema_version\": 1,\n  \"require_keys\": false\n}\n");
+        return zipBytes(files);
     }
 
     /** Đọc đề bài (de_bai.md) đã lưu trong handout/; null nếu đề chưa có (đề cũ / upload tay). */
@@ -885,7 +896,8 @@ public class ExamService {
 
     /**
      * Nhập bộ testcase viết thủ công từ ZIP. Tên/mã lấy từ tên file, ZIP chỉ dùng để vận chuyển
-     * rồi bị bỏ; trên đĩa chỉ giữ thư mục ba file để Build Sandbox mount trực tiếp.
+     * rồi bị bỏ; trên đĩa giữ ba file thực thi và contract đã cung cấp hoặc được backend tự sinh
+     * để Build Sandbox mount trực tiếp.
      */
     public synchronized Map<String, Object> importManualTestcase(
             String originalFilename, String teacherNote, byte[] zipBytes, String actor) throws Exception {
@@ -911,6 +923,7 @@ public class ExamService {
         try {
             unzip(zipBytes, staging);
             validateRequiredFiles(staging);
+            ensurePortableContract(staging);
             validateSkillCodes(staging);
 
             Files.createDirectories(examDir);
@@ -998,6 +1011,7 @@ public class ExamService {
         Files.createDirectories(testcaseDir);
 
         unzip(zipBytes, testcaseDir);
+        ensurePortableContract(testcaseDir);
         prepareSandboxFiles(testcaseDir);
 
         Exam exam = examRepository.findByExamId(examId).orElse(new Exam());
@@ -1675,6 +1689,34 @@ public class ExamService {
         if (!Files.readString(dir.resolve("grader.dart"), StandardCharsets.UTF_8).contains("main"))
             throw new IllegalArgumentException(
                     "grader.dart không có hàm main() — file có thể sai nội dung/encoding.");
+    }
+
+    /**
+     * Contract là tùy chọn khi upload. Bộ testcase không dùng Key vẫn chỉ cần ba file thực thi;
+     * backend tạo contract tương thích để hành vi đó được giữ nguyên khi tải xuống/upload lại.
+     * Nếu người dùng có gửi contract thì vẫn kiểm tra chặt để tránh âm thầm chấm sai policy.
+     */
+    private void ensurePortableContract(Path dir) throws Exception {
+        Path contract = dir.resolve("contract.json");
+        if (!Files.isRegularFile(contract)) {
+            Files.writeString(contract,
+                    "{\n  \"schema_version\": 1,\n  \"require_keys\": false\n}\n",
+                    StandardCharsets.UTF_8);
+            return;
+        }
+        if (Files.size(contract) == 0) {
+            throw new IllegalArgumentException("contract.json được cung cấp nhưng bị RỖNG (0 byte)");
+        }
+        try {
+            JsonNode root = mapper.readTree(Files.readString(contract, StandardCharsets.UTF_8));
+            if (root == null || !root.isObject()) {
+                throw new IllegalArgumentException("contract.json phải là một JSON object.");
+            }
+        } catch (IllegalArgumentException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IllegalArgumentException("contract.json không phải JSON hợp lệ: " + e.getMessage());
+        }
     }
 
     /**

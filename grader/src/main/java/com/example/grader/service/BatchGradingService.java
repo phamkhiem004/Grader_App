@@ -314,6 +314,89 @@ public class BatchGradingService {
         return new BatchSubmitResponse(batchId, pendingJobs.size(), parseErrors);
     }
 
+    /**
+     * NẠP THÊM bài vào một phiên chấm ĐÃ CÓ — dùng khi giáo viên thu bài làm nhiều đợt.
+     *
+     * <p>Nhận cả phiên đã chấm xong: phiên được MỞ LẠI ({@code IN_PROGRESS}, xoá {@code completedAt})
+     * để {@link #checkBatchComplete} còn đóng lại được lần nữa; nếu không, batch đứng nguyên
+     * trạng thái cũ và màn hình tiến độ không bao giờ chạy tiếp.
+     *
+     * <p>Cũng gỡ cờ "đã dừng": phiên từng bị bấm Dừng mà vẫn giữ cờ thì mọi bài mới nạp vào sẽ bị
+     * ghi CANCELLED ngay khi worker nhặt lên.
+     */
+    public BatchSubmitResponse addToBatch(List<MultipartFile> files, List<String> usernames,
+                                          String batchId) throws Exception {
+        if (usernames == null || usernames.size() != files.size())
+            throw new IllegalArgumentException("Mỗi file .zip phải đi kèm đúng tên thư mục username.");
+        GradingBatch batch = requireBatch(batchId);
+        if (batch.getStatus() == BatchStatus.CANCELLED)
+            throw new IllegalArgumentException("Phiên chấm đã bị hủy — hãy tạo phiên mới.");
+
+        String examId = batch.getExamId();
+        Exam exam = examRepo.findByExamId(examId)
+                .orElseThrow(() -> new IllegalArgumentException("Không tìm thấy đề thi: " + examId));
+        if (exam.getStatus() != ExamStatus.READY)
+            throw new IllegalStateException("Đề thi chưa sẵn sàng để chấm: " + exam.getStatus());
+
+        gradingService.clearCancelled(batchId);
+
+        List<String> parseErrors = new ArrayList<>();
+        List<GradingJob> pendingJobs = new ArrayList<>();
+        java.util.Set<String> seenInThisUpload = new java.util.LinkedHashSet<>();
+
+        for (int index = 0; index < files.size(); index++) {
+            MultipartFile file = files.get(index);
+            String filename = Objects.requireNonNull(file.getOriginalFilename());
+            String username = usernames.get(index) == null ? "" : usernames.get(index).trim();
+            String submissionLabel = username + "/" + filename;
+            try {
+                validateZip(file, filename);
+                StudentInfo info = parseStudentInfo(username);
+                if (!seenInThisUpload.add(info.studentId()))
+                    throw new IllegalArgumentException(
+                            "Trùng mã SV " + info.studentId() + " trong cùng lần upload");
+
+                // Cùng SV nộp lại ở đợt sau = GHI ĐÈ kết quả cũ, giống hệt luồng chấm lại.
+                ExamResult row = resultRepo
+                        .findByStudentIdAndExamIdAndMode(info.studentId(), examId, "submit")
+                        .orElseGet(ExamResult::new);
+                Path zip = stageZip(file, examId, batchId, info.studentId());
+
+                row.setStudentId(info.studentId());
+                row.setStudentName(info.studentName());
+                row.setExamId(examId);
+                row.setBatchId(batchId);
+                row.setStatus(GradingStatus.QUEUED);
+                row.setScore(null);
+                row.setDetails(null);
+                row.setResultJson(null);
+                row.setErrorLog(null);
+                row.setDiagnosticCode(null);
+                row.setDiagnosticOrigin(null);
+                row.setDiagnosticStage(null);
+                row.setRequiresManualReview(false);
+                resultRepo.save(row);
+
+                pendingJobs.add(new GradingJob(info.studentId(), info.studentName(),
+                        batchId, examId, zip.toString(), null));
+            } catch (Exception e) {
+                parseErrors.add(submissionLabel + ": " + e.getMessage());
+                log.warn("Skip {}: {}", submissionLabel, e.getMessage());
+            }
+        }
+
+        if (!pendingJobs.isEmpty()) {
+            batch.setTotalFiles((batch.getTotalFiles() == null ? 0 : batch.getTotalFiles()) + pendingJobs.size());
+            batch.setStatus(BatchStatus.IN_PROGRESS);
+            batch.setCompletedAt(null);
+            batchRepo.save(batch);
+            pendingJobs.forEach(jobQueue::add);
+        }
+
+        log.info("[{}] Nạp thêm {}/{} bài vào phiên đang có", batchId, pendingJobs.size(), files.size());
+        return new BatchSubmitResponse(batchId, pendingJobs.size(), parseErrors);
+    }
+
     // ── Xử lý 1 job (TUYỆT ĐỐI không ném exception ra ngoài → worker không bao giờ chết) ──
     private void processJob(GradingJob job) {
         boolean success = false;
@@ -1402,7 +1485,9 @@ public class BatchGradingService {
         Files.copy(oldZip, newZip, StandardCopyOption.REPLACE_EXISTING);
         snapshotTestcase(examId, newBatchId, tc);
 
-        // Ghi đè chính bản ghi này: trỏ sang batch mới, reset kết quả lần chấm trước
+        // Ghi đè chính bản ghi này: trỏ sang batch mới, reset kết quả lần chấm trước.
+        // Giữ lại điểm cũ TRƯỚC khi xoá — màn hình Lịch sử cần nó để cảnh báo lệch điểm.
+        r.setPreviousScore(r.getScore());
         r.setBatchId(newBatchId);
         r.setStatus(GradingStatus.QUEUED);
         r.setScore(null);
@@ -1458,6 +1543,7 @@ public class BatchGradingService {
                 Files.createDirectories(newZip.getParent());
                 Files.copy(oldZip, newZip, StandardCopyOption.REPLACE_EXISTING);
 
+                r.setPreviousScore(r.getScore());   // so sánh lệch điểm sau khi chấm lại
                 r.setBatchId(newBatchId);
                 r.setStatus(GradingStatus.QUEUED);
                 r.setScore(null); r.setDetails(null); r.setErrorLog(null); r.setResultJson(null);

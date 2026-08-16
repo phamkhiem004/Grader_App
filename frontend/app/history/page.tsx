@@ -9,10 +9,11 @@ import { Tooltip } from "@/components/ui/Tooltip";
 import CompetencyPanel, { CompetencyItem } from "@/components/grading/CompetencyPanel";
 import { gradingStatusLabel, gradingStatusTone, type GradingOutcome } from "@/lib/gradingStatus";
 import { csvRow, downloadCsv, formatGradingTime } from "@/lib/csv";
+import { findRunningSession, upsertStoredSession } from "@/lib/gradingSessions";
 import {
   FileJson, DownloadCloud, Search, ChevronRight,
-  CheckCircle, AlertCircle, Clock, Users, FileText, FileArchive,
-  BarChart3, X, Loader2, FileCode2, RotateCcw,
+  AlertCircle, Clock, Users, FileText, FileArchive,
+  BarChart3, X, Loader2, FileCode2, RotateCcw, PenLine, AlertTriangle,
 } from "lucide-react";
 
 interface ExamOption { examId: string; examName: string; }
@@ -51,6 +52,13 @@ interface ResultRow {
   studentId: string;
   studentName: string | null;
   score: number | null;
+  /** Điểm chấm tay (nếu giảng viên đã chốt) — endpoint vẫn trả, chỉ là type cũ chưa khai. */
+  manualScore: number | null;
+  /** Số tiêu chí đạt / tổng SAU chấm tay — backend đếm từ manual_json; null khi chưa chấm tay. */
+  manualPass?: number | null;
+  manualTotal?: number | null;
+  /** Điểm lần chấm TRƯỚC — chỉ có sau khi bấm "Chấm lại"; lệch với `score` = cảnh báo. */
+  previousScore?: number | null;
   status: "DONE" | "ERROR" | "MANUAL_REVIEW" | "GRADING" | "QUEUED" | "CANCELLED";
   /** Kết luận backend phát hành; vắng mặt ở dữ liệu cũ nên nhãn vẫn suy được từ status. */
   outcome?: GradingOutcome | null;
@@ -167,9 +175,27 @@ function passInfo(details: string | null): { pass: number; total: number } {
   }
 }
 
-// Nhãn dùng chung với trang Chấm tự động — xem lib/gradingStatus.
-function statusVi(row: Pick<ResultRow, "status" | "outcome">): string {
+/** Chấm lại ra điểm KHÁC lần trước — dấu hiệu bộ chấm/bài nộp không ổn định, cần xem lại. */
+function hasScoreDrift(row: Pick<ResultRow, "score" | "previousScore">): boolean {
+  return row.previousScore != null && row.score != null
+    && Math.abs(row.previousScore - row.score) > 0.001;
+}
+
+// Nhãn dùng chung với trang Chấm tự động — xem lib/gradingStatus. Hai trạng thái riêng của trang
+// này: "Lệch điểm" (chấm lại ra khác) ưu tiên trước vì là CẢNH BÁO cần xử lý, rồi tới "Edited"
+// (giảng viên đã sửa điểm ở trang Chấm thủ công) vốn chỉ là thông tin.
+function statusVi(row: Pick<ResultRow, "status" | "outcome" | "manualScore" | "score" | "previousScore">): string {
+  if (hasScoreDrift(row)) return "Lệch điểm";
+  if (row.manualScore != null) return "Edited";
   return gradingStatusLabel(row.status, row.outcome);
+}
+
+function formatHistoryTime(value: string | null): string {
+  if (!value) return "";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())} ${d.getDate()}/${d.getMonth() + 1}/${d.getFullYear()}`;
 }
 
 /**
@@ -249,7 +275,11 @@ export default function HistoryPage() {
     if (showSpinner) { setLoadingRows(true); setRows([]); }
     try {
       const data = await fetch(`${API_BASE}/results/exam/${encodeURIComponent(selected)}`).then((r) => r.json());
-      setRows(Array.isArray(data) ? data : []);
+      // CHỈ bài đã chấm xong mới vào Lịch sử. Bài đang chấm dở, bị dừng, hoặc máy chấm không cho
+      // ra điểm đều thuộc về màn hình Chấm tự động — nơi có cảnh báo sự cố và nút chấm lại theo
+      // nhóm. Lịch sử là sổ điểm, không phải nơi theo dõi sự cố.
+      const rowsOfExam = Array.isArray(data) ? data : [];
+      setRows(rowsOfExam.filter((r: ResultRow) => (r.outcome ? r.outcome === "SCORED" : r.status === "DONE")));
     } catch {
       setRows([]);
     } finally {
@@ -269,26 +299,109 @@ export default function HistoryPage() {
 
   const selectedName = exams.find((e) => e.examId === selected)?.examName || selected || "";
 
+  // ── Lọc theo THỜI GIAN CHẤM ──
+  // "Thời gian chấm" = updatedAt (lần chấm gần nhất — chấm lại cập nhật mốc này); dữ liệu cũ
+  // thiếu updatedAt thì rơi về submittedAt.
+  const [timeFilter, setTimeFilter] = useState<"all" | "today" | "yesterday" | "daybefore" | "custom">("all");
+  const [customFrom, setCustomFrom] = useState("");
+  const [customTo, setCustomTo] = useState("");
+  // Hai bộ lọc trạng thái, bật/tắt độc lập: đã sửa điểm tay ("Edited") và chấm lại lệch điểm.
+  const [editedFilter, setEditedFilter] = useState<"all" | "edited">("all");
+  const [driftFilter, setDriftFilter] = useState<"all" | "drift">("all");
+
+  // Đổi đề → về "Tất cả": giữ bộ lọc của đề trước dễ ra màn hình trống khó hiểu ở đề mới.
+  useEffect(() => {
+    setTimeFilter("all"); setCustomFrom(""); setCustomTo("");
+    setEditedFilter("all"); setDriftFilter("all");
+  }, [selected]);
+
+  const gradedAtMs = (r: ResultRow): number | null => {
+    const t = Date.parse(r.updatedAt || r.submittedAt || "");
+    return Number.isNaN(t) ? null : t;
+  };
+
+  // Mốc so sánh chốt theo ĐỢT NẠP DỮ LIỆU (không cần đồng hồ chạy realtime — bảng cũng chỉ đổi
+  // khi nạp lại).
+  const timeBounds = useMemo(() => {
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    return {
+      today: startOfToday,
+      // "Hôm qua"/"Hôm kia" là Ô CỬA SỔ đúng MỘT ngày, không phải "từ đó tới nay".
+      yesterdayStart: startOfToday - 86_400_000,
+      dayBeforeStart: startOfToday - 2 * 86_400_000,
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows]);
+
+  const matchTime = useMemo(() => {
+    return (r: ResultRow): boolean => {
+      if (timeFilter === "all") return true;
+      const t = gradedAtMs(r);
+      if (t == null) return false;
+      if (timeFilter === "custom") {
+        if (customFrom && t < new Date(`${customFrom}T00:00:00`).getTime()) return false;
+        if (customTo && t > new Date(`${customTo}T23:59:59.999`).getTime()) return false;
+        return true;
+      }
+      if (timeFilter === "today") return t >= timeBounds.today;
+      if (timeFilter === "yesterday") return t >= timeBounds.yesterdayStart && t < timeBounds.today;
+      return t >= timeBounds.dayBeforeStart && t < timeBounds.yesterdayStart;
+    };
+  }, [timeFilter, customFrom, customTo, timeBounds]);
+
+  // Đếm sẵn cho từng mốc — con số trên nút là câu trả lời trước cả khi bấm.
+  const timeCounts = useMemo(() => {
+    const count = (match: (t: number) => boolean) =>
+      rows.reduce((n, r) => { const t = gradedAtMs(r); return t != null && match(t) ? n + 1 : n; }, 0);
+    return {
+      all: rows.length,
+      today: count((t) => t >= timeBounds.today),
+      yesterday: count((t) => t >= timeBounds.yesterdayStart && t < timeBounds.today),
+      daybefore: count((t) => t >= timeBounds.dayBeforeStart && t < timeBounds.yesterdayStart),
+    };
+  }, [rows, timeBounds]);
+
+  const editedCount = useMemo(() => rows.filter((r) => r.manualScore != null).length, [rows]);
+  const driftCount = useMemo(() => rows.filter(hasScoreDrift).length, [rows]);
+
+  // Khoảng thời gian THẬT của dữ liệu — prefill cho "Tùy chỉnh" và gợi ý nên lọc từ đâu.
+  const dataRange = useMemo(() => {
+    const ts = rows.map(gradedAtMs).filter((t): t is number => t != null);
+    if (!ts.length) return null;
+    return { min: new Date(Math.min(...ts)), max: new Date(Math.max(...ts)) };
+  }, [rows]);
+
+  const toDateInput = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+  // "Tùy chỉnh" mở ra với khoảng ĐÚNG BẰNG dữ liệu đang có — chỉnh hẹp lại thay vì gõ từ con số 0.
+  const openCustomRange = () => {
+    setTimeFilter("custom");
+    if (!customFrom && dataRange) setCustomFrom(toDateInput(dataRange.min));
+    if (!customTo && dataRange) setCustomTo(toDateInput(dataRange.max));
+  };
+
   const filtered = useMemo(() => {
     const k = q.trim().toLowerCase();
-    if (!k) return rows;
     return rows.filter(
       (r) =>
-        r.studentId.toLowerCase().includes(k) ||
-        (r.studentName || "").toLowerCase().includes(k)
+        matchTime(r) &&
+        (editedFilter === "all" || r.manualScore != null) &&
+        (driftFilter === "all" || hasScoreDrift(r)) &&
+        (!k || r.studentId.toLowerCase().includes(k) || (r.studentName || "").toLowerCase().includes(k))
     );
-  }, [rows, q]);
+  }, [rows, q, matchTime, editedFilter, driftFilter]);
 
-  // Thống kê nhanh
-  const stats = useMemo(() => {
-    const done = rows.filter((r) => r.status === "DONE");
-    const error = rows.filter((r) => r.status === "ERROR").length;
-    const manual = rows.filter((r) => r.status === "MANUAL_REVIEW").length;
-    const avg = done.length
-      ? done.reduce((s, r) => s + (r.score || 0), 0) / done.length
-      : 0;
-    return { total: rows.length, done: done.length, error, manual, avg };
-  }, [rows]);
+  /** Bấm ô "Tổng bài đã chấm" → về màn hình TỔNG: xoá mọi bộ lọc đang áp. */
+  const showAllRows = () => {
+    setTimeFilter("all");
+    setCustomFrom("");
+    setCustomTo("");
+    setEditedFilter("all");
+    setDriftFilter("all");
+    setQ("");
+  };
 
   // Mở modal chi tiết: tải result_json đầy đủ (có competency_assessment + test_cases)
   const openDetail = async (r: ResultRow) => {
@@ -341,6 +454,13 @@ export default function HistoryPage() {
   // Chấm lại 1 bài từ zip đã lưu, rồi poll tiến độ đến khi xong → refetch danh sách
   const regrade = async (r: ResultRow) => {
     if (!selected || regradingId) return;
+    // Luật của màn hình Chấm tự động: mỗi lúc chỉ MỘT phiên chạy. Kiểm trước khi tạo phiên mới,
+    // nếu không màn hình đó sẽ có hai phiên cùng "đang chấm" mà chỉ một cái được cập nhật.
+    const running = await findRunningSession(API_BASE);
+    if (running) {
+      alert(`Bộ ${running.examId} đang được chấm ở màn hình "Chấm bài tự động". Đợi phiên đó xong rồi chấm lại bài này.`);
+      return;
+    }
     setRegradingId(r.studentId);
     setRows((list) => list.map((x) => (x.studentId === r.studentId ? { ...x, status: "GRADING", score: null, errorLog: null } : x)));
     try {
@@ -348,6 +468,8 @@ export default function HistoryPage() {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Chấm lại thất bại");
       const batchId = data.batchId as string;
+      // Đăng ký phiên vào kho dùng chung → mở "Chấm bài tự động" là thấy bài đang chấm.
+      upsertStoredSession(selected, batchId);
       for (let i = 0; i < 90; i++) {
         await new Promise((rs) => setTimeout(rs, 2000));
         const pr = await fetch(`${API_BASE}/batch/progress/${encodeURIComponent(batchId)}`).then((x) => (x.ok ? x.json() : null)).catch(() => null);
@@ -373,6 +495,11 @@ export default function HistoryPage() {
   // Chấm lại NHIỀU bài đã chọn (gộp 1 batch); auto-poll tự cập nhật tới khi xong.
   const regradeSelected = async () => {
     if (!selected || selectedIds.size === 0) return;
+    const running = await findRunningSession(API_BASE);
+    if (running) {
+      alert(`Bộ ${running.examId} đang được chấm ở màn hình "Chấm bài tự động". Đợi phiên đó xong rồi chấm lại.`);
+      return;
+    }
     const ids = [...selectedIds];
     setRows((list) => list.map((r) => (ids.includes(r.studentId) ? { ...r, status: "GRADING", score: null, errorLog: null } : r)));
     setSelectedIds(new Set());
@@ -382,6 +509,8 @@ export default function HistoryPage() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Chấm lại thất bại");
+      // Cùng lý do với chấm lại một bài: phiên phải nhìn thấy được ở màn hình theo dõi.
+      if (data.batchId) upsertStoredSession(selected, data.batchId as string);
       if (Array.isArray(data.skipped) && data.skipped.length)
         alert(`Đã bỏ qua ${data.skipped.length} bài (mất file/bộ testcase): ${data.skipped.join(", ")}`);
     } catch (e) {
@@ -430,36 +559,6 @@ export default function HistoryPage() {
     } catch (error: any) {
       alert(error?.message || "Không xuất được thư mục JSON.");
     }
-  };
-
-  // Xuất CSV toàn bộ đề
-  const exportCSV = () => {
-    if (!rows.length) return;
-    const header = csvRow([
-      "STT",
-      "Tên người dùng",
-      "Điểm",
-      "Trạng thái",
-      "Số câu đúng",
-      "Tổng số câu",
-      "Bắt đầu chấm",
-      "Chấm xong",
-    ]);
-    const body = rows.map((r, idx) => {
-      const { pass, total } = passInfo(r.details);
-      return csvRow([
-        idx + 1,
-        r.studentName || r.studentId,          // tên thư mục bài nộp
-        r.score != null ? r.score.toFixed(1) : "",
-        statusVi(r),
-        pass,
-        total,
-        formatGradingTime(r.gradingStartedAt),
-        formatGradingTime(r.gradingFinishedAt),
-      ]);
-    });
-    const dateStr = new Date().toISOString().split("T")[0];
-    downloadCsv([header, ...body].join("\n"), `${selected}_lichsu_${dateStr}.csv`);
   };
 
   /**
@@ -524,6 +623,66 @@ export default function HistoryPage() {
     }
   };
 
+  /**
+   * Xuất bảng điểm — theo ĐÚNG danh sách đang hiển thị (đã qua lọc), "cái bạn thấy là cái bạn
+   * tải về".
+   *
+   * <p>Xuất dạng bảng HTML lưu đuôi .xls thay vì CSV thuần: yêu cầu là dòng đã sửa điểm phải TÔ
+   * VÀNG, mà CSV là văn bản trần không mang được màu. Excel/LibreOffice/Google Sheets đều mở
+   * bảng HTML này và giữ nguyên màu nền; Excel có thể hỏi xác nhận đuôi file — bấm Yes là mở.
+   */
+  const exportExcel = () => {
+    if (!filtered.length) return;
+    const esc = (v: string | number) =>
+      String(v).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    // Cỡ chữ phải khai bằng ĐƠN VỊ pt: Excel đọc px sai (12px ra cỡ 6), còn bỏ trống thì nó rơi
+    // về mặc định 10 của bộ nhập HTML.
+    const BASE = "border:1px solid #CBD5E1;font-size:12.0pt;";
+    // `mso-number-format:'\@'` = ép ô dạng CHỮ. CHỈ dùng cho ô thật sự là chuỗi ("13/30", "1.6/1.4",
+    // mốc thời gian) — thiếu nó thì Excel đổi "12/30" thành ngày 30 tháng 12. Áp nhầm vào một con
+    // số đơn thuần thì ngược lại: Excel gắn cờ "số lưu dạng chữ" (tam giác xanh góc ô).
+    const td = (v: string | number, opts: { yellow?: boolean; text?: boolean } = {}) =>
+      `<td style="${BASE}${opts.yellow ? "background:#FEF08A;" : ""}${
+        opts.text ? "mso-number-format:'\\@';" : ""}">${esc(v)}</td>`;
+    const headerCells = ["STT", "Mã SV", "Điểm", "Trạng thái", "TC RATE", "Thời gian chấm"]
+      .map((h) => `<th style="${BASE}background:#EEF2FF">${h}</th>`)
+      .join("");
+    const bodyRows = filtered
+      .map((r, idx) => {
+        const { pass, total } = passInfo(r.details);
+        const edited = r.manualScore != null;
+        // Điểm: bài đã sửa ghi "mới/cũ" để nhìn phát biết cả hai; bài thường giữ một số.
+        const score = edited
+          ? `${r.manualScore!.toFixed(1)}/${r.score != null ? r.score.toFixed(1) : "—"}`
+          : r.score != null ? r.score.toFixed(1) : "";
+        const tcPass = edited && r.manualTotal ? (r.manualPass ?? 0) : pass;
+        const tcTotal = edited && r.manualTotal ? r.manualTotal : total;
+        // Vàng tô TỪNG Ô, không tô <tr>: nền đặt ở hàng bị Excel kéo dài hết chiều ngang sheet.
+        const y = { yellow: edited };
+        const cells = [
+          td(idx + 1, y),
+          td(r.studentId, y),
+          // Bài đã sửa: "1.6/1.4" là chuỗi thật → ép chữ. Bài thường: để nguyên SỐ, có vậy Excel
+          // mới canh phải và không gắn cờ "số lưu dạng chữ".
+          td(score, edited ? { ...y, text: true } : y),
+          td(statusVi(r), y),
+          td(`${tcPass}/${tcTotal}`, { ...y, text: true }),
+          td(formatHistoryTime(r.updatedAt || r.submittedAt), { ...y, text: true }),
+        ].join("");
+        return `<tr>${cells}</tr>`;
+      })
+      .join("");
+    const html = `﻿<html><head><meta charset="utf-8"></head><body>` +
+      `<table style="border-collapse:collapse">` +
+      `<thead><tr>${headerCells}</tr></thead><tbody>${bodyRows}</tbody></table></body></html>`;
+    const blob = new Blob([html], { type: "application/vnd.ms-excel;charset=utf-8" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    const dateStr = new Date().toISOString().split("T")[0];
+    a.download = `${selected}_lichsu_${dateStr}.xls`;
+    a.click();
+  };
+
   return (
     <SidebarLayout
       title="Lịch sử chấm"
@@ -581,14 +740,106 @@ export default function HistoryPage() {
 
         {/* Cột phải: danh sách bài đã chấm của đề */}
         <div className="min-w-0 space-y-6">
-          {/* Thống kê nhanh */}
-          <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-            <MiniStat label="Tổng bài" value={stats.total} icon={Users} tone="slate" />
-            <MiniStat label="Đã xong" value={stats.done} icon={CheckCircle} tone="emerald" />
-            {/* Gộp ERROR + MANUAL_REVIEW: cả hai đều là "máy chưa cho ra điểm", người chấm xử lý
-                y như nhau. Tách hai ô chỉ bắt họ tự cộng lại. */}
-            <MiniStat label="Lỗi hệ thống" value={stats.manual + stats.error} icon={AlertCircle} tone="amber" />
-            <MiniStat label="Điểm TB" value={stats.avg.toFixed(1)} icon={Clock} tone="indigo" />
+          {/* Tổng bài (bấm = về màn hình tổng) · EDITED (bấm = bật/tắt lọc bài đã sửa) · lọc
+              thời gian chấm chiếm phần còn lại. EDITED đứng TRƯỚC bộ lọc thời gian và là box
+              riêng cùng khuôn với "Tổng bài đã chấm" — "Tổng" đã đóng vai Tất cả nên bên trạng
+              thái chỉ còn đúng một nút lọc. */}
+          {/* Ba ô lọc BẰNG NHAU (mỗi ô 1 cột), khu lọc thời gian thu còn 2 cột: ba trạng thái là
+              thứ bấm thường xuyên, còn mốc thời gian chỉ là vài chip nên không cần rộng. */}
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-5">
+            <MiniStat
+              label="Tổng bài đã chấm"
+              value={rows.length}
+              icon={Users}
+              tone="slate"
+              onClick={showAllRows}
+              title="Xem toàn bộ bài (xoá mọi bộ lọc)"
+            />
+            <MiniStat
+              label="Edited"
+              value={editedCount}
+              icon={PenLine}
+              tone="violet"
+              active={editedFilter === "edited"}
+              onClick={() => setEditedFilter((v) => (v === "edited" ? "all" : "edited"))}
+              title="Chỉ hiện bài đã được sửa điểm chấm tay — bấm lần nữa để bỏ lọc"
+            />
+            <MiniStat
+              label="Lệch điểm"
+              value={driftCount}
+              icon={AlertTriangle}
+              tone="orange"
+              active={driftFilter === "drift"}
+              onClick={() => setDriftFilter((v) => (v === "drift" ? "all" : "drift"))}
+              title="Chỉ hiện bài chấm lại ra điểm khác lần trước — bấm lần nữa để bỏ lọc"
+            />
+            <div className="card p-4 md:col-span-2">
+              <div className="mb-2.5 flex flex-wrap items-center justify-between gap-2">
+                <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                  <Clock size={12} /> Lọc theo thời gian chấm
+                </p>
+                {dataRange && (
+                  <p className="text-[11px] text-slate-400">
+                    Dữ liệu từ <span className="font-semibold text-slate-500">{formatHistoryTime(dataRange.min.toISOString())}</span>
+                    {" "}đến <span className="font-semibold text-slate-500">{formatHistoryTime(dataRange.max.toISOString())}</span>
+                  </p>
+                )}
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {([
+                  { key: "all", label: "Tất cả", count: timeCounts.all },
+                  { key: "today", label: "Hôm nay", count: timeCounts.today },
+                  { key: "yesterday", label: "Hôm qua", count: timeCounts.yesterday },
+                  { key: "daybefore", label: "Hôm kia", count: timeCounts.daybefore },
+                ] as const).map((c) => (
+                  <button
+                    key={c.key}
+                    onClick={() => setTimeFilter(c.key)}
+                    className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors ${
+                      timeFilter === c.key
+                        ? "border-indigo-300 bg-indigo-50 text-indigo-700"
+                        : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+                    }`}
+                  >
+                    {c.label} ({c.count})
+                  </button>
+                ))}
+                <button
+                  onClick={openCustomRange}
+                  className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors ${
+                    timeFilter === "custom"
+                      ? "border-indigo-300 bg-indigo-50 text-indigo-700"
+                      : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+                  }`}
+                >
+                  Tùy chỉnh…
+                </button>
+                {timeFilter === "custom" && (
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <input
+                      type="date"
+                      value={customFrom}
+                      max={customTo || undefined}
+                      onChange={(e) => setCustomFrom(e.target.value)}
+                      className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700 outline-none focus:border-indigo-400"
+                    />
+                    <span className="text-xs text-slate-400">→</span>
+                    <input
+                      type="date"
+                      value={customTo}
+                      min={customFrom || undefined}
+                      onChange={(e) => setCustomTo(e.target.value)}
+                      className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700 outline-none focus:border-indigo-400"
+                    />
+                  </div>
+                )}
+              </div>
+              {(timeFilter !== "all" || editedFilter !== "all" || driftFilter !== "all") && (
+                <p className="mt-2 text-xs font-medium text-indigo-600">
+                  {filtered.length}/{rows.length} bài khớp bộ lọc đang chọn
+                </p>
+              )}
+            </div>
           </div>
 
           <div className="card overflow-hidden">
@@ -616,11 +867,12 @@ export default function HistoryPage() {
                   <FileArchive size={15} /> Xuất JSON
                 </button>
                 <button
-                  onClick={exportCSV}
+                  onClick={exportExcel}
                   disabled={!rows.length}
+                  title="Xuất bảng điểm Excel — dòng đã sửa điểm được tô vàng"
                   className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 shadow-sm transition-all hover:text-slate-900 hover:shadow active:scale-95 disabled:opacity-50"
                 >
-                  <DownloadCloud size={15} /> Xuất CSV
+                  <DownloadCloud size={15} /> Xuất Excel
                 </button>
                 {selectedIds.size > 0 && (
                   <button
@@ -700,6 +952,11 @@ export default function HistoryPage() {
                       const isDone = r.status === "DONE";
                       const isError = r.status === "ERROR";
                       const isManual = r.status === "MANUAL_REVIEW";
+                      // Đã sửa điểm ở trang Chấm thủ công → trạng thái "Edited", số liệu mới đè số cũ.
+                      const isEdited = r.manualScore != null;
+                      const isDrift = hasScoreDrift(r);
+                      const manualRatio = r.manualTotal
+                        ? Math.round(((r.manualPass || 0) / r.manualTotal) * 100) : 0;
                       const statusTone = gradingStatusTone(r.status, r.outcome);
                       const initials = (r.studentName || r.studentId || "?").trim().charAt(0).toUpperCase();
                       return (
@@ -724,15 +981,49 @@ export default function HistoryPage() {
                             </div>
                           </td>
                           <td className="px-6 py-3.5 text-center">
+                            {/* "Lệch điểm" là CẢNH BÁO nên đứng trước "Edited"; tooltip nói rõ
+                                lệch từ đâu tới đâu để bấm vào xem là biết soi cái gì. */}
                             <span
-                              className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${statusTone.pill}`}
+                              title={isDrift
+                                ? `Chấm lại ra điểm khác: ${r.previousScore!.toFixed(1)} → ${r.score!.toFixed(1)}`
+                                : undefined}
+                              className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${
+                                isDrift ? "bg-orange-100 text-orange-700"
+                                  : isEdited ? "bg-violet-100 text-violet-700"
+                                  : statusTone.pill
+                              }`}
                             >
-                              <span className={`h-1.5 w-1.5 rounded-full ${statusTone.dot}`}></span>
-                              {gradingStatusLabel(r.status, r.outcome)}
+                              {isDrift
+                                ? <AlertTriangle size={12} className="shrink-0" />
+                                : <span className={`h-1.5 w-1.5 rounded-full ${isEdited ? "bg-violet-500" : statusTone.dot}`}></span>}
+                              {isDrift ? "Lệch điểm" : isEdited ? "Edited" : gradingStatusLabel(r.status, r.outcome)}
                             </span>
                           </td>
                           <td className="px-6 py-3.5 text-center">
-                            {isDone ? (
+                            {isEdited && r.manualTotal ? (
+                              /* Thanh MỚI (có màu) nằm trên, thanh CŨ (xám) nằm dưới. */
+                              <div className="inline-block space-y-1 text-left">
+                                <div className="flex items-center gap-2">
+                                  <div className="h-1.5 w-20 overflow-hidden rounded-full bg-slate-100">
+                                    <div
+                                      className={`h-full rounded-full ${manualRatio >= 50 ? "bg-emerald-500" : "bg-amber-500"}`}
+                                      style={{ width: `${manualRatio}%` }}
+                                    ></div>
+                                  </div>
+                                  <span className="text-xs font-semibold text-slate-700">
+                                    {r.manualPass}/{r.manualTotal}
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-2" title="Kết quả chấm tự động trước khi sửa">
+                                  <div className="h-1.5 w-20 overflow-hidden rounded-full bg-slate-100">
+                                    <div className="h-full rounded-full bg-slate-300" style={{ width: `${ratio}%` }}></div>
+                                  </div>
+                                  <span className="text-[11px] font-medium text-slate-400">
+                                    {pass}/{total}
+                                  </span>
+                                </div>
+                              </div>
+                            ) : isDone ? (
                               <div className="flex items-center gap-2">
                                 <div className="h-1.5 w-20 overflow-hidden rounded-full bg-slate-100">
                                   <div
@@ -753,7 +1044,26 @@ export default function HistoryPage() {
                             )}
                           </td>
                           <td className="px-6 py-3.5 text-center">
-                            {r.score != null ? (
+                            {isEdited ? (
+                              /* [Điểm mới]/[Điểm cũ] — mới giữ màu theo ngưỡng, cũ chuyển xám. */
+                              <span
+                                className="inline-flex items-baseline gap-0.5"
+                                title={`Điểm chấm tay ${r.manualScore!.toFixed(1)} · điểm tự động cũ ${r.score != null ? r.score.toFixed(1) : "—"}`}
+                              >
+                                <span
+                                  className={`inline-block rounded-lg px-2.5 py-1 text-sm font-bold ${
+                                    r.manualScore! >= PASS_THRESHOLD
+                                      ? "bg-emerald-50 text-emerald-600"
+                                      : "bg-rose-50 text-rose-600"
+                                  }`}
+                                >
+                                  {r.manualScore!.toFixed(1)}
+                                </span>
+                                <span className="text-sm font-semibold text-slate-400">
+                                  /{r.score != null ? r.score.toFixed(1) : "—"}
+                                </span>
+                              </span>
+                            ) : r.score != null ? (
                               <span
                                 className={`inline-block rounded-lg px-2.5 py-1 text-sm font-bold ${
                                   r.score >= PASS_THRESHOLD
@@ -1091,9 +1401,10 @@ function FileViewer({ files, active, setActive, empty }: {
 }
 
 function MiniStat({
-  label, value, icon: Icon, tone,
+  label, value, icon: Icon, tone, onClick, title, active,
 }: {
   label: string; value: number | string; icon: React.ElementType; tone: string;
+  onClick?: () => void; title?: string; active?: boolean;
 }) {
   const tones: Record<string, string> = {
     slate: "bg-slate-100 text-slate-500",
@@ -1101,9 +1412,11 @@ function MiniStat({
     amber: "bg-amber-100 text-amber-700",
     rose: "bg-rose-100 text-rose-600",
     indigo: "bg-indigo-100 text-indigo-600",
+    violet: "bg-violet-100 text-violet-600",
+    orange: "bg-orange-100 text-orange-600",
   };
-  return (
-    <div className="card p-5">
+  const body = (
+    <>
       <div className="mb-3 flex items-center justify-between">
         <p className="text-xs font-bold uppercase tracking-wider text-slate-500">{label}</p>
         <span className={`flex h-8 w-8 items-center justify-center rounded-lg ${tones[tone] || tones.slate}`}>
@@ -1111,6 +1424,23 @@ function MiniStat({
         </span>
       </div>
       <p className="text-3xl font-bold tracking-tight text-slate-800">{value}</p>
-    </div>
+    </>
+  );
+  if (!onClick) return <div className="card p-5">{body}</div>;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      aria-pressed={active}
+      // Viền tím khi filter đang bật — không có dấu hiệu thì bấm xong bảng đổi mà không rõ vì sao.
+      className={`card p-5 text-left transition-all active:scale-[0.99] ${
+        active
+          ? `ring-2 ring-offset-1 ${tone === "orange" ? "ring-orange-400" : "ring-violet-400"}`
+          : "hover:-translate-y-0.5 hover:shadow-md"
+      }`}
+    >
+      {body}
+    </button>
   );
 }

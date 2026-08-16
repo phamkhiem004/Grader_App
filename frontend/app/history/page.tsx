@@ -11,7 +11,7 @@ import { gradingStatusLabel, gradingStatusTone, type GradingOutcome } from "@/li
 import { csvRow, downloadCsv, formatGradingTime } from "@/lib/csv";
 import { findRunningSession, upsertStoredSession } from "@/lib/gradingSessions";
 import {
-  FileJson, DownloadCloud, Search, ChevronRight,
+  FileJson, Search, ChevronRight,
   AlertCircle, Clock, Users, FileText, FileArchive,
   BarChart3, X, Loader2, FileCode2, RotateCcw, PenLine, AlertTriangle,
 } from "lucide-react";
@@ -198,19 +198,6 @@ function formatHistoryTime(value: string | null): string {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())} ${d.getDate()}/${d.getMonth() + 1}/${d.getFullYear()}`;
 }
 
-/**
- * Trạng thái một testcase cho file xuất ra.
- *
- * <p>`not_run` được giữ riêng chứ không gộp vào fail: nó nghĩa là testcase CHƯA CÓ CƠ HỘI chạy
- * (bài không build được…), ghi thành "fail" sẽ đọc ra thành "sai 12 chỗ khác nhau" trong khi chỉ
- * có đúng một nguyên nhân gốc — cùng lý do modal chi tiết tô nó màu xám.
- */
-function testcaseStatus(tc: TestCaseItem): "success" | "fail" | "not_run" {
-  const status = String(tc.status || "").toLowerCase();
-  if (status === "passed" || status === "pass") return "success";
-  return status === "not_run" ? "not_run" : "fail";
-}
-
 export default function HistoryPage() {
   const [exams, setExams] = useState<ExamOption[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
@@ -234,7 +221,6 @@ export default function HistoryPage() {
   const [activeSub, setActiveSub] = useState(0);
   const [activeTc, setActiveTc] = useState(0);
   const [regradingId, setRegradingId] = useState<string | null>(null);
-  const [exportingId, setExportingId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   // Khóa cuộn trang nền khi mở modal
@@ -562,125 +548,34 @@ export default function HistoryPage() {
   };
 
   /**
-   * CSV của MỘT bài: một dòng tổng hợp, rồi bảng liệt kê từng testcase đạt/không.
-   *
-   * <p>Phải tải result_json về mới có danh sách testcase (bảng lịch sử chỉ giữ số đếm cho nhẹ),
-   * nên nút này gọi mạng chứ không xuất được ngay từ dữ liệu đang hiển thị.
+   * Bảng điểm CSV — theo ĐÚNG danh sách đang hiển thị (đã qua lọc), cùng cột với CSV của trang
+   * Chấm tự động để hai file ghép được vào nhau.
    */
-  const exportRowCSV = async (r: ResultRow) => {
-    if (!selected) return;
-    setExportingId(r.studentId);
-    try {
-      let tests: TestCaseItem[] = [];
-      let passed: number | null = null;
-      let failed: number | null = null;
-      if (r.hasJson) {
-        const res = await fetch(
-          `${API_BASE}/results/${encodeURIComponent(selected)}/${encodeURIComponent(r.studentId)}`);
-        if (res.ok) {
-          const data = JSON.parse(await res.text()) as DetailData;
-          tests = data.test_cases || [];
-          passed = data.grading_result?.passed_tests ?? null;
-          failed = data.grading_result?.failed_tests ?? null;
-        }
-      }
-      // Bài chưa có JSON (đang chờ, lỗi hệ thống) vẫn xuất được phần tổng hợp — đếm từ `details`.
-      const counted = passInfo(r.details);
-      const statuses = tests.map(testcaseStatus);
-      const pass = passed ?? (tests.length
-        ? statuses.filter((s) => s === "success").length : counted.pass);
-      const fail = failed ?? (tests.length
-        ? statuses.filter((s) => s === "fail").length
-        : Math.max(0, counted.total - counted.pass));
-
-      const lines = [
-        csvRow(["Tên người dùng", "Điểm", "Trạng thái", "Số câu đúng", "Số câu sai",
-          "Bắt đầu chấm", "Chấm xong"]),
-        csvRow([
-          r.studentName || r.studentId,
-          r.score != null ? r.score.toFixed(1) : "",
-          statusVi(r),
-          pass,
-          fail,
-          formatGradingTime(r.gradingStartedAt),
-          formatGradingTime(r.gradingFinishedAt),
-        ]),
-        "",
-        csvRow(["Testcase", "Trạng thái"]),
-        ...tests.map((tc, i) => csvRow([
-          tc.test_id || tc.name || `testcase-${String(i + 1).padStart(2, "0")}`,
-          statuses[i],
-        ])),
-      ];
-      if (!tests.length) lines.push(csvRow(["(chưa có kết quả testcase)", ""]));
-
-      const name = (r.studentName || r.studentId).replace(/[\\/:*?"<>|]+/g, "_");
-      downloadCsv(lines.join("\n"), `${selected}_${name}.csv`);
-    } catch (e) {
-      alert((e as Error).message || "Không xuất được CSV của bài này.");
-    } finally {
-      setExportingId(null);
-    }
-  };
-
-  /**
-   * Xuất bảng điểm — theo ĐÚNG danh sách đang hiển thị (đã qua lọc), "cái bạn thấy là cái bạn
-   * tải về".
-   *
-   * <p>Xuất dạng bảng HTML lưu đuôi .xls thay vì CSV thuần: yêu cầu là dòng đã sửa điểm phải TÔ
-   * VÀNG, mà CSV là văn bản trần không mang được màu. Excel/LibreOffice/Google Sheets đều mở
-   * bảng HTML này và giữ nguyên màu nền; Excel có thể hỏi xác nhận đuôi file — bấm Yes là mở.
-   */
-  const exportExcel = () => {
+  const exportCSV = () => {
     if (!filtered.length) return;
-    const esc = (v: string | number) =>
-      String(v).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    // Cỡ chữ phải khai bằng ĐƠN VỊ pt: Excel đọc px sai (12px ra cỡ 6), còn bỏ trống thì nó rơi
-    // về mặc định 10 của bộ nhập HTML.
-    const BASE = "border:1px solid #CBD5E1;font-size:12.0pt;";
-    // `mso-number-format:'\@'` = ép ô dạng CHỮ. CHỈ dùng cho ô thật sự là chuỗi ("13/30", "1.6/1.4",
-    // mốc thời gian) — thiếu nó thì Excel đổi "12/30" thành ngày 30 tháng 12. Áp nhầm vào một con
-    // số đơn thuần thì ngược lại: Excel gắn cờ "số lưu dạng chữ" (tam giác xanh góc ô).
-    const td = (v: string | number, opts: { yellow?: boolean; text?: boolean } = {}) =>
-      `<td style="${BASE}${opts.yellow ? "background:#FEF08A;" : ""}${
-        opts.text ? "mso-number-format:'\\@';" : ""}">${esc(v)}</td>`;
-    const headerCells = ["STT", "Mã SV", "Điểm", "Trạng thái", "TC RATE", "Thời gian chấm"]
-      .map((h) => `<th style="${BASE}background:#EEF2FF">${h}</th>`)
-      .join("");
-    const bodyRows = filtered
-      .map((r, idx) => {
-        const { pass, total } = passInfo(r.details);
-        const edited = r.manualScore != null;
-        // Điểm: bài đã sửa ghi "mới/cũ" để nhìn phát biết cả hai; bài thường giữ một số.
-        const score = edited
+    const header = csvRow([
+      "STT", "Tên người dùng", "Điểm", "Trạng thái",
+      "Số câu đúng", "Tổng số câu", "Bắt đầu chấm", "Chấm xong",
+    ]);
+    const body = filtered.map((r, idx) => {
+      const { pass, total } = passInfo(r.details);
+      const edited = r.manualScore != null;
+      return csvRow([
+        idx + 1,
+        r.studentName || r.studentId,            // tên thư mục bài nộp
+        // Bài đã sửa điểm tay: ghi "mới/cũ" để không mất dấu điểm tự động ban đầu.
+        edited
           ? `${r.manualScore!.toFixed(1)}/${r.score != null ? r.score.toFixed(1) : "—"}`
-          : r.score != null ? r.score.toFixed(1) : "";
-        const tcPass = edited && r.manualTotal ? (r.manualPass ?? 0) : pass;
-        const tcTotal = edited && r.manualTotal ? r.manualTotal : total;
-        // Vàng tô TỪNG Ô, không tô <tr>: nền đặt ở hàng bị Excel kéo dài hết chiều ngang sheet.
-        const y = { yellow: edited };
-        const cells = [
-          td(idx + 1, y),
-          td(r.studentId, y),
-          // Bài đã sửa: "1.6/1.4" là chuỗi thật → ép chữ. Bài thường: để nguyên SỐ, có vậy Excel
-          // mới canh phải và không gắn cờ "số lưu dạng chữ".
-          td(score, edited ? { ...y, text: true } : y),
-          td(statusVi(r), y),
-          td(`${tcPass}/${tcTotal}`, { ...y, text: true }),
-          td(formatHistoryTime(r.updatedAt || r.submittedAt), { ...y, text: true }),
-        ].join("");
-        return `<tr>${cells}</tr>`;
-      })
-      .join("");
-    const html = `﻿<html><head><meta charset="utf-8"></head><body>` +
-      `<table style="border-collapse:collapse">` +
-      `<thead><tr>${headerCells}</tr></thead><tbody>${bodyRows}</tbody></table></body></html>`;
-    const blob = new Blob([html], { type: "application/vnd.ms-excel;charset=utf-8" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
+          : r.score != null ? r.score.toFixed(1) : "",
+        statusVi(r),
+        edited && r.manualTotal ? (r.manualPass ?? 0) : pass,
+        edited && r.manualTotal ? r.manualTotal : total,
+        formatGradingTime(r.gradingStartedAt),
+        formatGradingTime(r.gradingFinishedAt),
+      ]);
+    });
     const dateStr = new Date().toISOString().split("T")[0];
-    a.download = `${selected}_lichsu_${dateStr}.xls`;
-    a.click();
+    downloadCsv([header, ...body].join("\n"), `${selected}_lichsu_${dateStr}.csv`);
   };
 
   return (
@@ -867,12 +762,12 @@ export default function HistoryPage() {
                   <FileArchive size={15} /> Xuất JSON
                 </button>
                 <button
-                  onClick={exportExcel}
-                  disabled={!rows.length}
-                  title="Xuất bảng điểm Excel — dòng đã sửa điểm được tô vàng"
+                  onClick={exportCSV}
+                  disabled={!filtered.length}
+                  title="Xuất bảng điểm CSV của đúng danh sách đang hiển thị"
                   className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 shadow-sm transition-all hover:text-slate-900 hover:shadow active:scale-95 disabled:opacity-50"
                 >
-                  <DownloadCloud size={15} /> Xuất Excel
+                  <FileText size={15} /> Xuất CSV
                 </button>
                 {selectedIds.size > 0 && (
                   <button
@@ -1101,19 +996,6 @@ export default function HistoryPage() {
                                   className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-amber-50 hover:text-amber-600 disabled:opacity-50"
                                 >
                                   {regradingId === r.studentId ? <Loader2 size={15} className="animate-spin" /> : <RotateCcw size={15} />}
-                                </button>
-                              </Tooltip>
-                              {/* CSV của riêng bài này: dòng tổng hợp + danh sách testcase đạt/không.
-                                  Có cả ở bài chưa có JSON — khi đó chỉ thiếu phần liệt kê testcase. */}
-                              <Tooltip label={`Tải CSV của ${r.studentName || r.studentId}`} side="left">
-                                <button
-                                  onClick={() => exportRowCSV(r)}
-                                  disabled={exportingId === r.studentId}
-                                  className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-emerald-50 hover:text-emerald-600 disabled:opacity-50"
-                                >
-                                  {exportingId === r.studentId
-                                    ? <Loader2 size={15} className="animate-spin" />
-                                    : <DownloadCloud size={15} />}
                                 </button>
                               </Tooltip>
                               {r.hasJson && (

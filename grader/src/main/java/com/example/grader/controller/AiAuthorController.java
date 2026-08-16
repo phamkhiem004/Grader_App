@@ -43,10 +43,22 @@ public class AiAuthorController {
         return handle(() -> settings.update(body, AppActor.DEFAULT));
     }
 
-    /** Gọi thử một lượt ngắn để biết key/model dùng được không. Luôn trả 200 kèm {ok,message}. */
+    /**
+     * Gọi thử một lượt ngắn để biết key/model dùng được không. Luôn trả 200 kèm {ok,message}.
+     *
+     * <p>Body {model, apiKey, baseUrl} là cấu hình ĐANG GÕ: thử trên bản nháp và KHÔNG lưu gì.
+     * Bỏ trống body thì thử chính cấu hình đã lưu. Trước đây phép thử buộc phải lưu trước, nên
+     * gõ nhầm một ký tự trong key là mất luôn key đang dùng được.
+     */
     @PostMapping("/settings/test")
-    public ResponseEntity<?> testConnection() {
-        return ResponseEntity.ok(llm.testConnection());
+    public ResponseEntity<?> testConnection(@RequestBody(required = false) Map<String, Object> body) {
+        try {
+            return ResponseEntity.ok(settings.withDraft(
+                    str(body, "model"), str(body, "apiKey"), str(body, "baseUrl"),
+                    () -> llm.testConnection()));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.ok(Map.of("ok", false, "message", e.getMessage()));
+        }
     }
 
     // ── Bước 1: đề bài ───────────────────────────────────────────

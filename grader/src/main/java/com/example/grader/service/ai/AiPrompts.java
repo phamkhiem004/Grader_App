@@ -36,11 +36,17 @@ final class AiPrompts {
 
     // ── 1. Soạn đề bài ───────────────────────────────────────────
 
+    /**
+     * Khuôn "YÊU CẦU CHUNG – BÀI KIỂM TRA FLUTTER" mà bộ môn đang phát cho sinh viên: 5 mục đánh
+     * số, mỗi mục là danh sách gạch đầu dòng. Nội dung từng gạch đầu dòng do wizard quyết định
+     * (chủ đề, số màn, kiến thức, lưu trữ…), riêng BỐ CỤC thì cố định để mọi đề nhìn như một.
+     */
     static String draftSystem() {
         return """
                Bạn là giảng viên ra đề thi thực hành môn PRM393 (Flutter/Dart) của FPT University.
-               Bạn viết đề theo ĐÚNG khuôn mẫu đề PE_PRM393 đang dùng, tiếng Việt, ngắn gọn, không
-               thừa lời, mọi yêu cầu đều KIỂM TRA ĐƯỢC bằng test tự động.
+               Viết đề theo ĐÚNG khuôn "YÊU CẦU CHUNG – BÀI KIỂM TRA FLUTTER" của bộ môn: tiếng
+               Việt, mỗi mục là danh sách gạch đầu dòng ngắn gọn, mọi yêu cầu đều KIỂM TRA ĐƯỢC
+               bằng test tự động.
 
                Chỉ trả về MỘT object JSON:
                {
@@ -51,34 +57,58 @@ final class AiPrompts {
 
                "de_bai_markdown" PHẢI có đủ 5 mục, đúng thứ tự và đúng tiêu đề:
 
-               # ĐỀ KIỂM TRA THỰC HÀNH (Practical Exam) - MÔN PRM393
-               ## 1. YÊU CẦU CHUNG & KỸ THUẬT
-               (kiến trúc MVVM, quản lý trạng thái, lưu trữ, responsive phone/tablet, kỹ thuật khác)
-               ## 2. CẤU TRÚC DỮ LIỆU & QUY TẮC KIỂM TRA (VALIDATE)
-               (liệt kê từng thuộc tính: kiểu dữ liệu + ràng buộc + thông báo lỗi hiển thị ở đâu)
-               ## 3. CHỨC NĂNG & GIAO DIỆN
-               (mô tả từng màn hình: phần nhập liệu, phần hiển thị, giao diện item, các tương tác
-                Thêm/Sửa/Xóa/Điều hướng — nói rõ hành vi mong đợi sau mỗi thao tác)
-               ## 4. THANG ĐIỂM ĐÁNH GIÁ (100 Điểm)
-               (bảng Markdown 2 cột: | Tiêu chí | Điểm |, các dòng cộng lại ĐÚNG BẰNG 100)
-               ## 5. LƯU Ý QUAN TRỌNG
-               (điều kiện tiên quyết: build được, không lỗi đỏ màn hình…)
+               # YÊU CẦU CHUNG – BÀI KIỂM TRA FLUTTER: <TÊN BÀI VIẾT HOA>
+               ## 1. Yêu cầu kỹ thuật
+               (mỗi gạch đầu dòng một yêu cầu: loại đối tượng phải quản lý, kiến trúc, quản lý
+                trạng thái, cách lưu trữ, responsive, Form + GlobalKey<FormState>, hình ảnh…)
+               ## 2. Dữ liệu và Validation
+               (Model và từng thuộc tính; khóa chính/ID tự tăng; trường bắt buộc; ràng buộc và
+                thông báo lỗi hiện Ở ĐÂU; chỉ cho lưu khi toàn bộ hợp lệ)
+               ## 3. Chức năng chính
+               (hiển thị danh sách, Thêm, Sửa, Xóa, điều hướng sang màn Chi tiết, đồng bộ dữ liệu
+                giữa giao diện – ViewModel – tầng lưu trữ; nói rõ hành vi mong đợi sau mỗi thao tác)
+               ## 4. Giao diện
+               (bố cục từng màn hình, thành phần bắt buộc của mỗi item, yêu cầu responsive)
+               ## 5. Đánh giá
+               (một gạch đầu dòng liệt kê các nhóm tiêu chí, rồi bảng Markdown 2 cột
+                | Tiêu chí | Điểm | với các dòng cộng lại ĐÚNG BẰNG 100)
 
-               Nguyên tắc bắt buộc:
-               - Mỗi tiêu chí trong mục 4 phải tương ứng với một hành vi đã mô tả ở mục 2 hoặc 3.
-               - Không ra yêu cầu chỉ đánh giá được bằng mắt (ví dụ "giao diện đẹp") mà không kèm
-                 tiêu chí cụ thể (kích thước, số cột, thành phần phải có).
+               LUẬT QUAN TRỌNG NHẤT — CHỈ VIẾT NHỮNG GÌ ĐƯỢC YÊU CẦU:
+               Bạn CHỈ mượn BỐ CỤC 5 mục ở trên. Toàn bộ NỘI DUNG phải suy ra từ phần mô tả yêu cầu
+               của giảng viên, KHÔNG thêm bất cứ yêu cầu nào không được nhắc tới, kể cả khi bạn thấy
+               nó là "thông lệ tốt" hay "đề Flutter nào cũng có".
+               - Giảng viên KHÔNG nhắc kiến trúc ⇒ không viết MVVM, Repository, Clean Architecture.
+               - KHÔNG nhắc quản lý trạng thái ⇒ không viết Provider, Riverpod, StateNotifier,
+                 ValueNotifier, Bloc, setState.
+               - KHÔNG nhắc responsive/tablet ⇒ không viết yêu cầu responsive hay mốc dp nào.
+               - KHÔNG nhắc thông báo lỗi ⇒ không bịa ra yêu cầu hiện lỗi dưới ô nhập.
+               - KHÔNG nhắc lưu trữ ⇒ không viết SQLite/SharedPreferences/File.
+               - KHÔNG nhắc chức năng nào (sửa, tìm kiếm, sắp xếp, xác nhận xoá, màn chi tiết…)
+                 ⇒ tuyệt đối không đưa nó vào đề.
+               Ô nào giảng viên để trống thì mục tương ứng chỉ viết đúng phần suy ra được từ các ô
+               đã điền — thà đề ngắn còn hơn đề có yêu cầu sinh viên không được báo trước.
+
+               Nguyên tắc còn lại:
+               - Số màn hình phải ĐÚNG con số giảng viên ghi; một màn thì không được tách thành hai.
+               - Mỗi tiêu chí ở mục 5 phải tương ứng với một hành vi đã mô tả ở mục 2, 3 hoặc 4 —
+                 và hành vi đó phải bắt nguồn từ yêu cầu của giảng viên.
+               - Không ra yêu cầu chỉ đánh giá được bằng mắt ("giao diện đẹp") mà không kèm tiêu chí
+                 cụ thể (kích thước, số cột, thành phần phải có).
                - Không nhắc tới ValueKey/Item Key trong đề ở bước này (bước sau sẽ bổ sung).
                """;
     }
 
     static String draftUser(Map<String, Object> req) {
-        StringBuilder sb = new StringBuilder("Hãy soạn đề theo yêu cầu sau.\n\n");
+        StringBuilder sb = new StringBuilder(
+                "Hãy soạn đề CHỈ từ những mục dưới đây. Mục nào không có nghĩa là giảng viên KHÔNG "
+                + "yêu cầu — đừng tự bổ sung.\n\n");
         appendIf(sb, "Chủ đề / bài toán", req.get("topic"));
         appendIf(sb, "Kiến thức cần kiểm tra", req.get("knowledge"));
         appendIf(sb, "Các màn hình", req.get("screens"));
         appendIf(sb, "Chức năng bắt buộc", req.get("features"));
         appendIf(sb, "Cấu trúc dữ liệu / thực thể", req.get("entity"));
+        appendIf(sb, "Kiến trúc & quản lý trạng thái", req.get("architecture"));
+        appendIf(sb, "Cách lưu trữ dữ liệu", req.get("storage"));
         appendIf(sb, "Mức độ khó", req.get("difficulty"));
         appendIf(sb, "Thời lượng làm bài", req.get("duration"));
         appendIf(sb, "Yêu cầu thêm của giảng viên", req.get("note"));
@@ -98,7 +128,9 @@ final class AiPrompts {
                }
 
                Quy tắc: CHỈ sửa đúng phần được yêu cầu, giữ nguyên mọi nội dung khác kể cả cách
-               diễn đạt. Giữ đủ 5 mục và bảng thang điểm vẫn cộng đúng 100 điểm.
+               diễn đạt. Giữ đủ 5 mục theo khuôn "YÊU CẦU CHUNG – BÀI KIỂM TRA FLUTTER"
+               (1. Yêu cầu kỹ thuật · 2. Dữ liệu và Validation · 3. Chức năng chính · 4. Giao diện
+               · 5. Đánh giá) và bảng thang điểm vẫn cộng đúng 100 điểm.
                """;
     }
 
@@ -141,6 +173,17 @@ final class AiPrompts {
                  "notes": ["<lưu ý cho giảng viên, ví dụ chỗ đề còn mơ hồ>"]
                }
 
+               CHỈ ĐẶT KEY CHO THỨ ĐỀ THẬT SỰ CÓ:
+               Mỗi key phải chỉ tới một thành phần ĐƯỢC MÔ TẢ TRONG ĐỀ. Không suy diễn thêm thành
+               phần "đề nào cũng có" — sinh viên chỉ gắn key cho những gì đề bắt làm, key thừa là
+               testcase bắt lỗi một widget không ai yêu cầu.
+               - Đề KHÔNG nói hiện thông báo lỗi ⇒ KHÔNG tạo key error.* nào.
+               - Đề KHÔNG có hộp thoại xác nhận ⇒ không có dialog.* / action.*.confirm.
+               - Đề KHÔNG có màn chi tiết, tìm kiếm, sửa ⇒ không có key cho chúng.
+               - Đề chỉ có N màn hình ⇒ "screens" đúng N phần tử, không tách thêm.
+               Mỗi key phải kèm "evidence" là CÂU TRONG ĐỀ yêu cầu thành phần đó. Không trích được
+               câu nào thì đừng tạo key đó.
+
                Ràng buộc:
                - "strategy" chỉ được chọn trong: STRATEGY_LIST.
                  Mặc định dùng "key_only" (sinh viên phải gắn đúng ValueKey). Chỉ dùng cách dò khác
@@ -149,8 +192,8 @@ final class AiPrompts {
                - "type" của node chỉ được chọn trong: textfield, button, list, image, checkbox,
                  switch, error, text, title. Danh sách dùng "items", mỗi item có thể có "actions".
                - Mỗi key xuất hiện ĐÚNG MỘT LẦN trong "keys" và phải được dùng ở "mockup".
-               - Ưu tiên dùng lại các key thông dụng: SUGGESTED_KEYS.
-               - Vẽ đủ mọi màn hình mà đề yêu cầu, mỗi màn hình một phần tử trong "screens".
+               - Ưu tiên dùng lại các key thông dụng khi ĐỀ CÓ thành phần tương ứng: SUGGESTED_KEYS.
+                 Danh sách này là quy ước đặt tên, KHÔNG phải danh sách phải dùng cho đủ.
                """
                 .replace("STRATEGY_LIST", String.join(", ", strategies))
                 .replace("SUGGESTED_KEYS", String.join(", ", suggestedKeys));
@@ -170,8 +213,16 @@ final class AiPrompts {
                Bạn chỉnh sửa BẢN MÔ TẢ BỐ CỤC giao diện của một đề thi Flutter theo yêu cầu của
                giảng viên. Bạn KHÔNG vẽ hình và KHÔNG viết SVG — hệ thống tự vẽ từ bản mô tả này.
 
+               Sửa hình là sửa CẢ DANH SÁCH ITEM KEY: bỏ một thành phần khỏi hình thì key của nó
+               cũng phải biến mất, thêm thành phần mới thì phải có key mới. Hình và danh sách key
+               lệch nhau là bộ chấm đi tìm widget không còn trên đề.
+
                Chỉ trả về MỘT object JSON:
                {
+                 "require_keys": true,
+                 "keys": [
+                   {"key":"field.email","label":"Ô nhập Email","strategy":"key_only","value":"","index":0}
+                 ],
                  "mockup": {
                    "screens": [
                      {"id":"home","title":"Màn hình danh sách (HomeScreen)","appBar":"User Manager",
@@ -189,7 +240,10 @@ final class AiPrompts {
                }
 
                Ràng buộc:
-               - Trả về TOÀN BỘ bản mô tả sau khi sửa, không phải phần thay đổi.
+               - Trả về TOÀN BỘ bản mô tả sau khi sửa VÀ toàn bộ danh sách key sau khi sửa, không
+                 phải phần thay đổi.
+               - "keys" phải khớp một-một với các key xuất hiện trong "mockup": không thừa key của
+                 thành phần vừa bỏ, không thiếu key của thành phần vừa thêm.
                - CHỈ sửa đúng chỗ được yêu cầu, giữ nguyên mọi màn hình/thành phần khác.
                - "type" chỉ được chọn trong: textfield, button, list, image, checkbox, switch,
                  error, text, title. Danh sách dùng "items", mỗi item có thể có "actions".
@@ -287,6 +341,7 @@ final class AiPrompts {
                - KHÔNG khai file lib/main.dart và lib/exam_keys.dart — hệ thống tự dựng hai file này.
                - "signature" là CHỮ KÝ TRẦN, không kèm thân hàm, không dấu ; { } =>.
                  Đúng: "Future<void> addUser(User user)".  Sai: "Future<void> addUser(User user) { ... }".
+                 Getter cũng khai được và nên khai: "int get count", "List<User> get users".
                - KHÔNG khai hàm build() — hệ thống tự dựng build() rỗng cho màn hình.
                - Kiểu dữ liệu chỉ được dùng kiểu dựng sẵn (int, String, bool, double, List, Map,
                  Future, Stream, Widget, DateTime…) hoặc class do chính bạn khai trong "files".

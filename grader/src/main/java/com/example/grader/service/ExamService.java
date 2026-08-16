@@ -896,7 +896,8 @@ public class ExamService {
 
     /**
      * Nhập bộ testcase viết thủ công từ ZIP. Tên/mã lấy từ tên file, ZIP chỉ dùng để vận chuyển
-     * rồi bị bỏ; trên đĩa giữ thư mục bốn file để Build Sandbox mount trực tiếp.
+     * rồi bị bỏ; trên đĩa giữ ba file thực thi và contract đã cung cấp hoặc được backend tự sinh
+     * để Build Sandbox mount trực tiếp.
      */
     public synchronized Map<String, Object> importManualTestcase(
             String originalFilename, String teacherNote, byte[] zipBytes, String actor) throws Exception {
@@ -922,7 +923,7 @@ public class ExamService {
         try {
             unzip(zipBytes, staging);
             validateRequiredFiles(staging);
-            validatePortableContract(staging);
+            ensurePortableContract(staging);
             validateSkillCodes(staging);
 
             Files.createDirectories(examDir);
@@ -1010,7 +1011,7 @@ public class ExamService {
         Files.createDirectories(testcaseDir);
 
         unzip(zipBytes, testcaseDir);
-        validatePortableContract(testcaseDir);
+        ensurePortableContract(testcaseDir);
         prepareSandboxFiles(testcaseDir);
 
         Exam exam = examRepository.findByExamId(examId).orElse(new Exam());
@@ -1690,16 +1691,21 @@ public class ExamService {
                     "grader.dart không có hàm main() — file có thể sai nội dung/encoding.");
     }
 
-    /** Upload mới phải mang theo policy đã dùng lúc export; thiếu file này có thể làm đổi pass/fail. */
-    private void validatePortableContract(Path dir) throws Exception {
+    /**
+     * Contract là tùy chọn khi upload. Bộ testcase không dùng Key vẫn chỉ cần ba file thực thi;
+     * backend tạo contract tương thích để hành vi đó được giữ nguyên khi tải xuống/upload lại.
+     * Nếu người dùng có gửi contract thì vẫn kiểm tra chặt để tránh âm thầm chấm sai policy.
+     */
+    private void ensurePortableContract(Path dir) throws Exception {
         Path contract = dir.resolve("contract.json");
         if (!Files.isRegularFile(contract)) {
-            throw new IllegalArgumentException("Thiếu file bắt buộc: contract.json. "
-                    + "Gói testcase upload phải chứa trực tiếp exam_test.dart, grader.dart, "
-                    + "skills_matrix.json và contract.json.");
+            Files.writeString(contract,
+                    "{\n  \"schema_version\": 1,\n  \"require_keys\": false\n}\n",
+                    StandardCharsets.UTF_8);
+            return;
         }
         if (Files.size(contract) == 0) {
-            throw new IllegalArgumentException("File bắt buộc bị RỖNG (0 byte): contract.json");
+            throw new IllegalArgumentException("contract.json được cung cấp nhưng bị RỖNG (0 byte)");
         }
         try {
             JsonNode root = mapper.readTree(Files.readString(contract, StandardCharsets.UTF_8));

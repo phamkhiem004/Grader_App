@@ -397,7 +397,7 @@ public class ExamSetupController {
         }
     }
 
-    /** Tải EXAM_TEST: ZIP 4 file, gồm ba file thực thi và contract.json để upload lại không đổi hành vi chấm. */
+    /** Tải EXAM_TEST: ZIP gồm ba file thực thi và contract.json được chuẩn hóa để upload lại không đổi hành vi chấm. */
     @GetMapping("/{examId}/download/exam-test")
     public ResponseEntity<?> downloadExamTest(@PathVariable String examId) {
         try {

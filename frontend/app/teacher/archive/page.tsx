@@ -573,7 +573,7 @@ export default function ArchivePage() {
                       <div className="flex items-center justify-end gap-1.5">
                         <button onClick={() => doDownload(`/exam-setup/${encodeURIComponent(e.examId)}/download/exam-test`, `${e.examId}_exam_test.zip`)}
                           disabled={!e.hasTestcase}
-                          title="Tải testcase: exam_test.dart + grader.dart + skills_matrix.json"
+                          title="Tải testcase: exam_test.dart + grader.dart + skills_matrix.json + contract.json"
                           className={actBtnCls("hover:text-indigo-600")}>
                           <FileArchive size={16} /><span className="sr-only">Tải testcase</span>
                         </button>
@@ -744,7 +744,7 @@ export default function ArchivePage() {
                 </button>
                 <h3 id="create-testcase-title" className="mb-2 text-xl font-bold">Tạo bộ testcase sẵn có</h3>
                 <p className="mb-5 text-sm text-slate-500">
-                  ZIP phải chứa trực tiếp exam_test.dart, grader.dart và skills_matrix.json. ZIP chỉ dùng để import và không được lưu lại.
+                  ZIP phải chứa trực tiếp exam_test.dart, grader.dart, skills_matrix.json và contract.json. ZIP chỉ dùng để import và không được lưu lại.
                 </p>
 
                 <div

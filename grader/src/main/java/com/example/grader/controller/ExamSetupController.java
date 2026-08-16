@@ -397,7 +397,7 @@ public class ExamSetupController {
         }
     }
 
-    /** Tải EXAM_TEST: ZIP 3 file testcase (exam_test.dart + grader.dart + skills_matrix.json) — upload lại được. */
+    /** Tải EXAM_TEST: ZIP 4 file, gồm ba file thực thi và contract.json để upload lại không đổi hành vi chấm. */
     @GetMapping("/{examId}/download/exam-test")
     public ResponseEntity<?> downloadExamTest(@PathVariable String examId) {
         try {

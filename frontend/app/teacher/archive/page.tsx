@@ -9,7 +9,7 @@ import { API_BASE } from "@/lib/config";
 import {
   Archive, RotateCcw, Trash2, Loader2, AlertTriangle, CheckCircle2,
   Database, FileArchive, Pencil, Plus, X, UploadCloud, Package, ArrowLeft,
-  Copy, ChevronLeft, ChevronRight, PenLine, Pause, Play, FileText,
+  Copy, ChevronLeft, ChevronRight, PenLine, Pause, Play, FileText, FileCode2,
 } from "lucide-react";
 import ErrorScreen from "@/components/ui/ErrorScreen";
 import Banner from "@/components/ui/Banner";
@@ -23,6 +23,8 @@ interface ExamRow {
   hasTestcase?: boolean;
   /** true = đã có đề bài trong bộ phát cho sinh viên → mở được trang Xem đề. */
   hasDeBai?: boolean;
+  /** true = bộ đã kèm khung code starter (handout/starter) để phát cho sinh viên. */
+  hasStarter?: boolean;
   resultCount?: number;
   teacherNote?: string;
   /** true = sửa/clone được (có cấu hình builder, hoặc dựng lại được từ file testcase). */
@@ -576,6 +578,16 @@ export default function ArchivePage() {
                           title="Tải testcase: exam_test.dart + grader.dart + skills_matrix.json"
                           className={actBtnCls("hover:text-indigo-600")}>
                           <FileArchive size={16} /><span className="sr-only">Tải testcase</span>
+                        </button>
+                        {/* Khung starter phát cho SV — bộ nào chưa kèm thì nút mờ đi, bấm vào cũng
+                            chỉ nhận 404, nói trước bằng tooltip đỡ mất công. */}
+                        <button onClick={() => doDownload(`/exam-setup/${encodeURIComponent(e.examId)}/download/starter`, `${e.examId}_starter.zip`)}
+                          disabled={!e.hasStarter}
+                          title={e.hasStarter
+                            ? "Tải khung code starter (lib/…) phát cho sinh viên"
+                            : "Tải khung starter — bộ này chưa kèm khung starter"}
+                          className={actBtnCls("hover:text-violet-600")}>
+                          <FileCode2 size={16} /><span className="sr-only">Tải khung starter</span>
                         </button>
                         {/* Xem đề: đề bài + hình minh họa gộp một tài liệu, tải được .docx. */}
                         <Link href={`/teacher/exam-view?exam=${encodeURIComponent(e.examId)}`}

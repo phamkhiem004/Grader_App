@@ -68,11 +68,20 @@ body {
 /* ── Form controls theo theme ─────────────────────────────────────
    Tránh <select>/<option> hiện "trắng tinh không thấy chữ" trên máy có
    giao diện HỆ THỐNG tối. color-scheme (ở :root/.dark) đồng bộ control;
-   thêm màu chữ/nền rõ cho input/textarea/select ở chế độ tối. ── */
-select,
-input,
-textarea {
-  color: var(--foreground);
+   thêm màu chữ/nền rõ cho input/textarea/select ở chế độ tối.
+
+   PHẢI nằm trong @layer base: Tailwind v4 để utility trong @layer utilities,
+   mà CSS KHÔNG phân lớp luôn thắng mọi lớp bất kể specificity. Để trần thì
+   `textarea` nền tối kèm `text-slate-100` vẫn bị ép về --foreground (#0f172a)
+   — trùng đúng màu bg-slate-900 → khung code trông trống trơn (trình sửa file
+   testcase, khung starter của trợ lý AI). Trong base thì đây chỉ là mặc định,
+   utility ghi đè được. ── */
+@layer base {
+  select,
+  input,
+  textarea {
+    color: var(--foreground);
+  }
 }
 .dark select {
   background-color: var(--card);

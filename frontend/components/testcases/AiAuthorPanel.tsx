@@ -8,12 +8,13 @@
 // Backend: /api/ai/* (xem AiAuthorController). Testcase do AI đề xuất luôn là template có sẵn
 // trong thư viện nên vẫn đi qua đúng bộ kiểm tra tham số khi lưu.
 
-import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { API_BASE } from "@/lib/config";
+import { downloadBlob, downloadText, imageFileToSvg, svgToPng } from "@/lib/mockup-image";
 import {
   Sparkles, Settings2, KeyRound, Wand2, FileText, Image as ImageIcon, ListChecks,
   Loader2, Check, X, Plus, Trash2, RefreshCw, AlertTriangle, ChevronDown, Save, Info, FileCode2,
-  Upload,
+  Upload, Download, RotateCcw,
 } from "lucide-react";
 
 export interface AiContractKey {
@@ -41,8 +42,19 @@ export interface AiProposedItem {
   reason?: string;
 }
 
-interface MockupScreen { id: string; title: string; svg: string; keys: string[] }
+interface MockupScreen {
+  id: string; title: string; svg: string; keys: string[];
+  /** Hình do AI vẽ — giữ lại để hoàn tác khi giáo viên thay bằng ảnh của mình. */
+  aiSvg?: string;
+  /** Có giá trị = đang dùng ảnh giáo viên tải lên chứ không phải hình AI vẽ. */
+  uploadName?: string;
+}
 interface StarterFile { path: string; content: string; summary: string }
+/** Kết quả một lượt sinh/sửa khung starter; `spec` là bản mô tả để lượt sửa sau nối tiếp. */
+interface StarterResult {
+  files: StarterFile[]; warnings: string[]; notes: string[]; spec: unknown;
+  syntax_ok: boolean | null; syntax_message: string;
+}
 interface AiModel { id: string; label: string; provider: string; vendor: string }
 interface AiSettings {
   model: string; provider: string; vendor: string; keyUrl: string | null;
@@ -95,6 +107,10 @@ export default function AiAuthorPanel({ examId, existingKeys, onApplyContract, o
   const [screens, setScreens] = useState<MockupScreen[]>([]);
   const [keyNotes, setKeyNotes] = useState<string[]>([]);
   const [keysAccepted, setKeysAccepted] = useState(false);
+  const [mockupPrompt, setMockupPrompt] = useState("");
+  /** Màn hình đang chờ nhận ảnh từ máy — một ô chọn file dùng chung cho mọi hình. */
+  const [uploadTarget, setUploadTarget] = useState<string | null>(null);
+  const mockupFileRef = useRef<HTMLInputElement | null>(null);
 
   // Bước 4 — testcase
   const [proposed, setProposed] = useState<AiProposedItem[]>([]);
@@ -108,6 +124,11 @@ export default function AiAuthorPanel({ examId, existingKeys, onApplyContract, o
   const [starterNotes, setStarterNotes] = useState<string[]>([]);
   const [syntax, setSyntax] = useState<{ ok: boolean | null; message: string } | null>(null);
   const [openFile, setOpenFile] = useState<string | null>(null);
+  const [starterPrompt, setStarterPrompt] = useState("");
+  /** Bản mô tả khung AI trả về — gửi lại cho lượt "nhờ AI sửa" để sửa tiếp từ đúng bản này. */
+  const [starterSpec, setStarterSpec] = useState<unknown>(null);
+  /** true = giáo viên đã gõ tay vào code, lượt AI sửa kế tiếp sẽ ghi đè. */
+  const [starterEdited, setStarterEdited] = useState(false);
 
   const loadSettings = useCallback(async () => {
     try {
@@ -266,10 +287,78 @@ export default function AiAuthorPanel({ examId, existingKeys, onApplyContract, o
     }
   };
 
+  /**
+   * Giữ lại ảnh giáo viên đã tải lên khi hình được vẽ lại: họ chọn ảnh đó là có chủ ý, một lần
+   * bấm "vẽ lại" không được âm thầm quăng nó đi. Bản AI mới vẫn nằm trong aiSvg để hoàn tác.
+   */
+  const keepUploads = (next: MockupScreen[]) =>
+    setScreens((prev) => next.map((fresh) => {
+      const old = prev.find((s) => s.id === fresh.id);
+      return old?.uploadName
+        ? { ...fresh, svg: old.svg, uploadName: old.uploadName, aiSvg: fresh.svg }
+        : fresh;
+    }));
+
   const redrawMockup = async () => {
     const data = await call<{ screens: MockupScreen[] }>("/ai/keys/mockup", { mockup_spec: mockupSpec }, "mockup");
-    if (data) { setScreens(data.screens || []); setInfo("Đã vẽ lại hình từ bản mô tả hiện tại."); }
+    if (data) {
+      keepUploads(data.screens || []);
+      setInfo("Đã vẽ lại hình từ bản mô tả hiện tại.");
+    }
   };
+
+  /** Nhờ AI sửa BỐ CỤC hình bằng lời; toạ độ vẫn do máy chủ tính nên hình không bao giờ rối. */
+  const reviseMockup = async () => {
+    if (!mockupPrompt.trim()) { setError("Hãy mô tả bạn muốn sửa gì trên hình."); return; }
+    const data = await call<{
+      mockup_spec: unknown; screens: MockupScreen[]; notes: string[]; unused_keys: string[];
+    }>("/ai/keys/mockup/revise",
+      { mockup_spec: mockupSpec, instruction: mockupPrompt, contract: { keys } }, "mockup-revise");
+    if (data) {
+      setMockupSpec(data.mockup_spec);
+      keepUploads(data.screens || []);
+      setKeyNotes([...(data.notes || []),
+        ...(data.unused_keys?.length ? [`Key chưa xuất hiện trên hình: ${data.unused_keys.join(", ")}`] : [])]);
+      setMockupPrompt("");
+      setInfo("AI đã sửa hình. Xem lại rồi chấp nhận Item Key nếu bố cục đã đúng ý.");
+    }
+  };
+
+  const downloadScreenSvg = (screen: MockupScreen) =>
+    downloadText(screen.svg, `${screen.id}.svg`, "image/svg+xml;charset=utf-8");
+
+  const downloadScreenPng = async (screen: MockupScreen) => {
+    try {
+      const shot = await svgToPng(screen.svg);
+      const binary = atob(shot.png.split(",")[1] || "");
+      const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
+      downloadBlob(new Blob([bytes], { type: "image/png" }), `${screen.id}.png`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Không tải được ảnh PNG.");
+    }
+  };
+
+  /** Thay hình AI bằng ảnh giáo viên tự vẽ/chụp — ảnh nhúng thẳng vào SVG nên vẫn tự chứa. */
+  const applyUploadedImage = async (file: File) => {
+    const id = uploadTarget;
+    setUploadTarget(null);
+    if (!id) return;
+    setError(null);
+    try {
+      const { svg } = await imageFileToSvg(file);
+      setScreens((cur) => cur.map((s) => (s.id === id
+        ? { ...s, svg, uploadName: file.name, aiSvg: s.aiSvg ?? s.svg }
+        : s)));
+      setInfo(`Đã thay hình "${id}" bằng ${file.name}. Bấm "Lưu đề bài + hình" để phát cho sinh viên.`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Không đọc được ảnh.");
+    }
+  };
+
+  const revertScreen = (screen: MockupScreen) =>
+    setScreens((cur) => cur.map((s) => (s.id === screen.id && s.aiSvg
+      ? { ...s, svg: s.aiSvg, uploadName: undefined }
+      : s)));
 
   const updateKey = (i: number, patch: Partial<AiContractKey>) =>
     setKeys((cur) => cur.map((k, idx) => (idx === i ? { ...k, ...patch } : k)));
@@ -327,17 +416,37 @@ export default function AiAuthorPanel({ examId, existingKeys, onApplyContract, o
   };
 
   // ── Bước 5: khung starter ──────────────────────────────────────
+  const takeStarter = (data: StarterResult) => {
+    setStarterFiles(data.files || []);
+    setStarterWarnings(data.warnings || []);
+    setStarterNotes(data.notes || []);
+    setStarterSpec(data.spec ?? null);
+    setSyntax({ ok: data.syntax_ok, message: data.syntax_message });
+    setOpenFile(data.files?.[0]?.path ?? null);
+    setStarterEdited(false);
+  };
+
   const proposeStarter = async () => {
-    const data = await call<{
-      files: StarterFile[]; warnings: string[]; notes: string[];
-      syntax_ok: boolean | null; syntax_message: string;
-    }>("/ai/starter/propose", { de_bai: deBai, contract: { keys } }, "starter");
+    const data = await call<StarterResult>(
+      "/ai/starter/propose", { de_bai: deBai, contract: { keys } }, "starter");
+    if (data) takeStarter(data);
+  };
+
+  /**
+   * Nhờ AI sửa khung bằng lời. Máy chủ sinh lại TOÀN BỘ file từ bản mô tả đã sửa nên phần giáo
+   * viên gõ tay bị thay — hỏi trước cho chắc, mất code vừa gõ là bực nhất.
+   */
+  const reviseStarter = async () => {
+    if (!starterPrompt.trim()) { setError("Hãy mô tả bạn muốn AI sửa gì trong khung starter."); return; }
+    if (starterEdited && !confirm(
+      "AI sẽ sinh lại toàn bộ khung, phần code bạn vừa sửa tay sẽ bị thay. Tiếp tục?")) return;
+    const data = await call<StarterResult>("/ai/starter/revise",
+      { de_bai: deBai, spec: starterSpec, instruction: starterPrompt, contract: { keys } },
+      "starter-revise");
     if (data) {
-      setStarterFiles(data.files || []);
-      setStarterWarnings(data.warnings || []);
-      setStarterNotes(data.notes || []);
-      setSyntax({ ok: data.syntax_ok, message: data.syntax_message });
-      setOpenFile(data.files?.[0]?.path ?? null);
+      takeStarter(data);
+      setStarterPrompt("");
+      setInfo("AI đã sửa khung starter. Xem lại code rồi lưu cho sinh viên.");
     }
   };
 
@@ -345,6 +454,27 @@ export default function AiAuthorPanel({ examId, existingKeys, onApplyContract, o
     const data = await call<{ syntax_ok: boolean | null; syntax_message: string }>(
       "/ai/starter/check", { files: starterFiles }, "starter-check");
     if (data) setSyntax({ ok: data.syntax_ok, message: data.syntax_message });
+  };
+
+  /** Tải khung ĐANG SOẠN (kể cả phần vừa gõ tay) mà không cần lưu vào bộ testcase trước. */
+  const downloadStarterZip = async () => {
+    setBusy("starter-zip"); setError(null); setInfo(null);
+    try {
+      const res = await fetch(`${API_BASE}/ai/starter/download`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ exam_id: examId.trim(), files: starterFiles }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data?.error || "Không tải được khung starter.");
+      }
+      downloadBlob(await res.blob(), `${examId.trim() || "starter"}_starter.zip`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Không tải được khung starter.");
+    } finally {
+      setBusy(null);
+    }
   };
 
   const saveStarter = async () => {
@@ -773,11 +903,71 @@ export default function AiAuthorPanel({ examId, existingKeys, onApplyContract, o
               )}
 
               {screens.map((s) => (
-                <figure key={s.id} className="mt-4 overflow-x-auto rounded-xl border border-slate-200 bg-white p-3">
-                  <figcaption className="mb-2 text-xs font-bold text-slate-600">{s.title}</figcaption>
-                  <div className="min-w-[720px]" dangerouslySetInnerHTML={{ __html: s.svg }} />
+                <figure key={s.id} className="mt-4 rounded-xl border border-slate-200 bg-white p-3">
+                  <figcaption className="mb-2 flex flex-wrap items-center gap-2">
+                    <span className="text-xs font-bold text-slate-600">{s.title}</span>
+                    {s.uploadName && (
+                      <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">
+                        Ảnh của bạn · {s.uploadName}
+                      </span>
+                    )}
+                    <span className="ml-auto flex flex-wrap items-center gap-1">
+                      <button type="button" onClick={() => downloadScreenSvg(s)} className={miniBtn} title="Tải bản vẽ gốc (.svg)">
+                        <Download size={12} /> SVG
+                      </button>
+                      <button type="button" onClick={() => downloadScreenPng(s)} className={miniBtn} title="Tải ảnh .png để dán vào đề Word">
+                        <Download size={12} /> PNG
+                      </button>
+                      <button type="button" className={miniBtn} title="Dùng ảnh tự vẽ/chụp từ máy thay cho hình AI"
+                        onClick={() => { setUploadTarget(s.id); mockupFileRef.current?.click(); }}>
+                        <Upload size={12} /> Ảnh của tôi
+                      </button>
+                      {s.uploadName && s.aiSvg && (
+                        <button type="button" onClick={() => revertScreen(s)} className={miniBtn} title="Bỏ ảnh tải lên, quay lại hình AI vẽ">
+                          <RotateCcw size={12} /> Hình AI
+                        </button>
+                      )}
+                    </span>
+                  </figcaption>
+                  {/* SVG do máy chủ dựng, hoặc ảnh của giáo viên đã bọc trong thẻ <image> (chạy ở
+                      chế độ tĩnh, không thực thi script) — xem lib/mockup-image.ts. */}
+                  <div className="custom-scrollbar overflow-x-auto">
+                    <div className="min-w-[720px] [&>svg]:h-auto [&>svg]:max-w-full"
+                      dangerouslySetInnerHTML={{ __html: s.svg }} />
+                  </div>
                 </figure>
               ))}
+
+              {/* Một ô chọn file dùng chung cho mọi hình — uploadTarget nhớ đang thay hình nào. */}
+              <input ref={mockupFileRef} type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = "";           // chọn lại đúng file đó lần nữa vẫn nhận
+                  if (file) applyUploadedImage(file);
+                }} />
+
+              {screens.length > 0 && (
+                <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                  <p className="mb-2 text-[11px] leading-relaxed text-slate-500">
+                    Chưa ưng bố cục? Nói bằng lời để AI sửa — hệ thống vẽ lại theo bản mô tả mới nên
+                    hình luôn cùng một phong cách, không bao giờ chồng chữ.
+                  </p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <input
+                      value={mockupPrompt}
+                      onChange={(e) => setMockupPrompt(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); reviseMockup(); } }}
+                      placeholder="VD: bỏ ô số điện thoại, thêm màn hình chi tiết, đổi nút Add User thành FAB…"
+                      className={`${inputClass} min-w-[240px] flex-1`}
+                    />
+                    <button onClick={reviseMockup} disabled={busy !== null} className={ghostBtn}>
+                      {busy === "mockup-revise" ? <Loader2 size={15} className="animate-spin" /> : <Wand2 size={15} />}
+                      Nhờ AI sửa hình
+                    </button>
+                  </div>
+                </div>
+              )}
             </Step>
           )}
 
@@ -882,6 +1072,11 @@ export default function AiAuthorPanel({ examId, existingKeys, onApplyContract, o
                       {busy === "starter-check" ? <Loader2 size={15} className="animate-spin" /> : <RefreshCw size={15} />}
                       Kiểm tra cú pháp
                     </button>
+                    <button onClick={downloadStarterZip} disabled={busy !== null} className={ghostBtn}
+                      title="Tải đúng khung đang hiển thị (kể cả phần vừa sửa tay), chưa cần lưu">
+                      {busy === "starter-zip" ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />}
+                      Tải khung (.zip)
+                    </button>
                     <button onClick={saveStarter} disabled={busy !== null || !examId.trim()} className={ghostBtn}>
                       {busy === "starter-save" ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />}
                       Lưu khung cho SV
@@ -958,6 +1153,7 @@ export default function AiAuthorPanel({ examId, existingKeys, onApplyContract, o
                             const content = e.target.value;
                             setStarterFiles((cur) => cur.map((x) => x.path === active.path ? { ...x, content } : x));
                             setSyntax(null);   // sửa tay xong thì kết quả kiểm cú pháp cũ không còn đúng
+                            setStarterEdited(true);
                           }}
                           spellCheck={false}
                           wrap="off"
@@ -969,6 +1165,29 @@ export default function AiAuthorPanel({ examId, existingKeys, onApplyContract, o
                   </div>
                 );
               })()}
+
+              {starterFiles.length > 0 && (
+                <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                  <p className="mb-2 text-[11px] leading-relaxed text-slate-500">
+                    Sửa thẳng trong khung code ở trên, hoặc nói bằng lời để AI sửa hộ.
+                    {starterEdited && <span className="font-semibold text-amber-700"> Bạn đang có sửa tay chưa lưu — lượt AI sửa sẽ sinh lại toàn bộ file và thay phần đó.</span>}
+                  </p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <input
+                      value={starterPrompt}
+                      onChange={(e) => setStarterPrompt(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); reviseStarter(); } }}
+                      placeholder="VD: thêm màn hình chi tiết, bỏ lớp repository, đổi User.phone sang String?…"
+                      className={`${inputClass} min-w-[240px] flex-1`}
+                    />
+                    <button onClick={reviseStarter} disabled={busy !== null || !starterSpec} className={ghostBtn}
+                      title={starterSpec ? undefined : "Hãy bấm Sinh khung starter trước"}>
+                      {busy === "starter-revise" ? <Loader2 size={15} className="animate-spin" /> : <Wand2 size={15} />}
+                      Nhờ AI sửa khung
+                    </button>
+                  </div>
+                </div>
+              )}
             </Step>
           )}
 
@@ -999,6 +1218,9 @@ const primaryBtn =
   "flex items-center gap-2 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 px-3.5 py-2 text-xs font-semibold text-white shadow-sm transition-all hover:from-violet-700 hover:to-indigo-700 active:scale-[0.98] disabled:cursor-not-allowed disabled:from-slate-300 disabled:to-slate-300";
 const ghostBtn =
   "flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-50 disabled:opacity-50";
+/** Nút nhỏ trên thanh công cụ của từng hình minh họa. */
+const miniBtn =
+  "inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[10px] font-semibold text-slate-600 transition-colors hover:bg-slate-50 disabled:opacity-50";
 
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (

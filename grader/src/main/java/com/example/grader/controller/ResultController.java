@@ -128,6 +128,8 @@ public class ResultController {
             m.put("batchId", r.batchId());
             m.put("submittedAt", r.submittedAt());
             m.put("updatedAt", r.updatedAt());
+            m.put("gradingStartedAt", r.gradingStartedAt());
+            m.put("gradingFinishedAt", r.gradingFinishedAt());
             m.put("details", r.details());     // JSON gon cua grader: soTestPass / tongSoTest
             m.put("errorLog", r.errorLog());
             m.put("diagnosticCode", r.diagnosticCode());

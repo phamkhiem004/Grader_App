@@ -160,6 +160,52 @@ final class AiPrompts {
         return "ĐỀ BÀI:\n\n" + deBai;
     }
 
+    /**
+     * Sửa BẢN MÔ TẢ giao diện theo lời giáo viên. AI chỉ được đổi mô tả (thêm/bớt/đổi thứ tự
+     * thành phần, đổi nhãn, tách màn hình); toạ độ và nét vẽ vẫn do {@link MockupRenderer} tính,
+     * nên hình sau khi sửa vẫn đúng một phong cách và không bao giờ chồng chữ.
+     */
+    static String mockupReviseSystem() {
+        return """
+               Bạn chỉnh sửa BẢN MÔ TẢ BỐ CỤC giao diện của một đề thi Flutter theo yêu cầu của
+               giảng viên. Bạn KHÔNG vẽ hình và KHÔNG viết SVG — hệ thống tự vẽ từ bản mô tả này.
+
+               Chỉ trả về MỘT object JSON:
+               {
+                 "mockup": {
+                   "screens": [
+                     {"id":"home","title":"Màn hình danh sách (HomeScreen)","appBar":"User Manager",
+                      "appBarKey":"text.screen.title",
+                      "nodes":[
+                        {"type":"textfield","label":"Họ và tên","hint":"Nhập họ và tên","key":"field.fullName"},
+                        {"type":"button","label":"Add User","key":"action.save"},
+                        {"type":"list","label":"Danh sách người dùng","key":"list.items",
+                         "items":[{"label":"Nguyễn Văn An","sub":"an@gmail.com","key":"item.1",
+                                   "actions":[{"label":"Sửa","icon":"edit","key":"action.item.edit"}]}]}
+                      ]}
+                   ]
+                 },
+                 "notes": ["<những gì đã đổi so với bản cũ>"]
+               }
+
+               Ràng buộc:
+               - Trả về TOÀN BỘ bản mô tả sau khi sửa, không phải phần thay đổi.
+               - CHỈ sửa đúng chỗ được yêu cầu, giữ nguyên mọi màn hình/thành phần khác.
+               - "type" chỉ được chọn trong: textfield, button, list, image, checkbox, switch,
+                 error, text, title. Danh sách dùng "items", mỗi item có thể có "actions".
+               - KHÔNG được bỏ hay đổi tên Item Key đang có, trừ khi giảng viên yêu cầu thẳng.
+                 Thêm thành phần mới thì đặt key theo đúng quy ước dưới đây.
+               - Mỗi key xuất hiện đúng một lần trong toàn bộ bản mô tả.
+
+               """ + KEY_CONVENTION;
+    }
+
+    static String mockupReviseUser(String specJson, String keys, String instruction) {
+        return "BẢN MÔ TẢ HIỆN TẠI:\n" + specJson
+                + "\n\nITEM KEY ĐÃ CHỐT CỦA ĐỀ:\n" + (keys == null || keys.isBlank() ? "(chưa có)" : keys)
+                + "\n\n---\nYÊU CẦU CHỈNH SỬA HÌNH:\n" + instruction;
+    }
+
     // ── 3. Đề xuất bộ testcase từ thư viện template ──────────────
 
     static String testcaseSystem(String templateCatalog, String contractKeys) {
@@ -256,6 +302,26 @@ final class AiPrompts {
     static String starterUser(String deBai) {
         return "ĐỀ BÀI:\n\n" + deBai
                 + "\n\nHãy mô tả khung starter tối thiểu để sinh viên bắt đầu làm bài này.";
+    }
+
+    /**
+     * Sửa khung starter theo lời giáo viên. Vẫn đi qua BẢN MÔ TẢ chứ không cho AI sửa thẳng code:
+     * {@link StarterRenderer} mới là nơi sinh code, và nó luôn để thân hàm là TODO — đó là chốt
+     * chặn "AI không viết hộ bài thi", không được nới ra chỉ vì đây là bước sửa.
+     */
+    static String starterReviseSystem(String contractKeys) {
+        return starterSystem(contractKeys) + """
+
+               ĐÂY LÀ LƯỢT SỬA: bạn nhận bản mô tả khung hiện tại kèm yêu cầu của giảng viên.
+               - Trả về TOÀN BỘ bản mô tả sau khi sửa (đủ mọi file), không phải phần thay đổi.
+               - CHỈ đụng vào đúng chỗ được yêu cầu; file/thuộc tính/hàm khác giữ nguyên từng chữ.
+               """;
+    }
+
+    static String starterReviseUser(String deBai, String specJson, String instruction) {
+        return "ĐỀ BÀI:\n\n" + deBai
+                + "\n\nBẢN MÔ TẢ KHUNG HIỆN TẠI:\n" + specJson
+                + "\n\n---\nYÊU CẦU CHỈNH SỬA KHUNG:\n" + instruction;
     }
 
     private static void appendIf(StringBuilder sb, String label, Object value) {

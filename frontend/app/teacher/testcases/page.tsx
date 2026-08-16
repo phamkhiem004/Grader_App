@@ -998,11 +998,10 @@ function CodeEditor({ value, onChange, rows = 14, bare = false, language = "dart
               style={{
                 lineHeight: `${EDITOR_LINE_HEIGHT}px`,
                 tabSize: 2,
-                // BẮT BUỘC để ở inline style: globals.css có rule KHÔNG nằm trong @layer
-                // `select, input, textarea { color: var(--foreground) }`, mà style không phân
-                // lớp thì thắng mọi utility của Tailwind — kể cả text-transparent. Hậu quả:
-                // chữ thô của textarea bị vẽ đè lên lớp tô màu (nền sáng thì thành chữ đen
-                // chồng chữ màu → nhìn mờ nhòe). Inline style mới chặn được rule đó.
+                // Giữ ở inline style: chữ thô của textarea phải trong suốt để không vẽ đè
+                // lên lớp tô màu bên dưới. (Rule `select, input, textarea { color: … }` trong
+                // globals.css đã chuyển vào @layer base nên utility cũng đủ thắng, nhưng inline
+                // là chắc chắn nhất — đây là thứ dễ vô tình bị một rule khác ghi đè.)
                 color: "transparent",
                 WebkitTextFillColor: "transparent",
               }}

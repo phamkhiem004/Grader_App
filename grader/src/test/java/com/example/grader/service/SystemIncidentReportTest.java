@@ -73,7 +73,7 @@ class SystemIncidentReportTest {
     private static ResultRow row(String studentId, GradingStatus status, Float score,
                                  String code, String origin) {
         return new ResultRow(1L, studentId, studentId, status, score, null, "log",
-                code, origin, "TESTCASE_EXECUTION", false);
+                code, origin, "TESTCASE_EXECUTION", false, null, null);
     }
 
     @SuppressWarnings("unchecked")

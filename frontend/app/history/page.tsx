@@ -8,6 +8,7 @@ import { Skeleton } from "@/components/ui/Skeleton";
 import { Tooltip } from "@/components/ui/Tooltip";
 import CompetencyPanel, { CompetencyItem } from "@/components/grading/CompetencyPanel";
 import { gradingStatusLabel, gradingStatusTone, type GradingOutcome } from "@/lib/gradingStatus";
+import { csvRow, downloadCsv, formatGradingTime } from "@/lib/csv";
 import {
   FileJson, DownloadCloud, Search, ChevronRight,
   CheckCircle, AlertCircle, Clock, Users, FileText, FileArchive,
@@ -56,6 +57,9 @@ interface ResultRow {
   batchId: string | null;
   submittedAt: string | null;
   updatedAt: string | null;
+  /** Máy bắt đầu / kết thúc chấm bài này; null với dữ liệu chấm trước khi có hai cột này. */
+  gradingStartedAt: string | null;
+  gradingFinishedAt: string | null;
   details: string | null;
   errorLog: string | null;
   diagnosticCode: string | null;
@@ -163,22 +167,22 @@ function passInfo(details: string | null): { pass: number; total: number } {
   }
 }
 
-function csvCell(value: string | number): string {
-  const s = String(value);
-  return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-}
-
 // Nhãn dùng chung với trang Chấm tự động — xem lib/gradingStatus.
 function statusVi(row: Pick<ResultRow, "status" | "outcome">): string {
   return gradingStatusLabel(row.status, row.outcome);
 }
 
-function formatHistoryTime(value: string | null): string {
-  if (!value) return "";
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return "";
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())} ${d.getDate()}/${d.getMonth() + 1}/${d.getFullYear()}`;
+/**
+ * Trạng thái một testcase cho file xuất ra.
+ *
+ * <p>`not_run` được giữ riêng chứ không gộp vào fail: nó nghĩa là testcase CHƯA CÓ CƠ HỘI chạy
+ * (bài không build được…), ghi thành "fail" sẽ đọc ra thành "sai 12 chỗ khác nhau" trong khi chỉ
+ * có đúng một nguyên nhân gốc — cùng lý do modal chi tiết tô nó màu xám.
+ */
+function testcaseStatus(tc: TestCaseItem): "success" | "fail" | "not_run" {
+  const status = String(tc.status || "").toLowerCase();
+  if (status === "passed" || status === "pass") return "success";
+  return status === "not_run" ? "not_run" : "fail";
 }
 
 export default function HistoryPage() {
@@ -204,6 +208,7 @@ export default function HistoryPage() {
   const [activeSub, setActiveSub] = useState(0);
   const [activeTc, setActiveTc] = useState(0);
   const [regradingId, setRegradingId] = useState<string | null>(null);
+  const [exportingId, setExportingId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   // Khóa cuộn trang nền khi mở modal
@@ -430,38 +435,93 @@ export default function HistoryPage() {
   // Xuất CSV toàn bộ đề
   const exportCSV = () => {
     if (!rows.length) return;
-    const header = [
+    const header = csvRow([
       "STT",
-      "Mã SV",
-      "Họ tên",
+      "Tên người dùng",
       "Điểm",
       "Trạng thái",
       "Số câu đúng",
       "Tổng số câu",
-      "Thời gian nộp",
-    ].join(",") + "\n";
-    const body = rows
-      .map((r, idx) => {
-        const { pass, total } = passInfo(r.details);
-        const time = formatHistoryTime(r.submittedAt || r.updatedAt);
-        return [
-          idx + 1,
-          r.studentId,
-          r.studentName || "",
+      "Bắt đầu chấm",
+      "Chấm xong",
+    ]);
+    const body = rows.map((r, idx) => {
+      const { pass, total } = passInfo(r.details);
+      return csvRow([
+        idx + 1,
+        r.studentName || r.studentId,          // tên thư mục bài nộp
+        r.score != null ? r.score.toFixed(1) : "",
+        statusVi(r),
+        pass,
+        total,
+        formatGradingTime(r.gradingStartedAt),
+        formatGradingTime(r.gradingFinishedAt),
+      ]);
+    });
+    const dateStr = new Date().toISOString().split("T")[0];
+    downloadCsv([header, ...body].join("\n"), `${selected}_lichsu_${dateStr}.csv`);
+  };
+
+  /**
+   * CSV của MỘT bài: một dòng tổng hợp, rồi bảng liệt kê từng testcase đạt/không.
+   *
+   * <p>Phải tải result_json về mới có danh sách testcase (bảng lịch sử chỉ giữ số đếm cho nhẹ),
+   * nên nút này gọi mạng chứ không xuất được ngay từ dữ liệu đang hiển thị.
+   */
+  const exportRowCSV = async (r: ResultRow) => {
+    if (!selected) return;
+    setExportingId(r.studentId);
+    try {
+      let tests: TestCaseItem[] = [];
+      let passed: number | null = null;
+      let failed: number | null = null;
+      if (r.hasJson) {
+        const res = await fetch(
+          `${API_BASE}/results/${encodeURIComponent(selected)}/${encodeURIComponent(r.studentId)}`);
+        if (res.ok) {
+          const data = JSON.parse(await res.text()) as DetailData;
+          tests = data.test_cases || [];
+          passed = data.grading_result?.passed_tests ?? null;
+          failed = data.grading_result?.failed_tests ?? null;
+        }
+      }
+      // Bài chưa có JSON (đang chờ, lỗi hệ thống) vẫn xuất được phần tổng hợp — đếm từ `details`.
+      const counted = passInfo(r.details);
+      const statuses = tests.map(testcaseStatus);
+      const pass = passed ?? (tests.length
+        ? statuses.filter((s) => s === "success").length : counted.pass);
+      const fail = failed ?? (tests.length
+        ? statuses.filter((s) => s === "fail").length
+        : Math.max(0, counted.total - counted.pass));
+
+      const lines = [
+        csvRow(["Tên người dùng", "Điểm", "Trạng thái", "Số câu đúng", "Số câu sai",
+          "Bắt đầu chấm", "Chấm xong"]),
+        csvRow([
+          r.studentName || r.studentId,
           r.score != null ? r.score.toFixed(1) : "",
           statusVi(r),
           pass,
-          total,
-          time,
-        ].map(csvCell).join(",");
-      })
-      .join("\n");
-    const blob = new Blob(["﻿" + header + body], { type: "text/csv;charset=utf-8" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    const dateStr = new Date().toISOString().split("T")[0];
-    a.download = `${selected}_lichsu_${dateStr}.csv`;
-    a.click();
+          fail,
+          formatGradingTime(r.gradingStartedAt),
+          formatGradingTime(r.gradingFinishedAt),
+        ]),
+        "",
+        csvRow(["Testcase", "Trạng thái"]),
+        ...tests.map((tc, i) => csvRow([
+          tc.test_id || tc.name || `testcase-${String(i + 1).padStart(2, "0")}`,
+          statuses[i],
+        ])),
+      ];
+      if (!tests.length) lines.push(csvRow(["(chưa có kết quả testcase)", ""]));
+
+      const name = (r.studentName || r.studentId).replace(/[\\/:*?"<>|]+/g, "_");
+      downloadCsv(lines.join("\n"), `${selected}_${name}.csv`);
+    } catch (e) {
+      alert((e as Error).message || "Không xuất được CSV của bài này.");
+    } finally {
+      setExportingId(null);
+    }
   };
 
   return (
@@ -611,7 +671,7 @@ export default function HistoryPage() {
                     <th className="px-6 py-3.5 text-center">Trạng thái</th>
                     <th className="px-6 py-3.5 text-center">Pass</th>
                     <th className="px-6 py-3.5 text-center">Điểm</th>
-                    <th className="px-6 py-3.5 text-center">Thời gian</th>
+                    <th className="px-6 py-3.5 text-center">Chấm xong</th>
                     <th className="sticky right-0 z-20 border-l border-slate-100 bg-white px-4 py-3.5 text-center">Chi tiết</th>
                   </tr>
                 </thead>
@@ -708,7 +768,7 @@ export default function HistoryPage() {
                             )}
                           </td>
                           <td className="px-6 py-3.5 text-center text-xs text-slate-500">
-                            {formatHistoryTime(r.submittedAt || r.updatedAt) || "—"}
+                            {formatGradingTime(r.gradingFinishedAt || r.submittedAt || r.updatedAt) || "—"}
                           </td>
                           <td className="sticky right-0 z-10 border-l border-slate-100 bg-white px-4 py-3.5 transition-colors group-hover:bg-slate-50/70">
                             <div className="flex items-center justify-center gap-1">
@@ -731,6 +791,19 @@ export default function HistoryPage() {
                                   className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-amber-50 hover:text-amber-600 disabled:opacity-50"
                                 >
                                   {regradingId === r.studentId ? <Loader2 size={15} className="animate-spin" /> : <RotateCcw size={15} />}
+                                </button>
+                              </Tooltip>
+                              {/* CSV của riêng bài này: dòng tổng hợp + danh sách testcase đạt/không.
+                                  Có cả ở bài chưa có JSON — khi đó chỉ thiếu phần liệt kê testcase. */}
+                              <Tooltip label={`Tải CSV của ${r.studentName || r.studentId}`} side="left">
+                                <button
+                                  onClick={() => exportRowCSV(r)}
+                                  disabled={exportingId === r.studentId}
+                                  className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-emerald-50 hover:text-emerald-600 disabled:opacity-50"
+                                >
+                                  {exportingId === r.studentId
+                                    ? <Loader2 size={15} className="animate-spin" />
+                                    : <DownloadCloud size={15} />}
                                 </button>
                               </Tooltip>
                               {r.hasJson && (

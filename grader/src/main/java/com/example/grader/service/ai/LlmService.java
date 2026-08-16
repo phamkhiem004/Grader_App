@@ -144,9 +144,27 @@ public class LlmService {
         } catch (Exception e) {
             out.put("ok", false);
             out.put("elapsedMs", System.currentTimeMillis() - started);
-            out.put("message", e.getMessage());
+            out.put("message", explainAuthFailure(e.getMessage()));
         }
         return out;
+    }
+
+    /**
+     * Lỗi 401 kèm ĐÚNG thứ app đã gửi.
+     *
+     * <p>"API key is invalid" là câu trả lời chung cho mọi kiểu key hỏng, mà ô key trên giao diện
+     * luôn hiện dạng che — nên người dùng thấy key mình vừa tạo, tin là đúng, và không có gì để
+     * đối chiếu. In ra độ dài + endpoint + model là đủ để tự soi (key Claude dài 108 ký tự; thiếu
+     * vài ký tự là biết dán hụt, thừa là dính rác vô hình) mà không lộ nội dung key.
+     */
+    private String explainAuthFailure(String message) {
+        String text = message == null ? "" : message;
+        if (!text.contains(" 401") && !text.toLowerCase().contains("api key is invalid")) return text;
+        return text + "\n\nApp đã gửi: key dài " + (settings.hasApiKey() ? settings.apiKey().length() : 0)
+                + " ký tự tới " + settings.baseUrl() + " cho model " + settings.model() + "."
+                + " Key Claude thường dài 108 ký tự và bắt đầu bằng sk-ant-api03-."
+                + " Lệch số này nghĩa là key dán thiếu/thừa ký tự; đúng số mà vẫn 401 thì key đã bị"
+                + " thu hồi hoặc thuộc workspace khác.";
     }
 
     private static String excerpt(String s) {

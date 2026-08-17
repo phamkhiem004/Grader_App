@@ -268,9 +268,10 @@ export default function ArchivePage() {
   const doDelete = async (examId: string) => {
     setErr(null); setMsg(null); setDeleting(examId);
     try {
-      await api(`/exam-setup/${encodeURIComponent(examId)}`, "DELETE");
+      const data = await api(`/exam-setup/${encodeURIComponent(examId)}`, "DELETE");
       setConfirmDel(null);
-      setMsg(`Đã xóa bộ testcase ${examId} (gỡ testcase + ảnh Docker + bài nộp).`);
+      setMsg(`Đã xóa bộ testcase ${examId}: gỡ testcase + ảnh Docker + bài nộp, `
+           + `xóa ${data.resultsRemoved ?? 0} kết quả chấm và ${data.batchesRemoved ?? 0} phiên chấm.`);
       load();
     } catch (e) {
       setErr((e as Error).message);
@@ -1043,7 +1044,7 @@ export default function ArchivePage() {
               <AlertTriangle size={20} /> <h3 className="text-base font-bold">Xóa bộ testcase {confirmDel}?</h3>
             </div>
             <p className="mb-5 text-sm text-slate-600">
-              Sẽ gỡ <b>testcase + ảnh Docker + toàn bộ bài nộp (submissions)</b> của bộ testcase để giải phóng dung lượng. <b>Sau khi xóa KHÔNG chấm lại / xem mã nguồn bài nộp được nữa.</b> Điểm đã chấm vẫn lưu ở Lịch sử &amp; Thống kê.
+              Sẽ gỡ <b>testcase + ảnh Docker + toàn bộ bài nộp + toàn bộ kết quả đã chấm</b> của bộ testcase này. <b>Không hoàn tác được:</b> điểm sẽ biến mất khỏi Lịch sử &amp; Thống kê, không chấm lại hay xem mã nguồn bài nộp được nữa. Cần lưu lại thì xuất hồ sơ/Excel ở trang Lịch sử chấm TRƯỚC khi xóa.
             </p>
             <div className="flex justify-end gap-2">
               <button onClick={() => setConfirmDel(null)} className="rounded-lg px-4 py-2 text-sm font-semibold text-slate-500 hover:bg-slate-100">Hủy</button>

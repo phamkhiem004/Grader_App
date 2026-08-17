@@ -1251,9 +1251,18 @@ public class ExamService {
         }
     }
 
-    // ── Xóa đề: gỡ ảnh legacy + testcase + TOÀN BỘ bài nộp (submissions) + bản ghi đề (DB) ──
+    // ── Xóa đề: gỡ ảnh legacy + testcase + TOÀN BỘ bài nộp + kết quả chấm + bản ghi đề (DB) ──
     public Map<String, Object> deleteExam(String examId) {
         safeId(examId, "đề");
+
+        // Xóa giữa lúc đang chấm thì worker vẫn ghi vào bản ghi vừa bị xóa và đọc zip vừa bị gỡ.
+        boolean grading = batchRepository.findByExamIdOrderByCreatedAtDesc(examId).stream()
+                .anyMatch(b -> b.getStatus() == com.example.grader.entity.BatchStatus.IN_PROGRESS
+                            || b.getStatus() == com.example.grader.entity.BatchStatus.PAUSED);
+        if (grading)
+            throw new IllegalStateException("Bộ " + examId + " đang có phiên chấm chạy dở. "
+                    + "Hãy dừng phiên chấm rồi mới xóa.");
+
         boolean imageRemoved = false;
         try {
             imageRemoved = runDocker(
@@ -1276,18 +1285,71 @@ public class ExamService {
             log.warn("Không xóa được submissions của {}: {}", examId, e.getMessage());
         }
 
+        // Kết quả chấm và phiên chấm PHẢI chết theo đề. Trước đây chỉ xóa bản ghi `exam`, còn
+        // exam_result/grading_batch ở lại thành mồ côi — vô hình với Lịch sử (lọc theo bảng
+        // `exam`) nhưng vẫn bị Thống kê gộp vào (gộp thẳng trên exam_result), và màn hình Chấm
+        // tự động dựng lại được nguyên phiên chấm từ batchId trong localStorage. Nguy hiểm hơn:
+        // tạo lại đề TRÙNG MÃ thì điểm của kỳ thi cũ hiện về như thể vừa chấm.
+        List<com.example.grader.entity.ExamResult> orphanResults = resultRepository.findByExamId(examId);
+        resultRepository.deleteAll(orphanResults);
+        List<com.example.grader.entity.GradingBatch> orphanBatches =
+                batchRepository.findByExamIdOrderByCreatedAtDesc(examId);
+        batchRepository.deleteAll(orphanBatches);
+
         boolean dbRemoved = examRepository.findByExamId(examId)
                 .map(e -> { examRepository.delete(e); return true; })
                 .orElse(false);
 
-        log.info("🗑️ Đã xóa đề {} (ảnh legacy: {}, submissions: {}, DB: {})",
-                examId, imageRemoved, submissionsRemoved, dbRemoved);
+        log.info("🗑️ Đã xóa đề {} (ảnh legacy: {}, submissions: {}, kết quả: {}, phiên chấm: {}, DB: {})",
+                examId, imageRemoved, submissionsRemoved, orphanResults.size(), orphanBatches.size(), dbRemoved);
         Map<String, Object> r = new LinkedHashMap<>();
         r.put("examId", examId);
         r.put("imageRemoved", imageRemoved);
         r.put("submissionsRemoved", submissionsRemoved);
+        r.put("resultsRemoved", orphanResults.size());
+        r.put("batchesRemoved", orphanBatches.size());
         r.put("dbRecordRemoved", dbRemoved);
         return r;
+    }
+
+    /**
+     * Dọn kết quả chấm MỒ CÔI: exam_result/grading_batch còn trỏ tới bộ testcase đã bị xóa.
+     *
+     * <p>Bản cũ của {@link #deleteExam} chỉ xóa bản ghi đề nên mọi lần xóa trước đây đều để lại
+     * một đống như vậy. Chúng vô hình với Lịch sử nhưng vẫn bị Thống kê gộp vào, và màn hình
+     * Chấm tự động dựng lại được phiên cũ từ batchId trong localStorage.
+     *
+     * <p>CHỈ chạy khi người dùng gọi, không quét tự động lúc khởi động: kết quả chấm là bằng
+     * chứng phúc khảo, xóa nhầm thì không lấy lại được.
+     */
+    public Map<String, Object> purgeOrphanGradingData() {
+        Set<String> candidates = new LinkedHashSet<>(resultRepository.findDistinctExamIds());
+        candidates.addAll(batchRepository.findDistinctExamIds());
+
+        List<String> purged = new ArrayList<>();
+        Map<String, String> failed = new LinkedHashMap<>();
+        int results = 0, batches = 0;
+        for (String id : candidates) {
+            if (id == null || id.isBlank() || examRepository.existsByExamId(id)) continue;
+            try {
+                // Đi qua đúng đường xóa đề để dọn nốt thư mục còn sót, không viết luật xóa thứ hai.
+                Map<String, Object> one = deleteExam(id);
+                results += (int) one.getOrDefault("resultsRemoved", 0);
+                batches += (int) one.getOrDefault("batchesRemoved", 0);
+                purged.add(id);
+            } catch (Exception e) {   // vd: bộ đang chấm dở → bỏ qua bộ đó, vẫn dọn các bộ còn lại
+                failed.put(id, e.getMessage());
+            }
+        }
+
+        log.info("🧹 Dọn dữ liệu chấm mồ côi: {} bộ, {} kết quả, {} phiên chấm (bỏ qua {})",
+                purged.size(), results, batches, failed.size());
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("examIds", purged);
+        out.put("resultsRemoved", results);
+        out.put("batchesRemoved", batches);
+        out.put("failed", failed);
+        return out;
     }
 
     /** Thư mục cạnh grader-base (gốc repo)/<name>, dùng chung cho exams/ và submissions/. */

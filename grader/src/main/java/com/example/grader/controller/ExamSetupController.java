@@ -500,11 +500,26 @@ public class ExamSetupController {
                 .body(data);
     }
 
-    /** Xóa 1 đề không dùng nữa: gỡ ảnh Docker + bản ghi DB (giải phóng dung lượng). */
+    /**
+     * Dọn kết quả chấm mồ côi do các lần xóa đề TRƯỚC khi deleteExam biết xóa kèm kết quả.
+     * Đặt dưới /maintenance/ để không đụng mẫu /{examId}.
+     */
+    @PostMapping("/maintenance/purge-orphans")
+    public ResponseEntity<?> purgeOrphans() {
+        try {
+            return ResponseEntity.ok(examService.purgeOrphanGradingData());
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    /** Xóa 1 đề không dùng nữa: gỡ ảnh Docker + file + kết quả chấm + bản ghi DB. */
     @DeleteMapping("/{examId}")
     public ResponseEntity<?> deleteExam(@PathVariable String examId) {
         try {
             return ResponseEntity.ok(examService.deleteExam(examId));
+        } catch (IllegalArgumentException | IllegalStateException e) {   // vd: đang có phiên chấm chạy dở
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         } catch (Exception e) {
             return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
         }

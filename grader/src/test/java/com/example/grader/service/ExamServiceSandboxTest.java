@@ -107,10 +107,13 @@ class ExamServiceSandboxTest {
     private byte[] validTestcaseZip() throws Exception {
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         try (ZipOutputStream zip = new ZipOutputStream(bytes)) {
+            // contract.json là file bắt buộc THỨ TƯ (xem ExamService#validatePortableContract):
+            // nó mang policy package + luật ValueKey, thiếu nó thì pass/fail có thể đổi.
             for (Map.Entry<String, String> file : Map.of(
                     "exam_test.dart", "void main() {}\n",
                     "grader.dart", "void main() {}\n",
-                    "skills_matrix.json", "{}\n").entrySet()) {
+                    "skills_matrix.json", "{}\n",
+                    "contract.json", "{}\n").entrySet()) {
                 zip.putNextEntry(new ZipEntry(file.getKey()));
                 zip.write(file.getValue().getBytes(java.nio.charset.StandardCharsets.UTF_8));
                 zip.closeEntry();

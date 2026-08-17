@@ -42,14 +42,16 @@ class AiAuthorResponseShapeTest {
         } catch (Exception e) {
             throw new IllegalStateException(e);
         }
+        // reviseMockup nào cũng đi qua parseKeys → strategyCodes()/suggestedKeys() đọc catalog từ
+        // templateService — thiếu mock này là NPE trước khi chạm tới thứ test muốn kiểm.
+        // Catalog rỗng là chủ đích: strategyCodes() phải tự rơi về bộ cách dò mặc định.
+        com.example.grader.service.TestcaseTemplateService templates =
+                mock(com.example.grader.service.TestcaseTemplateService.class);
+        when(templates.contractCatalog()).thenReturn(Map.of());
+        when(templates.runnerCatalog()).thenReturn(Map.of());
         AiExamAuthorService service = new AiExamAuthorService();
         ReflectionTestUtils.setField(service, "llm", llm);
         ReflectionTestUtils.setField(service, "mockupRenderer", new MockupRenderer());
-        // Lượt sửa hình giờ bóc CẢ danh sách key nên phải hỏi thư viện xem có những cách dò nào.
-        // Catalog rỗng là đủ: bộ cách dò rơi về danh sách mặc định trong service.
-        com.example.grader.service.TestcaseTemplateService templates =
-                mock(com.example.grader.service.TestcaseTemplateService.class);
-        when(templates.contractCatalog()).thenReturn(java.util.Map.of());
         ReflectionTestUtils.setField(service, "templateService", templates);
         return service;
     }

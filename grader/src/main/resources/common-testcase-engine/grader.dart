@@ -45,7 +45,15 @@ import 'dart:io';
 /// 3.4.0: student-stage timeouts become explicit student failures; testcase or
 /// unknown timeouts still require manual review. Source contracts ignore harmless
 /// formatting differences and emit structured contract-violation evidence.
-const String kEngineVersion = 'COMMON_V1-3.4.0';
+/// 3.5.0 — CÔ LẬP DỮ LIỆU giữa các scenario: flow có ghi DB (GROUP/CRUD/PERSISTENCE/
+/// RESPONSIVE/FORM_SUBMIT) chạy mỗi cái một process riêng và grader xoá thư mục databases
+/// FFI trước MỖI lô — test không còn pass/fail nhờ dữ liệu sót của scenario trước.
+/// Boot fail ở lô thường KHÔNG dừng các lô sau nữa (chỉ APP_BOOT preflight mới dừng suite).
+/// `requires_manual_review` cấp bài bật khi có test not_run. Ghi chú DB_FACTORY_NOT_SET_BY_APP
+/// khi bài không tự gán databaseFactory trong main() (trường `db_factory_injected`).
+/// Điểm CÓ THỂ LỆCH so với 3.4.0: bài từng hưởng/chịu dữ liệu sót nay ra kết quả thật —
+/// phải chấm lại và đối chiếu trước khi công bố.
+const String kEngineVersion = 'COMMON_V1-3.5.0';
 
 /// PHẢI khớp hằng cùng tên trong `exam_test.dart` — hai chương trình Dart riêng biệt,
 /// không import nhau nên không chia sẻ được hằng số.
@@ -57,6 +65,19 @@ const int kProcessTimeoutExitCode = -124;
 // SQLite noIsolate, nên gom toàn bộ suite vào một process ổn định hơn nhiều so với
 // compile lại 3-4 lần. Có thể override bằng GRADER_BATCH_SIZE khi cần chia lô.
 const int kDefaultBatchSize = 64;
+// Runner có thao tác GHI dữ liệu (seed/add/edit/delete) — mỗi cái phải một process riêng
+// để dữ liệu và static singleton của bài không rò sang scenario khác (3.5.0).
+const Set<String> kStatefulRunners = <String>{
+  'GROUP',
+  'FORM_SUBMIT',
+  'FORM_PERSISTENCE_FLOW',
+  'CRUD_EDIT_FLOW',
+  'CRUD_DELETE_FLOW',
+  'CRUD_DETAIL_FLOW',
+  'RESPONSIVE_GRID_FLOW',
+};
+// Ghi chú do exam_test in ra khi bài KHÔNG tự gán databaseFactory trong main().
+const String kDbFactoryNoteMarker = 'DB_FACTORY_NOT_SET_BY_APP';
 const int kDefaultBatchTimeoutSeconds = 180;
 const int kDefaultPreflightTimeoutSeconds = 60;
 const int kDefaultTotalTimeoutSeconds = 210;
@@ -86,6 +107,7 @@ Future<void> main() async {
   );
   final totalWatch = Stopwatch()..start();
   var totalBudgetExceeded = false;
+  var dbFactoryNoted = false;
   final testIds = matrix.keys.toList(growable: false);
   String? appBootId;
   for (final entry in matrix.entries) {
@@ -98,14 +120,29 @@ Future<void> main() async {
   // be attributed to app boot and stopped quickly instead of consuming the whole suite.
   final batches = <List<String>>[];
   if (appBootId != null) batches.add(<String>[appBootId]);
-  final remainingIds = testIds
-      .where((id) => id != appBootId)
-      .toList(growable: false);
-  for (var offset = 0; offset < remainingIds.length; offset += batchSize) {
-    final end = offset + batchSize < remainingIds.length
+  // Test tĩnh/chỉ-đọc vẫn gom lô lớn để Flutter chỉ compile một lần; flow có ghi DB
+  // tách mỗi cái một process (kStatefulRunners). Tắt bằng GRADER_ISOLATE_STATEFUL=0
+  // khi cần tái hiện đúng hành vi 3.4.0.
+  final isolateStateful = _envFlag('GRADER_ISOLATE_STATEFUL', true);
+  final sharedIds = <String>[];
+  final statefulIds = <String>[];
+  for (final id in testIds) {
+    if (id == appBootId) continue;
+    final runner = (_asMap(matrix[id])['runner'] ?? '').toString();
+    if (isolateStateful && kStatefulRunners.contains(runner)) {
+      statefulIds.add(id);
+    } else {
+      sharedIds.add(id);
+    }
+  }
+  for (var offset = 0; offset < sharedIds.length; offset += batchSize) {
+    final end = offset + batchSize < sharedIds.length
         ? offset + batchSize
-        : remainingIds.length;
-    batches.add(remainingIds.sublist(offset, end));
+        : sharedIds.length;
+    batches.add(sharedIds.sublist(offset, end));
+  }
+  for (final id in statefulIds) {
+    batches.add(<String>[id]);
   }
 
   for (final batch in batches) {
@@ -118,9 +155,16 @@ Future<void> main() async {
     }
     final configuredLimit = isPreflight ? preflightTimeout : batchTimeout;
     final limit = remaining < configuredLimit ? remaining : configuredLimit;
+    // Xoá dữ liệu SQLite của lô trước NGOÀI process app — an toàn với mọi kiểu cache
+    // Database của bài (không còn handle nào đang mở) và bảo đảm mỗi lô bắt đầu sạch.
+    _cleanScenarioDatabases();
     final process = await _runFlutterBatch(batch, limit);
     stdout.write(process.stdout);
     stderr.write(process.stderr);
+    if (!dbFactoryNoted &&
+        process.stdout.toString().contains(kDbFactoryNoteMarker)) {
+      dbFactoryNoted = true;
+    }
 
     final parsed = _parseReporter(process.stdout.toString());
     runs.addAll(parsed);
@@ -166,8 +210,10 @@ Future<void> main() async {
         break;
       }
     }
-    if (batch.any((id) => runs[id]?['bootFailed'] == true)) {
-      // _boot() là đường chung của toàn bộ runner; thử tiếp chỉ lặp lại cùng lỗi gốc.
+    if (isPreflight && batch.any((id) => runs[id]?['bootFailed'] == true)) {
+      // APP_BOOT không mở được thì mọi lô sau chỉ lặp lại cùng lỗi gốc. Boot fail ở lô
+      // THƯỜNG không dừng suite nữa (3.5.0): các lô đã cô lập dữ liệu nên lỗi do trạng
+      // thái sót không lây — mỗi scenario xứng đáng có phán quyết riêng của nó.
       break;
     }
   }
@@ -342,7 +388,13 @@ Future<void> main() async {
     'diagnostic_origin': runnerDiagnostic?['origin'],
     'diagnostic_stage': runnerDiagnostic?['stage'],
     'diagnostic_message': runnerDiagnostic?['message'],
-    'requires_manual_review': runnerDiagnostic?['manual_review'] == true,
+    // not_run = có yêu cầu CHƯA ĐƯỢC KIỂM, điểm 0 của chúng chưa chắc phản ánh thực lực
+    // — giáo viên phải xem tay (guideline: "bài lỗi cần chấm lại thủ công").
+    'requires_manual_review':
+        runnerDiagnostic?['manual_review'] == true || notRun > 0,
+    // true = bài KHÔNG tự gán databaseFactory trong main(); app đang sống nhờ factory do
+    // bộ chấm cấp. Chỉ là ghi chú cho giáo viên, không ảnh hưởng điểm.
+    'db_factory_injected': dbFactoryNoted,
     'engine_version': kEngineVersion,
   };
 
@@ -566,6 +618,23 @@ Future<ProcessResult> _runFlutterBatch(List<String> testIds, Duration timeout) {
     environment: environment,
     timeout: timeout,
   );
+}
+
+bool _envFlag(String name, bool fallback) {
+  final raw = Platform.environment[name]?.trim().toLowerCase();
+  if (raw == null || raw.isEmpty) return fallback;
+  return raw != '0' && raw != 'false' && raw != 'off';
+}
+
+/// Xoá dữ liệu SQLite giữa các process chấm. getDatabasesPath() của sqflite FFI trỏ về
+/// .dart_tool/sqflite_common_ffi/databases dưới cwd của flutter test (= cwd của grader).
+void _cleanScenarioDatabases() {
+  final dir = Directory('.dart_tool/sqflite_common_ffi/databases');
+  try {
+    if (dir.existsSync()) dir.deleteSync(recursive: true);
+  } catch (_) {
+    // Không xoá được thì thôi: tệ nhất là quay về hành vi 3.4.0 (dữ liệu sót giữa lô).
+  }
 }
 
 Future<ProcessResult> _runProcess(

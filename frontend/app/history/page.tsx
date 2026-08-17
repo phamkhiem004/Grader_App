@@ -8,12 +8,12 @@ import { Skeleton } from "@/components/ui/Skeleton";
 import { Tooltip } from "@/components/ui/Tooltip";
 import CompetencyPanel, { CompetencyItem } from "@/components/grading/CompetencyPanel";
 import { gradingStatusLabel, gradingStatusTone, type GradingOutcome } from "@/lib/gradingStatus";
-import { csvRow, downloadCsv, formatGradingTime } from "@/lib/csv";
 import { findRunningSession, upsertStoredSession } from "@/lib/gradingSessions";
 import {
-  FileJson, Search, ChevronRight,
-  AlertCircle, Clock, Users, FileText, FileArchive,
-  BarChart3, X, Loader2, FileCode2, RotateCcw, PenLine, AlertTriangle,
+  DownloadCloud, Search, ChevronRight,
+  AlertCircle, Clock, Users, FileText,
+  BarChart3, X, Loader2, FileCode2, RotateCcw, PenLine, AlertTriangle, FolderDown,
+  MessageSquareText,
 } from "lucide-react";
 
 interface ExamOption { examId: string; examName: string; }
@@ -65,9 +65,6 @@ interface ResultRow {
   batchId: string | null;
   submittedAt: string | null;
   updatedAt: string | null;
-  /** Máy bắt đầu / kết thúc chấm bài này; null với dữ liệu chấm trước khi có hai cột này. */
-  gradingStartedAt: string | null;
-  gradingFinishedAt: string | null;
   details: string | null;
   errorLog: string | null;
   diagnosticCode: string | null;
@@ -75,8 +72,23 @@ interface ResultRow {
   diagnosticStage: string | null;
   requiresManualReview: boolean;
   hasJson: boolean;
+  /** Đã có nhận xét AI cache trong DB → nút feedback là "xem" thay vì "sinh". */
+  hasFeedback?: boolean;
 }
 interface CodeFile { name: string; content: string; }
+
+/** Một bản nhận xét AI (khớp FeedbackRow của backend). */
+interface FeedbackData {
+  studentId: string;
+  studentName?: string | null;
+  score?: number | null;
+  scoreSummary?: string | null;
+  feedbackText?: string | null;
+  teacherReviewRequired?: boolean;
+  reviewReasons?: string[];
+  sources?: string[];
+  error?: string | null;
+}
 
 // Màu badge theo nhóm: sai giá trị (rose) · widget/UI (amber/orange) · exception runtime (red) · khác (slate).
 const ERR_BADGE: Record<string, string> = {
@@ -505,77 +517,191 @@ export default function HistoryPage() {
     }
   };
 
-  // Tải JSON của 1 sinh viên
-  const downloadStudentJson = async (r: ResultRow) => {
-    if (!selected) return;
+  // ── Nhận xét AI (feedback bot NLP) ──────────────────────────────────────
+  // Nút mỗi dòng có HAI đời: chưa có nhận xét → bấm là SINH (gọi bot, có thể mất vài chục giây);
+  // đã có → icon sáng, bấm là XEM (chỉ đọc cache, không tốn lượt gọi model).
+  const [fbBusy, setFbBusy] = useState<Set<string>>(new Set());
+  // Bài vừa sinh xong trong phiên này — cộng với cờ hasFeedback từ server thành trạng thái nút.
+  const [fbDone, setFbDone] = useState<Set<string>>(new Set());
+  const [fbModal, setFbModal] = useState<{ r: ResultRow; data: FeedbackData | null; loading: boolean } | null>(null);
+  const [bulkFb, setBulkFb] = useState<{ done: number; total: number } | null>(null);
+
+  useEffect(() => { setFbDone(new Set()); setFbModal(null); }, [selected]);
+
+  const hasFb = (r: ResultRow) => fbDone.has(r.studentId) || !!r.hasFeedback;
+
+  const generateFeedback = async (r: ResultRow) => {
+    if (!selected || fbBusy.has(r.studentId) || bulkFb) return;
+    setFbBusy((s) => new Set(s).add(r.studentId));
     try {
       const res = await fetch(
-        `${API_BASE}/results/${encodeURIComponent(selected)}/${encodeURIComponent(r.studentId)}`
-      );
-      if (!res.ok) return;
-      const text = await res.text();
-      const blob = new Blob([text], { type: "application/json" });
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
-      a.download = `${r.studentId}.json`;
-      a.click();
-    } catch {
-      /* bỏ qua */
+        `${API_BASE}/feedback/exam/${encodeURIComponent(selected)}/${encodeURIComponent(r.studentId)}`,
+        { method: "POST" });
+      const data: FeedbackData = await res.json().catch(() => ({ studentId: r.studentId, error: "Phản hồi không đọc được." }));
+      if (!res.ok || data.error) {
+        // Lỗi (bot tắt, bài thiếu JSON...) → mở popup báo thẳng, nút vẫn ở đời "sinh".
+        setFbModal({ r, data, loading: false });
+        return;
+      }
+      // Sinh xong: chỉ làm nút SÁNG lên (chuyển sang "xem"), không tự bung popup.
+      setFbDone((s) => new Set(s).add(r.studentId));
+    } catch (e) {
+      setFbModal({ r, data: { studentId: r.studentId, error: "Không kết nối được server: " + (e as Error).message }, loading: false });
+    } finally {
+      setFbBusy((s) => { const next = new Set(s); next.delete(r.studentId); return next; });
+    }
+  };
+
+  const openFeedback = async (r: ResultRow) => {
+    if (!selected) return;
+    setFbModal({ r, data: null, loading: true });
+    try {
+      const res = await fetch(
+        `${API_BASE}/feedback/exam/${encodeURIComponent(selected)}/${encodeURIComponent(r.studentId)}`);
+      const data: FeedbackData = await res.json().catch(() => ({ studentId: r.studentId, error: "Phản hồi không đọc được." }));
+      if (!res.ok) {
+        // Cache không còn (vd đã chấm lại) → trả nút về đời "sinh" cho khớp sự thật.
+        setFbDone((s) => { const next = new Set(s); next.delete(r.studentId); return next; });
+      }
+      setFbModal({ r, data, loading: false });
+    } catch (e) {
+      setFbModal({ r, data: { studentId: r.studentId, error: "Không kết nối được server: " + (e as Error).message }, loading: false });
     }
   };
 
   /**
-   * Tải về thư mục kết quả: mỗi bài đã chấm xong một file JSON riêng, giải nén ra `Json/<MSSV>.json`
-   * — thay cho bản JSON GỘP trước đây (một file khổng lồ phải tự tách mới dùng được).
-   *
-   * Không dùng `showDirectoryPicker` — xem lý do ở trang Chấm tự động.
+   * SINH TOÀN BỘ feedback của đề rồi tải về ZIP mỗi SV một file `<MSSV>.txt` (file trống nếu bài
+   * đó sinh lỗi). Gọi TUẦN TỰ từng bài: bot chạy model local, dồn song song chỉ làm nghẽn.
    */
-  const downloadResultsFolder = async () => {
-    if (!selected) return;
+  const generateAllFeedback = async () => {
+    if (!selected || bulkFb) return;
+    // Bot phải đang chạy — báo một lần ngay đầu thay vì để N bài cùng lỗi một kiểu.
     try {
-      const res = await fetch(`${API_BASE}/results/exam/${encodeURIComponent(selected)}/archive`);
-      if (res.status === 404) throw new Error("Chưa có bài nào chấm xong để xuất.");
-      if (!res.ok) throw new Error("Không tạo được thư mục kết quả.");
+      const health = await fetch(`${API_BASE}/feedback/health`).then((x) => x.json());
+      if (!health?.up) {
+        alert(`Feedback bot (NLP) chưa chạy tại ${health?.base || "http://localhost:8000"}.\nHãy bật bot rồi bấm lại.`);
+        return;
+      }
+    } catch {
+      alert("Không kết nối được server.");
+      return;
+    }
+
+    const targets = rows.filter((r) => r.hasJson && !hasFb(r));
+    setBulkFb({ done: 0, total: targets.length });
+    let failed = 0;
+    for (const r of targets) {
+      try {
+        const res = await fetch(
+          `${API_BASE}/feedback/exam/${encodeURIComponent(selected)}/${encodeURIComponent(r.studentId)}`,
+          { method: "POST" });
+        const data: FeedbackData = await res.json().catch(() => ({ studentId: r.studentId, error: "?" }));
+        if (!res.ok || data.error) failed++;
+        else setFbDone((s) => new Set(s).add(r.studentId));
+      } catch { failed++; }
+      setBulkFb((p) => (p ? { ...p, done: p.done + 1 } : p));
+    }
+    setBulkFb(null);
+    await loadRows(false);   // đồng bộ cờ hasFeedback từ DB (kể cả bản sinh từ máy khác)
+    if (failed) alert(`${failed} bài không sinh được feedback — bấm nút feedback của từng bài để xem lỗi.`);
+
+    // Tải ZIP kể cả khi có bài lỗi: danh sách file khớp danh sách bài, bài lỗi là file trống.
+    try {
+      const res = await fetch(`${API_BASE}/feedback/exam/${encodeURIComponent(selected)}/export`);
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Không tạo được gói feedback.");
+      }
       const blob = await res.blob();
       const a = document.createElement("a");
       a.href = URL.createObjectURL(blob);
-      a.download = "Json.zip";
+      a.download = `Feedback_${selected}.zip`;
       a.click();
       URL.revokeObjectURL(a.href);
     } catch (error: any) {
-      alert(error?.message || "Không xuất được thư mục JSON.");
+      alert(error?.message || "Không tải được gói feedback.");
     }
   };
 
   /**
-   * Bảng điểm CSV — theo ĐÚNG danh sách đang hiển thị (đã qua lọc), cùng cột với CSV của trang
-   * Chấm tự động để hai file ghép được vào nhau.
+   * HỒ SƠ PHÁT CHO SINH VIÊN: Result_of_<đề>/<MSSV>/{json, xls, feedback.txt, logs/} — backend
+   * dựng cả gói, ZIP chỉ là lớp vận chuyển thư mục.
    */
-  const exportCSV = () => {
+  const downloadReportPackage = async () => {
+    if (!selected) return;
+    try {
+      const res = await fetch(`${API_BASE}/results/exam/${encodeURIComponent(selected)}/report-package`);
+      if (res.status === 404) throw new Error("Chưa có bài nào chấm xong để xuất hồ sơ.");
+      if (!res.ok) throw new Error("Không tạo được gói hồ sơ.");
+      const blob = await res.blob();
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `Result_of_${selected}.zip`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    } catch (error: any) {
+      alert(error?.message || "Không xuất được gói hồ sơ.");
+    }
+  };
+
+  /**
+   * Xuất bảng điểm — theo ĐÚNG danh sách đang hiển thị (đã qua lọc), "cái bạn thấy là cái bạn
+   * tải về".
+   *
+   * <p>Xuất dạng bảng HTML lưu đuôi .xls thay vì CSV thuần: yêu cầu là dòng đã sửa điểm phải TÔ
+   * VÀNG, mà CSV là văn bản trần không mang được màu. Excel/LibreOffice/Google Sheets đều mở
+   * bảng HTML này và giữ nguyên màu nền; Excel có thể hỏi xác nhận đuôi file — bấm Yes là mở.
+   */
+  const exportExcel = () => {
     if (!filtered.length) return;
-    const header = csvRow([
-      "STT", "Tên người dùng", "Điểm", "Trạng thái",
-      "Số câu đúng", "Tổng số câu", "Bắt đầu chấm", "Chấm xong",
-    ]);
-    const body = filtered.map((r, idx) => {
-      const { pass, total } = passInfo(r.details);
-      const edited = r.manualScore != null;
-      return csvRow([
-        idx + 1,
-        r.studentName || r.studentId,            // tên thư mục bài nộp
-        // Bài đã sửa điểm tay: ghi "mới/cũ" để không mất dấu điểm tự động ban đầu.
-        edited
+    const esc = (v: string | number) =>
+      String(v).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    // Cỡ chữ phải khai bằng ĐƠN VỊ pt: Excel đọc px sai (12px ra cỡ 6), còn bỏ trống thì nó rơi
+    // về mặc định 10 của bộ nhập HTML.
+    const BASE = "border:1px solid #CBD5E1;font-size:12.0pt;";
+    // `mso-number-format:'\@'` = ép ô dạng CHỮ. CHỈ dùng cho ô thật sự là chuỗi ("13/30", "1.6/1.4",
+    // mốc thời gian) — thiếu nó thì Excel đổi "12/30" thành ngày 30 tháng 12. Áp nhầm vào một con
+    // số đơn thuần thì ngược lại: Excel gắn cờ "số lưu dạng chữ" (tam giác xanh góc ô).
+    const td = (v: string | number, opts: { yellow?: boolean; text?: boolean } = {}) =>
+      `<td style="${BASE}${opts.yellow ? "background:#FEF08A;" : ""}${
+        opts.text ? "mso-number-format:'\\@';" : ""}">${esc(v)}</td>`;
+    const headerCells = ["STT", "Mã SV", "Điểm", "Trạng thái", "TC RATE", "Thời gian chấm"]
+      .map((h) => `<th style="${BASE}background:#EEF2FF">${h}</th>`)
+      .join("");
+    const bodyRows = filtered
+      .map((r, idx) => {
+        const { pass, total } = passInfo(r.details);
+        const edited = r.manualScore != null;
+        // Điểm: bài đã sửa ghi "mới/cũ" để nhìn phát biết cả hai; bài thường giữ một số.
+        const score = edited
           ? `${r.manualScore!.toFixed(1)}/${r.score != null ? r.score.toFixed(1) : "—"}`
-          : r.score != null ? r.score.toFixed(1) : "",
-        statusVi(r),
-        edited && r.manualTotal ? (r.manualPass ?? 0) : pass,
-        edited && r.manualTotal ? r.manualTotal : total,
-        formatGradingTime(r.gradingStartedAt),
-        formatGradingTime(r.gradingFinishedAt),
-      ]);
-    });
+          : r.score != null ? r.score.toFixed(1) : "";
+        const tcPass = edited && r.manualTotal ? (r.manualPass ?? 0) : pass;
+        const tcTotal = edited && r.manualTotal ? r.manualTotal : total;
+        // Vàng tô TỪNG Ô, không tô <tr>: nền đặt ở hàng bị Excel kéo dài hết chiều ngang sheet.
+        const y = { yellow: edited };
+        const cells = [
+          td(idx + 1, y),
+          td(r.studentId, y),
+          // Bài đã sửa: "1.6/1.4" là chuỗi thật → ép chữ. Bài thường: để nguyên SỐ, có vậy Excel
+          // mới canh phải và không gắn cờ "số lưu dạng chữ".
+          td(score, edited ? { ...y, text: true } : y),
+          td(statusVi(r), y),
+          td(`${tcPass}/${tcTotal}`, { ...y, text: true }),
+          td(formatHistoryTime(r.updatedAt || r.submittedAt), { ...y, text: true }),
+        ].join("");
+        return `<tr>${cells}</tr>`;
+      })
+      .join("");
+    const html = `﻿<html><head><meta charset="utf-8"></head><body>` +
+      `<table style="border-collapse:collapse">` +
+      `<thead><tr>${headerCells}</tr></thead><tbody>${bodyRows}</tbody></table></body></html>`;
+    const blob = new Blob([html], { type: "application/vnd.ms-excel;charset=utf-8" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
     const dateStr = new Date().toISOString().split("T")[0];
-    downloadCsv([header, ...body].join("\n"), `${selected}_lichsu_${dateStr}.csv`);
+    a.download = `${selected}_lichsu_${dateStr}.xls`;
+    a.click();
   };
 
   return (
@@ -754,20 +880,29 @@ export default function HistoryPage() {
                   />
                 </div>
                 <button
-                  onClick={downloadResultsFolder}
-                  disabled={!rows.some((r) => r.hasJson && r.outcome === "SCORED")}
-                  title="Xuất thư mục gồm một JSON cho mỗi bài đã chấm xong"
-                  className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 shadow-sm transition-all hover:text-slate-900 hover:shadow active:scale-95 disabled:opacity-50"
+                  onClick={generateAllFeedback}
+                  disabled={!rows.some((r) => r.hasJson) || !!bulkFb}
+                  title="Sinh nhận xét AI (bot NLP) cho mọi bài đã chấm, rồi tải về mỗi SV một file <MSSV>.txt"
+                  className="flex items-center gap-2 rounded-lg border border-violet-200 bg-violet-50 px-3 py-1.5 text-xs font-semibold text-violet-700 shadow-sm transition-all hover:bg-violet-100 active:scale-95 disabled:opacity-50"
                 >
-                  <FileArchive size={15} /> Xuất JSON
+                  {bulkFb ? <Loader2 size={15} className="animate-spin" /> : <MessageSquareText size={15} />}
+                  {bulkFb ? `Sinh feedback (${bulkFb.done}/${bulkFb.total})` : "Sinh feedback"}
                 </button>
                 <button
-                  onClick={exportCSV}
-                  disabled={!filtered.length}
-                  title="Xuất bảng điểm CSV của đúng danh sách đang hiển thị"
+                  onClick={downloadReportPackage}
+                  disabled={!rows.some((r) => r.hasJson && r.outcome === "SCORED")}
+                  title="Mỗi SV một thư mục: JSON + Excel testcase + feedback.txt + logs"
                   className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 shadow-sm transition-all hover:text-slate-900 hover:shadow active:scale-95 disabled:opacity-50"
                 >
-                  <FileText size={15} /> Xuất CSV
+                  <FolderDown size={15} /> Hồ sơ SV
+                </button>
+                <button
+                  onClick={exportExcel}
+                  disabled={!rows.length}
+                  title="Xuất bảng điểm Excel — dòng đã sửa điểm được tô vàng"
+                  className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 shadow-sm transition-all hover:text-slate-900 hover:shadow active:scale-95 disabled:opacity-50"
+                >
+                  <DownloadCloud size={15} /> Xuất Excel
                 </button>
                 {selectedIds.size > 0 && (
                   <button
@@ -818,7 +953,7 @@ export default function HistoryPage() {
                     <th className="px-6 py-3.5 text-center">Trạng thái</th>
                     <th className="px-6 py-3.5 text-center">Pass</th>
                     <th className="px-6 py-3.5 text-center">Điểm</th>
-                    <th className="px-6 py-3.5 text-center">Chấm xong</th>
+                    <th className="px-6 py-3.5 text-center">Thời gian</th>
                     <th className="sticky right-0 z-20 border-l border-slate-100 bg-white px-4 py-3.5 text-center">Chi tiết</th>
                   </tr>
                 </thead>
@@ -973,7 +1108,7 @@ export default function HistoryPage() {
                             )}
                           </td>
                           <td className="px-6 py-3.5 text-center text-xs text-slate-500">
-                            {formatGradingTime(r.gradingFinishedAt || r.submittedAt || r.updatedAt) || "—"}
+                            {formatHistoryTime(r.submittedAt || r.updatedAt) || "—"}
                           </td>
                           <td className="sticky right-0 z-10 border-l border-slate-100 bg-white px-4 py-3.5 transition-colors group-hover:bg-slate-50/70">
                             <div className="flex items-center justify-center gap-1">
@@ -1008,12 +1143,24 @@ export default function HistoryPage() {
                                       <BarChart3 size={15} />
                                     </button>
                                   </Tooltip>
-                                  <Tooltip label={`Tải JSON của ${r.studentId}`} side="left">
+                                  <Tooltip
+                                    label={hasFb(r)
+                                      ? `Xem feedback của ${r.studentId}`
+                                      : `Sinh feedback cho ${r.studentId} (bot NLP)`}
+                                    side="left"
+                                  >
                                     <button
-                                      onClick={() => downloadStudentJson(r)}
-                                      className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-indigo-50 hover:text-indigo-600"
+                                      onClick={() => (hasFb(r) ? openFeedback(r) : generateFeedback(r))}
+                                      disabled={fbBusy.has(r.studentId) || !!bulkFb}
+                                      className={`inline-flex h-7 w-7 items-center justify-center rounded-lg transition-colors disabled:opacity-50 ${
+                                        hasFb(r)
+                                          ? "text-violet-500 hover:bg-violet-50 hover:text-violet-700"
+                                          : "text-slate-400 hover:bg-violet-50 hover:text-violet-600"
+                                      }`}
                                     >
-                                      <FileJson size={15} />
+                                      {fbBusy.has(r.studentId)
+                                        ? <Loader2 size={15} className="animate-spin" />
+                                        : <MessageSquareText size={15} />}
                                     </button>
                                   </Tooltip>
                                 </>
@@ -1030,6 +1177,70 @@ export default function HistoryPage() {
           </div>
         </div>
       </div>
+      {/* Pop-up nhận xét AI của 1 bài — cùng cách Portal như modal năng lực bên dưới. */}
+      {fbModal && typeof document !== "undefined" && createPortal(
+        <div
+          className="animate-modal-overlay fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm"
+          onClick={() => setFbModal(null)}
+        >
+          <div
+            className="animate-modal-pop flex max-h-[85vh] w-full max-w-xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex shrink-0 items-center justify-between border-b border-slate-100 px-6 py-4">
+              <div className="flex min-w-0 items-center gap-2.5">
+                <MessageSquareText size={18} className="shrink-0 text-violet-500" />
+                <div className="min-w-0">
+                  <h3 className="truncate text-sm font-bold text-slate-800">
+                    Feedback — {fbModal.r.studentName || fbModal.r.studentId}
+                  </h3>
+                  <p className="font-mono text-xs text-slate-400">{fbModal.r.studentId} · {selected}</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setFbModal(null)}
+                className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="min-h-0 overflow-y-auto px-6 py-5">
+              {fbModal.loading ? (
+                <div className="flex items-center justify-center gap-2 py-10 text-sm text-slate-500">
+                  <Loader2 size={18} className="animate-spin" /> Đang đọc nhận xét…
+                </div>
+              ) : fbModal.data?.error ? (
+                <div className="flex items-start gap-2.5 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                  <AlertCircle size={16} className="mt-0.5 shrink-0" />
+                  <span>{fbModal.data.error}</span>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {fbModal.data?.scoreSummary && (
+                    <span className="inline-flex items-center gap-1.5 rounded-lg bg-violet-50 px-3 py-1.5 text-sm font-bold text-violet-700">
+                      Điểm: {fbModal.data.scoreSummary}
+                    </span>
+                  )}
+                  <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-700">
+                    {fbModal.data?.feedbackText || "(Nhận xét trống)"}
+                  </p>
+                  {fbModal.data?.teacherReviewRequired && (
+                    <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800">
+                      <p className="mb-1 flex items-center gap-1.5 font-bold">
+                        <AlertTriangle size={13} /> Bot khuyến nghị giảng viên xem lại bài này
+                      </p>
+                      <ul className="list-disc space-y-0.5 pl-5">
+                        {(fbModal.data.reviewReasons || []).map((reason, i) => <li key={i}>{reason}</li>)}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
       {/* Modal chi tiết năng lực 1 bài — render qua Portal ra body để không bị
           giam trong khung max-w-6xl (animate-fade-in-up tạo containing block). */}
       {detailRow && typeof document !== "undefined" && createPortal(

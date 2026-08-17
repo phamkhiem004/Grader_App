@@ -138,6 +138,8 @@ public class ResultController {
             m.put("diagnosticStage", r.diagnosticStage());
             m.put("requiresManualReview", r.requiresManualReview());
             m.put("hasJson", Boolean.TRUE.equals(r.hasJson()));
+            // Nút feedback trên trang Lịch sử: đã có nhận xét cache → "xem", chưa có → "sinh".
+            m.put("hasFeedback", Boolean.TRUE.equals(r.hasFeedback()));
             // Số tiêu chí ĐẠT sau chấm tay — để trang Lịch sử hiện "pass mới" cạnh "pass cũ".
             // Đếm tại đây rồi bỏ manualJson, không phát hành nguyên văn breakdown ra API này.
             int[] manualPass = manualPassCounts(r.manualJson());
@@ -149,27 +151,11 @@ public class ResultController {
     }
 
     /**
-     * Đếm tiêu chí đạt TRỌN điểm trong manual_json → {đạt, tổng}; null khi chưa chấm tay
-     * hoặc JSON không đọc được. Bản lưu cũ có thể thiếu maxPoints — khi đó tin cờ `passed`
-     * (trạng thái tự động lúc lưu) thay vì đoán thang điểm.
+     * Đếm tiêu chí đạt sau chấm tay — logic nằm ở {@link StudentReportArchiveBuilder} vì gói hồ sơ
+     * cũng cần đúng con số này; hai bản chép tay kiểu gì cũng lệch nhau.
      */
     private int[] manualPassCounts(String manualJson) {
-        if (manualJson == null || manualJson.isBlank()) return null;
-        try {
-            JsonNode criteria = mapper.readTree(manualJson).path("criteria");
-            if (!criteria.isArray() || criteria.isEmpty()) return null;
-            int pass = 0;
-            for (JsonNode c : criteria) {
-                double max = c.path("maxPoints").asDouble(0);
-                boolean ok = max > 0
-                        ? c.path("points").asDouble(0) >= max - 1e-6
-                        : c.path("passed").asBoolean(false);
-                if (ok) pass++;
-            }
-            return new int[]{pass, criteria.size()};
-        } catch (Exception e) {
-            return null;
-        }
+        return StudentReportArchiveBuilder.manualPassCounts(manualJson);
     }
 
     /** JSON GỘP toàn bộ bài đã chấm xong của 1 ĐỀ: { examId, count, results:[...] } — in đẹp. */
@@ -257,6 +243,28 @@ public class ResultController {
     @GetMapping(value = "/exam/{examId}/archive", produces = "application/zip")
     public ResponseEntity<byte[]> getExamResultsArchive(@PathVariable String examId) {
         return resultsArchive(examId, resultRepo.findByExamIdAndModeOrderByUpdatedAtDesc(examId, "submit"));
+    }
+
+    /**
+     * HỒ SƠ PHÁT CHO SINH VIÊN: Result_of_&lt;đề&gt;/&lt;MSSV&gt;/{json, xls, feedback.txt, logs/}.
+     * Chỉ bài đã chấm xong; xem {@link StudentReportArchiveBuilder} cho cấu trúc và lý do từng file.
+     */
+    @GetMapping(value = "/exam/{examId}/report-package", produces = "application/zip")
+    public ResponseEntity<byte[]> getStudentReportPackage(@PathVariable String examId) {
+        List<ExamResult> rows = resultRepo.findByExamIdAndModeOrderByUpdatedAtDesc(examId, "submit")
+                .stream().filter(ResultController::exportable).toList();
+        if (rows.isEmpty()) return ResponseEntity.notFound().build();
+        try {
+            byte[] archive = new StudentReportArchiveBuilder(this::pretty).build(examId, rows);
+            String downloadName = "Result_of_" + safeArchivePart(examId) + ".zip";
+            return ResponseEntity.ok()
+                    .contentType(MediaType.parseMediaType("application/zip"))
+                    .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment()
+                            .filename(downloadName, StandardCharsets.UTF_8).build().toString())
+                    .body(archive);
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().build();
+        }
     }
 
     private ResponseEntity<byte[]> resultsArchive(String name, List<ExamResult> rows) {

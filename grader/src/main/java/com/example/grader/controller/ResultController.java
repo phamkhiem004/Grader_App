@@ -138,6 +138,8 @@ public class ResultController {
             m.put("diagnosticStage", r.diagnosticStage());
             m.put("requiresManualReview", r.requiresManualReview());
             m.put("hasJson", Boolean.TRUE.equals(r.hasJson()));
+            // Nút feedback trên trang Lịch sử: đã có nhận xét cache → "xem", chưa có → "sinh".
+            m.put("hasFeedback", Boolean.TRUE.equals(r.hasFeedback()));
             // Số tiêu chí ĐẠT sau chấm tay — để trang Lịch sử hiện "pass mới" cạnh "pass cũ".
             // Đếm tại đây rồi bỏ manualJson, không phát hành nguyên văn breakdown ra API này.
             int[] manualPass = manualPassCounts(r.manualJson());

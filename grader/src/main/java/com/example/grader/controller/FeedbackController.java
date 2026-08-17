@@ -2,16 +2,23 @@ package com.example.grader.controller;
 
 import com.example.grader.dto.FeedbackRow;
 import com.example.grader.entity.ExamResult;
+import com.example.grader.entity.GradingStatus;
 import com.example.grader.repository.ExamResultRepository;
 import com.example.grader.service.FeedbackBotClient;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.io.ByteArrayOutputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 
 /**
  * "Đọc & nhận xét bài làm bằng AI": cầu nối giữa kết quả chấm (result_json) và AI agent
@@ -83,5 +90,54 @@ public class FeedbackController {
             } catch (Exception ignored) { /* không cache được cũng không sao */ }
         }
         return ResponseEntity.ok(row);
+    }
+
+    /**
+     * XEM nhận xét đã sinh (chỉ đọc cache, KHÔNG gọi bot). Trang Lịch sử dùng cho pop-up
+     * "view feedback": nút xem không được lặng lẽ tốn một lượt gọi model.
+     */
+    @GetMapping("/exam/{examId}/{studentId}")
+    public ResponseEntity<?> cached(@PathVariable String examId, @PathVariable String studentId) {
+        ExamResult r = resultRepo.findByStudentIdAndExamIdAndMode(studentId, examId, "submit").orElse(null);
+        if (r == null || r.getFeedbackJson() == null || r.getFeedbackJson().isBlank())
+            return ResponseEntity.status(404).body(Map.of("error", "Bài này chưa được sinh feedback."));
+        try {
+            return ResponseEntity.ok(mapper.readValue(r.getFeedbackJson(), FeedbackRow.class));
+        } catch (Exception broken) {
+            return ResponseEntity.status(404).body(Map.of("error", "Bản feedback đã lưu bị hỏng — hãy sinh lại."));
+        }
+    }
+
+    /**
+     * ZIP toàn bộ feedback của 1 đề: Feedback_&lt;đề&gt;/&lt;MSSV&gt;.txt — mỗi SV một file, trình
+     * bày y hệt feedback.txt trong gói Hồ sơ SV (cùng renderer). Bài chưa sinh nhận xét → file
+     * TRỐNG, không phải bỏ qua: danh sách file phải khớp danh sách bài đã chấm để giáo viên
+     * nhìn ra ngay bài nào còn thiếu.
+     */
+    @GetMapping("/exam/{examId}/export")
+    public ResponseEntity<?> exportTxt(@PathVariable String examId) throws Exception {
+        List<ExamResult> rows = resultRepo.findByExamIdAndModeOrderByUpdatedAtDesc(examId, "submit").stream()
+                .filter(r -> r.getStatus() == GradingStatus.DONE
+                          && r.getResultJson() != null && !r.getResultJson().isBlank())
+                .toList();
+        if (rows.isEmpty())
+            return ResponseEntity.badRequest().body(Map.of("error", "Đề này chưa có bài nào chấm xong."));
+
+        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+        try (ZipOutputStream zip = new ZipOutputStream(buffer, StandardCharsets.UTF_8)) {
+            String root = "Feedback_" + examId + "/";
+            zip.putNextEntry(new ZipEntry(root));
+            zip.closeEntry();
+            for (ExamResult r : rows) {
+                zip.putNextEntry(new ZipEntry(root + r.getStudentId() + ".txt"));
+                zip.write(StudentReportArchiveBuilder.renderFeedbackText(r).getBytes(StandardCharsets.UTF_8));
+                zip.closeEntry();
+            }
+        }
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        "attachment; filename=\"Feedback_" + examId + ".zip\"")
+                .contentType(MediaType.parseMediaType("application/zip"))
+                .body(buffer.toByteArray());
     }
 }

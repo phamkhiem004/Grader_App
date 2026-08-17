@@ -148,12 +148,19 @@ final class StudentReportArchiveBuilder {
 
     // ── feedback.txt ────────────────────────────────────────────────
     private String feedbackText(ExamResult row) {
+        return renderFeedbackText(row);
+    }
+
+    /**
+     * Nội dung feedback.txt của 1 SV — static để nút "Sinh feedback" (ZIP .txt theo MSSV) dùng
+     * chung một cách trình bày; hai bản chép tay kiểu gì cũng lệch nhau.
+     *
+     * <p>Chưa sinh nhận xét → trả CHUỖI RỖNG (file trống), không phải câu placeholder: hồ sơ phát
+     * cho sinh viên, một file trống nói "chưa có" rõ hơn một đoạn văn giải thích cơ chế nội bộ.
+     */
+    static String renderFeedbackText(ExamResult row) {
         String cached = row.getFeedbackJson();
-        if (cached == null || cached.isBlank()) {
-            return "Chưa có nhận xét cho bài này.\n\n"
-                    + "File này sẽ được điền tự động khi chạy chức năng \"Nhận xét AI\" (feedback bot)\n"
-                    + "cho bộ testcase " + row.getExamId() + ".\n";
-        }
+        if (cached == null || cached.isBlank()) return "";
         try {
             JsonNode fb = MAPPER.readTree(cached);
             StringBuilder sb = new StringBuilder();

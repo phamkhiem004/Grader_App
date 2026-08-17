@@ -1053,7 +1053,15 @@ Future<void> _boot(WidgetTester tester) async {
   // được hoàn tất, còn pumpAndSettle thì chờ vô hạn vì CircularProgressIndicator.
   _stage('STUDENT_APP_BOOT');
   await tester.runAsync(() async {
+    // Suite đã gán factory từ trước nên getter không bao giờ ném; so sánh identical cho
+    // biết main() của bài CÓ tự gán databaseFactory hay không.
+    final factoryBeforeMain = databaseFactory;
     student_app.main();
+    if (identical(databaseFactory, factoryBeforeMain)) {
+      // Bài không tự init DB: app đang sống nhờ factory do bộ chấm cấp. Chỉ ghi chú cho
+      // giáo viên (grader.dart gom thành `db_factory_injected`), không ảnh hưởng điểm.
+      print('###GRADER_NOTE### DB_FACTORY_NOT_SET_BY_APP');
+    }
     // Một số bài tự gán lại databaseFactoryFfi (có isolate) trong main(). Gán lại ngay
     // trước pump đầu tiên để Provider/Repository mở DB bằng backend noIsolate ổn định.
     sqfliteFfiInit();

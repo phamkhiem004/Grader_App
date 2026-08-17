@@ -66,9 +66,10 @@ class StudentReportArchiveBuilderTest {
         assertTrue(xls.contains("mso-number-format"), "chuỗi x/y phải ép dạng chữ");
         assertFalse(xls.contains("font-size:12px"), "cỡ chữ phải khai bằng pt, không phải px");
 
-        // Chưa chạy bot → feedback là placeholder nói rõ sẽ được điền sau.
+        // Chưa sinh nhận xét → feedback.txt phải TRỐNG (hồ sơ phát cho SV, không nhét câu
+        // giải thích cơ chế nội bộ vào file của họ).
         String feedback = entries.get(home + "feedback.txt");
-        assertTrue(feedback.contains("Chưa có nhận xét"), feedback);
+        assertEquals("", feedback, "chưa sinh feedback thì file phải bỏ trống");
 
         // Log: đủ định danh + liệt kê testcase không đạt kèm mã lỗi.
         String log = entries.get(home + "logs/grading.log");

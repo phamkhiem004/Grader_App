@@ -78,7 +78,7 @@ final class TestcaseRunnerCatalog {
                         keys("errorKeys", "Key lỗi tương ứng", true, "error.name,error.email",
                                 "Phải cùng số phần tử và cùng thứ tự với các ô nhập."))));
         out.add(runner("FORM_VALIDATE_FIELDS", "Form báo lỗi khi nhập sai", "SCREEN",
-                "Nhập giá trị sai vào từng ô rồi kiểm tra lỗi tương ứng hiện ra.",
+                "Nhập giá trị sai, ưu tiên errorKey rồi kiểm tra errorText trong đúng field.",
                 List.of(keys("fieldKeys", "Các ô nhập", true, "field.name,field.email", null),
                         enums("fieldType", "Loại ô nhập", true, FIELD_TYPES, "input", null),
                         values("invalidValues", "Giá trị sai cho từng ô", true, "fieldKeys",
@@ -164,7 +164,7 @@ final class TestcaseRunnerCatalog {
                         key("oldResultKey", "Dữ liệu cũ phải biến mất (tùy chọn)", false,
                                 "item.old", null))));
         out.add(runner("CRUD_DELETE_FLOW", "Luồng xóa có hủy và xác nhận", "BLACKBOX",
-                "Tạo dữ liệu qua UI, hủy xóa để giữ item rồi xác nhận xóa đúng item.",
+                "Tạo dữ liệu qua UI, scope action trong item/dialog, hủy để giữ item rồi xác nhận xóa đúng item.",
                 List.of(keys("fieldKeys", "Các ô nhập", true,
                                 "field.name,field.email,field.avatar", null),
                         enums("fieldType", "Loại ô nhập", true, FIELD_TYPES, "input", null),

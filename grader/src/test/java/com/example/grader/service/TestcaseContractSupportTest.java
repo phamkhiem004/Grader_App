@@ -63,4 +63,37 @@ class TestcaseContractSupportTest {
                 "keys", List.of(Map.of("key", "screen.home"))));
         validate.invoke(service, items, Map.of("require_keys", false, "keys", List.of()));
     }
+
+    /**
+     * Câu báo lỗi phải liệt kê nguyên vẹn key còn thiếu: màn hình soạn testcase đọc chính câu này
+     * để khai hộ key vào Khu vực 0. Đổi cách viết thì phải sửa cả chỗ đọc bên frontend.
+     */
+    @Test
+    void missingKeyErrorNamesEveryKeySoTheEditorCanDeclareThem() throws Exception {
+        TestcaseTemplateService service = new TestcaseTemplateService();
+        Method validate = TestcaseTemplateService.class.getDeclaredMethod(
+                "validateContractCoversSelectedKeys", List.class, Map.class);
+        validate.setAccessible(true);
+        // Testcase xóa item: key nằm ở deleteKey — một tham số mà trước đây frontend không dò tới.
+        List<Map<String, Object>> items = List.of(Map.of(
+                "runner", "CRUD_DELETE_FLOW",
+                "enabled", true,
+                "parameters", Map.of(
+                        "listKey", "screen.list",
+                        "deleteKey", "action.item.delete")));
+
+        try {
+            validate.invoke(service, items, Map.of("require_keys", true,
+                    "keys", List.of(Map.of("key", "screen.list"))));
+            throw new AssertionError("Contract thiếu action.item.delete phải bị chặn");
+        } catch (InvocationTargetException error) {
+            assertInstanceOf(IllegalArgumentException.class, error.getCause());
+            String message = error.getCause().getMessage();
+            assertEquals(true, message.contains("key testcase đang dùng: action.item.delete."),
+                    "frontend cắt danh sách key theo đúng cụm này: " + message);
+        }
+
+        validate.invoke(service, items, Map.of("require_keys", true, "keys", List.of(
+                Map.of("key", "screen.list"), Map.of("key", "action.item.delete"))));
+    }
 }

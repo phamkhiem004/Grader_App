@@ -424,22 +424,40 @@ public class TestcaseTemplateService {
         }
     }
 
-    private Map<String, Object> save(String rawExamId, Map<String, Object> body,
-                                     String actor, boolean publish) {
+    // synchronized: cú tự lưu nháp chạy nền và cú bấm Lưu có thể tới gần như cùng lúc. Để hai
+    // luồng cùng ghi thư mục testcase + hàng exams thì trạng thái cuối cùng là của cú tới sau,
+    // không phải của cú người dùng bấm.
+    private synchronized Map<String, Object> save(String rawExamId, Map<String, Object> body,
+                                                  String actor, boolean publish) {
         ensureReferenceTemplatesLoaded();
         String examId = ExamService.safeId(rawExamId, "đề");
         if (body == null) throw new IllegalArgumentException("Thiếu cấu hình testcase");
 
         Exam exam = examRepository.findByExamId(examId).orElseGet(Exam::new);
         boolean isNew = exam.getId() == null;
+        Map<String, Object> recoveredConfig = null;
         if (!isNew && !isTemplateCreatedExam(exam)) {
-            throw new IllegalStateException("Mã đề " + examId
-                    + " đã tồn tại. Hãy dùng một mã đề mới để tạo testcase.");
+            // Bộ common-engine nhập bằng ZIP được màn Sửa dựng lại từ file; cho phép lưu
+            // chính bộ đó, nhưng vẫn chặn đề legacy không thể phục hồi an toàn.
+            recoveredConfig = recoverConfig(examId);
+            if (recoveredConfig == null) {
+                throw new IllegalStateException("Mã đề " + examId
+                        + " đã tồn tại. Hãy dùng một mã đề mới để tạo testcase.");
+            }
+        }
+        // Bộ đã Lưu chính thức thì bản NHÁP không được đụng vào nữa. Lệnh nháp duy nhất còn lại là
+        // cú tự lưu chạy nền của màn builder: nó từng đáp SAU cú bấm Lưu, vừa hạ trạng thái về
+        // NHÁP vừa ghi đè chính bộ file đang dùng để chấm — người dùng thấy "đã lưu" mà Kho vẫn
+        // hiện Nháp. Chặn ở đây để mọi đường vào draft đều không hạ cấp được bộ đã Hoàn tất.
+        if (!publish && !isNew && "PUBLISHED".equalsIgnoreCase(exam.getTestcaseStatus())) {
+            throw new IllegalStateException("Bộ " + examId + " đã Lưu chính thức (Hoàn tất) nên "
+                    + "không ghi đè bằng bản nháp tự lưu. Bấm Lưu để cập nhật bộ này.");
         }
         String examName = firstText(body.get("exam_name"), body.get("examName"));
         if (isNew && (examName == null || examName.isBlank()))
             throw new IllegalArgumentException("Vui lòng nhập tên đề thi khi tạo đề mới");
-        Map<String, Object> oldConfig = parseConfig(exam.getTestcaseConfigJson());
+        Map<String, Object> oldConfig = recoveredConfig != null
+                ? recoveredConfig : parseConfig(exam.getTestcaseConfigJson());
         Map<String, Map<String, Object>> oldById = indexItems(oldConfig.get("items"));
         List<Map<String, Object>> items = normalizeItems(examId, body.get("items"), oldById, actor);
         String engineType = engineType(items);

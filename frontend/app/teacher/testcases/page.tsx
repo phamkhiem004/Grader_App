@@ -685,32 +685,55 @@ const PARAMETER_OPTION_LABELS: Record<string, string> = {
   w700: "w700 — Đậm", w800: "w800 — Rất đậm",
 };
 
-/** Tham số chỉ nhận một semantic key → gợi ý sẵn danh sách key chuẩn. */
+/**
+ * Tham số chỉ nhận một semantic key, DÙNG KHI CHƯA TẢI ĐƯỢC DANH MỤC RUNNER.
+ *
+ * <p>Nguồn đúng là danh mục runner của backend ({@code type: semantic_key}); danh sách gõ tay này
+ * chỉ để form vẫn gợi ý được key trong lúc danh mục chưa về. Đừng dựa vào nó để quyết định key nào
+ * phải khai ở Khu vực 0: nó từng thiếu {@code deleteKey}, {@code confirmKey}… nên bước Lưu bị
+ * backend chặn ("chưa công bố các key testcase đang dùng: action.item.delete") mà trên màn hình
+ * không có lấy một cảnh báo.
+ */
 const SINGLE_KEY_PARAMS = new Set([
   "widgetKey", "rootKey", "targetKey", "submitKey", "listKey", "openKey", "destinationKey",
   "backKey", "homeKey", "buttonKey", "resultKey", "initialKey", "actionKey", "updatedKey",
   "absentKey", "dialogKey", "decisionKey", "editKey", "fromKey", "toKey",
+  "cancelKey", "confirmKey", "deleteKey", "detailVisualKey", "firstItemKey", "itemKey",
+  "oldResultKey", "secondItemKey", "seedResultKey", "updatedResultKey",
 ]);
 
-/** Tham số chứa nhiều semantic key, phân tách bằng dấu phẩy. */
-const MULTI_KEY_PARAMS = new Set(["fieldKeys", "errorKeys", "itemKeys"]);
+/** Tham số chứa nhiều semantic key, phân tách bằng dấu phẩy (xem ghi chú ở trên). */
+const MULTI_KEY_PARAMS = new Set(["fieldKeys", "errorKeys", "itemKeys", "detailTextKeys"]);
 
 const splitCsv = (value: unknown) => String(value ?? "").split(",").map((v) => v.trim()).filter(Boolean);
+
+/** Một tham số chứa key đơn, danh sách key, hay không chứa key nào. */
+type KeyParamKind = "single" | "multi" | null;
+type KeyParamLookup = (runner: string, param: string) => KeyParamKind;
+
+const staticKeyParamKind: KeyParamLookup = (_runner, param) =>
+  SINGLE_KEY_PARAMS.has(param) ? "single" : MULTI_KEY_PARAMS.has(param) ? "multi" : null;
 
 /**
  * Mọi semantic key mà một nhóm testcase đang trỏ tới, theo thứ tự gặp.
  *
  * <p>Tham số mặc định của mẫu cũng tính (vd testcase sửa item dùng sẵn `item.old`) — đó chính là
  * loại key làm bước Lưu báo "chưa công bố key testcase đang dùng" dù giáo viên chưa gõ nó bao giờ.
+ *
+ * @param keyParamKind tra tham số nào chứa key, LẤY THEO DANH MỤC RUNNER để luôn khớp với phần
+ *                     kiểm tra ở backend; thiếu nó thì lùi về danh sách gõ tay ở trên
  */
-const collectItemKeys = (rows: { parameters?: JsonMap }[]): string[] => {
+const collectItemKeys = (
+  rows: { runner?: string; parameters?: JsonMap }[],
+  keyParamKind: KeyParamLookup = staticKeyParamKind,
+): string[] => {
   const ordered: string[] = [];
   const seen = new Set<string>();
   rows.forEach((item) => {
     Object.entries(item.parameters || {}).forEach(([name, raw]) => {
-      const values = SINGLE_KEY_PARAMS.has(name)
-        ? [String(raw ?? "").trim()]
-        : MULTI_KEY_PARAMS.has(name) ? splitCsv(raw) : [];
+      const kind = keyParamKind(item.runner || "", name);
+      const values = kind === "single" ? [String(raw ?? "").trim()]
+        : kind === "multi" ? splitCsv(raw) : [];
       values.filter(Boolean).forEach((key) => {
         if (!seen.has(key)) { seen.add(key); ordered.push(key); }
       });
@@ -1415,6 +1438,26 @@ function TestcasesEditor() {
 
   const selectedTemplate = templates.find((t) => t.template_id === selectedTemplateId) || null;
   const templateMap = useMemo(() => new Map(templates.map((t) => [t.template_id, t])), [templates]);
+
+  /**
+   * Tham số nào chứa semantic key — hỏi thẳng DANH MỤC RUNNER, đúng nguồn backend dùng để kiểm
+   * tra lúc lưu. Đoán bằng tên tham số thì cứ thêm runner mới là frontend lại bỏ sót một key.
+   */
+  const keyParamKind = useCallback<KeyParamLookup>((runner, param) => {
+    const found = runnerCatalog?.runners
+      .find((row) => row.runner === runner)?.parameters
+      .find((row) => row.name === param);
+    if (!found) return staticKeyParamKind(runner, param);   // danh mục chưa về, hoặc tham số riêng
+    return found.type === "semantic_key" ? "single"
+      : found.type === "semantic_keys" ? "multi" : null;
+  }, [runnerCatalog]);
+
+  /** Runner của một item: testcase code tay tự khai, còn lại lấy theo mẫu trong thư viện. */
+  const itemRunner = useCallback(
+    (item: { runner?: string; template_id: string }) =>
+      item.runner || templateMap.get(item.template_id)?.runner || "",
+    [templateMap],
+  );
   // Testcase code tay không có template nên phải bỏ qua khi xét khả năng gộp nhóm,
   // nếu không một mục code tay đứng đầu sẽ làm mất luôn nút gộp của cả đề.
   const supportsGrouping = items.some((item) => templateMap.get(item.template_id)?.engine_type === "COMMON_V1");
@@ -1565,7 +1608,10 @@ function TestcasesEditor() {
     // (vd `item.old` của testcase sửa item) — giáo viên không hề gõ nó, nên bắt họ tự đoán rồi
     // thêm tay ở Khu vực 0 mới lưu được là bắt sửa một lỗi họ không gây ra.
     const declared = new Set(contractKeys.map((row) => row.key.trim()).filter(Boolean));
-    const autoKeys = collectItemKeys(built).filter((key) => !declared.has(key));
+    const autoKeys = collectItemKeys(
+      built.map((item) => ({ runner: itemRunner(item), parameters: item.parameters })),
+      keyParamKind,
+    ).filter((key) => !declared.has(key));
     if (autoKeys.length) {
       setContractKeys((current) => [
         ...current,
@@ -1858,8 +1904,12 @@ function TestcasesEditor() {
 
   /** Key mà các testcase đang bật thực sự dùng; dùng để chặn contract thiếu địa chỉ. */
   const usedTestcaseKeys = useMemo(
-    () => collectItemKeys(items.filter((item) => item.enabled)),
-    [items],
+    () => collectItemKeys(
+      items.filter((item) => item.enabled)
+        .map((item) => ({ runner: itemRunner(item), parameters: item.parameters })),
+      keyParamKind,
+    ),
+    [items, itemRunner, keyParamKind],
   );
 
   const missingContractKeys = useMemo(() => {
@@ -1997,6 +2047,61 @@ function TestcasesEditor() {
 
   const updateItem = (instanceId: string, patch: Partial<TestcaseItem>) => {
     setItems((current) => current.map((item) => item.instance_id === instanceId ? { ...item, ...patch } : item));
+  };
+
+  /**
+   * Danh sách đi theo cặp của một testcase đã cùng số phần tử chưa?
+   *
+   * <p>`fieldKeys` ↔ `invalidValues`/`values`/`expectedValues`/`errorKeys` phải bằng nhau, không
+   * thì bấm Lưu mới báo "phải cùng số phần tử ở PE_62_item_06" — người dùng phải tự dò xem item
+   * đó là testcase nào rồi tự đếm lại từng ô.
+   */
+  const pairedListsBalanced = (item: TestcaseItem) => {
+    const params = item.parameters || {};
+    if (!("fieldKeys" in params)) return true;
+    const count = splitCsv(params.fieldKeys).length;
+    if (!count) return true;
+    const paired = [...Object.keys(PAIRED_VALUE_PARAMS), "errorKeys"];
+    return paired.every((name) => !(name in params) || splitCsv(params[name]).length === count);
+  };
+
+  const unbalancedItems = useMemo(
+    () => items.filter((item) => item.enabled && !pairedListsBalanced(item)),
+    [items],
+  );
+
+  /** Cân lại mọi danh sách đi kèm theo đúng số ô nhập — cùng luật với lúc gõ tay ở ô fieldKeys. */
+  const balanceItemLists = () => {
+    if (!unbalancedItems.length) return;
+    const ids = new Set(unbalancedItems.map((item) => item.instance_id));
+    setItems((current) => current.map((item) => {
+      if (!ids.has(item.instance_id)) return item;
+      const parameters: JsonMap = { ...item.parameters };
+      const fields = splitCsv(parameters.fieldKeys);
+      Object.entries(PAIRED_VALUE_PARAMS).forEach(([pairedKey, config]) => {
+        if (!(pairedKey in parameters)) return;
+        parameters[pairedKey] = resizeCsv(String(parameters[pairedKey] ?? ""), fields.length,
+          () => config.options[0]?.value ?? "");
+      });
+      if ("errorKeys" in parameters) {
+        parameters.errorKeys = resizeCsv(String(parameters.errorKeys ?? ""), fields.length,
+          (index) => `error.${(fields[index] ?? "field").split(".").pop()}`);
+      }
+      const template = templateMap.get(item.template_id);
+      return {
+        ...item,
+        parameters,
+        expected: item.expected_custom || !template
+          ? item.expected
+          : renderExpected(template.expected_template, parameters),
+      };
+    }));
+    setMessage({
+      type: "ok",
+      text: `Đã cân lại danh sách cho ${unbalancedItems.length} testcase: `
+        + `${unbalancedItems.map((item) => item.instance_id).join(", ")}. `
+        + "Kiểm tra lại giá trị vừa bù trước khi lưu.",
+    });
   };
 
   const updateParameter = (item: TestcaseItem, key: string, value: string) => {
@@ -2231,16 +2336,63 @@ function TestcasesEditor() {
       }
       setVersion(Number(data.version ?? version));
       setItems(Array.isArray(data.items) ? data.items as TestcaseItem[] : items);
+      // ĐÃ CHỐT BẢN CHÍNH THỨC → khóa tự lưu nháp lại ngay. Thiếu hai dòng này thì effect tự lưu
+      // chạy lại (saving về null, items vừa đổi) và 2 giây sau bắn POST .../testcases/draft, hạ
+      // đúng bộ vừa Lưu về NHÁP: đúng triệu chứng "báo đã lưu nhưng Kho vẫn hiện Nháp".
+      if (kind === "publish") {
+        if (autoDraftRef.current) { clearTimeout(autoDraftRef.current); autoDraftRef.current = null; }
+        setPublishedOnServer(true);
+      }
+      // Mã vừa lưu là mã của chính bộ này → khỏi bắt kiểm tra trùng ở lần lưu kế tiếp.
+      if (!renameTarget) setSavedExamId(saveExamId);
       const renamed = renameTarget ? `Đã đổi mã bộ testcase thành ${renameTarget}. ` : "";
       setMessage({ type: "ok", text: renamed + (data.warning || (kind === "publish"
         ? `Đã lưu bộ code testcase v${data.version} và chuẩn bị môi trường chấm — dùng chấm được ngay.`
         : `Đã lưu nháp bộ code testcase v${data.version} (chưa dùng để chấm).` )) });
     } catch (e) {
-      setMessage({ type: "error", text: e instanceof Error ? e.message : "Không lưu được cấu hình testcase" });
+      const text = e instanceof Error ? e.message : "Không lưu được cấu hình testcase";
+      // Backend là nơi biết chắc key nào đang được dùng. Nó đã liệt kê sẵn key còn thiếu trong
+      // câu báo lỗi, nên khai luôn hộ thay vì bắt giáo viên tự dò xem key đó nằm ở testcase nào.
+      const rescued = declareKeysFromSaveError(text);
+      setMessage(rescued.length
+        ? { type: "ok", text: `Đã tự khai ${rescued.length} key mà testcase đang dùng vào Khu vực 0: `
+            + `${rescued.join(", ")}. Bấm Lưu lại để hoàn tất.` }
+        : { type: "error", text });
     } finally {
       setSaving(null);
     }
   };
+
+  /**
+   * Vớt các key trong câu báo lỗi "chưa công bố các key testcase đang dùng: a, b." rồi khai luôn.
+   *
+   * <p>Lưới an toàn cho những key mà màn hình này chưa nhìn ra (mẫu mới, tham số riêng của testcase
+   * code tay). Không có nó thì bước Lưu đứng im ở một câu báo lỗi mà giáo viên không biết sửa ở đâu.
+   *
+   * @return các key vừa khai thêm, rỗng nếu lỗi không phải chuyện thiếu key
+   */
+  function declareKeysFromSaveError(text: string): string[] {
+    const marker = "key testcase đang dùng:";
+    const at = text.indexOf(marker);
+    if (at < 0) return [];
+    // Cắt tại chữ "Hãy" của câu hướng dẫn phía sau chứ KHÔNG cắt tại dấu chấm: dấu chấm nằm ngay
+    // trong tên key ("action.item.delete") nên cắt ở đó là khai thiếu mất một nửa cái tên.
+    const declared = new Set(contractKeys.map((row) => row.key.trim()));
+    const keys = text.slice(at + marker.length).split("Hãy")[0]
+      .trim().replace(/\.$/, "")
+      .split(",").map((key) => key.trim())
+      .filter((key) => key && !declared.has(key));
+    if (!keys.length) return [];
+    setContractKeys((current) => [...current, ...keys.map((key) => {
+      const preset = contractCatalog?.default_keys.find((row) => row.key === key);
+      return preset ? { ...preset, required: true } : {
+        key, label: key, required: true, strategy: "key_only",
+        value: "", text: "", index: 0,
+      } as ContractKey;
+    })]);
+    setContractOpen(true);
+    return keys;
+  }
 
   const downloadTestcase = async () => {
     if (!examId.trim()) return;
@@ -2701,6 +2853,15 @@ function TestcasesEditor() {
     || missingContractKeys.length > 0
     || (needsIdCheck && examIdCheck !== "available");
 
+  // Nút Lưu mờ đi mà không nói vì sao thì người dùng chỉ biết bấm mãi. Lý do hay gặp nhất là
+  // thiếu key ở Khu vực 0 — nói luôn tên key và chỉ sang đúng cái nút thêm hộ ở Khu vực 0.
+  const saveBlockReason = missingContractKeys.length
+    ? `Khu vực 0 chưa khai ${missingContractKeys.length} key mà testcase đang dùng `
+      + `(${missingContractKeys.join(", ")}). Bấm "+ Thêm ${missingContractKeys.length} key testcase `
+      + `còn thiếu" ở Khu vực 0 là xong.`
+    : !examName.trim() ? "Hãy nhập tên bộ testcase trước khi lưu."
+    : "Lưu chính thức — bộ testcase này sẽ được dùng để chấm";
+
   // Dòng chú thích dưới ô mã: LUÔN chiếm chỗ (kể cả khi rỗng) để 3 ô nhập của hàng
   // đầu không bị đẩy lệch nhau mỗi lần thông báo hiện/ẩn.
   const hintCls = "mt-1.5 block min-h-[16px] text-[11px] leading-4";
@@ -2778,10 +2939,20 @@ function TestcasesEditor() {
             <button onClick={downloadTestcase} disabled={!examId.trim() || !items.length || !!saving} className="flex items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3.5 py-2.5 text-sm font-semibold text-indigo-700 hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-50">
               <Download size={16} /> Tải ZIP code
             </button>
-            <button onClick={() => save("publish")} disabled={saveDisabled} title="Lưu chính thức — bộ testcase này sẽ được dùng để chấm" className="flex items-center gap-2 rounded-lg bg-indigo-600 px-3.5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50">
+            <button onClick={() => save("publish")} disabled={saveDisabled} title={saveBlockReason} className="flex items-center gap-2 rounded-lg bg-indigo-600 px-3.5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50">
               {saving === "publish" ? <Loader2 size={16} className="animate-spin" /> : <UploadCloud size={16} />} Lưu
             </button>
           </div>
+          {/* Nút Lưu mờ vì thiếu key: hiện hẳn ra một dòng thay vì bắt người dùng rê chuột đoán. */}
+          {missingContractKeys.length > 0 && (
+            <p className="basis-full text-xs font-medium text-amber-700">
+              Chưa lưu được: Khu vực 0 chưa khai {missingContractKeys.length} key mà testcase đang
+              dùng ({missingContractKeys.join(", ")}).{" "}
+              <button onClick={addMissingContractKeys} className="font-bold underline underline-offset-2 hover:text-amber-900">
+                Thêm hộ tôi
+              </button>
+            </p>
+          )}
         </div>
 
         {message && (
@@ -3167,6 +3338,23 @@ function TestcasesEditor() {
               <div className="flex flex-wrap items-center justify-between gap-3"><div><p className="eyebrow">Khu vực 3</p><h2 className="mt-1 text-sm font-bold text-slate-800">Testcase trong bộ</h2></div><div className="flex items-center gap-2"><span className="rounded-full bg-indigo-100 px-2.5 py-1 text-xs font-bold text-indigo-700">{items.length} mục</span>{supportsGrouping && selectedItemIds.length >= 2 && <button onClick={openGroupModal} className="rounded-lg bg-indigo-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700">Gộp thành testcase lớn</button>}{items.length > 0 && <button onClick={clearAllItems} className="flex items-center gap-1 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-100" title="Xóa toàn bộ testcase"><Trash2 size={13} /> Xóa tất cả</button>}</div></div>
               <div className="mt-3 flex items-center justify-between text-xs"><span className="text-slate-500">Tổng trọng số</span><strong className="text-indigo-700">{totalWeight.toFixed(2)}</strong></div>
 
+              {/* Danh sách đi cặp bị lệch: bắt ngay tại đây thay vì đợi bấm Lưu mới báo bằng một
+                  dòng lỗi kèm mã instance mà người dùng phải tự đi dò. */}
+              {unbalancedItems.length > 0 && (
+                <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 p-2.5 text-[11px] leading-relaxed text-amber-800">
+                  <AlertCircle size={13} className="shrink-0" />
+                  <span>
+                    {unbalancedItems.length} testcase có danh sách lệch số phần tử (ô nhập ≠ giá trị ≠ khoá lỗi):{" "}
+                    <strong className="font-mono">{unbalancedItems.map((item) => item.instance_id).join(", ")}</strong>
+                    {" "}— bấm Lưu sẽ bị chặn.
+                  </span>
+                  <button onClick={balanceItemLists}
+                    className="ml-auto rounded-lg border border-amber-300 bg-white px-2.5 py-1 font-semibold text-amber-800 hover:bg-amber-100">
+                    Cân lại danh sách
+                  </button>
+                </div>
+              )}
+
               {/* Cơ cấu bộ testcase theo LOẠI. Tổng số mục không nói được bộ đang lệch về đâu —
                   một bộ toàn Widget và một bộ toàn Logic đều hiện "20 mục" y như nhau. Tỉ lệ tính
                   theo TRỌNG SỐ (điểm), không theo số testcase: đó mới là thứ quyết định điểm. */}
@@ -3278,7 +3466,7 @@ function TestcasesEditor() {
                         if (key.endsWith("Json")) return <label key={key} className="col-span-2 text-[11px] text-slate-500">{PARAMETER_LABELS[key] || key}<textarea rows={key === "sourceChecksJson" ? 5 : 3} value={formatParam(item.parameters[key])} onChange={(e) => updateParameter(item, key, e.target.value)} spellCheck={false} className={`${cellClass} resize-y font-mono leading-relaxed`} /></label>;
                         return <label key={key} className="text-[11px] text-slate-500">{PARAMETER_LABELS[key] || key}{options
                           ? <select value={formatParam(item.parameters[key])} onChange={(e) => updateParameter(item, key, e.target.value)} className={cellClass}>{options.map((option) => <option key={option} value={option}>{PARAMETER_OPTION_LABELS[option] || option}</option>)}</select>
-                          : SINGLE_KEY_PARAMS.has(key)
+                          : keyParamKind(itemRunner(item), key) === "single"
                             ? renderKeyField(formatParam(item.parameters[key]), (next) => updateParameter(item, key, next), cellClass)
                             : <input type={isNumber ? "number" : "text"} value={formatParam(item.parameters[key])} onChange={(e) => updateParameter(item, key, e.target.value)} className={cellClass} />}</label>;
                       })}</div></div>

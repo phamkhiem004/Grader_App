@@ -499,18 +499,33 @@ Future<void> _submitCurrentForm(
 Finder _actionInside(String itemKey, String actionKey) {
   final item = _byKey(itemKey);
   _expectPresent(item, 'item', 'Không tìm thấy item cần thao tác: $itemKey');
-  final exact = find.descendant(
-    of: item,
-    matching: find.byKey(ValueKey<String>(actionKey), skipOffstage: false),
-  );
-  if (exact.evaluate().isNotEmpty) return exact;
+
+  // Ưu tiên key tuyệt đối trước: nhiều starter đặt key trực tiếp trên TextButton
+  // trong overlay của dialog. Key duy nhất đã xác định chính xác action cần tap.
+  final exact = find.byKey(ValueKey<String>(actionKey), skipOffstage: false);
+  if (exact.evaluate().length == 1) return exact;
 
   final rule = _contractRule(actionKey);
   final scoped = rule == null ? null : _contractFinderWithin(rule, item);
   if (scoped != null && scoped.evaluate().isNotEmpty) return scoped;
-  return find.descendant(of: item, matching: _byKey(actionKey));
-}
 
+  // Nếu contract không được mount/đọc ở process testcase, fallback vai trò vẫn
+  // phải được scope trong đúng item/dialog; không được trả action toàn màn hình.
+  final role = _roleActionFinder(actionKey);
+  final scopedRole = find.descendant(
+    of: item,
+    matching: role,
+    matchRoot: true,
+  );
+  if (scopedRole.evaluate().isNotEmpty) return scopedRole;
+
+  // Chỉ dùng descendant cho trường hợp hiếm có nhiều widget trùng actionKey.
+  return find.descendant(
+    of: item,
+    matching: exact,
+    matchRoot: true,
+  );
+}
 /// Đưa item lazy của ListView/GridView vào cây widget trước khi kiểm tra/tap.
 /// Không dùng pumpAndSettle vì animation hợp lệ có thể chạy vô hạn.
 Future<void> _revealKey(WidgetTester tester, String key) async {
@@ -632,6 +647,7 @@ Future<void> _checkCrudDeleteFlow(
   final dialogKey = _requiredText(parameters, 'dialogKey');
   final cancelKey = _requiredText(parameters, 'cancelKey');
   final confirmKey = _requiredText(parameters, 'confirmKey');
+  _reloadContract();
 
   await _revealKey(tester, itemKey);
 
@@ -651,13 +667,19 @@ Future<void> _checkCrudDeleteFlow(
   }
 
   await openDialog();
-  await _tap(tester, _byKey(cancelKey), 'Không tìm thấy nút hủy xóa.');
+  await _tap(tester, _actionInside(dialogKey, cancelKey), 'Không tìm thấy nút hủy xóa.');
   await _settle(tester);
   _failIfActionThrew(tester);
   _expectPresent(_byKey(itemKey), 'item', 'Hủy xóa nhưng item đã biến mất.');
+  _expectGone(
+    _byKey(dialogKey),
+    'dialog',
+    'Hủy xóa nhưng hộp thoại vẫn còn mở.',
+    where: 'after_action',
+  );
 
   await openDialog();
-  await _tap(tester, _byKey(confirmKey), 'Không tìm thấy nút xác nhận xóa.');
+  await _tap(tester, _actionInside(dialogKey, confirmKey), 'Không tìm thấy nút xác nhận xóa.');
   await _settle(tester);
   _failIfActionThrew(tester);
   _expectGone(
@@ -1337,11 +1359,43 @@ Future<void> _checkFormValidateFields(
   await _tap(tester, _byKey(submitKey), 'Không tìm thấy nút lưu: $submitKey');
   await _settle(tester);
   _failIfActionThrew(tester);
-  for (final errorKey in errors) {
+  for (var i = 0; i < errors.length; i++) {
+    final fieldFinder = _byKey(fields[i]);
+    final errorKey = errors[i];
+    // Ưu tiên ValueKey rõ ràng; nếu dùng contract text thì chỉ khớp trong đúng field.
+    // Không dùng _byKey(errorKey) ở đây vì fallback toàn cây có thể lấy nhầm lỗi field khác.
+    final exactError = find.byKey(
+      ValueKey<String>(errorKey),
+      skipOffstage: false,
+    );
+    if (exactError.evaluate().isNotEmpty) {
+      _expectPresent(
+        exactError,
+        'error',
+        'Thiếu lỗi validation key: $errorKey',
+        where: 'after_action',
+      );
+      continue;
+    }
+    final rule = _contractRule(errorKey);
+    final scopedContractError = rule == null
+        ? null
+        : _contractFinderWithin(rule, fieldFinder);
+    if (scopedContractError != null &&
+        scopedContractError.evaluate().isNotEmpty) {
+      _expectPresent(
+        scopedContractError,
+        'error',
+        'Thiếu lỗi validation trong field ${fields[i]}',
+        where: 'after_action',
+      );
+      continue;
+    }
+    if (_fieldValidationError(fieldFinder)) continue;
     _expectPresent(
-      _byKey(errorKey),
+      _notFound(),
       'error',
-      'Thiếu lỗi validation key: $errorKey',
+      'Thiếu lỗi validation key: $errorKey (hoặc errorText trong field ${fields[i]})',
       where: 'after_action',
     );
   }
@@ -1833,6 +1887,23 @@ FontWeight _fontWeight(String value) {
 /// vì phần khẳng định CHÍNH của mỗi runner vẫn phải đạt riêng.
 Finder _goneByKey(String key) => find.byKey(ValueKey<String>(key));
 
+Finder _roleActionFinder(String key) {
+  switch (key) {
+    case 'action.delete.cancel':
+      return _buttonWithText(
+        RegExp(r'^(cancel|no|hủy|huỷ|đóng|close)$', caseSensitive: false),
+      );
+    case 'action.delete.confirm':
+      return _buttonWithText(
+        RegExp(
+          r'^(confirm( delete)?|yes|delete|remove|xóa|xoá|đồng ý)$',
+          caseSensitive: false,
+        ),
+      );
+    default:
+      return _notFound();
+  }
+}
 Finder _byKey(String key) {
   final exact = find.byKey(ValueKey<String>(key), skipOffstage: false);
   if (exact.evaluate().isNotEmpty) return exact;
@@ -2006,6 +2077,25 @@ Finder _buttonWithText(RegExp pattern) {
 /// cũng được tính là thông báo lỗi ⇒ form không kiểm dữ liệu gì vẫn đạt. Đó là chấm sai
 /// điểm theo chiều CHO ĐIỂM OAN, ngược với lỗi `_byKey` nhưng cùng một nguồn: fallback
 /// đoán theo chữ hiển thị.
+/// Kiểm tra errorText/error widget mà Flutter render bên trong đúng field.
+/// Không phụ thuộc câu chữ/localization và không lấy nhầm lỗi field khác.
+bool _fieldValidationError(Finder field) {
+  if (field.evaluate().isEmpty) return false;
+  final decorators = find.descendant(
+    of: field,
+    matching: find.byType(InputDecorator, skipOffstage: false),
+    matchRoot: true,
+  );
+  for (final element in decorators.evaluate()) {
+    final decorator = element.widget as InputDecorator;
+    if ((decorator.decoration.errorText ?? '').trim().isNotEmpty ||
+        decorator.decoration.error != null) {
+      return true;
+    }
+  }
+  return false;
+}
+
 Finder _validationErrorFor(String key) {
   // Chỉ chấp nhận Text TRÔNG NHƯ thông báo lỗi. Trước đây nhánh "specific" chỉ khớp
   // tên field nên nhãn ô nhập ("Full Name", "Email") cũng bị tính là lỗi validation
@@ -2050,6 +2140,13 @@ Map<String, dynamic> _contract() {
     if (value is Map) return _contractCache = _asMap(value);
   }
   return _contractCache = <String, dynamic>{};
+}
+
+/// Khi ch?y t?ng testcase b?ng process ri?ng, CWD c? th? kh?ng ch?a contract.json.
+/// Reset cache v? cho flow tr?ng y?u d?ng fallback vai tr? thay v? m?t locator d?y chuy?n.
+void _reloadContract() {
+  _contractCache = null;
+  _contract();
 }
 
 /// Đề bắt buộc sinh viên gắn ValueKey: bỏ hết cách dò thay thế, thiếu key là trượt.
@@ -2105,40 +2202,62 @@ Finder? _contractFinder(Map<String, dynamic> rule) {
 
 /// Áp dụng rule contract trong phạm vi một item cụ thể. Hàm này ngăn trường hợp
 /// nút Edit/Delete của card đầu tiên bị dùng nhầm khi testcase đang chấm card khác.
+Finder _buttonOrSelfWithin(Finder inner, Finder ancestor) {
+  if (inner.evaluate().isEmpty) return _notFound();
+  for (final matcher in <bool Function(Widget)>[_isRealButton, _isTappable]) {
+    final buttons = find.ancestor(
+      of: inner,
+      matching: find.byWidgetPredicate(matcher, skipOffstage: false),
+      matchRoot: true,
+    );
+    final scoped = find.descendant(of: ancestor, matching: buttons, matchRoot: true);
+    if (scoped.evaluate().isNotEmpty) return scoped;
+  }
+  return inner;
+}
+
+/// Dò locator theo label trước rồi mới leo lên widget action. Vì vậy contract
+/// không thể lấy nhầm nút cùng chữ ở một dialog/card khác ngoài ancestor.
 Finder? _contractFinderWithin(Map<String, dynamic> rule, Finder ancestor) {
   final strategy = _text(rule, 'strategy');
   final value = _text(rule, 'value');
   final index = _number(rule, 'index', 0).toInt();
-  Finder candidate;
+  Finder scoped(Finder finder) =>
+      find.descendant(of: ancestor, matching: finder, matchRoot: true);
+
   switch (strategy) {
     case 'widget_type':
-      candidate = _byTypeName(value);
-      break;
+      return _pickAt(scoped(_byTypeName(value)), index);
     case 'icon':
-      candidate = _buttonOrSelf(_iconFinder(value));
-      break;
+      return _pickAt(
+        _buttonOrSelfWithin(scoped(_iconFinder(value)), ancestor),
+        index,
+      );
     case 'tooltip':
-      candidate = _buttonOrSelf(find.byTooltip(value, skipOffstage: false));
-      break;
+      return _pickAt(
+        _buttonOrSelfWithin(
+          scoped(find.byTooltip(value, skipOffstage: false)),
+          ancestor,
+        ),
+        index,
+      );
     case 'text':
-      candidate = _textLike(value);
-      break;
+      return _pickAt(scoped(_textLike(value)), index);
     case 'button_text':
-      candidate = _buttonOrSelf(_textLike(value));
-      break;
+      final labels = scoped(_textLike(value));
+      return _pickAt(_buttonOrSelfWithin(labels, ancestor), index);
     case 'type_with_text':
-      candidate = find.ancestor(
-        of: _textLike(_text(rule, 'text')),
+      final labels = scoped(_textLike(_text(rule, 'text')));
+      final typed = find.ancestor(
+        of: labels,
         matching: _byTypeName(value),
         matchRoot: true,
       );
-      break;
+      return _pickAt(scoped(typed), index);
     default:
       return null;
   }
-  return _pickAt(find.descendant(of: ancestor, matching: candidate), index);
 }
-
 Finder _pickAt(Finder finder, int index) {
   // Thiếu phần tử thứ index thì phải BÁO KHÔNG TÌM THẤY. Nếu tự lùi về phần tử 0,
   // "item.1" sẽ trỏ vào chính card của form và testcase pass giả khi danh sách rỗng.
@@ -2161,21 +2280,34 @@ Finder _byTypeName(String name) {
   }, skipOffstage: false);
 }
 
-/// Text đúng nội dung; bọc trong /.../ để dùng biểu thức chính quy.
+/// Khớp text chính xác hoặc biểu thức /.../flags từ contract.
+/// Hỗ trợ các flag Dart phổ biến (i/m/s/u), bao gồm contract dạng /.../i.
 Finder _textLike(String value) {
   final trimmed = value.trim();
   if (trimmed.isEmpty) return _notFound();
-  final isRegex =
-      trimmed.length > 2 && trimmed.startsWith('/') && trimmed.endsWith('/');
-  final pattern = isRegex
-      ? RegExp(trimmed.substring(1, trimmed.length - 1), caseSensitive: false)
-      : RegExp('^${RegExp.escape(trimmed)}\$', caseSensitive: false);
+  RegExp? pattern;
+  try {
+    final regex = RegExp(r'^/(.*)/([imsu]*)$').firstMatch(trimmed);
+    pattern = regex == null
+        ? RegExp('^${RegExp.escape(trimmed)}\$', caseSensitive: false)
+        : RegExp(
+            regex.group(1)!,
+            caseSensitive: !regex.group(2)!.contains('i'),
+            multiLine: regex.group(2)!.contains('m'),
+            dotAll: regex.group(2)!.contains('s'),
+            unicode: regex.group(2)!.contains('u'),
+          );
+  } on FormatException {
+    // Contract legacy có regex hỏng không được làm crash toàn bộ suite.
+    return _notFound();
+  } catch (_) {
+    return _notFound();
+  }
   return find.byWidgetPredicate(
-    (widget) => widget is Text && pattern.hasMatch((widget.data ?? '').trim()),
+    (widget) => widget is Text && pattern!.hasMatch((widget.data ?? '').trim()),
     skipOffstage: false,
   );
 }
-
 /// Nhóm icon theo Ý NGHĨA: chọn "Sửa (bút)" là khớp mọi biến thể edit/mode_edit/create,
 /// vì đề chỉ yêu cầu "icon bút" chứ không chỉ định đúng một hằng Icons nào.
 const Map<String, List<IconData>> _iconGroups = <String, List<IconData>>{

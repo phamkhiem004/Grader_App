@@ -34,6 +34,44 @@ class CommonEngineExecutionTest {
     }
 
     @Test
+    void reusableValidationAndDeleteFlowsUseRobustLocators() throws Exception {
+        String exam = resource("/common-testcase-engine/exam_test.dart");
+
+        assertTrue(exam.contains("RegExp(r'^/(.*)/([imsu]*)$')"),
+                "engine phải parse regex contract có flags như /.../i");
+        assertTrue(exam.contains("on FormatException"),
+                "regex contract hỏng không được làm crash runner");
+        assertTrue(exam.contains("final labels = scoped(_textLike(value));"),
+                "button_text phải scope label trong ancestor trước khi leo button");
+        assertTrue(exam.contains("_buttonOrSelfWithin(labels, ancestor)"),
+                "button finder phải giới hạn trong ancestor");
+        assertTrue(exam.contains("exact.evaluate().length == 1"),
+                "ValueKey action duy nhất phải được ưu tiên trước contract fallback");
+        assertTrue(exam.contains("_reloadContract();"),
+                "flow delete phải nạp lại contract trong process testcase");
+        assertTrue(exam.contains("final role = _roleActionFinder(actionKey);"),
+                "delete phải có fallback vai trò khi process không đọc được contract");
+        assertTrue(exam.contains("hủy|huỷ"),
+                "fallback nút hủy phải hỗ trợ cả hai cách đặt dấu tiếng Việt");
+        assertTrue(exam.contains("_contractFinderWithin(rule, fieldFinder)"),
+                "validation phải giới hạn contract trong đúng field");
+        assertTrue(exam.contains("_fieldValidationError(fieldFinder)"),
+                "validation phải fallback theo đúng field, không lấy nhầm lỗi field khác");
+        assertTrue(exam.contains("_actionInside(itemKey, deleteKey)"),
+                "delete phải scope action trong đúng item đã seed");
+        assertTrue(exam.contains("_actionInside(dialogKey, cancelKey)"),
+                "nút hủy phải nằm trong đúng dialog");
+        assertTrue(exam.contains("_actionInside(dialogKey, confirmKey)"),
+                "nút xác nhận phải nằm trong đúng dialog");
+        assertTrue(exam.contains("_expectPresent(_byKey(itemKey), 'item'"),
+                "nhánh hủy phải xác nhận item vẫn còn");
+        assertTrue(exam.matches("(?s).*_expectGone\\(\\R\\s+_byKey\\(dialogKey\\).*"),
+                "nhánh hủy phải xác nhận dialog đã đóng");
+        assertTrue(exam.matches("(?s).*_expectGone\\(\\R\\s+_byKey\\(itemKey\\).*"),
+                "nhánh xác nhận phải xác nhận đúng item biến mất");
+    }
+
+    @Test
     void examRegistersOnlyTheRequestedBatchInIsolatedMode() throws Exception {
         String exam = resource("/common-testcase-engine/exam_test.dart");
 

@@ -11,7 +11,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { API_BASE } from "@/lib/config";
 import { downloadBlob, downloadText, imageFileToSvg, svgToPng } from "@/lib/mockup-image";
-import { clearAiDraft, readAiDraft, writeAiDraft } from "@/lib/aiAuthorDrafts";
+import {
+  clearAiDraft, DRAFT_NO_EXAM, fetchAiDraftFromServer, pushAiDraftToServer, readAiDraft, writeAiDraft,
+} from "@/lib/aiAuthorDrafts";
 import {
   Sparkles, Settings2, KeyRound, Wand2, FileText, Image as ImageIcon, ListChecks,
   Loader2, Check, X, Plus, Trash2, RefreshCw, AlertTriangle, ChevronDown, Save, Info, FileCode2,
@@ -60,6 +62,8 @@ interface AiModel { id: string; label: string; provider: string; vendor: string 
 interface AiSettings {
   model: string; provider: string; vendor: string; keyUrl: string | null;
   hasApiKey: boolean; apiKeyMasked: string | null; keyWarning: string | null;
+  /** Độ dài key đang lưu — soi được "key dán thiếu/thừa ký tự" mà không lộ nội dung key. */
+  apiKeyLength: number;
   baseUrl: string; customBaseUrl: boolean;
   timeoutSeconds: number; models: AiModel[]; ready: boolean;
 }
@@ -84,11 +88,6 @@ export default function AiAuthorPanel({ examId, existingKeys, hasItem, onApplyCo
   const [modelDraft, setModelDraft] = useState("");
   const [baseUrlDraft, setBaseUrlDraft] = useState("");    // dịch vụ trung gian / cổng nội bộ
   const [customModel, setCustomModel] = useState(false);   // gõ tay mã model không có trong danh sách
-  /**
-   * Cấu hình ĐANG GÕ vừa thử kết nối thành công chưa. Chỉ khi true mới lưu được — và mỗi lần sửa
-   * model/key/endpoint là mất hiệu lực, vì bản vừa thử không còn là bản đang gõ nữa.
-   */
-  const [testedOk, setTestedOk] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
@@ -117,6 +116,11 @@ export default function AiAuthorPanel({ examId, existingKeys, hasItem, onApplyCo
   const [mockupSpec, setMockupSpec] = useState<unknown>(null);
   const [screens, setScreens] = useState<MockupScreen[]>([]);
   const [keyNotes, setKeyNotes] = useState<string[]>([]);
+  /**
+   * Key đã khai nhưng CHƯA có mặt trên hình. Giữ thành danh sách riêng (không nhét vào ghi chú)
+   * để còn nhờ AI vẽ bổ sung đúng mấy key đó bằng một cú bấm.
+   */
+  const [unusedKeys, setUnusedKeys] = useState<string[]>([]);
   const [keysAccepted, setKeysAccepted] = useState(false);
   const [mockupPrompt, setMockupPrompt] = useState("");
   /** Màn hình đang chờ nhận ảnh từ máy — một ô chọn file dùng chung cho mọi hình. */
@@ -146,6 +150,11 @@ export default function AiAuthorPanel({ examId, existingKeys, hasItem, onApplyCo
   const [restoredAt, setRestoredAt] = useState<number | null>(null);
   /** Phần bị bỏ bớt khi ghi nháp vì localStorage đầy (thường là hình minh họa). */
   const [draftTrimmed, setDraftTrimmed] = useState<string[]>([]);
+  /**
+   * Khoá cất nháp. Chưa gõ mã bộ testcase thì cất tạm ở {@link DRAFT_NO_EXAM} — bước soạn đề
+   * không cần mã, mà không có chỗ cất thì cả phần đó mất trắng lúc gõ mã vào.
+   */
+  const draftKey = examId.trim() || DRAFT_NO_EXAM;
 
   const loadSettings = useCallback(async () => {
     try {
@@ -170,17 +179,44 @@ export default function AiAuthorPanel({ examId, existingKeys, hasItem, onApplyCo
    * vào đây. Có nháp thì mở sẵn panel: đang làm dở mà panel đóng im thì người dùng tưởng mất hết.
    */
   useEffect(() => {
-    const exam = examId.trim();
-    if (!exam || restoredFor.current === exam) return;
-    restoredFor.current = exam;
+    const previous = restoredFor.current;
+    if (previous === draftKey) return;
+    restoredFor.current = draftKey;
     setDraftTrimmed([]);
+    let cancelled = false;
 
-    const draft = readAiDraft(exam);
-    if (!draft) {                          // đổi sang bộ chưa có nháp → dọn màn về trắng
-      setRestoredAt(null);
-      resetWizard();
-      return;
-    }
+    (async () => {
+      const local = readAiDraft(draftKey);
+      // Nháp còn được gắn vào chính bộ testcase trên server, nên bấm "Sửa" một bộ đã soạn bằng AI
+      // ở máy khác vẫn mở lại đúng phiên đó. Hai bên cùng có thì lấy bản MỚI HƠN.
+      const remote = await fetchAiDraftFromServer(API_BASE, draftKey);
+      if (cancelled || restoredFor.current !== draftKey) return;
+      const draft = !remote ? local
+        : !local ? remote
+        : (remote.updatedAt || 0) > (local.updatedAt || 0) ? remote : local;
+
+      if (!draft) {
+        // Không có nháp cho khoá này. Đổi khoá GIỮA PHIÊN chỉ xảy ra khi ô mã bộ testcase đang
+        // được gõ (đặt mã lần đầu, hay đổi mã bộ đang sửa) — việc trên màn hình vẫn là việc đó,
+        // chỉ đổi chỗ cất. Dọn màn ở đây là xoá trắng công sức giáo viên vừa bỏ ra, đúng lỗi
+        // "bấm Xem code hiện tại là mất hết"; mà gõ "PE_62"→"PE_63" thì mọi mã dở dang ở giữa
+        // ("PE_6") đều rơi vào nhánh này. Mở bộ khác thật sự là bấm "Sửa" từ Kho → trang dựng
+        // lại từ đầu, previous = null, nên vẫn dọn được màn.
+        if (previous !== null) {
+          if (previous === DRAFT_NO_EXAM) clearAiDraft(DRAFT_NO_EXAM);   // đã có mã thật để cất
+          return;                                                        // GIỮ NGUYÊN việc đang làm
+        }
+        setRestoredAt(null);
+        resetWizard();
+        return;
+      }
+      applyDraft(draft);
+    })();
+    return () => { cancelled = true; };
+  }, [draftKey]);
+
+  /** Đổ một bản nháp (từ localStorage hoặc từ server) trở lại các bước của trợ lý. */
+  const applyDraft = (draft: { updatedAt: number; state: Record<string, unknown> }) => {
     const s = draft.state as Record<string, never>;
     setSource(s.source ?? "ai");
     setImportedName(s.importedName ?? "");
@@ -193,6 +229,7 @@ export default function AiAuthorPanel({ examId, existingKeys, hasItem, onApplyCo
     setMockupSpec(s.mockupSpec ?? null);
     setScreens(s.screens ?? []);
     setKeyNotes(s.keyNotes ?? []);
+    setUnusedKeys(s.unusedKeys ?? []);
     setKeysAccepted(!!s.keysAccepted);
     setProposed(s.proposed ?? []);
     setRejected(s.rejected ?? []);
@@ -204,13 +241,13 @@ export default function AiAuthorPanel({ examId, existingKeys, hasItem, onApplyCo
     setOpenFile(s.openFile ?? null);
     setRestoredAt(draft.updatedAt);
     setOpen(true);
-  }, [examId]);
+  };
 
   /** Về màn trắng (đổi sang bộ chưa có nháp, hoặc người dùng bấm "Bắt đầu lại"). */
   const resetWizard = () => {
     setDeBai(""); setSummary(""); setCriteria([]); setExamAccepted(false);
     setKeys([]); setRequireKeys(true); setMockupSpec(null); setScreens([]);
-    setKeyNotes([]); setKeysAccepted(false);
+    setKeyNotes([]); setUnusedKeys([]); setKeysAccepted(false);
     setProposed([]); setRejected([]); setMissingKeys([]);
     setStarterFiles([]); setStarterSpec(null); setStarterWarnings([]);
     setSyntax(null); setOpenFile(null); setStarterEdited(false);
@@ -222,28 +259,36 @@ export default function AiAuthorPanel({ examId, existingKeys, hasItem, onApplyCo
    * từng ký tự, ghi thẳng là serialize cả bộ hình + khung starter sau mỗi phím.
    */
   useEffect(() => {
-    const exam = examId.trim();
-    if (!exam || restoredFor.current !== exam) return;      // chưa khôi phục xong thì chưa được ghi
+    if (restoredFor.current !== draftKey) return;           // chưa khôi phục xong thì chưa được ghi
     const empty = !deBai && !keys.length && !screens.length
       && !proposed.length && !starterFiles.length;
     const timer = setTimeout(() => {
-      if (empty) { clearAiDraft(exam); setRestoredAt(null); return; }
-      setDraftTrimmed(writeAiDraft(exam, {
+      if (empty) {
+        clearAiDraft(draftKey);
+        pushAiDraftToServer(API_BASE, draftKey, null);
+        setRestoredAt(null);
+        return;
+      }
+      const state = {
         source, importedName, req, deBai, summary, examAccepted,
-        keys, requireKeys, mockupSpec, screens, keyNotes, keysAccepted,
+        keys, requireKeys, mockupSpec, screens, keyNotes, unusedKeys, keysAccepted,
         proposed, rejected, missingKeys,
         starterFiles, starterSpec, starterWarnings, syntax, openFile,
-      }));
+      };
+      setDraftTrimmed(writeAiDraft(draftKey, state));
+      // Gắn luôn vào bộ testcase trên server: bấm "Sửa" bộ này ở máy khác vẫn mở lại đúng phiên.
+      pushAiDraftToServer(API_BASE, draftKey, state);
     }, 800);
     return () => clearTimeout(timer);
-  }, [examId, source, importedName, req, deBai, summary, examAccepted,
-    keys, requireKeys, mockupSpec, screens, keyNotes, keysAccepted,
+  }, [draftKey, source, importedName, req, deBai, summary, examAccepted,
+    keys, requireKeys, mockupSpec, screens, keyNotes, unusedKeys, keysAccepted,
     proposed, rejected, missingKeys, starterFiles, starterSpec, starterWarnings, syntax, openFile]);
 
   /** Bỏ hẳn bản nháp và làm lại từ đầu cho bộ này. */
   const discardDraft = () => {
     if (!confirm("Bỏ bản nháp của bộ này và bắt đầu lại từ đầu?")) return;
-    clearAiDraft(examId.trim());
+    clearAiDraft(draftKey);
+    pushAiDraftToServer(API_BASE, draftKey, null);
     resetWizard();
     setRestoredAt(null);
     setDraftTrimmed([]);
@@ -288,42 +333,36 @@ export default function AiAuthorPanel({ examId, existingKeys, hasItem, onApplyCo
     return data;
   };
 
-  /** Chỉ lưu được sau khi chính cấu hình ĐANG GÕ vừa thử kết nối thành công. */
-  const saveSettings = async () => {
-    if (!testedOk) return;                       // nút đã tắt, đây chỉ là lưới an toàn
-    const data = await persistSettings("settings");
-    if (data) {
-      setTestedOk(false);                        // đã lưu xong thì không còn gì để lưu nữa
-      setInfo(`Đã lưu. Đang dùng ${data.model} (${data.vendor}).`);
-    }
-  };
-
   /**
-   * Thử kết nối trên cấu hình ĐANG GÕ, KHÔNG lưu gì.
+   * MỘT nút cho cả việc thử lẫn lưu: gọi thử trên cấu hình ĐANG GÕ (không ghi gì), thử được mới
+   * lưu.
    *
-   * <p>Trước đây muốn thử thì phải lưu trước, nên gõ nhầm một ký tự trong key là ghi đè mất key
-   * đang chạy được. Giờ thử trên bản nháp; thử thành công mới mở nút Lưu cấu hình.
+   * <p>Tách hai nút hoá ra thừa: chẳng ai muốn lưu một cấu hình vừa thử hỏng, cũng chẳng ai thử
+   * xong lại không muốn lưu. Quan trọng là THỨ TỰ — thử trước nên gõ nhầm key không ghi đè mất
+   * key đang chạy được.
    */
-  const testConnection = async () => {
+  const testAndSaveSettings = async () => {
     if (!apiKeyDraft.trim() && !settings?.hasApiKey) {
       setError(`Chưa có API key cho ${draftVendor}. Hãy dán key rồi thử lại.`);
       return;
     }
-    const data = await call<{ ok: boolean; message: string; elapsedMs: number }>(
+    const probe = await call<{ ok: boolean; message: string; elapsedMs: number }>(
       "/ai/settings/test",
       {
         model: modelDraft.trim(),
         apiKey: apiKeyDraft.trim(),              // rỗng = dùng key đã lưu
         baseUrl: baseUrlDraft.trim(),            // rỗng = endpoint chính thức của hãng
       },
-      "test");
-    if (!data) return;
-    setTestedOk(data.ok);
-    if (data.ok) {
-      setInfo(`Kết nối thành công tới ${modelDraft.trim() || settings?.model} (${data.elapsedMs} ms). `
-        + "Bấm “Lưu cấu hình” để dùng cấu hình này.");
-    } else {
-      setError(data.message || "Không kết nối được.");
+      "settings");
+    if (!probe) return;
+    if (!probe.ok) {
+      setError(probe.message || "Không kết nối được — chưa lưu gì cả.");
+      return;
+    }
+    const data = await persistSettings("settings");
+    if (data) {
+      setInfo(`Kết nối thành công (${probe.elapsedMs} ms) và đã lưu. `
+        + `Đang dùng ${data.model} (${data.vendor}).`);
     }
   };
 
@@ -395,8 +434,7 @@ export default function AiAuthorPanel({ examId, existingKeys, hasItem, onApplyCo
       setRequireKeys(data.contract?.require_keys ?? true);
       setMockupSpec(data.mockup_spec);
       setScreens(data.screens || []);
-      setKeyNotes(data.unused_keys?.length
-        ? [`Key chưa xuất hiện trên hình: ${data.unused_keys.join(", ")}`] : []);
+      setUnusedKeys(data.unused_keys || []);
       setKeysAccepted(false);
     }
   };
@@ -422,13 +460,14 @@ export default function AiAuthorPanel({ examId, existingKeys, hasItem, onApplyCo
   };
 
   /** Nhờ AI sửa BỐ CỤC hình bằng lời; toạ độ vẫn do máy chủ tính nên hình không bao giờ rối. */
-  const reviseMockup = async () => {
-    if (!mockupPrompt.trim()) { setError("Hãy mô tả bạn muốn sửa gì trên hình."); return; }
+  const reviseMockup = async (instruction?: string) => {
+    const order = (instruction ?? mockupPrompt).trim();
+    if (!order) { setError("Hãy mô tả bạn muốn sửa gì trên hình."); return; }
     const data = await call<{
       mockup_spec: unknown; screens: MockupScreen[]; notes: string[]; unused_keys: string[];
       contract?: { require_keys: boolean; keys: AiContractKey[] };
     }>("/ai/keys/mockup/revise",
-      { mockup_spec: mockupSpec, instruction: mockupPrompt, contract: { keys } }, "mockup-revise");
+      { mockup_spec: mockupSpec, instruction: order, contract: { keys } }, "mockup-revise");
     if (data) {
       setMockupSpec(data.mockup_spec);
       keepUploads(data.screens || []);
@@ -443,10 +482,80 @@ export default function AiAuthorPanel({ examId, existingKeys, hasItem, onApplyCo
         keyNote = ` Danh sách Item Key cập nhật theo hình: ${before} → ${data.contract.keys.length} key`
           + " — bấm “Chấp nhận Item Key” để đưa vào Khu vực 0.";
       }
-      setKeyNotes(data.unused_keys?.length
-        ? [`Key chưa xuất hiện trên hình: ${data.unused_keys.join(", ")}`] : []);
+      setUnusedKeys(data.unused_keys || []);
       setMockupPrompt("");
       setInfo("AI đã sửa hình." + keyNote);
+    }
+  };
+
+  /**
+   * Vẽ bổ sung đúng những key đã khai mà hình còn thiếu.
+   *
+   * <p>Chỉ thị được dựng sẵn từ danh sách key, kèm gợi ý loại thành phần theo tiền tố quy ước
+   * (screen.* là một màn hình, action.* là nút…) — AI đoán mò loại widget thì hay vẽ nhầm chỗ.
+   */
+  const drawMissingKeys = () => {
+    if (!unusedKeys.length) return;
+    const hint = (key: string) => {
+      if (key.startsWith("screen.")) return `${key} (một MÀN HÌNH riêng)`;
+      if (key.startsWith("action.")) return `${key} (một nút)`;
+      if (key.startsWith("field.")) return `${key} (một ô nhập)`;
+      if (key.startsWith("list.")) return `${key} (một danh sách)`;
+      if (key.startsWith("item.")) return `${key} (một dòng trong danh sách)`;
+      if (key.startsWith("error.")) return `${key} (một dòng báo lỗi)`;
+      if (key.startsWith("message.")) return `${key} (một dòng thông báo)`;
+      return key;
+    };
+    reviseMockup("Bổ sung vào hình các thành phần còn thiếu cho những key sau, đặt đúng màn hình "
+      + "và đúng vị trí hợp lý: " + unusedKeys.map(hint).join("; ")
+      + ". Giữ nguyên toàn bộ thành phần và key đang có.");
+  };
+
+  /**
+   * Vẽ bổ sung KHÔNG cần AI: tự chèn thành phần cho từng key còn thiếu vào bản mô tả rồi vẽ lại.
+   *
+   * <p>Loại widget suy từ tiền tố key theo đúng quy ước của engine, nên chèn được chắc chắn đúng
+   * kiểu. Không tốn lượt gọi AI, không phụ thuộc mạng, và quan trọng nhất là KHÔNG BAO GIỜ trượt:
+   * nhờ AI thì vẫn có lần nó bỏ sót đúng cái key mình đang thiếu.
+   */
+  const fillMissingKeysLocally = async () => {
+    if (!unusedKeys.length) return;
+    const spec = JSON.parse(JSON.stringify(mockupSpec ?? {})) as {
+      screens?: { id?: string; title?: string; appBar?: string; appBarKey?: string; nodes?: unknown[] }[];
+    };
+    spec.screens = Array.isArray(spec.screens) ? spec.screens : [];
+
+    const label = (key: string) => key.split(".").slice(1).join(" ") || key;
+    for (const key of unusedKeys) {
+      if (key.startsWith("screen.")) {
+        // Key màn hình gắn vào tiêu đề màn: có sẵn màn cùng tên thì dùng, không thì mở màn mới.
+        const id = key.split(".").pop() || "screen";
+        const found = spec.screens.find((s) => s.id === id);
+        if (found) found.appBarKey = key;
+        else spec.screens.push({ id, title: `Màn hình ${label(key)}`, appBar: label(key), appBarKey: key, nodes: [] });
+        continue;
+      }
+      if (!spec.screens.length) spec.screens.push({ id: "home", title: "Màn hình chính", appBar: "App", nodes: [] });
+      const screen = spec.screens[0];
+      screen.nodes = Array.isArray(screen.nodes) ? screen.nodes : [];
+      const type = key.startsWith("field.") ? "textfield"
+        : key.startsWith("action.") ? "button"
+        : key.startsWith("list.") ? "list"
+        : key.startsWith("error.") ? "error"
+        : key.startsWith("item.") ? "text"
+        : "text";
+      screen.nodes.push(type === "list"
+        ? { type, label: label(key), key, items: [] }
+        : { type, label: label(key), key });
+    }
+
+    setMockupSpec(spec);
+    const data = await call<{ screens: MockupScreen[] }>("/ai/keys/mockup", { mockup_spec: spec }, "mockup");
+    if (data) {
+      keepUploads(data.screens || []);
+      setUnusedKeys([]);
+      setInfo(`Đã vẽ bổ sung ${unusedKeys.length} key vào hình: ${unusedKeys.join(", ")}. `
+        + "Sửa lại nhãn/vị trí bằng ô nhắc AI bên dưới nếu cần.");
     }
   };
 
@@ -767,7 +876,9 @@ export default function AiAuthorPanel({ examId, existingKeys, hasItem, onApplyCo
             <div className="flex flex-wrap items-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 p-3 text-xs text-indigo-800">
               <RotateCcw size={14} className="shrink-0" />
               <span className="font-medium">
-                Đang tiếp tục bản soạn dở của bộ <span className="font-mono font-bold">{examId.trim()}</span>
+                {examId.trim()
+                  ? <>Đang tiếp tục bản soạn dở của bộ <span className="font-mono font-bold">{examId.trim()}</span></>
+                  : "Đang tiếp tục bản soạn dở (chưa đặt mã bộ testcase)"}
                 {" · lưu lúc "}{new Date(restoredAt).toLocaleString("vi-VN")}
               </span>
               {draftTrimmed.length > 0 && (
@@ -805,7 +916,7 @@ export default function AiAuthorPanel({ examId, existingKeys, hasItem, onApplyCo
                       onChange={(e) => {
                         if (e.target.value === "__custom__") { setCustomModel(true); return; }
                         setCustomModel(false);
-                        setModelDraft(e.target.value); setTestedOk(false);
+                        setModelDraft(e.target.value);
                       }}
                       className={inputClass}
                     >
@@ -835,7 +946,10 @@ export default function AiAuthorPanel({ examId, existingKeys, hasItem, onApplyCo
                         type="text"
                         name="grader-ai-key"
                         value={apiKeyDraft}
-                        onChange={(e) => { setApiKeyDraft(e.target.value.replace(/\s+/g, "")); setTestedOk(false); }}
+                        // Cắt mọi ký tự KHÔNG phải ASCII in được: copy key từ web/chat rất hay dính
+                        // zero-width space (U+200B) hay BOM — mắt không thấy, hãng thì trả 401
+                        // "API key is invalid" mà ô key luôn hiện dạng che nên không soi ra được.
+                        onChange={(e) => setApiKeyDraft(e.target.value.replace(/[^\x21-\x7E]/g, ""))}
                         placeholder={settings?.hasApiKey && !vendorChanged
                           ? settings.apiKeyMasked || "••••" : "Dán API key vào đây"}
                         className={inputClass}
@@ -864,7 +978,7 @@ export default function AiAuthorPanel({ examId, existingKeys, hasItem, onApplyCo
                     <Field label="Endpoint riêng (tùy chọn)">
                       <input
                         value={baseUrlDraft}
-                        onChange={(e) => { setBaseUrlDraft(e.target.value); setTestedOk(false); }}
+                        onChange={(e) => setBaseUrlDraft(e.target.value)}
                         placeholder="https://api.dich-vu-cua-ban.com/v1"
                         className={`${inputClass} font-mono`}
                       />
@@ -879,19 +993,18 @@ export default function AiAuthorPanel({ examId, existingKeys, hasItem, onApplyCo
                 {/* Thứ tự bắt buộc: THỬ trước, LƯU sau. Phép thử chạy trên cấu hình đang gõ và
                     không ghi gì, nên gõ nhầm key cũng không mất key đang dùng được. */}
                 <div className="flex flex-wrap items-center gap-2">
-                  <button onClick={testConnection}
+                  <button onClick={testAndSaveSettings}
                     disabled={busy !== null || (!settings?.hasApiKey && !apiKeyDraft.trim())}
+                    title="Gọi thử một lượt; gọi được mới lưu — thử hỏng thì cấu hình cũ giữ nguyên"
                     className={primaryBtn}>
-                    {busy === "test" ? <Loader2 size={15} className="animate-spin" /> : <RefreshCw size={15} />}
-                    Kiểm tra kết nối
+                    {busy === "settings" ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />}
+                    Kiểm tra &amp; lưu cấu hình
                   </button>
-                  <button onClick={saveSettings} disabled={busy !== null || !testedOk}
-                    title={testedOk
-                      ? "Lưu cấu hình vừa thử thành công"
-                      : "Bấm “Kiểm tra kết nối” thành công trước đã"}
-                    className={ghostBtn}>
-                    {busy === "settings" ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />} Lưu cấu hình
-                  </button>
+                  {settings?.apiKeyLength ? (
+                    <span className="text-[11px] text-slate-400">
+                      Key đang lưu: {settings.apiKeyMasked} · {settings.apiKeyLength} ký tự
+                    </span>
+                  ) : null}
                   {settings?.keyUrl && (
                     <a href={settings.keyUrl} target="_blank" rel="noreferrer"
                       className="text-[11px] font-semibold text-indigo-600 underline-offset-2 hover:underline">
@@ -1071,6 +1184,36 @@ export default function AiAuthorPanel({ examId, existingKeys, hasItem, onApplyCo
                 </ul>
               )}
 
+              {/* Key đã khai mà hình chưa có: nhờ AI vẽ bổ sung ngay tại chỗ. Chỉ báo suông thì
+                  giáo viên phải tự nghĩ ra câu lệnh sửa hình cho đúng mấy key này. */}
+              {unusedKeys.length > 0 && (
+                <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg bg-amber-50 p-2.5 text-[11px] leading-relaxed text-amber-800">
+                  <Info size={12} className="shrink-0" />
+                  <span>
+                    {unusedKeys.length} key chưa xuất hiện trên hình:{" "}
+                    <strong className="font-mono">{unusedKeys.join(", ")}</strong>
+                  </span>
+                  <span className="ml-auto flex items-center gap-1.5">
+                    {/* Vẽ thẳng: chèn đúng loại widget theo tiền tố key, không gọi AI nên không
+                        bao giờ trượt. Nhờ AI thì đặt được vào đúng màn/đúng chỗ hợp lý hơn. */}
+                    <button onClick={fillMissingKeysLocally} disabled={busy !== null}
+                      title="Chèn ngay thành phần cho các key này rồi vẽ lại — không tốn lượt gọi AI"
+                      className="flex items-center gap-1.5 rounded-lg border border-amber-300 bg-white px-2.5 py-1 font-semibold text-amber-800 hover:bg-amber-100 disabled:opacity-50">
+                      {busy === "mockup" ? <Loader2 size={12} className="animate-spin" /> : <Plus size={12} />}
+                      Vẽ bổ sung ngay
+                    </button>
+                    <button onClick={drawMissingKeys} disabled={busy !== null}
+                      title="Để AI tự đặt vào đúng màn hình và đúng vị trí hợp lý"
+                      className="flex items-center gap-1.5 rounded-lg border border-amber-300 bg-white px-2.5 py-1 font-semibold text-amber-800 hover:bg-amber-100 disabled:opacity-50">
+                      {busy === "mockup-revise"
+                        ? <Loader2 size={12} className="animate-spin" />
+                        : <Wand2 size={12} />}
+                      Nhờ AI vẽ
+                    </button>
+                  </span>
+                </div>
+              )}
+
               {keys.length > 0 && (
                 <div className="overflow-x-auto rounded-xl border border-slate-200">
                   <table className="w-full min-w-[680px] text-left text-xs">
@@ -1175,10 +1318,6 @@ export default function AiAuthorPanel({ examId, existingKeys, hasItem, onApplyCo
 
               {screens.length > 0 && (
                 <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
-                  <p className="mb-2 text-[11px] leading-relaxed text-slate-500">
-                    Chưa ưng bố cục? Nói bằng lời để AI sửa — hệ thống vẽ lại theo bản mô tả mới nên
-                    hình luôn cùng một phong cách, không bao giờ chồng chữ.
-                  </p>
                   <div className="flex flex-wrap items-center gap-2">
                     <input
                       value={mockupPrompt}
@@ -1187,7 +1326,7 @@ export default function AiAuthorPanel({ examId, existingKeys, hasItem, onApplyCo
                       placeholder="VD: bỏ ô số điện thoại, thêm màn hình chi tiết, đổi nút Add User thành FAB…"
                       className={`${inputClass} min-w-[240px] flex-1`}
                     />
-                    <button onClick={reviseMockup} disabled={busy !== null} className={ghostBtn}>
+                    <button onClick={() => reviseMockup()} disabled={busy !== null} className={ghostBtn}>
                       {busy === "mockup-revise" ? <Loader2 size={15} className="animate-spin" /> : <Wand2 size={15} />}
                       Nhờ AI sửa hình
                     </button>
@@ -1380,10 +1519,13 @@ export default function AiAuthorPanel({ examId, existingKeys, hasItem, onApplyCo
 
               {starterFiles.length > 0 && (
                 <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
-                  <p className="mb-2 text-[11px] leading-relaxed text-slate-500">
-                    Sửa thẳng trong khung code ở trên, hoặc nói bằng lời để AI sửa hộ.
-                    {starterEdited && <span className="font-semibold text-amber-700"> Bạn đang có sửa tay chưa lưu — lượt AI sửa sẽ sinh lại toàn bộ file và thay phần đó.</span>}
-                  </p>
+                  {/* Chỉ giữ CẢNH BÁO mất code vừa gõ tay — phần hướng dẫn cách dùng đã tự hiện
+                      qua ô nhập và nút bên dưới. */}
+                  {starterEdited && (
+                    <p className="mb-2 text-[11px] font-semibold leading-relaxed text-amber-700">
+                      Bạn đang có sửa tay chưa lưu — lượt AI sửa sẽ sinh lại toàn bộ file và thay phần đó.
+                    </p>
+                  )}
                   <div className="flex flex-wrap items-center gap-2">
                     <input
                       value={starterPrompt}
@@ -1403,15 +1545,11 @@ export default function AiAuthorPanel({ examId, existingKeys, hasItem, onApplyCo
             </Step>
           )}
 
-          {/* Lưu bộ phát cho SV */}
+          {/* Đề phát cho SV */}
           {!!deBai && (
             <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
               <div className="min-w-0 flex-1">
-                <p className="text-sm font-bold text-slate-700">Bộ phát cho sinh viên</p>
-                <p className="text-[11px] leading-relaxed text-slate-500">
-                  Lưu đề bài + hình minh họa vào bộ testcase <span className="font-mono">{examId.trim() || "(chưa có mã)"}</span>
-                  {" "}và tải luôn bản <span className="font-mono">.docx</span> về máy; xem lại bất cứ lúc nào ở trang Kho đề bằng nút “Đề bài”.
-                </p>
+                <p className="text-sm font-bold text-slate-700">Đề cho sinh viên</p>
               </div>
               <button onClick={saveHandout} disabled={busy !== null || !examId.trim()} className={primaryBtn}>
                 {busy === "handout" ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />}

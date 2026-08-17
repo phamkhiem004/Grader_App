@@ -226,6 +226,40 @@ public class ExamSetupController {
     }
 
     /**
+     * Phiên làm việc của TRỢ LÝ AI cho một bộ testcase (đề bài, Item Key, hình, khung starter…).
+     *
+     * <p>Nhờ nó mà bấm "Sửa" một bộ đã soạn bằng AI là mở lại đúng phiên đó và nhờ AI sửa tiếp
+     * được ngay — kể cả khi mở trên máy khác hoặc đã dọn trình duyệt.
+     */
+    @GetMapping("/{examId}/ai-draft")
+    public ResponseEntity<?> readAiDraft(@PathVariable String examId) {
+        try {
+            String json = examService.readAiAuthorDraft(examId);
+            return ResponseEntity.ok(Map.of("exam_id", examId, "has_draft", json != null,
+                    "draft", json == null ? "" : json));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().body(Map.of("error", "Lỗi máy chủ"));
+        }
+    }
+
+    /** Body: { draft: "<json>" } — chuỗi rỗng = xoá nháp AI của bộ này. */
+    @PostMapping("/{examId}/ai-draft")
+    public ResponseEntity<?> saveAiDraft(@PathVariable String examId,
+                                         @RequestBody(required = false) Map<String, Object> body) {
+        try {
+            Object draft = body == null ? null : body.get("draft");
+            examService.saveAiAuthorDraft(examId, draft == null ? null : String.valueOf(draft));
+            return ResponseEntity.ok(Map.of("exam_id", examId, "ok", true));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    /**
      * Đọc các file testcase của 1 đề (exam_test.dart, skills_matrix.json, grader.dart).
      *
      * @param edit true = đọc để SỬA: trả nguyên vẹn, không cắt bớt (bản cắt mà lưu lại là mất dữ liệu)

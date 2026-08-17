@@ -2336,6 +2336,15 @@ function TestcasesEditor() {
       }
       setVersion(Number(data.version ?? version));
       setItems(Array.isArray(data.items) ? data.items as TestcaseItem[] : items);
+      // ĐÃ CHỐT BẢN CHÍNH THỨC → khóa tự lưu nháp lại ngay. Thiếu hai dòng này thì effect tự lưu
+      // chạy lại (saving về null, items vừa đổi) và 2 giây sau bắn POST .../testcases/draft, hạ
+      // đúng bộ vừa Lưu về NHÁP: đúng triệu chứng "báo đã lưu nhưng Kho vẫn hiện Nháp".
+      if (kind === "publish") {
+        if (autoDraftRef.current) { clearTimeout(autoDraftRef.current); autoDraftRef.current = null; }
+        setPublishedOnServer(true);
+      }
+      // Mã vừa lưu là mã của chính bộ này → khỏi bắt kiểm tra trùng ở lần lưu kế tiếp.
+      if (!renameTarget) setSavedExamId(saveExamId);
       const renamed = renameTarget ? `Đã đổi mã bộ testcase thành ${renameTarget}. ` : "";
       setMessage({ type: "ok", text: renamed + (data.warning || (kind === "publish"
         ? `Đã lưu bộ code testcase v${data.version} và chuẩn bị môi trường chấm — dùng chấm được ngay.`

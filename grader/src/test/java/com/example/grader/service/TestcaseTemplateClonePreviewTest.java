@@ -16,6 +16,7 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -96,6 +97,47 @@ class TestcaseTemplateClonePreviewTest {
         verify(examService).cloneImportedExam(
                 "MANUAL_ZIP", "TARGET_02", "Bản sao viết tay", "Ghi chú mới", "local-user");
         // Bản ghi do ExamService tạo trong lúc chép file, service này không được tự lưu thêm.
+        verify(repository, never()).save(any(Exam.class));
+    }
+
+    /** Bấm Lưu = chốt bản chính thức: bộ đang nháp (vừa clone) phải sang Hoàn tất. */
+    @Test
+    void publishTurnsDraftSetIntoCompleted() {
+        Exam draft = sourceExam("PUB_01", """
+                {"schema_version":1,"items":[],"contract":{"require_keys":false,"keys":[]}}
+                """);
+        draft.setTestcaseStatus("DRAFT");
+        ExamRepository repository = mock(ExamRepository.class);
+        when(repository.findByExamId("PUB_01")).thenReturn(Optional.of(draft));
+        when(repository.save(any(Exam.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        ExamService examService = mock(ExamService.class);
+        when(examService.testcaseDirectoryForConfiguration("PUB_01"))
+                .thenReturn(tempDir.resolve("exams/PUB_01/testcase"));
+
+        Map<String, Object> result = service(repository, examService)
+                .publish("PUB_01", Map.of("items", List.of(), "contract", Map.of()), "local-user");
+
+        assertEquals("PUBLISHED", result.get("status"));
+        assertEquals("PUBLISHED", draft.getTestcaseStatus());
+    }
+
+    /**
+     * Tự lưu nháp chạy nền có thể tới SAU cú bấm Lưu; nếu nó ghi được thì bộ vừa Hoàn tất tụt
+     * về Nháp và file đang dùng để chấm bị đè — đúng lỗi "báo đã lưu nhưng Kho vẫn hiện Nháp".
+     */
+    @Test
+    void lateAutosaveDraftCannotDowngradePublishedSet() {
+        Exam published = sourceExam("PUB_02", """
+                {"schema_version":1,"items":[],"contract":{"require_keys":false,"keys":[]}}
+                """);
+        published.setTestcaseStatus("PUBLISHED");
+        ExamRepository repository = mock(ExamRepository.class);
+        when(repository.findByExamId("PUB_02")).thenReturn(Optional.of(published));
+        TestcaseTemplateService service = service(repository, mock(ExamService.class));
+
+        assertThrows(IllegalStateException.class, () -> service.saveDraft("PUB_02",
+                Map.of("items", List.of(), "contract", Map.of()), "local-user"));
+        assertEquals("PUBLISHED", published.getTestcaseStatus());
         verify(repository, never()).save(any(Exam.class));
     }
 

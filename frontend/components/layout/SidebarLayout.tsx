@@ -54,7 +54,7 @@ const PRIMARY_NAV: NavEntry[] = [
   },
   { name: 'Thư viện chấm', path: '/teacher/libraries', icon: Package },
   // Vào thẳng trang Kho — mọi thao tác (tạo/sửa/xóa/chấm lại) đều là nút trong trang đó.
-  { name: 'Quản lý bộ testcase', path: '/teacher/archive', icon: FileCode2 },
+  { name: 'Bộ chấm Golden', path: '/teacher/archive', icon: FileCode2 },
   { name: 'Khung năng lực', path: '/syllabus', icon: BookOpen },
   { name: 'Nhận xét AI', path: '/teacher/feedback', icon: MessageSquareText },
 ];

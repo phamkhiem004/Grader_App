@@ -58,7 +58,6 @@ public class BatchGradingService {
     @Autowired private ExamRepository examRepo;
     @Autowired private SyllabusService    syllabusService;
     @Autowired private CompetencyService  competencyService;
-    @Autowired private TestcaseTemplateService templateService;
     @Autowired private GradingRuntimeSettingsService runtimeSettings;
 
     /** Bản hợp đồng `result.json` mà backend này phát hành — xem SPEC_grader_result_json/. */
@@ -1582,13 +1581,8 @@ public class BatchGradingService {
         List<String> ids = resultRepo.findSubmitStudentIds(examId);
         if (ids.isEmpty())
             throw new IllegalArgumentException("Đề " + examId + " chưa có bài nộp nào để chấm lại.");
-        // Nâng engine lên bản mới nhất TRƯỚC khi chấm lại — engine bị chép đóng băng vào thư mục
-        // testcase lúc publish nên không nâng thì bản sửa engine vô hiệu với đề đã publish.
-        //
-        // CHỈ nâng ở đây, KHÔNG nâng khi chấm lại lẻ: ở đây cả đề được chấm lại bằng CÙNG một
-        // engine nên vẫn công bằng; nâng lúc chấm lại một bài thì trong cùng đề sẽ có bài chấm
-        // bằng engine mới, bài chấm bằng engine cũ.
-        templateService.refreshCommonEngine(examId);
+        // Golden suite đã publish là một snapshot bất biến. Chấm lại phải dùng đúng bundle
+        // đã được preflight, không âm thầm thay engine giữa các lần chấm.
         return regradeStudents(examId, ids, createdBy);
     }
 

@@ -1,0 +1,152 @@
+package com.example.grader.service;
+
+import com.example.grader.entity.BehaviorArtifact;
+import com.example.grader.entity.BehaviorArtifactType;
+import com.example.grader.entity.BehaviorSuite;
+import com.example.grader.repository.BehaviorArtifactRepository;
+import com.example.grader.repository.BehaviorSuiteRepository;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.springframework.mock.web.MockMultipartFile;
+import org.springframework.test.util.ReflectionTestUtils;
+
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.Statement;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.*;
+
+class BehaviorArtifactServiceTest {
+
+    @TempDir
+    Path tempDir;
+
+    private final List<BehaviorArtifact> stored = new ArrayList<>();
+    private BehaviorArtifactService service;
+
+    @BeforeEach
+    void setUp() {
+        BehaviorArtifactRepository artifacts = mock(BehaviorArtifactRepository.class);
+        BehaviorSuiteRepository suites = mock(BehaviorSuiteRepository.class);
+        when(suites.existsById("suite-1")).thenReturn(true);
+        BehaviorSuite suite = new BehaviorSuite();
+        suite.setId("suite-1");
+        suite.setDatabaseContractJson("{\"driver\":\"sqlite\",\"database_name\":\"grader.db\"}");
+        when(suites.findById("suite-1")).thenReturn(Optional.of(suite));
+        when(artifacts.countBySuiteIdAndArtifactType(any(), any())).thenAnswer(invocation -> {
+            BehaviorArtifactType type = invocation.getArgument(1);
+            return stored.stream().filter(row -> row.getArtifactType() == type).count();
+        });
+        when(artifacts.findBySuiteIdAndArtifactTypeAndActiveTrue(any(), any())).thenAnswer(invocation -> {
+            BehaviorArtifactType type = invocation.getArgument(1);
+            return stored.stream().filter(row -> row.getArtifactType() == type && Boolean.TRUE.equals(row.getActive())).toList();
+        });
+        when(artifacts.findFirstBySuiteIdAndArtifactTypeAndActiveTrueOrderByVersionDesc(any(), any()))
+                .thenAnswer(invocation -> {
+                    BehaviorArtifactType type = invocation.getArgument(1);
+                    return stored.stream()
+                            .filter(row -> row.getArtifactType() == type && Boolean.TRUE.equals(row.getActive()))
+                            .max(Comparator.comparing(BehaviorArtifact::getVersion));
+                });
+        when(artifacts.save(any(BehaviorArtifact.class))).thenAnswer(invocation -> {
+            BehaviorArtifact row = invocation.getArgument(0);
+            if (row.getId() == null) row.setId(UUID.randomUUID().toString());
+            if (row.getActive() == null) row.setActive(true);
+            stored.add(row);
+            return row;
+        });
+        when(artifacts.saveAll(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service = new BehaviorArtifactService(artifacts, suites);
+        ReflectionTestUtils.setField(service, "artifactsDir", tempDir.resolve("artifacts").toString());
+    }
+
+    @Test
+    void acceptsDatabasesWithSameSchemaAndDifferentData() throws Exception {
+        Path publicDb = sqlite("public.db", "CREATE TABLE users(uid TEXT PRIMARY KEY, name TEXT NOT NULL)",
+                "INSERT INTO users VALUES ('PUBLIC_01', 'Public user')");
+        Path hiddenDb = sqlite("hidden.db", "CREATE TABLE users(uid TEXT PRIMARY KEY, name TEXT NOT NULL)",
+                "INSERT INTO users VALUES ('HIDDEN_99', 'Hidden user')");
+
+        service.upload("suite-1", BehaviorArtifactType.STUDENT_DATABASE, multipart(publicDb), "{}");
+        service.upload("suite-1", BehaviorArtifactType.HIDDEN_DATABASE, multipart(hiddenDb), "{}");
+
+        assertEquals(2, stored.size());
+        assertNotEquals(stored.get(0).getSha256(), stored.get(1).getSha256(),
+                "Hai DB phải được phép khác dữ liệu nhưng vẫn cùng schema");
+    }
+
+    @Test
+    void rejectsHiddenDatabaseWithDifferentSchema() throws Exception {
+        Path publicDb = sqlite("public.db", "CREATE TABLE users(uid TEXT PRIMARY KEY, name TEXT NOT NULL)");
+        Path hiddenDb = sqlite("hidden.db", "CREATE TABLE users(uid TEXT PRIMARY KEY, full_name TEXT, age INTEGER)");
+        service.upload("suite-1", BehaviorArtifactType.STUDENT_DATABASE, multipart(publicDb), "{}");
+
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> service.upload("suite-1", BehaviorArtifactType.HIDDEN_DATABASE, multipart(hiddenDb), "{}"));
+
+        assertTrue(error.getMessage().contains("cùng cấu trúc"));
+        assertEquals(1, stored.size(), "DB sai schema không được tạo version mới");
+    }
+
+    @Test
+    void testcaseDefinitionRequiresAllSevenExecutionColumns() {
+        byte[] invalid = """
+                {"steps":[{"stage":"ACTION","attribute":"semanticId","attributeValue":"add.button",
+                "valueType":"string","value":"","action":"tap"}]}
+                """.getBytes();
+        MockMultipartFile file = new MockMultipartFile(
+                "file", "testcase-definition.json", "application/json", invalid);
+
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> service.upload("suite-1", BehaviorArtifactType.TESTCASE_DEFINITION, file, "{}"));
+
+        assertTrue(error.getMessage().contains("browser"));
+    }
+
+    @Test
+    void derivesIndependentInsertUpdateDeleteCheckpointsFromOutputDatabase() throws Exception {
+        Path hiddenDb = sqlite("hidden-diff.db",
+                "CREATE TABLE users(uid TEXT PRIMARY KEY, name TEXT NOT NULL)",
+                "INSERT INTO users VALUES ('U1', 'Before')",
+                "INSERT INTO users VALUES ('U2', 'Delete me')");
+        Path outputDb = sqlite("output-diff.db",
+                "CREATE TABLE users(uid TEXT PRIMARY KEY, name TEXT NOT NULL)",
+                "INSERT INTO users VALUES ('U1', 'After')",
+                "INSERT INTO users VALUES ('U3', 'Inserted')");
+
+        service.upload("suite-1", BehaviorArtifactType.HIDDEN_DATABASE, multipart(hiddenDb), "{}");
+        service.upload("suite-1", BehaviorArtifactType.OUTPUT_DATABASE, multipart(outputDb), "{}");
+
+        List<java.util.Map<String, Object>> checkpoints = service.databaseDiffCheckpoints("suite-1");
+        assertEquals(3, checkpoints.size());
+        assertEquals(java.util.Set.of("UPDATE", "INSERT", "DELETE"),
+                new java.util.HashSet<>(checkpoints.stream()
+                        .map(row -> String.valueOf(row.get("operation"))).toList()));
+        assertTrue(checkpoints.stream().allMatch(row -> "database_observation".equals(row.get("kind"))));
+    }
+
+    private Path sqlite(String fileName, String... statements) throws Exception {
+        Path path = tempDir.resolve(fileName);
+        try (Connection connection = DriverManager.getConnection("jdbc:sqlite:" + path.toAbsolutePath());
+             Statement statement = connection.createStatement()) {
+            for (String sql : statements) statement.execute(sql);
+        }
+        return path;
+    }
+
+    private MockMultipartFile multipart(Path path) throws Exception {
+        return new MockMultipartFile("file", path.getFileName().toString(),
+                "application/vnd.sqlite3", Files.readAllBytes(path));
+    }
+}

@@ -1,0 +1,1092 @@
+package com.example.grader.service;
+
+import com.example.grader.entity.*;
+import com.example.grader.repository.*;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.transaction.Transactional;
+import org.springframework.stereotype.Service;
+
+import java.time.Instant;
+import java.util.*;
+import java.util.regex.Pattern;
+
+/**
+ * Lõi soạn bộ chấm Record–Abstract–Replay. Service chỉ quản lý contract có cấu trúc; việc điều khiển
+ * Flutter runtime nằm ở GoldenRuntimeService và GoldenOracleCaptureService để
+ * UI/API soạn bộ chấm không phải tự điều khiển Docker.
+ */
+@Service
+public class BehaviorAuthoringService {
+
+    public static final String SCHEMA_VERSION = "1.0";
+    private static final Pattern CODE = Pattern.compile("[A-Z0-9][A-Z0-9_-]{2,79}");
+    private static final Set<String> EVENT_KINDS = Set.of(
+            "action", "ui_observation", "database_observation", "checkpoint", "navigation", "exception");
+    private static final Set<String> ACTIONS = Set.of(
+            "boot", "tap", "enter_text", "clear_text", "scroll", "back", "restart", "wait_until");
+    private static final int MAX_EVENTS = 2_000;
+
+    private final GoldenAppRepository goldenApps;
+    private final BehaviorSuiteRepository suites;
+    private final BehaviorScenarioRepository scenarios;
+    private final GoldenRecordingRepository recordings;
+    private final OracleSnapshotRepository oracles;
+    private final SkillRepository skills;
+    private final ObjectMapper mapper = new ObjectMapper().findAndRegisterModules();
+
+    public BehaviorAuthoringService(GoldenAppRepository goldenApps,
+                                    BehaviorSuiteRepository suites,
+                                    BehaviorScenarioRepository scenarios,
+                                    GoldenRecordingRepository recordings,
+                                    OracleSnapshotRepository oracles,
+                                    SkillRepository skills) {
+        this.goldenApps = goldenApps;
+        this.suites = suites;
+        this.scenarios = scenarios;
+        this.recordings = recordings;
+        this.oracles = oracles;
+        this.skills = skills;
+    }
+
+    @Transactional
+    public Map<String, Object> registerGoldenApp(Map<String, Object> body) {
+        String name = required(body, "name");
+        String runtimeUrl = optional(body, "runtime_url", "runtimeUrl");
+        if (runtimeUrl != null && !(runtimeUrl.startsWith("http://") || runtimeUrl.startsWith("https://"))) {
+            throw new IllegalArgumentException("runtime_url phải bắt đầu bằng http:// hoặc https://");
+        }
+        String platform = text(body, "platform", "WEB").toUpperCase(Locale.ROOT);
+        if (!Set.of("WEB", "ANDROID", "LINUX_DESKTOP").contains(platform)) {
+            throw new IllegalArgumentException("platform chỉ nhận WEB, ANDROID hoặc LINUX_DESKTOP");
+        }
+
+        GoldenApp app = new GoldenApp();
+        app.setName(name);
+        app.setExamId(optional(body, "exam_id", "examId"));
+        app.setVersion(text(body, "version", "1"));
+        app.setPlatform(platform);
+        app.setRuntimeUrl(runtimeUrl);
+        app.setArtifactPath(optional(body, "artifact_path", "artifactPath"));
+        app.setArtifactSha256(optional(body, "artifact_sha256", "artifactSha256"));
+        app.setMetadataJson(json(body.getOrDefault("metadata", Map.of())));
+        app.setStatus(bool(body.get("ready"), runtimeUrl != null) ? GoldenAppStatus.READY : GoldenAppStatus.REGISTERED);
+        goldenApps.save(app);
+        return goldenAppView(app);
+    }
+
+    public List<Map<String, Object>> listGoldenApps(String examId) {
+        List<GoldenApp> rows = examId == null || examId.isBlank()
+                ? goldenApps.findAllByOrderByUpdatedAtDesc()
+                : goldenApps.findByExamIdOrderByUpdatedAtDesc(examId.trim());
+        return rows.stream().map(this::goldenAppView).toList();
+    }
+
+    public Map<String, Object> getGoldenApp(String id) {
+        return goldenAppView(golden(id));
+    }
+
+    @Transactional
+    public Map<String, Object> createSuite(Map<String, Object> body) {
+        String code = required(body, "suite_code", "suiteCode").toUpperCase(Locale.ROOT);
+        if (!CODE.matcher(code).matches()) {
+            throw new IllegalArgumentException("suite_code chỉ gồm A-Z, 0-9, _ hoặc -, dài 3-80 ký tự");
+        }
+        if (suites.existsBySuiteCode(code)) {
+            throw new IllegalStateException("Mã bộ chấm đã tồn tại: " + code);
+        }
+        GoldenApp app = golden(required(body, "golden_app_id", "goldenAppId"));
+        if (app.getStatus() == GoldenAppStatus.DISABLED) {
+            throw new IllegalStateException("Golden App không thể dùng để tạo bộ chấm: " + app.getStatus());
+        }
+
+        BehaviorSuite suite = new BehaviorSuite();
+        suite.setSuiteCode(code);
+        suite.setExamId(optional(body, "exam_id", "examId"));
+        suite.setGoldenAppId(app.getId());
+        suite.setName(required(body, "name"));
+        suite.setDescription(optional(body, "description"));
+        suite.setSchemaVersion(SCHEMA_VERSION);
+        suite.setPublicContractJson(normalizeObject(body.get("public_contract"), defaultPublicContract()));
+        suite.setDatabaseContractJson(normalizeObject(body.get("database_contract"), defaultDatabaseContract()));
+        suite.setRuntimeConfigJson(normalizeObject(body.get("runtime_config"), defaultRuntimeConfig()));
+        suites.save(suite);
+        return suiteView(suite, true);
+    }
+
+    /** Golden Solution đã qua kiểm tra ZIP thì Golden App mới được phép record/replay. */
+    @Transactional
+    public Map<String, Object> markGoldenSolutionReady(String suiteId, Map<String, Object> artifact) {
+        BehaviorSuite suite = suite(suiteId);
+        GoldenApp app = golden(suite.getGoldenAppId());
+        if (app.getStatus() == GoldenAppStatus.DISABLED) {
+            throw new IllegalStateException("Golden App đang ở trạng thái không thể kích hoạt: " + app.getStatus());
+        }
+        app.setArtifactPath("behavior-artifact:" + String.valueOf(artifact.get("id")));
+        app.setArtifactSha256(String.valueOf(artifact.get("sha256")));
+        // Upload thành công mới chỉ xác nhận artifact hợp lệ. Golden App chỉ READY
+        // sau khi GoldenRuntimeService build xong và runtime thực sự truy cập được.
+        app.setRuntimeUrl(null);
+        app.setStatus(GoldenAppStatus.REGISTERED);
+        goldenApps.save(app);
+
+        // Một Golden Solution mới làm các oracle cũ mất tính xác thực. Không được âm thầm
+        // publish testcase với output của phiên bản đáp án trước.
+        staleSuiteOracles(suite);
+        suites.save(suite);
+        return goldenAppView(app);
+    }
+
+    public List<Map<String, Object>> listSuites(String examId) {
+        List<BehaviorSuite> rows = examId == null || examId.isBlank()
+                ? suites.findAllByOrderByUpdatedAtDesc()
+                : suites.findByExamIdOrderByUpdatedAtDesc(examId.trim());
+        return rows.stream().map(row -> suiteView(row, false)).toList();
+    }
+
+    public Map<String, Object> getSuite(String id) {
+        return suiteView(suite(id), true);
+    }
+
+    public Map<String, Object> getRecording(String id) {
+        return recordingView(recording(id));
+    }
+
+    @Transactional
+    public Map<String, Object> updateSuite(String id, Map<String, Object> body) {
+        BehaviorSuite suite = suite(id);
+        ensureEditable(suite);
+        boolean invalidatesReplay = body.containsKey("public_contract")
+                || body.containsKey("database_contract")
+                || body.containsKey("runtime_config");
+        if (body.containsKey("name")) suite.setName(required(body, "name"));
+        if (body.containsKey("description")) suite.setDescription(optional(body, "description"));
+        if (body.containsKey("public_contract")) {
+            suite.setPublicContractJson(normalizeObject(body.get("public_contract"), Map.of()));
+        }
+        if (body.containsKey("database_contract")) {
+            suite.setDatabaseContractJson(normalizeObject(body.get("database_contract"), Map.of()));
+        }
+        if (body.containsKey("runtime_config")) {
+            suite.setRuntimeConfigJson(normalizeObject(body.get("runtime_config"), Map.of()));
+        }
+        if (invalidatesReplay) {
+            staleSuiteOracles(suite);
+        }
+        suites.save(suite);
+        return suiteView(suite, true);
+    }
+
+    @Transactional
+    public Map<String, Object> startRecording(String suiteId, Map<String, Object> body) {
+        BehaviorSuite suite = suite(suiteId);
+        ensureEditable(suite);
+        GoldenApp app = golden(suite.getGoldenAppId());
+        if (app.getStatus() != GoldenAppStatus.READY) {
+            throw new IllegalStateException("Golden App không còn READY");
+        }
+        if (recordings.countBySuiteIdAndStatus(suiteId, RecordingStatus.ACTIVE) > 0) {
+            throw new IllegalStateException("Bộ chấm đang có một phiên record chưa kết thúc");
+        }
+
+        GoldenRecording recording = new GoldenRecording();
+        recording.setSuiteId(suiteId);
+        recording.setGoldenAppId(app.getId());
+        recording.setName(text(body, "name", "Luồng " + (scenarios.countBySuiteIdAndEnabledTrue(suiteId) + 1)));
+        recording.setSeed(text(body, "seed", UUID.randomUUID().toString()));
+        recording.setViewportJson(normalizeObject(body.get("viewport"), defaultViewport()));
+        recording.setInitialStateJson(normalizeObject(body.get("initial_state"), Map.of("reset_storage", true)));
+        recording.setRawTraceJson("[]");
+        recordings.save(recording);
+        suite.setStatus(BehaviorSuiteStatus.RECORDING);
+        suites.save(suite);
+        return recordingView(recording);
+    }
+
+    @Transactional
+    public Map<String, Object> appendEvent(String recordingId, Map<String, Object> body) {
+        GoldenRecording recording = recordingForUpdate(recordingId);
+        if (recording.getStatus() != RecordingStatus.ACTIVE) {
+            throw new IllegalStateException("Chỉ có thể ghi event vào phiên ACTIVE");
+        }
+        List<Map<String, Object>> trace = readObjectList(recording.getRawTraceJson());
+        if (trace.size() >= MAX_EVENTS) throw new IllegalStateException("Phiên record vượt quá 2000 event");
+
+        Map<String, Object> event = new LinkedHashMap<>(body == null ? Map.of() : body);
+        String kind = text(event, "kind", "action").toLowerCase(Locale.ROOT);
+        if (!EVENT_KINDS.contains(kind)) throw new IllegalArgumentException("Loại event không hỗ trợ: " + kind);
+        if ("action".equals(kind)) {
+            String action = required(event, "action").toLowerCase(Locale.ROOT);
+            if (!ACTIONS.contains(action)) throw new IllegalArgumentException("Action không hỗ trợ: " + action);
+            if (Set.of("tap", "enter_text", "clear_text", "scroll").contains(action)
+                    && map(event.get("target")).isEmpty()) {
+                throw new IllegalArgumentException("Action " + action + " phải có target ngữ nghĩa");
+            }
+            Map<String, Object> target = map(event.get("target"));
+            event.putIfAbsent("stage", "ACTION");
+            event.putIfAbsent("attribute", locatorAttribute(target));
+            event.putIfAbsent("attributeValue", locatorValue(target));
+            event.putIfAbsent("valueType", valueType(event.get("value")));
+            event.putIfAbsent("value", event.getOrDefault("value", ""));
+            event.putIfAbsent("browser", "flutter_tester");
+        } else if ("database_observation".equals(kind)) {
+            validateDatabaseObservation(event);
+        } else if ("checkpoint".equals(kind) || "ui_observation".equals(kind)) {
+            validateUiObservation(event);
+        }
+        event.put("kind", kind);
+        event.put("sequence", trace.size() + 1);
+        event.putIfAbsent("recorded_at", Instant.now().toString());
+        trace.add(event);
+        recording.setRawTraceJson(json(trace));
+        recordings.save(recording);
+        return Map.of("recording_id", recordingId, "event_count", trace.size(), "event", event);
+    }
+
+    @Transactional
+    public Map<String, Object> deleteEvent(String recordingId, int sequence) {
+        if (sequence < 1) throw new IllegalArgumentException("sequence event phải lớn hơn hoặc bằng 1");
+        GoldenRecording recording = recordingForUpdate(recordingId);
+        if (recording.getStatus() != RecordingStatus.ACTIVE) {
+            throw new IllegalStateException("Chỉ có thể xóa event trong phiên ACTIVE");
+        }
+        List<Map<String, Object>> trace = readObjectList(recording.getRawTraceJson());
+        int index = -1;
+        for (int i = 0; i < trace.size(); i++) {
+            Object value = trace.get(i).get("sequence");
+            if (value instanceof Number number && number.intValue() == sequence) {
+                index = i;
+                break;
+            }
+        }
+        if (index < 0) throw new IllegalArgumentException("Không tìm thấy event sequence " + sequence);
+
+        Map<String, Object> removed = new LinkedHashMap<>(trace.remove(index));
+        for (int i = 0; i < trace.size(); i++) trace.get(i).put("sequence", i + 1);
+        recording.setRawTraceJson(json(trace));
+        recordings.save(recording);
+        return Map.of(
+                "recording_id", recordingId,
+                "event_count", trace.size(),
+                "removed", removed);
+    }
+
+    @Transactional
+    public Map<String, Object> stopRecording(String recordingId, Map<String, Object> body) {
+        GoldenRecording recording = recordingForUpdate(recordingId);
+        if (recording.getStatus() == RecordingStatus.STOPPED
+                || recording.getStatus() == RecordingStatus.ABSTRACTED) {
+            return recordingView(recording);
+        }
+        if (recording.getStatus() != RecordingStatus.ACTIVE) {
+            throw new IllegalStateException("Phiên record không thể dừng ở trạng thái " + recording.getStatus());
+        }
+        recording.setFinalObservationJson(normalizeObject(
+                body == null ? null : body.get("final_observation"), Map.of()));
+        recording.setStoppedAt(Instant.now());
+        recording.setStatus(RecordingStatus.STOPPED);
+        recordings.save(recording);
+        BehaviorSuite suite = suite(recording.getSuiteId());
+        suite.setStatus(BehaviorSuiteStatus.REVIEW);
+        suites.save(suite);
+        return recordingView(recording);
+    }
+
+    @Transactional
+    public Map<String, Object> abstractRecording(String recordingId, Map<String, Object> body) {
+        GoldenRecording recording = recording(recordingId);
+        if (recording.getStatus() == RecordingStatus.ABSTRACTED) {
+            BehaviorScenario existing = scenarios.findFirstBySourceRecordingId(recordingId)
+                    .orElseThrow(() -> new IllegalStateException(
+                            "Record đã ABSTRACTED nhưng không còn scenario tương ứng"));
+            Map<String, Object> existingView = new LinkedHashMap<>(scenarioView(existing, true));
+            oracles.findFirstByScenarioIdOrderByCreatedAtDesc(existing.getId())
+                    .ifPresent(oracle -> existingView.put("oracle", oracleView(oracle)));
+            return existingView;
+        }
+        if (recording.getStatus() != RecordingStatus.STOPPED) {
+            throw new IllegalStateException("Cần dừng record trước khi abstract");
+        }
+        BehaviorSuite suite = suite(recording.getSuiteId());
+        ensureEditable(suite);
+        List<Map<String, Object>> trace = readObjectList(recording.getRawTraceJson());
+        if (trace.isEmpty()) throw new IllegalStateException("Phiên record chưa có thao tác nào");
+
+        List<Map<String, Object>> steps = new ArrayList<>();
+        List<Map<String, Object>> checkpoints = new ArrayList<>();
+        Map<String, Object> variables = new LinkedHashMap<>();
+        int actionNo = 0;
+        for (Map<String, Object> event : trace) {
+            String kind = text(event, "kind", "");
+            if ("action".equals(kind)) {
+                String action = text(event, "action", "");
+                Map<String, Object> step = new LinkedHashMap<>();
+                step.put("id", "step_" + (++actionNo));
+                step.put("action", action);
+                for (String field : List.of("stage", "attribute", "attributeValue", "valueType", "browser")) {
+                    if (event.containsKey(field)) step.put(field, event.get(field));
+                }
+                if (event.containsKey("target")) step.put("target", event.get("target"));
+                if (event.containsKey("delta")) step.put("delta", event.get("delta"));
+                if (event.containsKey("direction")) step.put("direction", event.get("direction"));
+                if ("enter_text".equals(action) && event.get("value") != null) {
+                    String variable = variableName(map(event.get("target")), actionNo);
+                    variables.put(variable, Map.of(
+                            "generator", generatorFor(variable),
+                            "example", String.valueOf(event.get("value"))));
+                    step.put("value", "${" + variable + "}");
+                } else if (event.containsKey("value")) {
+                    step.put("value", event.get("value"));
+                }
+                step.put("timeout_ms", number(event.get("timeout_ms"), 5_000));
+                steps.add(step);
+            } else if ("checkpoint".equals(kind)
+                    || (bool(event.get("checkpoint"), false)
+                    && Set.of("ui_observation", "database_observation", "navigation").contains(kind))) {
+                Map<String, Object> checkpoint = new LinkedHashMap<>(event);
+                checkpoint.remove("recorded_at");
+                checkpoint.remove("sequence");
+                checkpoint.putIfAbsent("id", "checkpoint_" + (checkpoints.size() + 1));
+                checkpoint.putIfAbsent("weight", 1.0);
+                checkpoints.add(checkpoint);
+            }
+        }
+        if (checkpoints.stream().noneMatch(item -> "database_observation".equals(text(item, "kind", "")))) {
+            for (Object raw : objectList(body.get("database_checkpoints"))) {
+                Map<String, Object> checkpoint = map(raw);
+                validateDatabaseObservation(checkpoint);
+                checkpoint.putIfAbsent("id", "checkpoint_" + (checkpoints.size() + 1));
+                checkpoints.add(checkpoint);
+            }
+        }
+        if (actionNo == 0) throw new IllegalStateException("Record không chứa action có thể replay");
+
+        Map<String, String> examples = new LinkedHashMap<>();
+        variables.forEach((key, value) -> {
+            Object example = map(value).get("example");
+            if (example != null && !String.valueOf(example).isBlank()) {
+                examples.put(key, String.valueOf(example));
+            }
+        });
+        checkpoints = checkpoints.stream()
+                .map(item -> map(parameterize(item, examples)))
+                .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
+
+        Map<String, Object> finalObservation = map(parameterize(
+                readObject(recording.getFinalObservationJson()), examples));
+        if (!finalObservation.isEmpty()) {
+            checkpoints.add(new LinkedHashMap<>(Map.of(
+                    "id", "checkpoint_final",
+                    "kind", "checkpoint",
+                    "scope", "ui",
+                    "weight", 1.0,
+                    "expect", finalObservation)));
+        }
+        if (checkpoints.isEmpty()) {
+            // Một record chỉ gồm thao tác vẫn cần một criterion tối thiểu để runner có
+            // execution group và capture Output DB. Criterion này chỉ kiểm tra luồng
+            // Golden/student không ném exception; DB diff sẽ được bổ sung sau capture.
+            Map<String, Object> checkpoint = new LinkedHashMap<>();
+            checkpoint.put("id", "checkpoint_no_exception");
+            checkpoint.put("kind", "checkpoint");
+            checkpoint.put("scope", "ui");
+            checkpoint.put("stage", "ASSERT");
+            checkpoint.put("attribute", "runtime");
+            checkpoint.put("attributeValue", "no_exception");
+            checkpoint.put("valueType", "boolean");
+            checkpoint.put("value", true);
+            checkpoint.put("action", "observe_ui");
+            checkpoint.put("browser", "flutter_tester");
+            checkpoint.put("weight", 1.0);
+            checkpoint.put("expect", Map.of("no_exception", true));
+            checkpoints.add(checkpoint);
+        }
+
+        String requestedCode = text(body, "scenario_code", "");
+        String code = requestedCode.isBlank()
+                ? uniqueScenarioCode(suite.getId(), slug(recording.getName()))
+                : requestedCode.toUpperCase(Locale.ROOT).replaceAll("[^A-Z0-9_-]", "_");
+        if (scenarios.findBySuiteIdAndScenarioCode(suite.getId(), code).isPresent()) {
+            throw new IllegalStateException("scenario_code đã tồn tại trong bộ chấm: " + code);
+        }
+
+        BehaviorScenario scenario = new BehaviorScenario();
+        scenario.setSuiteId(suite.getId());
+        scenario.setSourceRecordingId(recording.getId());
+        scenario.setScenarioCode(code);
+        scenario.setName(text(body, "name", recording.getName()));
+        scenario.setSkillCode(text(body, "skill_code",
+                checkpoints.stream().anyMatch(item -> "database_observation".equals(text(item, "kind", "")))
+                        ? "STORAGE_SQLITE_CRUD" : "UI_BUTTONS_SELECTION"));
+        scenario.setDescription(optional(body, "description"));
+        scenario.setDisplayOrder((int) scenarios.countBySuiteIdAndEnabledTrue(suite.getId()) + 1);
+        scenario.setWeight(number(body.get("weight"), Math.max(1.0, checkpoints.size())));
+        scenario.setVariablesJson(json(variables));
+        scenario.setInitialStateJson(recording.getInitialStateJson());
+        scenario.setStepsJson(json(steps));
+        scenario.setCheckpointsJson(json(checkpoints));
+        List<Object> requestedViewports = objectList(body.get("viewports"));
+        scenario.setViewportsJson(requestedViewports.isEmpty()
+                ? json(List.of(readObject(recording.getViewportJson())))
+                : json(requestedViewports));
+        scenarios.save(scenario);
+
+        // Record trên Golden App chính là nguồn oracle đầu tiên. Giá trị nhập đã được tách
+        // thành biến, còn snapshot UI/DB vẫn giữ nguyên để replay cùng seed đối chiếu.
+        Map<String, Object> input = new LinkedHashMap<>();
+        variables.forEach((key, value) -> input.put(key, map(value).get("example")));
+        List<Map<String, Object>> databaseObservations = checkpoints.stream()
+                .filter(item -> "database_observation".equals(text(item, "kind", "")))
+                .toList();
+        OracleSnapshot oracle = new OracleSnapshot();
+        oracle.setScenarioId(scenario.getId());
+        oracle.setGoldenAppId(suite.getGoldenAppId());
+        oracle.setGoldenSha256(golden(suite.getGoldenAppId()).getArtifactSha256());
+        oracle.setSeed(recording.getSeed());
+        oracle.setInputJson(json(input));
+        oracle.setUiObservationJson(recording.getFinalObservationJson());
+        Map<String, Object> databaseObservation = new LinkedHashMap<>();
+        databaseObservation.put("checkpoints", databaseObservations);
+        databaseObservation.put("output_database_sha256", text(body, "output_database_sha256", ""));
+        oracle.setDatabaseObservationJson(json(databaseObservation));
+        oracle.setStatus(text(body, "output_database_sha256", "").isBlank()
+                ? OracleStatus.PENDING : OracleStatus.READY);
+        oracles.save(oracle);
+
+        recording.setStatus(RecordingStatus.ABSTRACTED);
+        recordings.save(recording);
+        Map<String, Object> out = new LinkedHashMap<>(scenarioView(scenario, true));
+        out.put("oracle", oracleView(oracle));
+        return out;
+    }
+
+    /**
+     * Hoàn thiện oracle sau khi Docker đã replay Golden trên Hidden DB. Các thay đổi
+     * SQLite được tách thành checkpoint độc lập và giá trị sinh ngẫu nhiên được trả
+     * về placeholder để replay mỗi bài bằng dữ liệu khác, tránh hard-code.
+     */
+    @Transactional
+    public Map<String, Object> applyDerivedDatabaseCheckpoints(String scenarioId,
+                                                                List<Map<String, Object>> derived,
+                                                                Map<String, String> materializedVariables,
+                                                                String outputSha256) {
+        BehaviorScenario scenario = scenario(scenarioId);
+        ensureEditable(suite(scenario.getSuiteId()));
+        List<Map<String, Object>> checkpoints = readObjectList(scenario.getCheckpointsJson()).stream()
+                .filter(item -> !"hidden_output_diff".equals(text(item, "generated_from", "")))
+                .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
+        int next = checkpoints.size() + 1;
+        for (Map<String, Object> raw : derived == null ? List.<Map<String, Object>>of() : derived) {
+            Map<String, Object> checkpoint = map(parameterizeCaptured(raw, materializedVariables));
+            validateDatabaseObservation(checkpoint);
+            checkpoint.put("generated_from", "hidden_output_diff");
+            checkpoint.put("id", "database_diff_" + next++);
+            checkpoint.putIfAbsent("weight", 1.0);
+            checkpoints.add(checkpoint);
+        }
+        if (derived != null && !derived.isEmpty()
+                && "UI_BUTTONS_SELECTION".equals(scenario.getSkillCode())) {
+            scenario.setSkillCode("STORAGE_SQLITE_CRUD");
+        }
+        scenario.setCheckpointsJson(json(checkpoints));
+        scenarios.save(scenario);
+
+        OracleSnapshot oracle = oracles.findFirstByScenarioIdOrderByCreatedAtDesc(scenarioId)
+                .orElseThrow(() -> new IllegalStateException("Scenario chưa có oracle để hoàn thiện"));
+        Map<String, Object> observation = new LinkedHashMap<>();
+        observation.put("checkpoints", checkpoints.stream()
+                .filter(item -> "database_observation".equals(text(item, "kind", "")))
+                .toList());
+        observation.put("output_database_sha256", outputSha256);
+        observation.put("captured_variables", materializedVariables == null ? Map.of() : materializedVariables);
+        oracle.setDatabaseObservationJson(json(observation));
+        oracle.setStatus(OracleStatus.READY);
+        oracles.save(oracle);
+
+        Map<String, Object> out = new LinkedHashMap<>(scenarioView(scenario, true));
+        out.put("oracle", oracleView(oracle));
+        return out;
+    }
+
+    @Transactional
+    public Map<String, Object> updateScenario(String scenarioId, Map<String, Object> body) {
+        BehaviorScenario scenario = scenario(scenarioId);
+        BehaviorSuite suite = suite(scenario.getSuiteId());
+        ensureEditable(suite);
+        boolean invalidatesReplay = body.containsKey("variables")
+                || body.containsKey("initial_state")
+                || body.containsKey("steps")
+                || body.containsKey("checkpoints")
+                || body.containsKey("viewports");
+        if (body.containsKey("name")) scenario.setName(required(body, "name"));
+        if (body.containsKey("skill_code")) scenario.setSkillCode(required(body, "skill_code"));
+        if (body.containsKey("description")) scenario.setDescription(optional(body, "description"));
+        if (body.containsKey("weight")) scenario.setWeight(number(body.get("weight"), 1.0));
+        if (body.containsKey("enabled")) scenario.setEnabled(bool(body.get("enabled"), true));
+        if (body.containsKey("display_order")) {
+            scenario.setDisplayOrder((int) number(body.get("display_order"), scenario.getDisplayOrder()));
+        }
+        if (body.containsKey("variables")) scenario.setVariablesJson(normalizeObject(body.get("variables"), Map.of()));
+        if (body.containsKey("initial_state")) scenario.setInitialStateJson(normalizeObject(body.get("initial_state"), Map.of()));
+        if (body.containsKey("steps")) scenario.setStepsJson(normalizeArray(body.get("steps")));
+        if (body.containsKey("checkpoints")) scenario.setCheckpointsJson(normalizeArray(body.get("checkpoints")));
+        if (body.containsKey("viewports")) scenario.setViewportsJson(normalizeArray(body.get("viewports")));
+        validateScenario(scenario, false);
+        scenarios.save(scenario);
+        if (invalidatesReplay) {
+            staleScenarioOracles(scenario.getId());
+            if (suite.getStatus() == BehaviorSuiteStatus.PUBLISHED) {
+                suite.setStatus(BehaviorSuiteStatus.REVIEW);
+                suites.save(suite);
+            }
+        }
+        return scenarioView(scenario, true);
+    }
+
+    /**
+     * Artifact đầu vào của replay (đặc biệt Hidden DB) đã đổi thì mọi oracle cũ
+     * không còn chứng minh được kết quả của Golden Solution trên đầu vào hiện tại.
+     */
+    @Transactional
+    public void invalidateSuiteOracles(String suiteId) {
+        BehaviorSuite suite = suite(suiteId);
+        ensureEditable(suite);
+        staleSuiteOracles(suite);
+        suites.save(suite);
+    }
+
+    @Transactional
+    public Map<String, Object> saveOracle(String scenarioId, Map<String, Object> body) {
+        BehaviorScenario scenario = scenario(scenarioId);
+        BehaviorSuite suite = suite(scenario.getSuiteId());
+        GoldenApp app = golden(suite.getGoldenAppId());
+        String seed = required(body, "seed");
+        OracleSnapshot oracle = new OracleSnapshot();
+        oracle.setScenarioId(scenarioId);
+        oracle.setGoldenAppId(app.getId());
+        oracle.setGoldenSha256(app.getArtifactSha256());
+        oracle.setSeed(seed);
+        oracle.setInputJson(normalizeObject(body.get("input"), Map.of()));
+        oracle.setUiObservationJson(normalizeObject(body.get("ui_observation"), Map.of()));
+        oracle.setDatabaseObservationJson(normalizeObject(body.get("database_observation"), Map.of()));
+        oracle.setStatus(OracleStatus.READY);
+        oracles.save(oracle);
+        return oracleView(oracle);
+    }
+
+    @Transactional
+    public Map<String, Object> publish(String suiteId) {
+        BehaviorSuite suite = suite(suiteId);
+        GoldenApp app = golden(suite.getGoldenAppId());
+        if (app.getStatus() != GoldenAppStatus.READY) {
+            throw new IllegalStateException("Không thể publish vì Golden App chưa READY");
+        }
+        List<BehaviorScenario> enabled = scenarios.findBySuiteIdOrderByDisplayOrderAscCreatedAtAsc(suiteId)
+                .stream().filter(row -> Boolean.TRUE.equals(row.getEnabled())).toList();
+        if (enabled.isEmpty()) throw new IllegalStateException("Bộ chấm chưa có scenario đang bật");
+        double totalWeight = 0;
+        for (BehaviorScenario scenario : enabled) {
+            validateScenario(scenario, true);
+            if (!skills.existsById(scenario.getSkillCode())) {
+                throw new IllegalStateException(
+                        "Scenario " + scenario.getScenarioCode() + " dùng skill_code không có trong syllabus: "
+                                + scenario.getSkillCode());
+            }
+            boolean hasOracle = oracles.findByScenarioIdOrderByCreatedAtDesc(scenario.getId()).stream()
+                    .anyMatch(row -> row.getStatus() == OracleStatus.READY
+                            && Objects.equals(row.getGoldenSha256(), app.getArtifactSha256()));
+            if (!hasOracle) {
+                throw new IllegalStateException(
+                        "Scenario " + scenario.getScenarioCode()
+                                + " chưa có oracle READY khớp phiên bản Golden Solution hiện tại");
+            }
+            totalWeight += scenario.getWeight();
+        }
+        if (totalWeight <= 0) throw new IllegalStateException("Tổng trọng số phải lớn hơn 0");
+        suite.setRevision(suite.getStatus() == BehaviorSuiteStatus.PUBLISHED
+                ? suite.getRevision() + 1 : suite.getRevision());
+        suite.setStatus(BehaviorSuiteStatus.PUBLISHED);
+        suite.setPublishedAt(Instant.now());
+        suites.save(suite);
+        Map<String, Object> out = new LinkedHashMap<>(suiteView(suite, true));
+        out.put("total_weight", totalWeight);
+        out.put("ready_for_replay", true);
+        return out;
+    }
+
+    public Map<String, Object> executionPlan(String suiteId) {
+        BehaviorSuite suite = suite(suiteId);
+        if (suite.getStatus() != BehaviorSuiteStatus.PUBLISHED) {
+            throw new IllegalStateException("Bộ chấm chưa publish");
+        }
+        return buildExecutionPlan(suite);
+    }
+
+    /** Kế hoạch nháp chỉ dùng để chạy preflight trên Golden Solution trước khi publish. */
+    public Map<String, Object> previewExecutionPlan(String suiteId) {
+        return buildExecutionPlan(suite(suiteId));
+    }
+
+    private Map<String, Object> buildExecutionPlan(BehaviorSuite suite) {
+        String suiteId = suite.getId();
+        GoldenApp app = golden(suite.getGoldenAppId());
+        List<Map<String, Object>> scenarioRows = scenarios
+                .findBySuiteIdOrderByDisplayOrderAscCreatedAtAsc(suiteId).stream()
+                .filter(row -> Boolean.TRUE.equals(row.getEnabled()))
+                .map(row -> {
+                    Map<String, Object> view = new LinkedHashMap<>(scenarioView(row, true));
+                    oracles.findByScenarioIdOrderByCreatedAtDesc(row.getId()).stream()
+                            .filter(oracle -> oracle.getStatus() == OracleStatus.READY)
+                            .findFirst()
+                            .ifPresent(oracle -> view.put("oracle", oracleView(oracle)));
+                    return view;
+                }).toList();
+        Map<String, Object> plan = new LinkedHashMap<>();
+        plan.put("schema_version", SCHEMA_VERSION);
+        plan.put("suite", suiteView(suite, false));
+        plan.put("golden_app", goldenAppView(app));
+        plan.put("public_contract", readObject(suite.getPublicContractJson()));
+        plan.put("database_contract", readObject(suite.getDatabaseContractJson()));
+        plan.put("runtime_config", readObject(suite.getRuntimeConfigJson()));
+        plan.put("scenarios", scenarioRows);
+        return plan;
+    }
+
+    private void validateScenario(BehaviorScenario scenario, boolean publish) {
+        if (scenario.getWeight() == null || scenario.getWeight() <= 0) {
+            throw new IllegalArgumentException("Scenario " + scenario.getScenarioCode() + " phải có weight > 0");
+        }
+        List<Map<String, Object>> steps = readObjectList(scenario.getStepsJson());
+        if (steps.isEmpty()) throw new IllegalArgumentException("Scenario " + scenario.getScenarioCode() + " chưa có bước");
+        for (Map<String, Object> step : steps) {
+            String action = text(step, "action", "");
+            if (!ACTIONS.contains(action)) {
+                throw new IllegalArgumentException("Scenario " + scenario.getScenarioCode() + " có action không hỗ trợ: " + action);
+            }
+        }
+        List<Map<String, Object>> viewports = readObjectList(scenario.getViewportsJson());
+        if (viewports.isEmpty()) {
+            throw new IllegalArgumentException("Scenario " + scenario.getScenarioCode() + " chưa có viewport");
+        }
+        for (Map<String, Object> viewport : viewports) {
+            if (number(viewport.get("width"), 0) <= 0 || number(viewport.get("height"), 0) <= 0) {
+                throw new IllegalArgumentException(
+                        "Scenario " + scenario.getScenarioCode() + " có viewport không hợp lệ: " + viewport);
+            }
+        }
+        if (publish && readObjectList(scenario.getCheckpointsJson()).isEmpty()) {
+            throw new IllegalArgumentException("Scenario " + scenario.getScenarioCode() + " chưa có checkpoint chấm");
+        }
+    }
+
+    private void validateDatabaseObservation(Map<String, Object> event) {
+        String table = required(event, "table");
+        if (!table.matches("[A-Za-z_][A-Za-z0-9_]*")) {
+            throw new IllegalArgumentException("Tên bảng SQLite không hợp lệ: " + table);
+        }
+        String operation = text(event, "operation", "READ").toUpperCase(Locale.ROOT);
+        if (!Set.of("READ", "INSERT", "UPDATE", "DELETE").contains(operation)) {
+            throw new IllegalArgumentException("operation DB chỉ nhận READ, INSERT, UPDATE hoặc DELETE");
+        }
+        if (map(event.get("row")).isEmpty() && event.get("count") == null) {
+            throw new IllegalArgumentException("Checkpoint DB phải có row hoặc count cần đối chiếu");
+        }
+        event.put("operation", operation);
+        event.putIfAbsent("checkpoint", true);
+        event.putIfAbsent("scope", "database");
+        event.putIfAbsent("stage", "ASSERT");
+        event.putIfAbsent("attribute", "table");
+        event.putIfAbsent("attributeValue", table);
+        event.putIfAbsent("valueType", "json");
+        event.putIfAbsent("value", event.getOrDefault("row", Map.of()));
+        event.putIfAbsent("action", "observe_database");
+        event.putIfAbsent("browser", "sqlite");
+    }
+
+    private void validateUiObservation(Map<String, Object> event) {
+        Map<String, Object> expect = map(event.get("expect"));
+        if (map(event.get("target")).isEmpty()
+                && objectList(expect.get("visible_texts")).isEmpty()
+                && objectList(expect.get("hidden_texts")).isEmpty()
+                && event.get("text") == null
+                && !bool(event.get("no_exception"), false)) {
+            throw new IllegalArgumentException(
+                    "Checkpoint UI phải có target, visible_texts, hidden_texts, text hoặc no_exception");
+        }
+        event.putIfAbsent("checkpoint", true);
+        event.putIfAbsent("scope", "ui");
+        event.putIfAbsent("stage", "ASSERT");
+        event.putIfAbsent("action", "observe_ui");
+        event.putIfAbsent("browser", "flutter_tester");
+    }
+
+    private Map<String, Object> goldenAppView(GoldenApp app) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("id", app.getId());
+        out.put("exam_id", app.getExamId());
+        out.put("name", app.getName());
+        out.put("version", app.getVersion());
+        out.put("platform", app.getPlatform());
+        out.put("runtime_url", app.getRuntimeUrl());
+        out.put("artifact_path", app.getArtifactPath());
+        out.put("artifact_sha256", app.getArtifactSha256());
+        out.put("status", app.getStatus().name());
+        out.put("metadata", readObject(app.getMetadataJson()));
+        out.put("created_at", timestamp(app.getCreatedAt()));
+        out.put("updated_at", timestamp(app.getUpdatedAt()));
+        return out;
+    }
+
+    private Map<String, Object> suiteView(BehaviorSuite suite, boolean includeScenarios) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("id", suite.getId());
+        out.put("suite_code", suite.getSuiteCode());
+        out.put("exam_id", suite.getExamId());
+        out.put("golden_app_id", suite.getGoldenAppId());
+        out.put("name", suite.getName());
+        out.put("description", suite.getDescription());
+        out.put("schema_version", suite.getSchemaVersion());
+        out.put("revision", suite.getRevision());
+        out.put("status", suite.getStatus().name());
+        out.put("public_contract", readObject(suite.getPublicContractJson()));
+        out.put("database_contract", readObject(suite.getDatabaseContractJson()));
+        out.put("runtime_config", readObject(suite.getRuntimeConfigJson()));
+        out.put("created_at", timestamp(suite.getCreatedAt()));
+        out.put("updated_at", timestamp(suite.getUpdatedAt()));
+        out.put("published_at", timestamp(suite.getPublishedAt()));
+        if (includeScenarios) {
+            out.put("scenarios", scenarios.findBySuiteIdOrderByDisplayOrderAscCreatedAtAsc(suite.getId())
+                    .stream().map(row -> scenarioView(row, true)).toList());
+            out.put("recordings", recordings.findBySuiteIdOrderByStartedAtDesc(suite.getId())
+                    .stream().map(this::recordingView).toList());
+        }
+        return out;
+    }
+
+    private Map<String, Object> scenarioView(BehaviorScenario scenario, boolean full) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("id", scenario.getId());
+        out.put("suite_id", scenario.getSuiteId());
+        out.put("source_recording_id", scenario.getSourceRecordingId());
+        out.put("scenario_code", scenario.getScenarioCode());
+        out.put("name", scenario.getName());
+        out.put("skill_code", scenario.getSkillCode());
+        out.put("description", scenario.getDescription());
+        out.put("display_order", scenario.getDisplayOrder());
+        out.put("weight", scenario.getWeight());
+        out.put("enabled", scenario.getEnabled());
+        if (full) {
+            out.put("variables", readObject(scenario.getVariablesJson()));
+            out.put("initial_state", readObject(scenario.getInitialStateJson()));
+            out.put("steps", readArray(scenario.getStepsJson()));
+            out.put("checkpoints", readArray(scenario.getCheckpointsJson()));
+            out.put("viewports", readArray(scenario.getViewportsJson()));
+        }
+        return out;
+    }
+
+    private Map<String, Object> recordingView(GoldenRecording recording) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("id", recording.getId());
+        out.put("suite_id", recording.getSuiteId());
+        out.put("golden_app_id", recording.getGoldenAppId());
+        out.put("name", recording.getName());
+        out.put("seed", recording.getSeed());
+        out.put("status", recording.getStatus().name());
+        out.put("viewport", readObject(recording.getViewportJson()));
+        out.put("initial_state", readObject(recording.getInitialStateJson()));
+        out.put("raw_trace", readArray(recording.getRawTraceJson()));
+        out.put("final_observation", readObject(recording.getFinalObservationJson()));
+        out.put("started_at", timestamp(recording.getStartedAt()));
+        out.put("stopped_at", timestamp(recording.getStoppedAt()));
+        return out;
+    }
+
+    private Map<String, Object> oracleView(OracleSnapshot oracle) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("id", oracle.getId());
+        out.put("scenario_id", oracle.getScenarioId());
+        out.put("golden_app_id", oracle.getGoldenAppId());
+        out.put("golden_sha256", oracle.getGoldenSha256());
+        out.put("seed", oracle.getSeed());
+        out.put("status", oracle.getStatus().name());
+        out.put("input", readObject(oracle.getInputJson()));
+        out.put("ui_observation", readObject(oracle.getUiObservationJson()));
+        out.put("database_observation", readObject(oracle.getDatabaseObservationJson()));
+        out.put("created_at", timestamp(oracle.getCreatedAt()));
+        return out;
+    }
+
+    private String timestamp(Instant value) {
+        return value == null ? null : value.toString();
+    }
+
+    private GoldenApp golden(String id) {
+        return goldenApps.findById(id).orElseThrow(() -> new IllegalArgumentException("Không tìm thấy Golden App: " + id));
+    }
+
+    private BehaviorSuite suite(String id) {
+        return suites.findById(id).orElseThrow(() -> new IllegalArgumentException("Không tìm thấy bộ chấm hành vi: " + id));
+    }
+
+    private BehaviorScenario scenario(String id) {
+        return scenarios.findById(id).orElseThrow(() -> new IllegalArgumentException("Không tìm thấy scenario: " + id));
+    }
+
+    private GoldenRecording recording(String id) {
+        return recordings.findById(id).orElseThrow(() -> new IllegalArgumentException("Không tìm thấy phiên record: " + id));
+    }
+
+    private GoldenRecording recordingForUpdate(String id) {
+        return recordings.findByIdForUpdate(id)
+                .orElseThrow(() -> new IllegalArgumentException("Không tìm thấy phiên record: " + id));
+    }
+
+    private void ensureEditable(BehaviorSuite suite) {
+        if (suite.getStatus() == BehaviorSuiteStatus.DISABLED) {
+            throw new IllegalStateException("Bộ chấm đã bị vô hiệu hoá");
+        }
+    }
+
+    private void staleSuiteOracles(BehaviorSuite suite) {
+        for (BehaviorScenario scenario : scenarios.findBySuiteIdOrderByDisplayOrderAscCreatedAtAsc(suite.getId())) {
+            staleScenarioOracles(scenario.getId());
+        }
+        if (suite.getStatus() == BehaviorSuiteStatus.PUBLISHED) {
+            suite.setStatus(BehaviorSuiteStatus.REVIEW);
+        }
+    }
+
+    private void staleScenarioOracles(String scenarioId) {
+        List<OracleSnapshot> snapshots = oracles.findByScenarioIdOrderByCreatedAtDesc(scenarioId);
+        snapshots.stream()
+                .filter(snapshot -> snapshot.getStatus() != OracleStatus.STALE)
+                .forEach(snapshot -> snapshot.setStatus(OracleStatus.STALE));
+        oracles.saveAll(snapshots);
+    }
+
+    private Map<String, Object> defaultPublicContract() {
+        return Map.of(
+                "locator_priority", List.of("semantic_id", "value_key", "accessibility_label", "role_text", "structure"),
+                "required_semantics", List.of(),
+                "allow_coordinate_fallback", false);
+    }
+
+    private Map<String, Object> defaultDatabaseContract() {
+        return Map.of(
+                "enabled", false,
+                "driver", "sqlite",
+                "tables", List.of(),
+                "ignore_columns", List.of("created_at", "updated_at"));
+    }
+
+    private Map<String, Object> defaultRuntimeConfig() {
+        return Map.of(
+                "reset_between_scenarios", true,
+                "default_timeout_ms", 5_000,
+                "oracle_mode", "golden_per_seed",
+                "screenshot_evidence", true,
+                "automation_driver", "flutter_test",
+                "browser", "flutter_tester",
+                "api_base_url", "http://mock-api:8080",
+                "allowed_packages", List.of(
+                        "flutter", "flutter_test", "path", "sqflite", "sqflite_common_ffi"));
+    }
+
+    private Map<String, Object> defaultViewport() {
+        return Map.of("id", "desktop", "width", 1280, "height", 800, "device_pixel_ratio", 1.0);
+    }
+
+    private String variableName(Map<String, Object> target, int index) {
+        String candidate = text(target, "semanticId", "");
+        if (candidate.isBlank()) candidate = text(target, "key", "");
+        if (candidate.isBlank()) candidate = text(target, "label", "");
+        candidate = candidate.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]+", "_").replaceAll("^_+|_+$", "");
+        return candidate.isBlank() ? "input_" + index : candidate;
+    }
+
+    private String generatorFor(String variable) {
+        if (variable.contains("email")) return "email";
+        if (variable.contains("uid") || variable.endsWith("_id")) return "stable_id";
+        if (variable.contains("first")) return "first_name";
+        if (variable.contains("last")) return "last_name";
+        if (variable.contains("phone")) return "phone";
+        return "text";
+    }
+
+    private String locatorAttribute(Map<String, Object> target) {
+        for (String key : List.of("semanticId", "semantic_id", "valueKey", "value_key", "key",
+                "label", "hint", "text", "role")) {
+            if (target.get(key) != null && !String.valueOf(target.get(key)).isBlank()) return key;
+        }
+        return "none";
+    }
+
+    private String locatorValue(Map<String, Object> target) {
+        String attribute = locatorAttribute(target);
+        return "none".equals(attribute) ? "" : String.valueOf(target.get(attribute));
+    }
+
+    private String valueType(Object value) {
+        if (value == null) return "none";
+        if (value instanceof Boolean) return "boolean";
+        if (value instanceof Number) return "number";
+        if (value instanceof Map<?, ?>) return "object";
+        if (value instanceof List<?>) return "array";
+        return "string";
+    }
+
+    private List<Object> objectList(Object value) {
+        return value instanceof List<?> source ? new ArrayList<>(source) : new ArrayList<>();
+    }
+
+    private Object parameterize(Object value, Map<String, String> examples) {
+        if (value instanceof Map<?, ?> source) {
+            Map<String, Object> out = new LinkedHashMap<>();
+            source.forEach((key, item) -> out.put(String.valueOf(key), parameterize(item, examples)));
+            return out;
+        }
+        if (value instanceof List<?> source) {
+            return source.stream().map(item -> parameterize(item, examples)).toList();
+        }
+        if (!(value instanceof String text)) return value;
+        String result = text;
+        for (Map.Entry<String, String> entry : examples.entrySet()) {
+            if (entry.getValue().isEmpty()) continue;
+            result = result.replace(entry.getValue(), "${" + entry.getKey() + "}");
+        }
+        return result;
+    }
+
+    private Object parameterizeCaptured(Object value, Map<String, String> variables) {
+        if (value instanceof Map<?, ?> source) {
+            Map<String, Object> out = new LinkedHashMap<>();
+            source.forEach((key, item) -> out.put(
+                    String.valueOf(key), parameterizeCaptured(item, variables)));
+            return out;
+        }
+        if (value instanceof List<?> source) {
+            return source.stream().map(item -> parameterizeCaptured(item, variables)).toList();
+        }
+        if (value == null || variables == null || variables.isEmpty()) return value;
+        String actual = String.valueOf(value);
+        for (Map.Entry<String, String> entry : variables.entrySet()) {
+            if (entry.getValue() != null && !entry.getValue().isBlank()
+                    && actual.equals(entry.getValue())) {
+                return "${" + entry.getKey() + "}";
+            }
+        }
+        return value;
+    }
+
+    private String uniqueScenarioCode(String suiteId, String base) {
+        String value = base.isBlank() ? "SCENARIO" : base;
+        String candidate = value;
+        int suffix = 2;
+        while (scenarios.findBySuiteIdAndScenarioCode(suiteId, candidate).isPresent()) {
+            candidate = value + "_" + suffix++;
+        }
+        return candidate;
+    }
+
+    private String slug(String value) {
+        String slug = value == null ? "" : value.toUpperCase(Locale.ROOT).replaceAll("[^A-Z0-9]+", "_")
+                .replaceAll("^_+|_+$", "");
+        return slug.length() > 90 ? slug.substring(0, 90) : slug;
+    }
+
+    private String normalizeObject(Object value, Map<String, Object> fallback) {
+        if (value == null) return json(fallback);
+        Map<String, Object> parsed = value instanceof String s ? readObject(s) : map(value);
+        if (parsed.isEmpty() && !(value instanceof Map<?, ?>)) {
+            throw new IllegalArgumentException("Giá trị phải là JSON object");
+        }
+        return json(parsed);
+    }
+
+    private String normalizeArray(Object value) {
+        if (value == null) return "[]";
+        if (value instanceof String s) return json(readArray(s));
+        if (!(value instanceof List<?>)) throw new IllegalArgumentException("Giá trị phải là JSON array");
+        return json(value);
+    }
+
+    private String json(Object value) {
+        try {
+            return mapper.writeValueAsString(value);
+        } catch (Exception e) {
+            throw new IllegalArgumentException("Không thể mã hoá JSON", e);
+        }
+    }
+
+    private Map<String, Object> readObject(String value) {
+        if (value == null || value.isBlank()) return new LinkedHashMap<>();
+        try {
+            return mapper.readValue(value, new TypeReference<LinkedHashMap<String, Object>>() {});
+        } catch (Exception e) {
+            throw new IllegalArgumentException("JSON object không hợp lệ", e);
+        }
+    }
+
+    private List<Object> readArray(String value) {
+        if (value == null || value.isBlank()) return new ArrayList<>();
+        try {
+            return mapper.readValue(value, new TypeReference<ArrayList<Object>>() {});
+        } catch (Exception e) {
+            throw new IllegalArgumentException("JSON array không hợp lệ", e);
+        }
+    }
+
+    private List<Map<String, Object>> readObjectList(String value) {
+        if (value == null || value.isBlank()) return new ArrayList<>();
+        try {
+            return mapper.readValue(value, new TypeReference<List<Map<String, Object>>>() {});
+        } catch (Exception e) {
+            throw new IllegalArgumentException("Danh sách JSON không hợp lệ", e);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> map(Object value) {
+        if (!(value instanceof Map<?, ?> source)) return new LinkedHashMap<>();
+        Map<String, Object> out = new LinkedHashMap<>();
+        source.forEach((key, item) -> out.put(String.valueOf(key), item));
+        return out;
+    }
+
+    private String required(Map<String, Object> body, String... keys) {
+        String value = optional(body, keys);
+        if (value == null || value.isBlank()) throw new IllegalArgumentException("Thiếu trường " + keys[0]);
+        return value;
+    }
+
+    private String optional(Map<String, Object> body, String... keys) {
+        if (body == null) return null;
+        for (String key : keys) {
+            Object value = body.get(key);
+            if (value != null && !String.valueOf(value).trim().isEmpty()) return String.valueOf(value).trim();
+        }
+        return null;
+    }
+
+    private String text(Map<String, Object> body, String key, String fallback) {
+        String value = optional(body, key);
+        return value == null ? fallback : value;
+    }
+
+    private boolean bool(Object value, boolean fallback) {
+        if (value == null) return fallback;
+        if (value instanceof Boolean b) return b;
+        return Boolean.parseBoolean(String.valueOf(value));
+    }
+
+    private double number(Object value, double fallback) {
+        if (value == null) return fallback;
+        if (value instanceof Number n) return n.doubleValue();
+        try {
+            return Double.parseDouble(String.valueOf(value));
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("Giá trị số không hợp lệ: " + value);
+        }
+    }
+}

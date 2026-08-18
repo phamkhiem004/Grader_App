@@ -9,7 +9,8 @@ import java.util.regex.Pattern;
 /**
  * TRỤC PHÂN LOẠI TESTCASE cho `result.json` v2 — nguồn sự thật DUY NHẤT của {@code layer},
  * {@code rubric} và {@code expected} của testcase GROUP. Dùng chung cho lúc SINH đề
- * ({@link TestcaseTemplateService}) và lúc GHÉP kết quả ({@link BatchGradingService}) để hai
+ * Dùng lúc ghép kết quả cũ trong {@link BatchGradingService}; Golden suite mới ghi layer trực tiếp
+ * trong testcase definition nên không còn phụ thuộc thư viện template.
  * bên không lệch nhau.
  *
  * <p><b>layer</b> — tầng kiểm thử. Tiêu chí phân tầng là ĐIỀU ĐƯỢC KHẲNG ĐỊNH, không phải

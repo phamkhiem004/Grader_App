@@ -27,6 +27,14 @@ class CommonEngineExecutionTest {
         assertTrue(grader.contains("kStageMarker"));
         assertTrue(grader.contains("GRADER_CASE_MODE"));
         assertTrue(grader.contains("GRADER_CASE_IDS"));
+        assertTrue(grader.contains("final sourceOnlyIds = <String>[];"),
+                "source-contract thu?n ph?i ???c gom ri?ng ?? ti?t ki?m compile");
+        assertTrue(grader.contains("final isolatedIds = <String>[];"),
+                "scenario widget/behavior ph?i ???c c? l?p");
+        assertTrue(grader.contains("batches.addAll(isolatedIds.map((id) => <String>[id]))"),
+                "m?i scenario c? g?i app ph?i ch?y trong process ri?ng");
+        assertTrue(grader.contains("metadata['runner']?.toString() == 'CUSTOM_CODE'"));
+        assertTrue(grader.contains("sourceChecks.isNotEmpty"));
         assertTrue(grader.contains("--concurrency=1"));
         assertTrue(grader.contains("process.exitCode.timeout("));
         assertFalse(grader.contains("final process = await Process.run("),

@@ -22,7 +22,7 @@ spring:
       enabled: true
       force: true
     multipart:
-      max-file-size: 50MB
+      max-file-size: ${GRADER_MAX_UPLOAD_SIZE:500MB}
       max-request-size: ${GRADER_MAX_UPLOAD:2GB}   # cho batch lớn
       file-size-threshold: 256KB                    # part lớn ghi ra đĩa tạm, không giữ trong RAM
 
@@ -40,6 +40,11 @@ grader:
   template-dir: ${GRADER_TEMPLATE_DIR:grader-base}
   # Nơi dựng build context cho từng đề thi
   exams-dir: ${GRADER_EXAMS_DIR:exams}
+  # Flutter Web Golden builds used by the Record–Abstract–Replay authoring screen.
+  golden-runtime-dir: ${GRADER_GOLDEN_RUNTIME_DIR:golden-runtimes}
+  golden-runtime-build-timeout-seconds: ${GRADER_GOLDEN_RUNTIME_BUILD_TIMEOUT_SECONDS:420}
+  # Replay một record trên Golden + Hidden DB và capture Output DB/oracle.
+  golden-capture-timeout-seconds: ${GRADER_GOLDEN_CAPTURE_TIMEOUT_SECONDS:240}
   # Ảnh nền dùng chung — build 1 lần, mọi đề thi kế thừa (FROM grading-base)
   base-image: ${GRADER_BASE_IMAGE:grading-base:latest}
   # Lưu lại bài nộp (zip) để audit/chấm lại khi tranh chấp

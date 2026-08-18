@@ -45,7 +45,8 @@ import 'dart:io';
 /// 3.4.0: student-stage timeouts become explicit student failures; testcase or
 /// unknown timeouts still require manual review. Source contracts ignore harmless
 /// formatting differences and emit structured contract-violation evidence.
-const String kEngineVersion = 'COMMON_V1-3.4.0';
+/// 3.5.0: gom source check, c? l?p m?i scenario widget/behavior trong process ri?ng.
+const String kEngineVersion = 'COMMON_V1-3.5.0';
 
 /// PHẢI khớp hằng cùng tên trong `exam_test.dart` — hai chương trình Dart riêng biệt,
 /// không import nhau nên không chia sẻ được hằng số.
@@ -53,9 +54,8 @@ const String kBootFailedMarker = '###GRADER_BOOT_FAILED###';
 const String kObservationMarker = '###GRADER_OBS###';
 const String kStageMarker = '###GRADER_STAGE###';
 const int kProcessTimeoutExitCode = -124;
-// Compile Flutter chiếm phần lớn thời gian. Các scenario đã dùng dữ liệu riêng và
-// SQLite noIsolate, nên gom toàn bộ suite vào một process ổn định hơn nhiều so với
-// compile lại 3-4 lần. Có thể override bằng GRADER_BATCH_SIZE khi cần chia lô.
+// GRADER_BATCH_SIZE ch? gi?i h?n l? source-contract thu?n. Scenario c? g?i main()
+// lu?n ???c c? l?p ?? kh?ng r? animation, Riverpod, Navigator ho?c SQLite gi?a test.
 const int kDefaultBatchSize = 64;
 const int kDefaultBatchTimeoutSeconds = 180;
 const int kDefaultPreflightTimeoutSeconds = 60;
@@ -94,19 +94,30 @@ Future<void> main() async {
       break;
     }
   }
-  // APP_BOOT runs alone first. A synchronous loop in student_app.main() can then
-  // be attributed to app boot and stopped quickly instead of consuming the whole suite.
+  // APP_BOOT ch?y ri?ng tr??c. Ch? source-contract kh?ng g?i main() m?i ???c
+  // gom l?; m?i scenario widget/behavior ch?y trong process ri?ng.
   final batches = <List<String>>[];
   if (appBootId != null) batches.add(<String>[appBootId]);
-  final remainingIds = testIds
-      .where((id) => id != appBootId)
-      .toList(growable: false);
-  for (var offset = 0; offset < remainingIds.length; offset += batchSize) {
-    final end = offset + batchSize < remainingIds.length
-        ? offset + batchSize
-        : remainingIds.length;
-    batches.add(remainingIds.sublist(offset, end));
+  final sourceOnlyIds = <String>[];
+  final isolatedIds = <String>[];
+  for (final id in testIds.where((id) => id != appBootId)) {
+    final metadata = _asMap(matrix[id]);
+    final parameters = _asMap(metadata['parameters']);
+    final sourceChecks = parameters['sourceChecksJson']?.toString().trim() ?? '';
+    if (metadata['runner']?.toString() == 'CUSTOM_CODE' &&
+        sourceChecks.isNotEmpty) {
+      sourceOnlyIds.add(id);
+    } else {
+      isolatedIds.add(id);
+    }
   }
+  for (var offset = 0; offset < sourceOnlyIds.length; offset += batchSize) {
+    final end = offset + batchSize < sourceOnlyIds.length
+        ? offset + batchSize
+        : sourceOnlyIds.length;
+    batches.add(sourceOnlyIds.sublist(offset, end));
+  }
+  batches.addAll(isolatedIds.map((id) => <String>[id]));
 
   for (final batch in batches) {
     final isPreflight =
@@ -166,8 +177,9 @@ Future<void> main() async {
         break;
       }
     }
-    if (batch.any((id) => runs[id]?['bootFailed'] == true)) {
-      // _boot() là đường chung của toàn bộ runner; thử tiếp chỉ lặp lại cùng lỗi gốc.
+    if (isPreflight && batch.any((id) => runs[id]?['bootFailed'] == true)) {
+      // Ch? preflight ???c ph?p ch?n c? suite. L?i boot ? m?t scenario c? l?p
+      // kh?ng ???c l?m c?c nghi?p v? ??c l?p ph?a sau m?t c? h?i ch?y.
       break;
     }
   }

@@ -46,6 +46,9 @@ __pycache__/
 # Thư mục output thử nghiệm của bộ sinh đề AI (cục bộ)
 grader/ai-test-output/
 grader/ai-zip-test/
+grader/behavior-artifacts/
+grader/golden-runtimes/
+scratch/
 
 # ── Tài liệu cục bộ (không commit) ──────────────────────────────
 docs/context-diagram.md

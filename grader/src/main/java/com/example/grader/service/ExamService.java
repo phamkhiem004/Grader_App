@@ -166,12 +166,9 @@ public class ExamService {
             m.put("hasTestcase", hasTc);
             // Mở được màn builder khi có cấu hình, HOẶC matrix còn template_id để dựng lại cấu hình.
             // Testcase viết tay không có template_id → sửa bằng trình sửa file thay vì builder.
-            boolean hasConfig = e.getTestcaseConfigJson() != null && !e.getTestcaseConfigJson().isBlank();
-            boolean recoverable = !hasConfig && hasTc
-                    && TestcaseConfigRecovery.canRecover(Path.of(e.getTestcasePath()));
-            m.put("editable", hasConfig || recoverable);
-            m.put("configRecovered", recoverable);           // FE báo "dựng lại từ file testcase"
-            m.put("fileEditable", !hasConfig && hasTc);      // sửa thẳng file (testcase viết tay)
+            m.put("editable", false);
+            m.put("configRecovered", false);
+            m.put("fileEditable", false);
             byId.put(e.getExamId(), m);
         }
 
@@ -193,11 +190,9 @@ public class ExamService {
                         m.put("hasTestcase", true);
                         // Chỉ có thư mục trên đĩa: vẫn sửa được — hệ thống tự đăng ký bản ghi
                         // ngay lần thao tác đầu tiên (xem ensureExamRecord).
-                        Path onDisk = d.resolve("testcase");
-                        boolean canRebuild = TestcaseConfigRecovery.canRecover(onDisk);
-                        m.put("editable", canRebuild);
-                        m.put("configRecovered", canRebuild);
-                        m.put("fileEditable", !canRebuild);
+                        m.put("editable", false);
+                        m.put("configRecovered", false);
+                        m.put("fileEditable", false);
                         byId.put(id, m);
                     }
                 }
@@ -286,13 +281,6 @@ public class ExamService {
         return Files.exists(disk) ? disk : null;
     }
 
-    /** Thư mục testcase để bộ dựng template ghi skills_matrix.json, không phụ thuộc đã upload ZIP hay chưa. */
-    public Path testcaseDirectoryForConfiguration(String examId) {
-        safeId(examId, "đề");
-        Path existing = testcaseDirOf(examId);
-        return existing != null ? existing : examsRoot().resolve(examId).resolve("testcase");
-    }
-
     /** Ba file bắt buộc + hai file hợp đồng — chỉ những file này được sửa trực tiếp. */
     private static final Set<String> EDITABLE_TESTCASE_FILES = Set.of(
             "exam_test.dart", "grader.dart", "skills_matrix.json", "contract.json", "contract.md");
@@ -353,11 +341,6 @@ public class ExamService {
             throw new IllegalStateException("Bộ " + examId + " chưa có thư mục testcase trên đĩa.");
         // Bộ mở được bằng builder (có config, hoặc dựng lại được từ skills_matrix.json) thì lần Lưu
         // kế tiếp trong builder sẽ sinh đè file sửa tay — nói trước để giáo viên tự chọn đường sửa.
-        boolean hasConfig = exam.getTestcaseConfigJson() != null && !exam.getTestcaseConfigJson().isBlank();
-        String builderWarning = (hasConfig || TestcaseConfigRecovery.canRecover(dir))
-                ? "Bộ " + examId + " cũng mở được bằng builder. Đã lưu bản sửa tay, nhưng nếu sau này "
-                        + "bấm Lưu trong màn \"Tạo bộ testcase\" thì các file này sẽ bị sinh lại và mất phần sửa tay."
-                : null;
         if (files == null || files.isEmpty())
             throw new IllegalArgumentException("Không có nội dung file nào để lưu.");
 
@@ -416,8 +399,7 @@ public class ExamService {
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("files", written);
         out.put("status", "PUBLISHED");
-        String warning = ((builderWarning == null ? "" : builderWarning + " ")
-                + (matrixWarning == null ? "" : matrixWarning + " ")
+        String warning = ((matrixWarning == null ? "" : matrixWarning + " ")
                 + (sandboxWarning == null ? "" : sandboxWarning)).trim();
         if (!warning.isBlank()) out.put("warning", warning);
         return out;
@@ -489,36 +471,6 @@ public class ExamService {
         out.put("status", "DRAFT");
         log.info("📑 Đã nhân bản bộ testcase {} → {} (nháp)", sourceId, targetId);
         return out;
-    }
-
-    /**
-     * Phiên làm việc của trợ lý AI cho một bộ; {@code null} nếu bộ đó chưa từng dùng AI.
-     *
-     * <p>Bộ mới chỉ nằm trên đĩa (chưa có hàng trong DB) thì cũng trả null chứ KHÔNG dựng bản ghi:
-     * chỉ mở màn sửa mà đã ghi vào DB là đăng ký nhầm cả những bộ người dùng chỉ ghé xem.
-     */
-    public String readAiAuthorDraft(String examId) {
-        safeId(examId, "đề");
-        return examRepository.findByExamId(examId).map(Exam::getAiAuthorJson).orElse(null);
-    }
-
-    /**
-     * Ghi phiên làm việc của trợ lý AI cho một bộ. Chuỗi rỗng/null = xoá nháp (bấm "Bắt đầu lại").
-     *
-     * <p>KHÔNG đụng tới testcase đang chấm hay cấu hình builder — đây chỉ là bản nháp soạn thảo.
-     */
-    public synchronized void saveAiAuthorDraft(String examId, String json) {
-        safeId(examId, "đề");
-        Exam exam = examRepository.findByExamId(examId).orElse(null);
-        if (exam == null) {
-            // Chưa có bộ trên đĩa lẫn DB (đang soạn cho một mã hoàn toàn mới): giữ nháp ở trình
-            // duyệt là đủ, tạo hàng exam rỗng ở đây sẽ đẻ ra bộ testcase ma trong Kho.
-            if (!Files.exists(examsRoot().resolve(examId).resolve("testcase").resolve("skills_matrix.json")))
-                return;
-            exam = ensureExamRecord(examId);
-        }
-        exam.setAiAuthorJson(json == null || json.isBlank() ? null : json);
-        examRepository.save(exam);
     }
 
     /**
@@ -609,9 +561,8 @@ public class ExamService {
     }
 
     /**
-     * Sao chép nguyên bộ phát cho sinh viên khi clone một bộ testcase tạo bằng builder.
-     * Testcase/config được sinh lại bởi {@link TestcaseTemplateService}; hàm này chỉ giữ kèm đề bài,
-     * starter và lời giải mẫu nếu bộ nguồn có các tài liệu đó.
+     * Sao chép nguyên bộ phát cho sinh viên khi nhân bản tài liệu của một đề.
+     * Golden suite được quản lý riêng; hàm này chỉ giữ kèm đề bài, starter và lời giải mẫu.
      */
     public void cloneHandout(String sourceExamId, String targetExamId) throws Exception {
         safeId(sourceExamId, "bộ testcase nguồn");

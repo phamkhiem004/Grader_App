@@ -25,8 +25,6 @@ public class ExamSetupController {
     private ExamRepository examRepo;
     @Autowired
     private SyllabusService syllabusService;
-    @Autowired
-    private com.example.grader.service.TestcaseTemplateService testcaseTemplateService;
 
     @PostMapping("/upload-testcase")
     public ResponseEntity<?> uploadTestcase(
@@ -131,47 +129,6 @@ public class ExamSetupController {
         }
     }
 
-    /** Đọc cấu hình template-instance của đề; không làm thay đổi skills_matrix đang publish. */
-    @GetMapping("/{examId}/testcases")
-    public ResponseEntity<?> getTestcaseConfig(@PathVariable String examId) {
-        try {
-            return ResponseEntity.ok(testcaseTemplateService.getExamConfig(examId));
-        } catch (IllegalArgumentException e) {
-            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
-        } catch (Exception e) {
-            return ResponseEntity.internalServerError().body(Map.of("error", "Không đọc được cấu hình testcase"));
-        }
-    }
-
-    /** Lưu Draft: chỉ lưu instance/config, không đụng vào bộ testcase đang được chấm. */
-    @RequestMapping(path = "/{examId}/testcases/draft", method = {RequestMethod.POST, RequestMethod.PUT})
-    public ResponseEntity<?> saveTestcaseDraft(@PathVariable String examId,
-                                                @RequestBody Map<String, Object> body) {
-        try {
-            return ResponseEntity.ok(testcaseTemplateService.saveDraft(examId, body, AppActor.DEFAULT));
-        } catch (IllegalArgumentException e) {
-            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
-        } catch (IllegalStateException e) {
-            return ResponseEntity.status(409).body(Map.of("error", e.getMessage()));
-        } catch (Exception e) {
-            return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
-        }
-    }
-
-    /** Publish: sinh skills_matrix.json và ghi snapshot cấu hình versioned cho đề. */
-    @PostMapping("/{examId}/testcases/publish")
-    public ResponseEntity<?> publishTestcases(@PathVariable String examId,
-                                              @RequestBody Map<String, Object> body) {
-        try {
-            return ResponseEntity.ok(testcaseTemplateService.publish(examId, body, AppActor.DEFAULT));
-        } catch (IllegalArgumentException e) {
-            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
-        } catch (IllegalStateException e) {
-            return ResponseEntity.status(409).body(Map.of("error", e.getMessage()));
-        } catch (Exception e) {
-            return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
-        }
-    }
 
     /** Đổi mã và/hoặc tên bộ testcase. Khi đổi mã, toàn bộ dữ liệu liên quan được chuyển theo. */
     @PostMapping("/{examId}/rename")
@@ -195,69 +152,6 @@ public class ExamSetupController {
         }
     }
 
-    /** Clone toàn bộ cấu hình builder sang mã/tên mới; bộ nhập ZIP bị service từ chối. */
-    @PostMapping("/{examId}/clone")
-    public ResponseEntity<?> cloneTestcaseSet(@PathVariable String examId,
-                                              @RequestBody Map<String, Object> body) {
-        try {
-            return ResponseEntity.ok(testcaseTemplateService.cloneExam(examId, body, AppActor.DEFAULT));
-        } catch (IllegalArgumentException e) {
-            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
-        } catch (IllegalStateException e) {
-            return ResponseEntity.status(409).body(Map.of("error", e.getMessage()));
-        } catch (Exception e) {
-            return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
-        }
-    }
-
-    /** Sinh code từ trạng thái form hiện tại để xem trước; không ghi file, không tăng version và không sửa DB. */
-    @PostMapping("/{examId}/testcases/preview")
-    public ResponseEntity<?> previewTestcases(@PathVariable String examId,
-                                              @RequestBody Map<String, Object> body) {
-        try {
-            return ResponseEntity.ok(testcaseTemplateService.preview(examId, body, AppActor.DEFAULT));
-        } catch (IllegalArgumentException e) {
-            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
-        } catch (IllegalStateException e) {
-            return ResponseEntity.status(409).body(Map.of("error", e.getMessage()));
-        } catch (Exception e) {
-            return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
-        }
-    }
-
-    /**
-     * Phiên làm việc của TRỢ LÝ AI cho một bộ testcase (đề bài, Item Key, hình, khung starter…).
-     *
-     * <p>Nhờ nó mà bấm "Sửa" một bộ đã soạn bằng AI là mở lại đúng phiên đó và nhờ AI sửa tiếp
-     * được ngay — kể cả khi mở trên máy khác hoặc đã dọn trình duyệt.
-     */
-    @GetMapping("/{examId}/ai-draft")
-    public ResponseEntity<?> readAiDraft(@PathVariable String examId) {
-        try {
-            String json = examService.readAiAuthorDraft(examId);
-            return ResponseEntity.ok(Map.of("exam_id", examId, "has_draft", json != null,
-                    "draft", json == null ? "" : json));
-        } catch (IllegalArgumentException e) {
-            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
-        } catch (Exception e) {
-            return ResponseEntity.internalServerError().body(Map.of("error", "Lỗi máy chủ"));
-        }
-    }
-
-    /** Body: { draft: "<json>" } — chuỗi rỗng = xoá nháp AI của bộ này. */
-    @PostMapping("/{examId}/ai-draft")
-    public ResponseEntity<?> saveAiDraft(@PathVariable String examId,
-                                         @RequestBody(required = false) Map<String, Object> body) {
-        try {
-            Object draft = body == null ? null : body.get("draft");
-            examService.saveAiAuthorDraft(examId, draft == null ? null : String.valueOf(draft));
-            return ResponseEntity.ok(Map.of("exam_id", examId, "ok", true));
-        } catch (IllegalArgumentException e) {
-            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
-        } catch (Exception e) {
-            return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
-        }
-    }
 
     /**
      * Đọc các file testcase của 1 đề (exam_test.dart, skills_matrix.json, grader.dart).

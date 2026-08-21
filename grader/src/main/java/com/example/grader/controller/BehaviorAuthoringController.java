@@ -125,6 +125,11 @@ public class BehaviorAuthoringController {
         });
     }
 
+    @PostMapping("/scenarios/{id}/revision-recording")
+    public ResponseEntity<?> startScenarioRevision(@PathVariable String id) {
+        return call(() -> service.startScenarioRevision(id));
+    }
+
     @PostMapping("/recordings/{id}/events")
     public ResponseEntity<?> appendEvent(@PathVariable String id, @RequestBody Map<String, Object> body) {
         return call(() -> service.appendEvent(id, body));
@@ -133,6 +138,11 @@ public class BehaviorAuthoringController {
     @DeleteMapping("/recordings/{id}/events/{sequence}")
     public ResponseEntity<?> deleteEvent(@PathVariable String id, @PathVariable int sequence) {
         return call(() -> service.deleteEvent(id, sequence));
+    }
+
+    @DeleteMapping("/recordings/{id}")
+    public ResponseEntity<?> cancelRecording(@PathVariable String id) {
+        return call(() -> service.cancelRecording(id));
     }
 
     @PostMapping("/recordings/{id}/stop")

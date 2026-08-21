@@ -27,6 +27,10 @@ public class GoldenRecording {
     @Column(name = "golden_app_id", length = 36, nullable = false)
     private String goldenAppId;
 
+    /** Scenario being revised. Null means this recording creates a new scenario. */
+    @Column(name = "revision_scenario_id", length = 36)
+    private String revisionScenarioId;
+
     @Column(name = "name", length = 240, nullable = false)
     private String name;
 

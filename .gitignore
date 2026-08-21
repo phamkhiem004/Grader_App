@@ -6,7 +6,7 @@ grader/target/
 
 # ── Node / Next.js ──────────────────────────────────────────────
 frontend/node_modules/
-frontend/.next/
+frontend/.next*
 frontend/out/
 frontend/.turbo/
 npm-debug.log*

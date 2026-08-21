@@ -22,7 +22,7 @@ type ArtifactType =
 
 interface GoldenApp { id: string; name: string; runtime_url?: string | null; status: string }
 interface Suite { id: string; suite_code: string; exam_id?: string; golden_app_id: string; name: string; status: string; database_contract?: JsonMap; recordings?: Recording[]; scenarios?: JsonMap[] }
-interface Recording { id: string; suite_id: string; name: string; status: string; raw_trace?: JsonMap[]; initial_state?: JsonMap }
+interface Recording { id: string; suite_id: string; name: string; status: string; revision_scenario_id?: string | null; raw_trace?: JsonMap[]; initial_state?: JsonMap }
 interface Artifact { id: string; type: ArtifactType; version: number; file_name: string; size_bytes: number; active: boolean; sha256: string }
 interface Readiness { ready: boolean; missing: ArtifactType[]; artifacts: Partial<Record<ArtifactType, Artifact | null>> }
 interface GoldenValidation { status: "NOT_RUN" | "RUNNING" | "PASSED" | "FAILED" | "UNAVAILABLE"; current: boolean; total_checkpoints?: number; passed_checkpoints?: number; log?: string }
@@ -86,7 +86,7 @@ function BehaviorAuthoringEditor() {
   const [examId, setExamId] = useState(() => search.get("exam") || "");
   const [name, setName] = useState("");
   const [runtimeUrl, setRuntimeUrl] = useState("");
-  const [databaseName, setDatabaseName] = useState("app.db");
+  const [databaseName, setDatabaseName] = useState("");
   const [suite, setSuite] = useState<Suite | null>(null);
   const [availableSuites, setAvailableSuites] = useState<Suite[]>([]);
   const [recording, setRecording] = useState<Recording | null>(null);
@@ -127,10 +127,9 @@ function BehaviorAuthoringEditor() {
   const [desktopHeight, setDesktopHeight] = useState(800);
   const [codePreview, setCodePreview] = useState<CodePreview | null>(null);
   const [previewFileName, setPreviewFileName] = useState("");
-  const [editingScenario, setEditingScenario] = useState<JsonMap | null>(null);
-  const [editingScenarioName, setEditingScenarioName] = useState("");
-  const [editingScenarioWeight, setEditingScenarioWeight] = useState(1);
+  const [editingScenarioId, setEditingScenarioId] = useState<string | null>(null);
   const goldenFrame = useRef<HTMLIFrameElement | null>(null);
+  const authoringPanel = useRef<HTMLDivElement | null>(null);
   // The Golden iframe can still emit a debounced event immediately after Stop.
   // Keep an imperative session guard so those late events never reach a closed
   // recording while React is waiting for the next render/refresh.
@@ -146,6 +145,13 @@ function BehaviorAuthoringEditor() {
     () => codePreview?.files.find((file) => file.name === previewFileName) || codePreview?.files[0] || null,
     [codePreview, previewFileName],
   );
+  const savedDatabaseName = String(
+    suite?.database_contract?.database_name
+      || suite?.database_contract?.path
+      || suite?.database_contract?.name
+      || "",
+  ).trim();
+  const databaseNameChanged = Boolean(suite && databaseName.trim() !== savedDatabaseName);
 
   useEffect(() => setRecorderReady(false), [previewUrl]);
 
@@ -172,12 +178,23 @@ function BehaviorAuthoringEditor() {
     setReadiness(readyData);
     setValidation(validationData);
     setRuntimeStatus(runtimeData);
-    const active = (suiteData.recordings || []).find((item) => item.status === "ACTIVE");
-    activeRecordingId.current = active?.id || null;
-    acceptsRecorderEvents.current = Boolean(active);
-    setRecording(active || null);
-    const contractName = String(suiteData.database_contract?.database_name || "");
-    if (contractName) setDatabaseName(contractName);
+    const orderedRecordings = suiteData.recordings || [];
+    const active = orderedRecordings.find((item) => item.status === "ACTIVE");
+    // Chỉ khôi phục STOPPED khi đó là lần thao tác mới nhất. Một phiên lỗi cũ
+    // không được che khung soạn sau khi giáo viên đã tạo scenario mới thành công.
+    const latest = orderedRecordings[0];
+    const pending = active || (latest?.status === "STOPPED" ? latest : undefined);
+    activeRecordingId.current = pending?.id || null;
+    acceptsRecorderEvents.current = pending?.status === "ACTIVE";
+    setRecording(pending || null);
+    setEditingScenarioId(pending?.revision_scenario_id || null);
+    const contractName = String(
+      suiteData.database_contract?.database_name
+        || suiteData.database_contract?.path
+        || suiteData.database_contract?.name
+        || "",
+    );
+    setDatabaseName(contractName);
     if (suiteData.golden_app_id) {
       const golden = await api<GoldenApp>(`/behavior-authoring/golden-apps/${suiteData.golden_app_id}`);
       const hasUploadedGolden = artifactData.some((item) => item.active && item.type === "GOLDEN_SOLUTION");
@@ -214,6 +231,7 @@ function BehaviorAuthoringEditor() {
 
   const createSuite = () => run("create", async () => {
     const cleanExam = examId.trim();
+    if (!databaseName.trim()) throw new Error("Cần nhập đúng tên file SQLite mà Golden App mở, ví dụ user_manager.db.");
     if (!cleanExam || !name.trim()) throw new Error("Cần nhập mã đề và tên bộ chấm.");
     const golden = await api<GoldenApp>("/behavior-authoring/golden-apps", {
       method: "POST",
@@ -236,6 +254,32 @@ function BehaviorAuthoringEditor() {
     setNotice("Đã tạo bộ chấm. Hãy cung cấp 3 artifact đầu vào rồi record luồng Golden Solution.");
   });
 
+  const saveDatabaseContract = () => suite && run("save-database-contract", async () => {
+    const nextDatabaseName = databaseName.trim();
+    if (!nextDatabaseName) {
+      throw new Error("Tên file SQLite không được để trống.");
+    }
+    const nextContract: JsonMap = {
+      ...(suite.database_contract || {}),
+      enabled: true,
+      driver: String(suite.database_contract?.driver || "sqlite"),
+      database_name: nextDatabaseName,
+      ignore_columns: Array.isArray(suite.database_contract?.ignore_columns)
+        ? suite.database_contract.ignore_columns
+        : ["created_at", "updated_at"],
+    };
+    // Runner ưu tiên path hơn database_name. Xóa alias cũ để tên vừa lưu
+    // chắc chắn là giá trị duy nhất được dùng khi mount DB và replay.
+    delete nextContract.path;
+    delete nextContract.name;
+    await api<Suite>(`/behavior-authoring/suites/${suite.id}`, {
+      method: "PUT",
+      body: JSON.stringify({ database_contract: nextContract }),
+    });
+    await refresh(suite.id);
+    setNotice(`Đã đổi Database runtime thành ${nextDatabaseName}. Oracle cũ đã hết hiệu lực; cần sinh lại và chạy lại preflight.`);
+  });
+
   const openSuite = async (selected: Suite) => {
     setError("");
     await refresh(selected.id);
@@ -252,6 +296,7 @@ function BehaviorAuthoringEditor() {
     setValidation(null);
     setRuntimeStatus(null);
     setRuntimeUrl("");
+    setDatabaseName("");
     setExamId("");
     setName("");
     window.history.replaceState(null, "", "/teacher/archive");
@@ -279,6 +324,7 @@ function BehaviorAuthoringEditor() {
   };
 
   const startRecording = () => suite && run("record-start", async () => {
+    setEditingScenarioId(null);
     const created = await api<Recording>(`/behavior-authoring/suites/${suite.id}/recordings`, {
       method: "POST", body: JSON.stringify({ name: scenarioName, viewport: { width: viewportWidth, height: viewportHeight, device_pixel_ratio: 1 }, initial_state: { reset_storage: true } }),
     });
@@ -417,29 +463,36 @@ function BehaviorAuthoringEditor() {
 
   const stopAndAbstract = () => {
     const recordingId = activeRecordingId.current;
-    if (!recordingId || !recording || recording.status !== "ACTIVE" || !suite) return;
+    if (!recordingId || !recording || !["ACTIVE", "STOPPED"].includes(recording.status) || !suite) return;
     // Close the client-side gate before the first network request. This is
     // intentionally earlier than the backend transition to prevent iframe
     // messages racing with /stop and /abstract.
     acceptsRecorderEvents.current = false;
-    activeRecordingId.current = null;
-    setRecording(null);
     run("record-stop", async () => {
-      await api(`/behavior-authoring/recordings/${recordingId}/stop`, { method: "POST", body: JSON.stringify({ final_observation: {} }) });
+      if (recording.status === "ACTIVE") {
+        await api(`/behavior-authoring/recordings/${recordingId}/stop`, { method: "POST", body: JSON.stringify({ final_observation: {} }) });
+        setRecording((current) => current ? { ...current, status: "STOPPED" } : current);
+      }
       await api(`/behavior-authoring/recordings/${recordingId}/abstract`, {
         method: "POST",
         body: JSON.stringify({
           scenario_code: scenarioCode.trim().toUpperCase(),
           name: scenarioName.trim(),
           weight: scenarioWeight,
+          ...(editingScenarioId ? { replace_scenario_id: editingScenarioId } : {}),
           viewports: [
             { width: viewportWidth, height: viewportHeight, device_pixel_ratio: 1, name: "phone" },
             ...(testDesktop ? [{ width: desktopWidth, height: desktopHeight, device_pixel_ratio: 1, name: "desktop" }] : []),
           ],
         }),
       });
+      activeRecordingId.current = null;
+      setRecording(null);
       await refresh(suite.id);
-      setNotice("Đã replay Golden trên Database ẩn, sinh Output Database, oracle và testcase-definition.json.");
+      setEditingScenarioId(null);
+      setNotice(editingScenarioId
+        ? "Đã cập nhật scenario, replay Golden trên Database ẩn và tạo lại oracle."
+        : "Đã replay Golden trên Database ẩn, sinh Output Database, oracle và testcase-definition.json.");
     });
   };
 
@@ -469,25 +522,48 @@ function BehaviorAuthoringEditor() {
   });
 
   const openScenarioEditor = (item: JsonMap) => {
-    setEditingScenario(item);
-    setEditingScenarioName(String(item.name || item.scenario_code || ""));
-    setEditingScenarioWeight(Number(item.weight || 1));
+    if (!suite || !item.id || recording) return;
+    run(`revise-scenario-${String(item.id)}`, async () => {
+      const viewports = Array.isArray(item.viewports) ? item.viewports as JsonMap[] : [];
+      const phone = viewports.find((viewport) => String(viewport.name || "").toLowerCase() === "phone") || viewports[0];
+      const desktop = viewports.find((viewport) => String(viewport.name || "").toLowerCase() === "desktop") || viewports[1];
+      setScenarioCode(String(item.scenario_code || ""));
+      setScenarioName(String(item.name || item.scenario_code || ""));
+      setScenarioWeight(Number(item.weight || 1));
+      if (phone) {
+        setViewportWidth(Number(phone.width || 390));
+        setViewportHeight(Number(phone.height || 844));
+      }
+      setTestDesktop(Boolean(desktop));
+      if (desktop) {
+        setDesktopWidth(Number(desktop.width || 1280));
+        setDesktopHeight(Number(desktop.height || 800));
+      }
+      const created = await api<Recording>(`/behavior-authoring/scenarios/${String(item.id)}/revision-recording`, { method: "POST" });
+      activeRecordingId.current = created.id;
+      acceptsRecorderEvents.current = true;
+      setEditingScenarioId(String(item.id));
+      setRecording(created);
+      await refresh(suite.id);
+      setNotice("Đã nạp các action/checkpoint cũ vào khung record. Có thể thao tác thêm trên Golden App, thêm checkpoint hoặc xóa bước rồi sinh lại testcase.");
+      window.setTimeout(() => authoringPanel.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+    });
   };
 
-  const saveScenario = () => {
-    if (!suite || !editingScenario?.id || !editingScenarioName.trim()) return;
-    const scenarioId = String(editingScenario.id);
-    run(`edit-scenario-${scenarioId}`, async () => {
-      await api(`/behavior-authoring/scenarios/${scenarioId}`, {
-        method: "PUT",
-        body: JSON.stringify({
-          name: editingScenarioName.trim(),
-          weight: editingScenarioWeight,
-        }),
-      });
-      setEditingScenario(null);
+  const cancelActiveRecording = () => {
+    const recordingId = activeRecordingId.current;
+    if (!suite || !recordingId || !recording) return;
+    if (!window.confirm(editingScenarioId
+      ? "Hủy chỉnh sửa? Scenario cũ vẫn được giữ nguyên."
+      : "Hủy phiên record hiện tại?")) return;
+    acceptsRecorderEvents.current = false;
+    activeRecordingId.current = null;
+    run("record-cancel", async () => {
+      await api(`/behavior-authoring/recordings/${recordingId}`, { method: "DELETE" });
+      setRecording(null);
+      setEditingScenarioId(null);
       await refresh(suite.id);
-      setNotice("Đã cập nhật scenario. Hãy chạy lại preflight trước khi publish.");
+      setNotice("Đã hủy phiên soạn; scenario đã publish trước đó không bị thay đổi.");
     });
   };
 
@@ -539,7 +615,24 @@ function BehaviorAuthoringEditor() {
             <input value={suite?.exam_id || examId} disabled={Boolean(suite)} onChange={(e) => setExamId(e.target.value)} placeholder="Mã đề, ví dụ PE_PRM393" className="rounded-xl border border-slate-300 bg-transparent px-4 py-3 outline-none focus:border-indigo-500 disabled:opacity-60 dark:border-slate-700" />
             <input value={suite?.name || name} disabled={Boolean(suite)} onChange={(e) => setName(e.target.value)} placeholder="Tên bộ chấm" className="rounded-xl border border-slate-300 bg-transparent px-4 py-3 outline-none focus:border-indigo-500 disabled:opacity-60 dark:border-slate-700" />
             <input value={runtimeUrl} disabled={Boolean(suite)} onChange={(e) => setRuntimeUrl(e.target.value)} placeholder="URL Golden App đã deploy (không bắt buộc)" className="rounded-xl border border-slate-300 bg-transparent px-4 py-3 outline-none focus:border-indigo-500 disabled:opacity-60 dark:border-slate-700" />
-            <input value={databaseName} disabled={Boolean(suite)} onChange={(e) => setDatabaseName(e.target.value)} placeholder="Tên file SQLite dùng chung, ví dụ app.db" className="rounded-xl border border-slate-300 bg-transparent px-4 py-3 outline-none focus:border-indigo-500 disabled:opacity-60 dark:border-slate-700" />
+            <div className="min-w-0">
+              <label className="sr-only" htmlFor="golden-database-name">Database Golden App đang mở</label>
+              <div className="flex min-w-0 gap-2">
+                <input id="golden-database-name" value={databaseName} onChange={(e) => setDatabaseName(e.target.value)} placeholder="Database Golden, ví dụ user_manager.db" className="min-w-0 flex-1 rounded-xl border border-slate-300 bg-transparent px-4 py-3 font-mono outline-none focus:border-indigo-500 dark:border-slate-700" />
+                {suite && (
+                  <button
+                    type="button"
+                    onClick={saveDatabaseContract}
+                    disabled={!databaseNameChanged || !databaseName.trim() || Boolean(busy)}
+                    className="inline-flex shrink-0 items-center gap-2 rounded-xl border border-indigo-400 px-3 py-2 text-sm font-bold text-indigo-600 hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-indigo-300 dark:hover:bg-indigo-950"
+                  >
+                    {busy === "save-database-contract" ? <Loader2 size={16} className="animate-spin" /> : <Database size={16} />}
+                    Lưu DB
+                  </button>
+                )}
+              </div>
+              <p className="mt-1 text-xs text-slate-500">Phải trùng chính xác tên file trong <span className="font-mono">openDatabase(...)</span> của Golden/starter.</p>
+            </div>
           </div>
           {!suite && <><button onClick={createSuite} disabled={Boolean(busy)} className="mt-4 inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-3 font-bold text-white hover:bg-indigo-500 disabled:opacity-50">{busy === "create" ? <Loader2 className="animate-spin" size={18} /> : <Plus size={18} />} Tạo bộ chấm mới</button>{availableSuites.length > 0 && <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-3">{availableSuites.map((item) => <div key={item.id} className="relative rounded-xl border border-slate-200 transition hover:border-indigo-400 hover:bg-indigo-50/50 dark:border-slate-700 dark:hover:bg-indigo-950/20"><button onClick={() => void openSuite(item)} className="block w-full p-4 pr-14 text-left"><div className="flex items-center justify-between gap-2"><span className="font-bold">{item.name}</span><span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-bold text-slate-600 dark:bg-slate-800 dark:text-slate-300">{item.status}</span></div><p className="mt-1 font-mono text-xs text-indigo-500">{item.suite_code}</p><p className="mt-2 text-xs text-slate-500">Mã đề: {item.exam_id || "chưa gắn"}</p></button><button onClick={() => deleteSuite(item)} disabled={Boolean(busy)} title="Xóa bộ chấm" className="absolute bottom-3 right-3 rounded-lg border border-rose-300 p-2 text-rose-500 hover:bg-rose-50 disabled:opacity-40 dark:border-rose-800 dark:hover:bg-rose-950"><Trash2 size={16} /></button></div>)}</div>}</>}
         </section>
@@ -571,9 +664,10 @@ function BehaviorAuthoringEditor() {
               {previewUrl ? <div className="mt-4 w-full overflow-auto rounded-xl border border-slate-300 bg-slate-100 p-3 dark:border-slate-700 dark:bg-slate-950"><iframe ref={goldenFrame} title="Golden App" src={previewUrl} style={{ width: Math.min(viewportWidth, 900), minWidth: Math.min(viewportWidth, 900), height: Math.min(viewportHeight, 700) }} className="mx-auto block rounded-lg border border-slate-300 bg-white dark:border-slate-700" /></div> : <div className="mt-4 flex h-[300px] flex-col items-center justify-center rounded-xl border border-dashed border-slate-300 text-center dark:border-slate-700"><MonitorPlay size={42} className="text-slate-400" /><p className="mt-3 font-bold">Golden Solution chưa được build để thao tác</p><p className="mt-1 max-w-md text-sm text-slate-500">Upload Golden ZIP rồi bấm “Build & mở Golden”. Hệ thống tự host app và ghi click/nhập liệu bằng semantic locator.</p></div>}
             </div>
 
-            <div className="min-w-0 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
-              <div className="flex items-center justify-between"><div><p className="text-xs font-bold uppercase tracking-widest text-indigo-500">Bước 4</p><h2 className="text-xl font-bold">Record → Abstract</h2></div>{recording ? <span className="flex items-center gap-2 text-sm font-bold text-rose-500"><span className="h-2 w-2 animate-pulse rounded-full bg-rose-500" /> Đang ghi</span> : <span className="text-sm text-slate-500">Chưa ghi</span>}</div>
-              <div className="mt-4 grid gap-3 sm:grid-cols-3"><input value={scenarioCode} onChange={(e) => setScenarioCode(e.target.value)} placeholder="Mã luồng" className="rounded-lg border border-slate-300 bg-transparent px-3 py-2 dark:border-slate-700" /><input value={scenarioName} onChange={(e) => setScenarioName(e.target.value)} placeholder="Tên luồng" className="rounded-lg border border-slate-300 bg-transparent px-3 py-2 dark:border-slate-700" /><input type="number" min={0.1} step={0.5} value={scenarioWeight} onChange={(e) => setScenarioWeight(Number(e.target.value))} aria-label="Trọng số scenario" className="rounded-lg border border-slate-300 bg-transparent px-3 py-2 dark:border-slate-700" /></div>
+            <div ref={authoringPanel} className="min-w-0 scroll-mt-24 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
+              <div className="flex items-center justify-between"><div><p className="text-xs font-bold uppercase tracking-widest text-indigo-500">Bước 4</p><h2 className="text-xl font-bold">Record → Abstract</h2></div>{recording ? <span className={`flex items-center gap-2 text-sm font-bold ${recording.status === "ACTIVE" ? "text-rose-500" : "text-amber-500"}`}><span className={`h-2 w-2 rounded-full ${recording.status === "ACTIVE" ? "animate-pulse bg-rose-500" : "bg-amber-500"}`} /> {recording.status === "ACTIVE" ? "Đang ghi" : "Chờ sinh testcase"}</span> : <span className="text-sm text-slate-500">Chưa ghi</span>}</div>
+              {editingScenarioId && recording && <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-indigo-300 bg-indigo-50 px-4 py-3 text-sm dark:border-indigo-800 dark:bg-indigo-950/30"><div><p className="font-bold text-indigo-700 dark:text-indigo-300">Đang sửa scenario {scenarioCode}</p><p className="mt-1 text-xs text-slate-600 dark:text-slate-300">Toàn bộ bước cũ đã nằm trong danh sách bên dưới. Hãy thao tác thêm trên Golden App hoặc dùng các form thêm action/checkpoint; có thể xóa từng bước cũ.</p></div><button onClick={cancelActiveRecording} disabled={Boolean(busy)} className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-bold disabled:opacity-40 dark:border-slate-700">Hủy sửa</button></div>}
+              <div className="mt-4 grid gap-3 sm:grid-cols-3"><input value={scenarioCode} disabled={Boolean(editingScenarioId)} onChange={(e) => setScenarioCode(e.target.value)} placeholder="Mã luồng" className="rounded-lg border border-slate-300 bg-transparent px-3 py-2 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700" /><input value={scenarioName} onChange={(e) => setScenarioName(e.target.value)} placeholder="Tên luồng" className="rounded-lg border border-slate-300 bg-transparent px-3 py-2 dark:border-slate-700" /><input type="number" min={0.1} step={0.5} value={scenarioWeight} onChange={(e) => setScenarioWeight(Number(e.target.value))} aria-label="Trọng số scenario" className="rounded-lg border border-slate-300 bg-transparent px-3 py-2 dark:border-slate-700" /></div>
               <div className="mt-2 grid gap-2 sm:grid-cols-2 xl:grid-cols-4"><label className="text-xs font-semibold text-slate-500">Rộng điện thoại<input type="number" min={240} value={viewportWidth} onChange={(e) => setViewportWidth(Number(e.target.value))} className="mt-1 w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 text-slate-800 dark:border-slate-700 dark:text-slate-100" /></label><label className="text-xs font-semibold text-slate-500">Cao điện thoại<input type="number" min={320} value={viewportHeight} onChange={(e) => setViewportHeight(Number(e.target.value))} className="mt-1 w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 text-slate-800 dark:border-slate-700 dark:text-slate-100" /></label><label className="text-xs font-semibold text-slate-500">Rộng desktop<input type="number" min={600} value={desktopWidth} disabled={!testDesktop} onChange={(e) => setDesktopWidth(Number(e.target.value))} className="mt-1 w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 text-slate-800 disabled:opacity-40 dark:border-slate-700 dark:text-slate-100" /></label><label className="text-xs font-semibold text-slate-500">Cao desktop<input type="number" min={480} value={desktopHeight} disabled={!testDesktop} onChange={(e) => setDesktopHeight(Number(e.target.value))} className="mt-1 w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 text-slate-800 disabled:opacity-40 dark:border-slate-700 dark:text-slate-100" /></label></div>
               <label className="mt-2 inline-flex items-center gap-2 text-xs font-semibold text-slate-600 dark:text-slate-300"><input type="checkbox" checked={testDesktop} onChange={(e) => setTestDesktop(e.target.checked)} /> Replay checkpoint UI trên cả điện thoại và desktop</label>
               {!recording ? <><button onClick={startRecording} disabled={!recordingInputsReady || Boolean(busy)} className="mt-4 inline-flex items-center gap-2 rounded-xl bg-rose-600 px-4 py-2.5 font-bold text-white disabled:opacity-40"><Radio size={18} /> Bắt đầu record</button>{!recordingInputsReady && <p className="mt-2 text-xs text-amber-600">Cần đủ Database phát sinh viên, Database ẩn và Golden Solution.</p>}</> : <>
@@ -642,7 +736,8 @@ function BehaviorAuthoringEditor() {
                     <button onClick={() => deleteRecordedEvent(sequence)} disabled={Boolean(busy)} title="Xóa thao tác/checkpoint này" className="rounded-md p-1.5 text-rose-500 hover:bg-rose-100 disabled:opacity-40 dark:hover:bg-rose-950"><Trash2 size={15} /></button>
                   </div>;
                 })}</div>
-                <button onClick={stopAndAbstract} disabled={Boolean(busy)} className="mt-4 inline-flex items-center gap-2 rounded-xl bg-slate-800 px-4 py-2.5 font-bold text-white disabled:opacity-40 dark:bg-slate-700">{busy === "record-stop" ? <Loader2 size={17} className="animate-spin" /> : <Square size={17} />} {busy === "record-stop" ? "Đang replay Golden và sinh Output DB…" : "Dừng, capture oracle và sinh testcase"}</button>
+                {recording.status === "STOPPED" && error && <div className="mt-4 rounded-xl border border-rose-300 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700 dark:border-rose-800 dark:bg-rose-950/30 dark:text-rose-200">Không thể sinh testcase: {error}. Phiên vẫn được giữ để bạn thử lại hoặc hủy.</div>}
+                <div className="mt-4 flex flex-wrap gap-2"><button onClick={stopAndAbstract} disabled={Boolean(busy)} className="inline-flex items-center gap-2 rounded-xl bg-slate-800 px-4 py-2.5 font-bold text-white disabled:opacity-40 dark:bg-slate-700">{busy === "record-stop" ? <Loader2 size={17} className="animate-spin" /> : <Square size={17} />} {busy === "record-stop" ? "Đang replay Golden và sinh Output DB…" : recording.status === "STOPPED" ? "Thử sinh testcase lại" : editingScenarioId ? "Lưu sửa đổi và sinh lại testcase" : "Dừng, capture oracle và sinh testcase"}</button><button onClick={cancelActiveRecording} disabled={Boolean(busy)} className="rounded-xl border border-rose-300 px-4 py-2.5 font-bold text-rose-600 disabled:opacity-40 dark:border-rose-900">{editingScenarioId ? "Hủy sửa" : "Hủy record"}</button></div>
                 <p className="mt-2 text-xs text-slate-500">Bước này có thể mất vài phút vì chạy chính Golden Solution trong Docker bằng Hidden DB; không cần tự xuất hoặc tải Output DB.</p>
               </>}
             </div>
@@ -651,20 +746,11 @@ function BehaviorAuthoringEditor() {
           <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
             <div className="flex flex-wrap items-center justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-widest text-indigo-500">Bước 5</p><h2 className="text-xl font-bold">Kiểm chứng Golden và publish</h2><p className="mt-1 text-sm text-slate-500">Còn thiếu: {readiness?.missing.join(", ") || "không"}. Preflight chạy chính plan trên Golden; publish chỉ mở khi toàn bộ checkpoint pass.</p><p className={`mt-2 text-sm font-bold ${validation?.status === "PASSED" && validation.current ? "text-emerald-600" : "text-amber-600"}`}>Preflight: {validation?.status || "NOT_RUN"}{validation?.total_checkpoints !== undefined ? ` · ${validation.passed_checkpoints}/${validation.total_checkpoints}` : ""}{validation && !validation.current ? " · plan đã thay đổi" : ""}</p></div><div className="flex flex-wrap gap-2"><button onClick={() => openCodePreview()} disabled={!suite.scenarios?.length || Boolean(busy)} className="inline-flex items-center gap-2 rounded-xl border border-slate-300 px-5 py-3 font-bold text-slate-700 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-700 dark:text-slate-200">{busy === "code-preview" ? <Loader2 className="animate-spin" size={18} /> : <Code2 size={18} />} Xem code bộ chấm</button><button onClick={validateGolden} disabled={!readiness?.ready || Boolean(recording) || Boolean(busy)} className="inline-flex items-center gap-2 rounded-xl border border-indigo-300 px-5 py-3 font-bold text-indigo-700 disabled:cursor-not-allowed disabled:opacity-40 dark:border-indigo-700 dark:text-indigo-300">{busy === "validate-golden" ? <Loader2 className="animate-spin" size={18} /> : <Play size={18} />} Chạy thử trên Golden</button><button onClick={publish} disabled={!readiness?.ready || !validation?.current || validation.status !== "PASSED" || Boolean(recording) || Boolean(busy)} className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-5 py-3 font-bold text-white disabled:cursor-not-allowed disabled:opacity-40">{busy === "publish" ? <Loader2 className="animate-spin" size={18} /> : <Send size={18} />} Publish bộ chấm</button></div></div>
             <div className="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-              {(suite.scenarios || []).map((item, index) => <div key={String(item.id || index)} className="rounded-xl border border-slate-200 px-4 py-3 dark:border-slate-700"><div className="flex items-center justify-between gap-2"><span className="font-bold">{String(item.name || item.scenario_code)}</span><span className="rounded-full bg-indigo-100 px-2 py-1 text-xs font-bold text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300">{String(item.weight)} điểm</span></div><p className="mt-1 font-mono text-[11px] text-indigo-500">{String(item.scenario_code || "")}</p><p className="mt-2 text-xs text-slate-500">{Array.isArray(item.steps) ? item.steps.length : 0} action · {Array.isArray(item.checkpoints) ? item.checkpoints.length : 0} checkpoint</p><div className="mt-3 flex flex-wrap gap-2"><button onClick={() => openCodePreview(String(item.scenario_code || ""))} disabled={Boolean(busy)} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs font-bold text-slate-700 hover:border-indigo-400 disabled:opacity-40 dark:border-slate-700 dark:text-slate-200"><Code2 size={14} /> Xem testcase</button><button onClick={() => openScenarioEditor(item)} disabled={Boolean(busy)} className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-300 px-2.5 py-1.5 text-xs font-bold text-indigo-700 hover:bg-indigo-50 disabled:opacity-40 dark:border-indigo-800 dark:text-indigo-300 dark:hover:bg-indigo-950"><Pencil size={14} /> Sửa</button><button onClick={() => deleteScenario(item)} disabled={Boolean(busy)} className="inline-flex items-center gap-1.5 rounded-lg border border-rose-300 px-2.5 py-1.5 text-xs font-bold text-rose-600 hover:bg-rose-50 disabled:opacity-40 dark:border-rose-900 dark:hover:bg-rose-950"><Trash2 size={14} /> Xóa</button></div></div>)}
+              {(suite.scenarios || []).map((item, index) => <div key={String(item.id || index)} className="rounded-xl border border-slate-200 px-4 py-3 dark:border-slate-700"><div className="flex items-center justify-between gap-2"><span className="font-bold">{String(item.name || item.scenario_code)}</span><span className="rounded-full bg-indigo-100 px-2 py-1 text-xs font-bold text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300">{String(item.weight)} điểm</span></div><p className="mt-1 font-mono text-[11px] text-indigo-500">{String(item.scenario_code || "")}</p><p className="mt-2 text-xs text-slate-500">{Array.isArray(item.steps) ? item.steps.length : 0} action · {Array.isArray(item.checkpoints) ? item.checkpoints.length : 0} checkpoint</p><div className="mt-3 flex flex-wrap gap-2"><button onClick={() => openCodePreview(String(item.scenario_code || ""))} disabled={Boolean(busy)} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs font-bold text-slate-700 hover:border-indigo-400 disabled:opacity-40 dark:border-slate-700 dark:text-slate-200"><Code2 size={14} /> Xem testcase</button><button onClick={() => openScenarioEditor(item)} disabled={Boolean(busy) || Boolean(recording)} title={recording ? "Hãy kết thúc phiên đang soạn trước" : "Nạp lại các bước vào khung record để chỉnh sửa"} className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-300 px-2.5 py-1.5 text-xs font-bold text-indigo-700 hover:bg-indigo-50 disabled:opacity-40 dark:border-indigo-800 dark:text-indigo-300 dark:hover:bg-indigo-950"><Pencil size={14} /> Sửa thao tác</button><button onClick={() => deleteScenario(item)} disabled={Boolean(busy) || Boolean(recording)} className="inline-flex items-center gap-1.5 rounded-lg border border-rose-300 px-2.5 py-1.5 text-xs font-bold text-rose-600 hover:bg-rose-50 disabled:opacity-40 dark:border-rose-900 dark:hover:bg-rose-950"><Trash2 size={14} /> Xóa</button></div></div>)}
               {!suite.scenarios?.length && <p className="text-sm text-slate-500">Chưa có scenario. Hãy record ít nhất một luồng và sinh testcase.</p>}
             </div>
           </section>
         </>}
-        {editingScenario && <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/75 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-lg rounded-2xl border border-slate-700 bg-white p-5 shadow-2xl dark:bg-slate-900">
-            <div className="flex items-start justify-between gap-4"><div><h2 className="text-xl font-bold">Sửa scenario</h2><p className="mt-1 font-mono text-xs text-indigo-500">{String(editingScenario.scenario_code || "")}</p></div><button onClick={() => setEditingScenario(null)} className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"><X size={19} /></button></div>
-            <label className="mt-5 block text-sm font-bold">Tên scenario</label><input value={editingScenarioName} onChange={(event) => setEditingScenarioName(event.target.value)} className="mt-2 w-full rounded-xl border border-slate-300 bg-transparent px-4 py-3 dark:border-slate-700" />
-            <label className="mt-4 block text-sm font-bold">Trọng số</label><input type="number" min="0.1" step="0.1" value={editingScenarioWeight} onChange={(event) => setEditingScenarioWeight(Number(event.target.value))} className="mt-2 w-full rounded-xl border border-slate-300 bg-transparent px-4 py-3 dark:border-slate-700" />
-            <p className="mt-3 text-xs text-slate-500">Nếu thao tác hoặc checkpoint bị tạo sai, hãy xóa scenario và record lại để oracle luôn đồng bộ với Golden App.</p>
-            <div className="mt-5 flex justify-end gap-2"><button onClick={() => setEditingScenario(null)} className="rounded-xl border border-slate-300 px-4 py-2 font-bold dark:border-slate-700">Hủy</button><button onClick={saveScenario} disabled={Boolean(busy) || !editingScenarioName.trim() || editingScenarioWeight <= 0} className="rounded-xl bg-indigo-600 px-4 py-2 font-bold text-white disabled:opacity-40">{busy.startsWith("edit-scenario-") ? "Đang lưu…" : "Lưu thay đổi"}</button></div>
-          </div>
-        </div>}
         {codePreview && previewFile && <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/75 p-3 backdrop-blur-sm sm:p-6">
           <div className="flex h-[min(900px,94vh)] w-full max-w-[1500px] min-w-0 flex-col overflow-hidden rounded-2xl border border-slate-700 bg-slate-950 text-slate-100 shadow-2xl">
             <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-800 px-5 py-4">

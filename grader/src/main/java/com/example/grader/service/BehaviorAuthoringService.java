@@ -229,6 +229,67 @@ public class BehaviorAuthoringService {
         return recordingView(recording);
     }
 
+    /**
+     * Opens an existing scenario as a new ACTIVE recording. The original raw trace is
+     * copied so the teacher can use the normal authoring controls to append or remove
+     * actions/checkpoints without editing generated JSON.
+     */
+    @Transactional
+    public Map<String, Object> startScenarioRevision(String scenarioId) {
+        BehaviorScenario scenario = scenario(scenarioId);
+        BehaviorSuite suite = suite(scenario.getSuiteId());
+        ensureEditable(suite);
+        GoldenApp app = golden(suite.getGoldenAppId());
+        if (app.getStatus() != GoldenAppStatus.READY) {
+            throw new IllegalStateException("Golden App không còn READY");
+        }
+        if (recordings.countBySuiteIdAndStatus(suite.getId(), RecordingStatus.ACTIVE) > 0) {
+            throw new IllegalStateException("Bộ chấm đang có một phiên record chưa kết thúc");
+        }
+
+        List<Map<String, Object>> trace = scenario.getSourceRecordingId() == null
+                ? scenarioTrace(scenario)
+                : recordings.findById(scenario.getSourceRecordingId())
+                .map(source -> readObjectList(source.getRawTraceJson()))
+                .orElseGet(() -> scenarioTrace(scenario));
+        List<Map<String, Object>> copiedTrace = new ArrayList<>();
+        for (int index = 0; index < trace.size(); index++) {
+            Map<String, Object> event = new LinkedHashMap<>(trace.get(index));
+            event.put("sequence", index + 1);
+            event.remove("recorded_at");
+            copiedTrace.add(event);
+        }
+
+        List<Object> viewports = readArray(scenario.getViewportsJson());
+        GoldenRecording revision = new GoldenRecording();
+        revision.setSuiteId(suite.getId());
+        revision.setGoldenAppId(app.getId());
+        revision.setRevisionScenarioId(scenario.getId());
+        revision.setName(scenario.getName());
+        revision.setSeed(UUID.randomUUID().toString());
+        revision.setViewportJson(json(viewports.isEmpty() ? defaultViewport() : viewports.get(0)));
+        revision.setInitialStateJson(scenario.getInitialStateJson());
+        revision.setRawTraceJson(json(copiedTrace));
+        recordings.save(revision);
+        suite.setStatus(BehaviorSuiteStatus.RECORDING);
+        suites.save(suite);
+        return recordingView(revision);
+    }
+
+    @Transactional
+    public Map<String, Object> cancelRecording(String recordingId) {
+        GoldenRecording recording = recordingForUpdate(recordingId);
+        if (recording.getStatus() != RecordingStatus.ACTIVE
+                && recording.getStatus() != RecordingStatus.STOPPED) {
+            throw new IllegalStateException("Chỉ có thể hủy phiên record chưa abstract");
+        }
+        BehaviorSuite suite = suite(recording.getSuiteId());
+        recordings.delete(recording);
+        suite.setStatus(BehaviorSuiteStatus.REVIEW);
+        suites.save(suite);
+        return Map.of("cancelled", true, "recording_id", recordingId, "suite_id", suite.getId());
+    }
+
     @Transactional
     public Map<String, Object> appendEvent(String recordingId, Map<String, Object> body) {
         GoldenRecording recording = recordingForUpdate(recordingId);
@@ -390,7 +451,16 @@ public class BehaviorAuthoringService {
                 checkpoints.add(checkpoint);
             }
         }
-        if (actionNo == 0) throw new IllegalStateException("Record không chứa action có thể replay");
+        if (actionNo == 0) {
+            // Scenario chỉ mô tả contract màn hình có thể hoàn toàn không cần tương tác.
+            // Runner luôn boot ứng dụng trước khi chạy steps, vì vậy thêm một boot no-op
+            // giúp record chỉ chứa checkpoint vẫn là một testcase replay hợp lệ.
+            Map<String, Object> boot = new LinkedHashMap<>();
+            boot.put("id", "step_1");
+            boot.put("action", "boot");
+            boot.put("timeout_ms", 5_000);
+            steps.add(boot);
+        }
 
         Map<String, String> examples = new LinkedHashMap<>();
         List<Map.Entry<String, Object>> variableEntries = new ArrayList<>(variables.entrySet());
@@ -437,24 +507,44 @@ public class BehaviorAuthoringService {
             checkpoints.add(checkpoint);
         }
 
+        String revisionScenarioId = optional(body, "replace_scenario_id", "replaceScenarioId");
+        if ((revisionScenarioId == null || revisionScenarioId.isBlank())
+                && recording.getRevisionScenarioId() != null) {
+            revisionScenarioId = recording.getRevisionScenarioId();
+        }
+        BehaviorScenario revision = revisionScenarioId == null || revisionScenarioId.isBlank()
+                ? null : scenario(revisionScenarioId);
+        if (revision != null && !Objects.equals(revision.getSuiteId(), suite.getId())) {
+            throw new IllegalArgumentException("Scenario sửa không thuộc bộ chấm của phiên record");
+        }
+
         String requestedCode = text(body, "scenario_code", "");
         String code = requestedCode.isBlank()
-                ? uniqueScenarioCode(suite.getId(), slug(recording.getName()))
+                ? (revision == null
+                    ? uniqueScenarioCode(suite.getId(), slug(recording.getName()))
+                    : revision.getScenarioCode())
                 : requestedCode.toUpperCase(Locale.ROOT).replaceAll("[^A-Z0-9_-]", "_");
-        if (scenarios.findBySuiteIdAndScenarioCode(suite.getId(), code).isPresent()) {
+        Optional<BehaviorScenario> codeOwner = scenarios.findBySuiteIdAndScenarioCode(suite.getId(), code);
+        if (codeOwner.isPresent() && (revision == null || !codeOwner.get().getId().equals(revision.getId()))) {
             throw new IllegalStateException("scenario_code đã tồn tại trong bộ chấm: " + code);
         }
 
-        BehaviorScenario scenario = new BehaviorScenario();
+        BehaviorScenario scenario = revision == null ? new BehaviorScenario() : revision;
         scenario.setSuiteId(suite.getId());
         scenario.setSourceRecordingId(recording.getId());
         scenario.setScenarioCode(code);
         scenario.setName(text(body, "name", recording.getName()));
         scenario.setSkillCode(text(body, "skill_code",
-                checkpoints.stream().anyMatch(item -> "database_observation".equals(text(item, "kind", "")))
-                        ? "STORAGE_SQLITE_CRUD" : "UI_BUTTONS_SELECTION"));
-        scenario.setDescription(optional(body, "description"));
-        scenario.setDisplayOrder((int) scenarios.countBySuiteIdAndEnabledTrue(suite.getId()) + 1);
+                revision == null
+                        ? (checkpoints.stream().anyMatch(item -> "database_observation".equals(text(item, "kind", "")))
+                            ? "STORAGE_SQLITE_CRUD" : "UI_BUTTONS_SELECTION")
+                        : revision.getSkillCode()));
+        scenario.setDescription(body.containsKey("description")
+                ? optional(body, "description")
+                : revision == null ? null : revision.getDescription());
+        if (revision == null) {
+            scenario.setDisplayOrder((int) scenarios.countBySuiteIdAndEnabledTrue(suite.getId()) + 1);
+        }
         scenario.setWeight(number(body.get("weight"), Math.max(1.0, checkpoints.size())));
         scenario.setVariablesJson(json(variables));
         scenario.setInitialStateJson(recording.getInitialStateJson());
@@ -464,6 +554,7 @@ public class BehaviorAuthoringService {
         scenario.setViewportsJson(requestedViewports.isEmpty()
                 ? json(List.of(readObject(recording.getViewportJson())))
                 : json(requestedViewports));
+        if (revision != null) staleScenarioOracles(revision.getId());
         scenarios.save(scenario);
 
         // Record trên Golden App chính là nguồn oracle đầu tiên. Giá trị nhập đã được tách
@@ -890,6 +981,7 @@ public class BehaviorAuthoringService {
         out.put("id", recording.getId());
         out.put("suite_id", recording.getSuiteId());
         out.put("golden_app_id", recording.getGoldenAppId());
+        out.put("revision_scenario_id", recording.getRevisionScenarioId());
         out.put("name", recording.getName());
         out.put("seed", recording.getSeed());
         out.put("status", recording.getStatus().name());
@@ -900,6 +992,47 @@ public class BehaviorAuthoringService {
         out.put("started_at", timestamp(recording.getStartedAt()));
         out.put("stopped_at", timestamp(recording.getStoppedAt()));
         return out;
+    }
+
+    private List<Map<String, Object>> scenarioTrace(BehaviorScenario scenario) {
+        Map<String, Object> examples = new LinkedHashMap<>();
+        readObject(scenario.getVariablesJson()).forEach((key, definition) -> {
+            Object example = map(definition).get("example");
+            if (example != null) examples.put(key, example);
+        });
+        List<Map<String, Object>> trace = new ArrayList<>();
+        for (Object raw : readArray(scenario.getStepsJson())) {
+            Map<String, Object> event = map(materializeExamples(raw, examples));
+            event.put("kind", "action");
+            trace.add(event);
+        }
+        for (Object raw : readArray(scenario.getCheckpointsJson())) {
+            Map<String, Object> event = map(materializeExamples(raw, examples));
+            event.putIfAbsent("kind", "checkpoint");
+            event.put("checkpoint", true);
+            trace.add(event);
+        }
+        for (int index = 0; index < trace.size(); index++) trace.get(index).put("sequence", index + 1);
+        return trace;
+    }
+
+    private Object materializeExamples(Object value, Map<String, Object> examples) {
+        if (value instanceof Map<?, ?> source) {
+            Map<String, Object> out = new LinkedHashMap<>();
+            source.forEach((key, item) -> out.put(String.valueOf(key), materializeExamples(item, examples)));
+            return out;
+        }
+        if (value instanceof List<?> source) {
+            return source.stream().map(item -> materializeExamples(item, examples)).toList();
+        }
+        if (!(value instanceof String text)) return value;
+        Object exact = examples.get(text.replaceAll("^\\$\\{([^}]+)}$", "$1"));
+        if (text.matches("^\\$\\{[^}]+}$") && exact != null) return exact;
+        String result = text;
+        for (Map.Entry<String, Object> entry : examples.entrySet()) {
+            result = result.replace("${" + entry.getKey() + "}", String.valueOf(entry.getValue()));
+        }
+        return result;
     }
 
     private Map<String, Object> oracleView(OracleSnapshot oracle) {

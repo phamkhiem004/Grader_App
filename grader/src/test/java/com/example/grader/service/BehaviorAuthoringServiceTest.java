@@ -137,6 +137,111 @@ class BehaviorAuthoringServiceTest {
         assertTrue(oracleRepository.findByScenarioIdOrderByCreatedAtDesc(scenarioId).isEmpty());
     }
 
+    @Test
+    void revisesExistingScenarioThroughRecordingUiWithoutCreatingDuplicate() {
+        Map<String, Object> original = createEquivalentScenario("REVISE_EXISTING_SCENARIO");
+        String scenarioId = String.valueOf(original.get("id"));
+        String originalRecordingId = String.valueOf(original.get("source_recording_id"));
+
+        Map<String, Object> revision = service.startScenarioRevision(scenarioId);
+        String revisionRecordingId = String.valueOf(revision.get("id"));
+        assertEquals(scenarioId, revision.get("revision_scenario_id"));
+        assertNotEquals(originalRecordingId, revisionRecordingId);
+        assertEquals(3, ((List<?>) revision.get("raw_trace")).size());
+
+        // The teacher can remove an old action and append a new action using the
+        // same Record -> Abstract controls used while creating a scenario.
+        service.deleteEvent(revisionRecordingId, 2);
+        service.appendEvent(revisionRecordingId, Map.of(
+                "kind", "action", "action", "tap",
+                "target", Map.of("semanticId", "action.save", "role", "button")));
+        service.stopRecording(revisionRecordingId, Map.of());
+
+        Map<String, Object> updated = service.abstractRecording(revisionRecordingId, Map.of(
+                "replace_scenario_id", scenarioId,
+                "scenario_code", original.get("scenario_code"),
+                "name", "Add and save user",
+                "weight", 3.0,
+                "viewports", original.get("viewports")));
+
+        assertEquals(scenarioId, updated.get("id"));
+        assertEquals("Add and save user", updated.get("name"));
+        assertEquals(revisionRecordingId, updated.get("source_recording_id"));
+        assertEquals(1, scenarioRepository.countBySuiteIdAndEnabledTrue(String.valueOf(original.get("suite_id"))));
+        assertEquals(2, ((List<?>) updated.get("steps")).size());
+        assertEquals(1, ((List<?>) updated.get("checkpoints")).size());
+        assertEquals("PENDING", ((Map<?, ?>) updated.get("oracle")).get("status"));
+    }
+
+    @Test
+    void cancellingScenarioRevisionKeepsOriginalScenarioUntouched() {
+        Map<String, Object> original = createEquivalentScenario("CANCEL_SCENARIO_REVISION");
+        String scenarioId = String.valueOf(original.get("id"));
+        Map<String, Object> revision = service.startScenarioRevision(scenarioId);
+
+        Map<String, Object> cancelled = service.cancelRecording(String.valueOf(revision.get("id")));
+
+        assertEquals(true, cancelled.get("cancelled"));
+        assertTrue(scenarioRepository.existsById(scenarioId));
+        assertEquals(original.get("source_recording_id"),
+                scenarioRepository.findById(scenarioId).orElseThrow().getSourceRecordingId());
+        assertFalse(recordingRepository.existsById(String.valueOf(revision.get("id"))));
+    }
+
+    @Test
+    void checkpointOnlyRecordingGetsImplicitBootAndBecomesScenario() {
+        Map<String, Object> golden = service.registerGoldenApp(Map.of(
+                "name", "Golden screen contract",
+                "runtime_url", "http://localhost:9010",
+                "ready", true));
+        Map<String, Object> suite = service.createSuite(Map.of(
+                "suite_code", "CHECKPOINT_ONLY",
+                "name", "Checkpoint-only suite",
+                "golden_app_id", golden.get("id")));
+        Map<String, Object> recording = service.startRecording(String.valueOf(suite.get("id")), Map.of(
+                "name", "Screen contract"));
+        String recordingId = String.valueOf(recording.get("id"));
+        service.appendEvent(recordingId, Map.of(
+                "kind", "checkpoint",
+                "action", "observe_ui",
+                "expect", Map.of("visible_texts", List.of("User Manager"), "no_exception", true)));
+        service.stopRecording(recordingId, Map.of());
+
+        Map<String, Object> scenario = service.abstractRecording(recordingId, Map.of(
+                "scenario_code", "SCREEN_CONTRACT",
+                "name", "Screen contract",
+                "weight", 1.0));
+
+        List<?> steps = (List<?>) scenario.get("steps");
+        assertEquals(1, steps.size());
+        assertEquals("boot", ((Map<?, ?>) steps.get(0)).get("action"));
+        assertEquals(1, ((List<?>) scenario.get("checkpoints")).size());
+        assertEquals("ABSTRACTED", recordingRepository.findById(recordingId).orElseThrow().getStatus().name());
+    }
+
+    @Test
+    void stoppedRecordingCanBeDiscardedAfterAbstractFailure() {
+        Map<String, Object> golden = service.registerGoldenApp(Map.of(
+                "name", "Golden recoverable recording",
+                "runtime_url", "http://localhost:9010",
+                "ready", true));
+        Map<String, Object> suite = service.createSuite(Map.of(
+                "suite_code", "RECOVER_STOPPED",
+                "name", "Recover stopped suite",
+                "golden_app_id", golden.get("id")));
+        Map<String, Object> recording = service.startRecording(String.valueOf(suite.get("id")), Map.of(
+                "name", "Recover me"));
+        String recordingId = String.valueOf(recording.get("id"));
+        service.appendEvent(recordingId, Map.of(
+                "kind", "action", "action", "boot"));
+        service.stopRecording(recordingId, Map.of());
+
+        Map<String, Object> cancelled = service.cancelRecording(recordingId);
+
+        assertEquals(true, cancelled.get("cancelled"));
+        assertFalse(recordingRepository.existsById(recordingId));
+    }
+
     private Map<String, Object> createEquivalentScenario(String suiteCode) {
         Map<String, Object> golden = service.registerGoldenApp(Map.of(
                 "name", "Golden " + suiteCode,

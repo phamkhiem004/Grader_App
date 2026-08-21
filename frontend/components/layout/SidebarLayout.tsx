@@ -7,7 +7,7 @@ import {
   FileText, FileCode2, CheckSquare, BarChart2, Bell, Search,
   GraduationCap, Loader2, History, PanelLeftClose,
   Clock, CheckCircle2, AlertCircle, BookOpen, Package, Pause,
-  MessageSquareText, Bot, ChevronDown,
+  Bot, ChevronDown,
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { API_BASE } from '@/lib/config';
@@ -56,7 +56,7 @@ const PRIMARY_NAV: NavEntry[] = [
   // Vào thẳng trang Kho — mọi thao tác (tạo/sửa/xóa/chấm lại) đều là nút trong trang đó.
   { name: 'Bộ chấm Golden', path: '/teacher/archive', icon: FileCode2 },
   { name: 'Khung năng lực', path: '/syllabus', icon: BookOpen },
-  { name: 'Nhận xét AI', path: '/teacher/feedback', icon: MessageSquareText },
+  // "Nhận xét AI" không còn là trang riêng: sinh/xem feedback nằm ngay trang Lịch sử chấm.
 ];
 
 /** Diễn giải trạng thái 1 phiên chấm cho thông báo. */

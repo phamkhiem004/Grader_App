@@ -414,6 +414,7 @@ public class BatchGradingService {
             Path zipPath = Path.of(job.zipPath());     // file đã staged trên đĩa
             if (!Files.exists(zipPath))
                 throw new IllegalStateException("Mất file bài nộp: " + zipPath);
+            recordSubmissionHash(job, zipPath);        // dấu vân tay bài nộp, ghi khi bằng chứng còn tươi
 
             Path tempDir = Files.createTempDirectory("grading_" + job.studentId() + "_");
             // Ép testcase (chấm lại đề cũ dùng snapshot); mặc định lấy testcase hiện tại của đề.
@@ -478,6 +479,30 @@ public class BatchGradingService {
             }
             try { checkBatchComplete(job.batchId()); }
             catch (Exception ex) { log.warn("[{}] checkBatchComplete lỗi: {}", job.batchId(), ex.getMessage()); }
+        }
+    }
+
+    /**
+     * Ghi SHA-256 của zip bài nộp vào bản ghi kết quả.
+     *
+     * <p>Bọc lỗi và nuốt: đây là dữ liệu ĐỐI CHỨNG, không phải điều kiện để chấm — đọc file hỏng
+     * thì mất một dòng trong log truy vết, không được phép làm hỏng cả lượt chấm.
+     */
+    private void recordSubmissionHash(GradingJob job, Path zipPath) {
+        try {
+            java.security.MessageDigest digest = java.security.MessageDigest.getInstance("SHA-256");
+            try (InputStream in = Files.newInputStream(zipPath)) {
+                byte[] buffer = new byte[64 * 1024];
+                int read;
+                while ((read = in.read(buffer)) > 0) digest.update(buffer, 0, read);
+            }
+            StringBuilder hex = new StringBuilder(64);
+            for (byte b : digest.digest()) hex.append(String.format("%02x", b));
+            resultRepo.findByStudentIdAndBatchId(job.studentId(), job.batchId())
+                    .ifPresent(r -> { r.setSubmissionHash(hex.toString()); resultRepo.save(r); });
+        } catch (Exception e) {
+            log.warn("[{}] Không tính được hash bài nộp của {}: {}",
+                    job.batchId(), job.studentId(), e.getMessage());
         }
     }
 
@@ -1625,8 +1650,11 @@ public class BatchGradingService {
         // Bài ĐANG chấm: giết container để worker thoát ngay, thay vì chờ hết watchdog từng bài.
         int killed = gradingService.killRunning(batchId);
 
+        // PARTIAL chứ KHÔNG phải CANCELLED: Dừng = kết thúc sớm nhưng GIỮ kết quả, và giáo viên
+        // còn được nạp thêm bài để chấm tiếp (addToBatch chỉ từ chối CANCELLED). Trước đây đặt
+        // CANCELLED nên bấm Dừng xong là phiên bị khóa vĩnh viễn — đúng lỗi đã gặp.
         // completedAt != null cũng là chốt chặn để checkBatchComplete không ghi đè trạng thái này.
-        batch.setStatus(BatchStatus.CANCELLED);
+        batch.setStatus(BatchStatus.PARTIAL);
         if (batch.getCompletedAt() == null) batch.setCompletedAt(Instant.now());
         batchRepo.save(batch);
 
@@ -1675,6 +1703,7 @@ public class BatchGradingService {
         // người dùng gửi lên) nên đường dẫn chắc chắn nằm trong submissions/.
         if (batch != null) {
             deleteDirQuietly(batchDir(batch.getExamId(), batch.getBatchId()));
+            batch.setStatus(BatchStatus.CANCELLED);   // stopBatch chỉ đặt PARTIAL; Hủy mới là CANCELLED
             batch.setDoneCount(0);      // bản ghi kết quả đã bị xóa → bộ đếm cũ thành vô nghĩa
             batch.setErrorCount(0);
             batchRepo.save(batch);

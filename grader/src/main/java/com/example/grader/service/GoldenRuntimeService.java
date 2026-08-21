@@ -186,6 +186,7 @@ public class GoldenRuntimeService {
         Files.createDirectories(target);
         copyTree(source.resolve("lib"), target.resolve("lib"));
         normalizeInternalPackageImports(source, target.resolve("lib"));
+        writeRecorderEntry(target.resolve("lib"));
         if (Files.isDirectory(source.resolve("assets"))) copyTree(source.resolve("assets"), target.resolve("assets"));
         Path basePubspec = resolveTemplateDir().resolve("pubspec.base.yaml");
         if (!Files.isRegularFile(basePubspec)) throw new IllegalStateException("Khong tim thay pubspec.base.yaml");
@@ -234,11 +235,42 @@ public class GoldenRuntimeService {
         String baseHref = runtimePath(suiteId);
         // Docker invokes /bin/sh; the grading image uses dash, which does not support
         // `set -o pipefail`. Keep this script POSIX so runtime builds do not fail before Flutter starts.
+        // Build qua entry bọc ngoài do writeRecorderEntry sinh sẵn (xem ghi chú ở đó).
         return "set -eu; cd /runtime; "
                 + "flutter create --platforms=web --project-name=exam_project --no-pub . >/tmp/flutter-create.log; "
                 + "rm -rf .dart_tool; cp -a /app/.dart_tool ./.dart_tool; "
                 + "if [ -f /app/.flutter-plugins-dependencies ]; then cp /app/.flutter-plugins-dependencies .; fi; "
-                + "flutter build web --release --no-pub --base-href '" + baseHref + "'";
+                + "flutter build web --release --no-pub -t " + RECORDER_ENTRY + " --base-href '" + baseHref + "'";
+    }
+
+    /** Tên entry bọc ngoài, tính từ gốc dự án runtime. */
+    private static final String RECORDER_ENTRY = "lib/_recorder_entry.dart";
+
+    /**
+     * Flutter Web KHÔNG dựng cây ngữ nghĩa cho tới khi trợ năng được bật: {@code flt-semantics-host}
+     * rỗng, không widget nào có {@code aria-label}, nên recorder không có gì để bám và buộc phải
+     * đoán theo chữ — sinh ra đích rác kiểu "Danh mục Định dạng yyyy-MM-dd Lưu" rồi chết lúc replay.
+     *
+     * <p>Vì vậy Golden runtime được build qua một entry bọc ngoài gọi {@code ensureSemantics()}
+     * trước khi chạy {@code main()} của Golden Solution. Sinh tệp bằng Java thay vì bằng shell
+     * để không phụ thuộc cách dash/bash xử lý dấu nháy lồng nhau.
+     */
+    private void writeRecorderEntry(Path lib) throws Exception {
+        Files.createDirectories(lib);
+        Files.writeString(lib.resolve("_recorder_entry.dart"), """
+                // Tệp do hệ thống sinh cho phiên ghi thao tác — không có trong bài nộp sinh viên.
+                import 'package:flutter/semantics.dart';
+                import 'package:flutter/widgets.dart';
+
+                import 'main.dart' as golden_app;
+
+                void main() {
+                  WidgetsFlutterBinding.ensureInitialized();
+                  // Giữ handle sống suốt phiên để cây ngữ nghĩa luôn được dựng.
+                  SemanticsBinding.instance.ensureSemantics();
+                  golden_app.main();
+                }
+                """, StandardCharsets.UTF_8);
     }
 
     private void injectRecorderBridge(Path index) throws Exception {
@@ -252,71 +284,56 @@ public class GoldenRuntimeService {
                   const scrollOffsets = new WeakMap();
                   const send = payload => window.parent.postMessage({type: TYPE, payload}, '*');
                   const textOf = el => ((el && (el.innerText || el.textContent)) || '').replace(/\\s+/g, ' ').trim();
-                  const attr = (el, ...names) => {
-                    for (const name of names) {
-                      const value = el.getAttribute(name);
-                      if (value != null && value.trim()) return value.trim();
+                  // Dem so phan tu la CO CHU RIENG ben trong node. Mot nut that chi co 0 hoac 1.
+                  // Neu tu 2 tro len thi node la KHUNG CHUA nhieu nhan khac nhau, khong phai nut.
+                  const textLeafCount = el => {
+                    let n = 0;
+                    const kids = el.querySelectorAll ? el.querySelectorAll('*') : [];
+                    for (const kid of kids) {
+                      if (kid.children.length === 0 && (kid.textContent || '').trim().length > 0) n++;
+                      if (n > 1) break;
                     }
-                    return '';
+                    return n;
                   };
-                  const boolAttr = (el, name, fallback) => {
-                    const value = el.getAttribute(name);
-                    return value == null ? fallback : value !== 'false';
-                  };
-                  function roleOf(el) {
-                    const declared = attr(el, 'role').toLowerCase();
-                    const type = attr(el, 'type').toLowerCase();
-                    if (type === 'checkbox' || declared === 'checkbox') return 'checkbox';
-                    if (type === 'radio' || declared === 'radio') return 'radio';
-                    if (declared === 'switch') return 'switch';
-                    if (declared === 'textbox' || el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) return 'text_field';
-                    if (declared === 'button' || el instanceof HTMLButtonElement) return 'button';
-                    if (declared === 'img') return 'image';
-                    if (declared === 'link') return 'link';
-                    return 'text';
-                  }
-                  function targetOf(el) {
-                    const semanticId = attr(el, 'data-semantic-id', 'data-semantics-id');
-                    if (semanticId) return {semanticId};
-                    const label = attr(el, 'aria-label', 'data-semantics-label');
-                    if (label && label !== 'Enable accessibility') return {label};
-                    const hint = attr(el, 'placeholder');
-                    if (hint) return {hint};
-                    const text = textOf(el);
-                    return text && text.length <= 120 ? {text} : {};
-                  }
-                  function semanticState(el) {
-                    const target = targetOf(el);
-                    if (!Object.keys(target).length) return null;
-                    const role = roleOf(el);
-                    const rect = el.getBoundingClientRect();
-                    const style = getComputedStyle(el);
-                    const state = {target, role, visible: rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden'};
-                    const value = el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement
-                      ? el.value : attr(el, 'aria-valuetext', 'aria-value-now');
-                    if (value !== '') state.value = value;
-                    if (['text_field', 'button', 'checkbox', 'switch', 'radio'].includes(role)) {
-                      state.enabled = !('disabled' in el && el.disabled) && !boolAttr(el, 'aria-disabled', false);
-                    }
-                    if (['checkbox', 'switch', 'radio'].includes(role)) {
-                      state.checked = el instanceof HTMLInputElement ? el.checked : boolAttr(el, 'aria-checked', false);
-                    }
-                    return state;
-                  }
+                  const MAX_TEXT_LOCATOR = 80;
+                  let lastReject = '';
                   function semanticNode(event) {
+                    lastReject = '';
                     const path = event.composedPath ? event.composedPath() : [];
                     for (const node of path) {
                       if (!(node instanceof Element)) continue;
-                      const target = targetOf(node);
-                      const key = Object.keys(target)[0];
-                      if (key) return {target, attribute: key, attributeValue: target[key]};
+                      const label = node.getAttribute('aria-label') || node.getAttribute('data-semantics-label');
+                      if (label && label !== 'Enable accessibility') return {target: {label}, attribute: 'label', attributeValue: label};
+                      const hint = node.getAttribute('placeholder');
+                      if (hint) return {target: {hint}, attribute: 'hint', attributeValue: hint};
+                      const text = textOf(node);
+                      if (!text) continue;
+                      // Chi nhan chu cua node khi no la mot nhan/nut THAT SU.
+                      // Truoc day chi kiem do dai <= 120 nen chu cua ca khung bi dinh lien
+                      // ("Danh muc Dinh dang yyyy-MM-dd Luu") van duoc ghi lai, roi khong bao gio
+                      // tim thay luc replay vi khong widget nao mang noi dung do.
+                      if (textLeafCount(node) > 1) {
+                        lastReject = text;
+                        return null;
+                      }
+                      if (text.length <= MAX_TEXT_LOCATOR) return {target: {text}, attribute: 'text', attributeValue: text};
+                      lastReject = text;
+                      return null;
                     }
                     return null;
+                  }
+                  function warnNoTarget() {
+                    const message = lastReject
+                      ? 'Cham truot ra vung trong. Recorder chi doc duoc chu cua ca khung: "'
+                        + (lastReject.length > 60 ? lastReject.slice(0, 60) + '...' : lastReject)
+                        + '". Hay bam DUNG vao nut hoac o nhap, dung bam vao le hay nen.'
+                      : 'Khong suy ra duoc semantic locator cho thao tac nay. Hay bam dung vao nut hoac o nhap.';
+                    window.parent.postMessage({type: 'GOLDEN_RECORDER_WARNING', payload: {message}}, '*');
                   }
                   function action(event, name, value = '') {
                     const found = semanticNode(event);
                     if (!found) {
-                      window.parent.postMessage({type: 'GOLDEN_RECORDER_WARNING', payload: {message: 'Khong suy ra duoc semantic locator cho thao tac nay.'}}, '*');
+                      warnNoTarget();
                       return;
                     }
                     send({kind: 'action', stage: 'ACTION', action: name, ...found, valueType: 'string', value, browser: 'flutter_tester'});
@@ -326,18 +343,34 @@ public class GoldenRuntimeService {
                     if (target instanceof Element && target.getAttribute('aria-label') === 'Enable accessibility') return;
                     action(event, 'tap');
                   }, true);
+                  // Chong doi theo LOCATOR chu khong theo phan tu DOM: Flutter Web tao lai the
+                  // input sau moi lan go, nen khoa theo phan tu thi moi ky tu thanh mot su kien
+                  // rieng (da gap: 8 su kien cho mot o). 700ms de go het roi moi ghi mot lan.
+                  const textTimers = new Map();
                   document.addEventListener('input', event => {
                     const target = event.target;
                     if (!(target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement)) return;
                     const found = semanticNode(event);
                     if (!found) {
-                      window.parent.postMessage({type: 'GOLDEN_RECORDER_WARNING', payload: {message: 'Khong suy ra duoc semantic locator cho o nhap nay.'}}, '*');
+                      warnNoTarget();
                       return;
                     }
-                    const old = timers.get(target); if (old) clearTimeout(old);
-                    timers.set(target, setTimeout(() => {
+                    // O nhap PHAI duoc nhan dien bang nhan ngu nghia hoac goi y nhap lieu.
+                    // Nhan dang 'text' la chu tinh (vi du chu thich duoi o) — luc replay no tro
+                    // vao mot Text widget, khong phai o nhap, va enterText se bao "Bad state: No element".
+                    if (found.attribute !== 'label' && found.attribute !== 'hint') {
+                      window.parent.postMessage({type: 'GOLDEN_RECORDER_WARNING', payload: {message:
+                        'O nhap nay khong co nhan ngu nghia rieng; recorder chi doc duoc chu tinh "'
+                        + String(found.attributeValue).slice(0, 40)
+                        + '". Hay them Semantics(label: ...) hoac hintText cho o nhap trong Golden Solution.'}}, '*');
+                      return;
+                    }
+                    const key = found.attribute + '=' + found.attributeValue;
+                    const old = textTimers.get(key); if (old) clearTimeout(old);
+                    textTimers.set(key, setTimeout(() => {
+                      textTimers.delete(key);
                       send({kind: 'action', stage: 'ACTION', action: 'enter_text', ...found, valueType: 'string', value: target.value, browser: 'flutter_tester'});
-                    }, 250));
+                    }, 700));
                   }, true);
                   document.addEventListener('scroll', event => {
                     const target = event.target instanceof Element ? event.target : document.scrollingElement;

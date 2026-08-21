@@ -91,7 +91,8 @@ public interface ExamResultRepository extends JpaRepository<ExamResult, Long> {
             r.diagnosticCode, r.diagnosticOrigin, r.diagnosticStage, r.requiresManualReview,
             case when r.resultJson is null then false else true end,
             r.gradingStartedAt, r.gradingFinishedAt,
-            r.manualJson, r.previousScore
+            r.manualJson, r.previousScore,
+            case when r.feedbackJson is null then false else true end
         )
         from ExamResult r
         where r.examId = :examId and r.mode = :mode

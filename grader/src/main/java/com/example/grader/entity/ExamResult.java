@@ -51,6 +51,17 @@ public class ExamResult {
     @Column(name = "previous_score")
     private Float previousScore;
 
+    /**
+     * SHA-256 của file .zip bài nộp ĐÚNG LÚC ĐEM ĐI CHẤM.
+     *
+     * <p>Tính tại thời điểm chấm chứ không phải lúc xuất hồ sơ: zip trong {@code submissions/} bị
+     * dọn sau 30 ngày, còn hồ sơ có thể xuất bất cứ lúc nào. Có chuỗi này thì đối chiếu được bản
+     * code lưu ở kho ngoài với đúng bản đã chấm — trả lời được cáo buộc "bài em nộp khác bài
+     * được chấm" mà không cần giữ file.
+     */
+    @Column(name = "submission_hash", length = 64)
+    private String submissionHash;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "status", length = 20)
     private GradingStatus status;

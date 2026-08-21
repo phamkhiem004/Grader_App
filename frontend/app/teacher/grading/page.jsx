@@ -5,111 +5,20 @@ import SidebarLayout from "@/components/layout/SidebarLayout";
 import { API_BASE, PASS_THRESHOLD } from "@/lib/config";
 import ExamCombobox from "@/components/ui/ExamCombobox";
 import PerformanceSettings from "@/components/grading/PerformanceSettings";
-import { csvRow, downloadCsv, formatGradingTime } from "@/lib/csv";
 import { gradingStatusLabel, gradingStatusTone } from "@/lib/gradingStatus";
 // Kho phiên chấm dùng chung với trang Lịch sử (nút "Chấm lại" bên đó ghi vào cùng chỗ này).
 import { readStoredSessions, writeStoredSessions } from "@/lib/gradingSessions";
-import { UploadCloud, Play, FileArchive, X, CheckCircle, Clock, AlertCircle, DownloadCloud, Loader2, CheckSquare, BarChart2, Users, TrendingUp, FileJson, StopCircle, Trash2, Ban, RotateCcw, ListFilter, ChevronDown } from "lucide-react";
+import { UploadCloud, Play, Pause, FileArchive, X, CheckCircle, Clock, AlertCircle, Loader2, CheckSquare, BarChart2, Users, TrendingUp, StopCircle, Ban, RotateCcw, ListFilter, ChevronDown } from "lucide-react";
 
 const normalizedPath = (value) => String(value || "").replace(/\\/g, "/");
 
-/**
- * Tên thư mục KHÔNG mang thông tin sinh viên: thư mục nén của bài làm (lib), thư mục trung gian
- * do LMS sinh ra… Gặp mấy tên này thì phải trèo lên thư mục cha mới lấy đúng tên sinh viên.
- */
-const GENERIC_FOLDERS = new Set([
-  "lib", "src", "code", "source", "submission", "submissions", "bai", "bailam", "bai_lam",
-  "baithi", "bai_thi", "nop", "nopbai", "assignment", "upload", "uploads", "zip", "files",
-]);
-
-const genericFolder = (name) =>
-  GENERIC_FOLDERS.has(String(name || "").toLowerCase().replace(/[\s-]+/g, "_"));
-
-/**
- * Suy một bài nộp từ một file trong cây thư mục đã thả/chọn.
- *
- * <p>KHÔNG ràng buộc tên thư mục: tên có dấu, có khoảng trắng, có ngoặc đều nhận. Backend tự rút
- * mã SV (mẫu 2 chữ + ≥6 số ở bất kỳ đâu, không có thì rút gọn cả tên) — xem parseStudentInfo.
- */
 const submissionFromFile = (file, suppliedPath = "") => {
   const relativePath = normalizedPath(suppliedPath || file.webkitRelativePath || file.name);
   const segments = relativePath.split("/").filter(Boolean);
-  if (!segments.at(-1)?.toLowerCase().endsWith(".zip")) return null;
-
-  // Tên sinh viên = thư mục gần file zip nhất mà KHÔNG phải tên chung chung (lib, src…).
-  let username = "";
-  for (let i = segments.length - 2; i >= 0; i--) {
-    const name = segments[i]?.trim();
-    if (!name) continue;
-    if (genericFolder(name) && i > 0) continue;
-    username = name;
-    break;
-  }
-  // Zip nằm trần (kéo thẳng nhiều file .zip vào): lấy luôn tên file làm tên sinh viên.
-  // Trừ khi nó tên "lib.zip" — không có thư mục cha thì chẳng biết đó là bài của ai.
-  if (!username) {
-    const base = segments.at(-1).replace(/\.zip$/i, "").trim();
-    if (!base || genericFolder(base)) return null;
-    username = base;
-  }
-
-  return { file, username: username.slice(0, 100), relativePath, key: username.toLowerCase() };
-};
-
-/**
- * Duyệt một thư mục chọn bằng File System Access API (showDirectoryPicker).
- *
- * <p>Đường này KHÔNG bật hộp thoại "Tải N tệp lên trang này?" của trình duyệt như
- * {@code <input webkitdirectory>}, nên chọn xong là bài hiện thẳng vào khu vực chờ.
- */
-const collectFromDirectoryHandle = async (dirHandle, parentPath = "") => {
-  const path = parentPath ? `${parentPath}/${dirHandle.name}` : dirHandle.name;
-  const out = [];
-  for await (const entry of dirHandle.values()) {
-    if (entry.kind === "file") {
-      if (!entry.name.toLowerCase().endsWith(".zip")) continue;   // bỏ qua rác, đỡ đọc thừa
-      out.push({ file: await entry.getFile(), relativePath: `${path}/${entry.name}` });
-    } else {
-      out.push(...await collectFromDirectoryHandle(entry, path));
-    }
-  }
-  return out;
-};
-
-/**
- * Quét thư mục vừa chọn theo TỪNG thư mục con: chọn một lần thư mục lớp là lấy được cả lớp.
- *
- * <p>Trình duyệt không cho chọn nhiều thư mục trong một hộp thoại, nên "nhiều thư mục cùng lúc"
- * đi bằng đường này — mỗi thư mục con là một sinh viên. Thư mục con nào không có .zip thì trả tên
- * ra để báo, chứ bỏ qua lặng lẽ là mất bài mà không ai biết.
- */
-const scanPickedDirectory = async (handle) => {
-  const nested = [];          // .zip nằm trong thư mục con → thư mục con là tên sinh viên
-  const loose = [];           // .zip nằm ngay trong thư mục vừa chọn
-  const emptyFolders = [];
-  for await (const entry of handle.values()) {
-    if (entry.kind === "file") {
-      if (entry.name.toLowerCase().endsWith(".zip")) loose.push(entry);
-      continue;
-    }
-    const found = await collectFromDirectoryHandle(entry, handle.name);
-    if (found.length) nested.push(...found);
-    else emptyFolders.push(entry.name);
-  }
-
-  // Thư mục vừa chọn là THƯ MỤC LỚP hay thư mục của MỘT sinh viên? Có bài trong thư mục con, hoặc
-  // có từ hai file .zip nằm trần trở lên → là thư mục lớp: tên nó KHÔNG phải tên sinh viên, nên
-  // mỗi zip trần phải tự lấy tên file (Lớp cô Huệ/HE180412.zip → HE180412). Nếu cứ ghép tên thư
-  // mục lớp vào thì cả lớp mang chung một tên và gộp lại thành đúng một bài.
-  const rootIsContainer = nested.length > 0 || loose.length > 1;
-  const entries = [...nested];
-  for (const entry of loose) {
-    entries.push({
-      file: await entry.getFile(),
-      relativePath: rootIsContainer ? entry.name : `${handle.name}/${entry.name}`,
-    });
-  }
-  return { entries, emptyFolders };
+  if (segments.length < 2 || !segments.at(-1)?.toLowerCase().endsWith(".zip")) return null;
+  const username = segments.at(-2)?.trim();
+  if (!username || !/^[A-Za-z0-9_-]{1,60}$/.test(username)) return null;
+  return { file, username, relativePath, key: username.toLowerCase() };
 };
 
 const readDirectoryEntries = async (reader) => {
@@ -140,16 +49,13 @@ export default function AutomaticGradingPage() {
   // MỖI BỘ MỘT PHIÊN: exam → { batchId, phase: "uploading"|"polling"|"done", progress, parseErrors }.
   // Một biến phase/progress toàn cục là lý do chấm bộ 2 xong quay lại bộ 1 thì mọi số liệu biến
   // mất — phiên mới ghi đè phiên cũ. Giữ theo map thì đổi khung nhìn chỉ là đổi khoá đọc; dữ liệu
-  // một bộ chỉ mất khi chính bộ ĐÓ bắt đầu lượt chấm mới (hoặc Hủy phiên).
+  // một bộ chỉ mất khi chính bộ ĐÓ bắt đầu lượt chấm mới.
   const [sessions, setSessions] = useState({});
   // Bài đã chọn nhưng CHƯA upload — cũng theo từng bộ, để soạn sẵn bài cho bộ 2 trong lúc bộ 1
   // đang chấm mà hai danh sách không lẫn vào nhau.
   const [filesByExam, setFilesByExam] = useState({});
   const [dragging, setDragging] = useState(false);
   const [uploadErr, setUploadErr] = useState(null);
-  const [uploadInfo, setUploadInfo] = useState(null);   // tóm tắt lần thêm thư mục gần nhất
-  const [scanning, setScanning] = useState(false);      // đang đọc cây thư mục (lớp đông thì lâu)
-  // parseErrors KHÔNG còn là state riêng: nó thuộc về phiên của từng bộ (viewSession.parseErrors).
   // Một trục lọc duy nhất cho bảng kết quả: all | scored | grading | blocked.
   const [rowFilter, setRowFilter] = useState("all");
   const [filterOpen, setFilterOpen] = useState(false);
@@ -164,9 +70,6 @@ export default function AutomaticGradingPage() {
   const fileRef = useRef();
   const pollRef = useRef(null);
   const filterRef = useRef(null);
-  // Bản sao files CỦA BỘ ĐANG XEM cho addFiles: thêm nhiều đợt liên tiếp thì phải biết đợt trước
-  // đã có ai, mà useCallback([]) thì đọc state cũ.
-  const filesRef = useRef([]);
   const addFileRef = useRef(null);
   // Chặn effect ghi localStorage chạy TRƯỚC khi khôi phục xong — không thì lần mount đầu
   // (sessions còn rỗng) sẽ xoá sạch phiên đã lưu trước cả khi kịp đọc lại.
@@ -248,28 +151,38 @@ export default function AutomaticGradingPage() {
   }, []);
 
   // ── Khôi phục phiên chấm khi quay lại trang ──
-  // Giữ NGUYÊN màn hình sau F5 hoặc rời trang, kể cả khi đã chấm xong. Lưu dạng map nhiều phiên
-  // (v2); vẫn đọc được bản lưu một-phiên cũ. Phiên nào batch đã bị hủy/xóa thì rơi rụng tự nhiên.
+  // CHỈ khôi phục phiên còn CHẠY DỞ. Phiên đã chấm hết bài là phiên ĐÃ KẾT THÚC — dữ liệu của nó
+  // thuộc về trang Lịch sử chấm, màn hình này không lưu lại. Lưu dạng map nhiều phiên (v2); vẫn
+  // đọc được bản lưu một-phiên cũ.
   useEffect(() => {
     const saved = readStoredSessions();
     const entries = Object.entries(saved.sessions);
     if (!entries.length) { restoredRef.current = true; return; }
 
+    // Ba kết cục khác nhau, và phải phân biệt: "backend nói phiên này không còn/đã xong" thì XÓA
+    // khỏi kho, còn "không hỏi được backend" thì GIỮ NGUYÊN — backend đang khởi động lại mà đi
+    // dọn thì mất trắng phiên chấm thật.
     Promise.all(entries.map(async ([exam, info]) => {
-      if (!exam || !info?.batchId) return null;
+      if (!exam || !info?.batchId) return { exam, verdict: "gone" };
       try {
         const data = await fetch(`${API_BASE}/batch/progress/${info.batchId}`).then((r) => r.json());
-        if (!data || data.total == null) return null;
+        if (!data || data.total == null) return { exam, verdict: "unreachable", info };
+        // Bộ testcase bị xóa → backend xóa luôn phiên chấm và trả `status: "UNKNOWN"`. Không bỏ
+        // phiên ở đây thì batchId cũ nằm lại localStorage và cứ mỗi lần F5 lại dựng lại nguyên
+        // màn hình chấm của một bộ không còn tồn tại.
+        if (data.status === "UNKNOWN") return { exam, verdict: "gone" };
         const pending = (data.queued || 0) + (data.grading || 0);
-        return [exam, {
+        // Chấm xong hết trong lúc vắng mặt → phiên đã kết thúc, kết quả xem ở Lịch sử chấm.
+        if (pending === 0) return { exam, verdict: "gone" };
+        return { exam, verdict: "live", info, session: {
           batchId: info.batchId,
-          phase: pending > 0 ? "polling" : "done",
+          phase: "polling",
           progress: data,
           parseErrors: info.parseErrors || [],
-        }];
-      } catch { return null; }
-    })).then((results) => {
-      const valid = results.filter(Boolean);
+        } };
+      } catch { return { exam, verdict: "unreachable", info }; }
+    })).then((outcomes) => {
+      const valid = outcomes.filter((o) => o.verdict === "live").map((o) => [o.exam, o.session]);
       if (valid.length) {
         setSessions(Object.fromEntries(valid));
         const running = valid.find(([, s]) => s.phase === "polling");
@@ -279,15 +192,29 @@ export default function AutomaticGradingPage() {
         if (running) startPolling(running[1].batchId, running[0]);
       }
       restoredRef.current = true;
+
+      // Dọn kho ngay tại đây. Effect ghi kho bên dưới chỉ chạy khi `sessions` đổi, mà phiên chết
+      // thì không vào `sessions` — không tự ghi lại thì batchId chết nằm mãi trong localStorage.
+      const dropped = outcomes.filter((o) => o.verdict === "gone");
+      if (!dropped.length) return;
+      const kept = {};
+      for (const o of outcomes) {
+        if (o.verdict === "live") kept[o.exam] = { batchId: o.session.batchId, parseErrors: o.session.parseErrors };
+        else if (o.verdict === "unreachable") kept[o.exam] = o.info;
+      }
+      writeStoredSessions({ lastExam: kept[saved.lastExam] ? saved.lastExam : undefined, sessions: kept });
     });
   }, []);
 
   // Ghi lại map phiên mỗi khi nó đổi (batchId là đủ để dựng lại; progress đọc lại từ backend).
+  // CHỈ ghi phiên đang chạy dở: phiên chấm xong là kết thúc — không lưu, F5 là dữ liệu về với
+  // trang Lịch sử chấm (màn hình này chỉ giữ nó tới khi rời trang, cho người đứng nhìn tiến độ).
   useEffect(() => {
     if (!restoredRef.current) return;
     const out = {};
     for (const [exam, s] of Object.entries(sessions)) {
-      if (s?.batchId) out[exam] = { batchId: s.batchId, parseErrors: s.parseErrors || [] };
+      if (s?.batchId && (s.phase === "uploading" || s.phase === "polling"))
+        out[exam] = { batchId: s.batchId, parseErrors: s.parseErrors || [] };
     }
     writeStoredSessions({ lastExam: examId.trim(), sessions: out });
   }, [sessions, examId]);
@@ -311,138 +238,45 @@ export default function AutomaticGradingPage() {
     };
   }, [filterOpen]);
 
-  // Đổi thông báo lỗi của server sang câu người đọc hiểu được — dùng cho cột Ghi chú của CSV.
-  const formatErrorMsg = (errStr) => {
-    if (typeof errStr !== 'string') return errStr;
-    const parts = errStr.split(': ');
-    if (parts.length < 2) return errStr;
-
-    const fileName = parts[0];
-    const errMsg = parts.slice(1).join(': ');
-
-    if (errMsg.includes('Duplicate entry')) {
-      return `${fileName}: Đã có kết quả trên hệ thống (Lỗi trùng lặp bài thi).`;
-    }
-
-    if (errMsg.includes('could not execute statement') || errMsg.includes('SQL') || errMsg.includes('Constraint')) {
-      return `${fileName}: Lỗi cơ sở dữ liệu khi lưu kết quả.`;
-    }
-
-    return errStr;
-  };
-
   // File handling
-  useEffect(() => { filesRef.current = files; }, [files]);
-
-  /**
-   * Thêm bài vào khu vực chờ.
-   *
-   * @param incoming      file .zip (hoặc {file, relativePath}) quét được
-   * @param emptyFolders  tên các thư mục KHÔNG có .zip nào — báo ra để không mất bài trong im lặng
-   */
-  const addFiles = useCallback((incoming, emptyFolders = []) => {
-    const submissions = Array.from(incoming)
-      .map((value) => (value?.file
-        ? submissionFromFile(value.file, value.relativePath)
-        : submissionFromFile(value)))
-      .filter(Boolean);
-
-    // Chống trùng với cả bài đã thêm từ đợt trước lẫn bài trùng trong chính đợt này.
-    const seen = new Set(filesRef.current.map((entry) => entry.key));
-    const fresh = [];
-    let duplicates = 0;
-    for (const item of submissions) {
-      if (seen.has(item.key)) { duplicates++; continue; }
-      seen.add(item.key);
-      fresh.push(item);
-    }
-
-    if (!fresh.length && !duplicates) {
-      setUploadInfo(null);
-      setUploadErr(emptyFolders.length
-        ? `Không có thư mục nào chứa file .zip (đã xem ${emptyFolders.length} thư mục).`
-        : "Không tìm thấy file .zip nào trong thư mục vừa chọn.");
+  const addFiles = useCallback((incoming) => {
+    const candidates = Array.from(incoming).map((value) => value?.file
+      ? submissionFromFile(value.file, value.relativePath)
+      : submissionFromFile(value));
+    const submissions = candidates.filter(Boolean);
+    if (!submissions.length) {
+      setUploadErr("Không tìm thấy bài hợp lệ. Mỗi thư mục sinh viên phải chứa một file .zip của thư mục lib.");
       return;
     }
     // File chọn vào BỘ ĐANG XEM — không có bộ thì chưa biết cất vào đâu.
     const exam = examId.trim();
     if (!exam) { setUploadErr("Chọn mã bộ testcase trước khi thêm bài."); return; }
-
-    if (fresh.length) setFilesFor(exam, (prev) => [...prev, ...fresh]);
+    setFilesByExam((all) => {
+      const prev = all[exam] || [];
+      const existing = new Set(prev.map((entry) => entry.key));
+      return { ...all, [exam]: [...prev, ...submissions.filter((entry) => !existing.has(entry.key))] };
+    });
     setUploadErr(null);
-    const parts = [`Đã thêm ${fresh.length} bài`];
-    if (duplicates) parts.push(`bỏ qua ${duplicates} bài trùng tên với bài đã có`);
-    if (emptyFolders.length) {
-      const shown = emptyFolders.slice(0, 5).join(", ");
-      parts.push(`${emptyFolders.length} thư mục không có .zip: ${shown}`
-        + (emptyFolders.length > 5 ? "…" : ""));
-    }
-    setUploadInfo(parts.join(" · "));
   }, [examId]);
 
   const onDrop = useCallback(async (e) => {
     e.preventDefault(); setDragging(false);
-    setScanning(true);
     try {
       const roots = Array.from(e.dataTransfer.items || [])
         .map((item) => item.webkitGetAsEntry?.())
         .filter(Boolean);
       if (roots.length) {
-        const scanned = await Promise.all(roots.map(async (entry) => ({
-          name: entry.name,
-          isDirectory: entry.isDirectory,
-          items: await collectDroppedEntry(entry),
-        })));
-        addFiles(
-          scanned.flatMap((root) => root.items),
-          scanned.filter((root) => root.isDirectory && !root.items.length).map((root) => root.name));
+        const nested = await Promise.all(roots.map((entry) => collectDroppedEntry(entry)));
+        addFiles(nested.flat());
       } else {
         addFiles(e.dataTransfer.files);
       }
     } catch (error) {
       setUploadErr("Không đọc được thư mục đã thả: " + (error?.message || "lỗi không xác định"));
-    } finally {
-      setScanning(false);
     }
   }, [addFiles]);
 
-  /**
-   * Chọn thư mục bài nộp — chọn THƯ MỤC LỚP là lấy hết bài của cả lớp trong một lần.
-   *
-   * <p>Ưu tiên showDirectoryPicker: chọn xong là bài vào thẳng khu vực chờ, KHÔNG qua hộp thoại
-   * "Tải N tệp lên trang này?" mà {@code <input webkitdirectory>} luôn bật lên. Hộp thoại xin
-   * quyền đọc thư mục là của trình duyệt, trang web không tắt được — nhưng chọn cả thư mục lớp
-   * thì chỉ phải qua nó ĐÚNG MỘT LẦN thay vì mỗi sinh viên một lần.
-   */
-  const pickFolders = useCallback(async () => {
-    if (typeof window === "undefined" || !window.showDirectoryPicker) {
-      fileRef.current?.click();
-      return;
-    }
-    let handle;
-    try {
-      handle = await window.showDirectoryPicker({ id: "grader-submissions", mode: "read" });
-    } catch (error) {
-      if (error?.name !== "AbortError") {                // AbortError = người dùng bấm Huỷ
-        setUploadErr("Không mở được thư mục: " + (error?.message || "lỗi không xác định"));
-      }
-      return;
-    }
-    setScanning(true);
-    try {
-      const { entries, emptyFolders } = await scanPickedDirectory(handle);
-      addFiles(entries, emptyFolders);
-    } catch (error) {
-      setUploadErr("Không đọc được thư mục đã chọn: " + (error?.message || "lỗi không xác định"));
-    } finally {
-      setScanning(false);
-    }
-  }, [addFiles]);
-
-  const removeFile = (key) => {
-    setFilesFor(examId.trim(), (current) => current.filter((entry) => entry.key !== key));
-    setUploadInfo(null);           // tóm tắt của lần thêm trước không còn đúng nữa
-  };
+  const removeFile = (key) => setFilesFor(examId.trim(), (current) => current.filter((entry) => entry.key !== key));
 
   // Upload + poll
   const execute = async () => {
@@ -455,7 +289,7 @@ export default function AutomaticGradingPage() {
     const staged = filesByExam[exam] || [];
     if (!staged.length) { setUploadErr("Chưa có file nào để chấm."); return; }
 
-    setUploadErr(null); setUploadInfo(null); setStopNotice(null); setAddNotice(null); setRowFilter("all");
+    setUploadErr(null); setStopNotice(null); setAddNotice(null); setRowFilter("all");
     // Phiên MỚI của chính bộ này thay phiên cũ CỦA NÓ — dữ liệu các bộ khác không bị đụng tới.
     setSessions((all) => ({ ...all, [exam]: { batchId: null, phase: "uploading", progress: null, parseErrors: [] } }));
 
@@ -562,10 +396,24 @@ export default function AutomaticGradingPage() {
     }, 3000);
   };
 
+  const toggleBatchPause = async () => {
+    if (!batchId) return;
+    const action = progress?.status === "PAUSED" ? "resume" : "pause";
+    try {
+      const res = await fetch(`${API_BASE}/batch/${encodeURIComponent(batchId)}/${action}`, { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || "Không cập nhật được trạng thái phiên chấm.");
+      patchSession(trimmedExam, (s) => ({ ...s, progress: data }));
+      setUploadErr(null);
+    } catch (error) {
+      setUploadErr(error?.message || "Không cập nhật được trạng thái phiên chấm.");
+    }
+  };
+
   /**
    * "+ Chấm kỳ thi mới": chỉ RỜI khung nhìn về form trắng (bỏ chọn bộ testcase) — KHÔNG xoá dữ
    * liệu của bất kỳ phiên nào. Chọn lại một bộ đã từng chấm là thấy lại nguyên kết quả của nó;
-   * dữ liệu phiên chỉ mất khi chính bộ đó bắt đầu lượt chấm mới hoặc bấm Hủy phiên.
+   * dữ liệu phiên chỉ mất khi chính bộ đó bắt đầu lượt chấm mới.
    */
   const startNewView = () => {
     setExamId("");
@@ -573,9 +421,10 @@ export default function AutomaticGradingPage() {
     setRowFilter("all");
   };
 
-  // ── Dừng / hủy phiên chấm đang chạy ────────────────────────────
-  // Dừng  = bỏ các bài chưa chấm + giết container đang chạy, GIỮ kết quả đã có.
-  // Hủy   = dừng rồi XÓA sạch kết quả và file bài nộp của phiên này (không hoàn tác được).
+  // ── Dừng phiên chấm đang chạy ──────────────────────────────────
+  // Dừng = bỏ các bài chưa chấm + giết container đang chạy, GIỮ kết quả đã có; phiên vẫn nhận
+  // thêm bài để chấm tiếp. (Nút "Hủy phiên chấm" — xóa sạch kết quả — đã bỏ theo yêu cầu:
+  // quá gần một thao tác không hoàn tác được, ai cần xóa thì xóa cả bộ ở Quản lý bộ testcase.)
   const stopGrading = async () => {
     if (!batchId || batchAction) return;
     setBatchAction("stop");
@@ -586,7 +435,7 @@ export default function AutomaticGradingPage() {
       const skipped = (data.dequeued || 0) + (data.cancelled || 0);
       setStopNotice(`Đã dừng phiên chấm: ${skipped} bài chưa chấm bị bỏ qua`
         + (data.killedContainers ? `, ${data.killedContainers} bài đang chấm bị ngắt` : "")
-        + ". Kết quả của các bài đã chấm xong vẫn được giữ nguyên.");
+        + ". Kết quả đã có vẫn giữ nguyên — nạp thêm bài ở ô “Thêm bài làm” để chấm tiếp.");
       // GIỮ phiên lưu: bài đã chấm xong vẫn còn đó, và giáo viên còn nạp thêm bài vào phiên này.
       // KHÔNG tự chuyển sang "done" ở đây: vòng poll sẵn có sẽ tự kết thúc khi container cuối
       // cùng thực sự thoát — nếu giết hụt thì người dùng phải thấy nó vẫn đang chạy.
@@ -595,130 +444,6 @@ export default function AutomaticGradingPage() {
     } finally {
       setBatchAction(null);
     }
-  };
-
-  const cancelGrading = async () => {
-    if (!batchId || batchAction) return;
-    if (!confirm("Hủy phiên chấm này?\n\nToàn bộ kết quả đã chấm và file bài nộp của phiên sẽ bị XÓA "
-      + "(bài đã có điểm chấm tay được giữ lại). Thao tác này không hoàn tác được.")) return;
-    setBatchAction("cancel");
-    try {
-      const res = await fetch(`${API_BASE}/batch/${batchId}/cancel`, { method: "POST" });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) { setUploadErr(data.error || "Không hủy được phiên chấm."); return; }
-      // Hủy = dữ liệu phía server đã bị XÓA thật → gỡ phiên của đúng bộ này khỏi màn hình.
-      const exam = examId.trim();
-      if (runningExam === exam) clearInterval(pollRef.current);
-      dropSession(exam);
-      setFilesFor(exam, []);
-      setRowFilter("all");
-      setStopNotice(`Đã hủy phiên chấm và xóa ${data.deleted || 0} bản ghi kết quả`
-        + (data.keptManual ? `, giữ lại ${data.keptManual} bài đã chấm tay` : "") + ".");
-    } catch (e) {
-      setUploadErr("Không kết nối được server: " + e.message);
-    } finally {
-      setBatchAction(null);
-    }
-  };
-
-  // Cột giống hệt CSV tổng hợp của trang Lịch sử chấm: cùng một bảng điểm thì không được lệch cột.
-  const downloadCSV = () => {
-    if (!progress?.results?.length && !parseErrors.length) return;
-
-    const header = csvRow([
-      "Tên người dùng", "Điểm", "Trạng thái", "Bắt đầu chấm", "Chấm xong", "Ghi chú",
-    ]);
-
-    // 1. Các bài hợp lệ đã nạp vào server
-    const validRows = (progress?.results || []).map(r => {
-      let note = "";
-      if (r.outcome === "STOPPED") note = "Chưa chấm — phiên chấm đã bị dừng";
-      // 0 điểm do bài làm KHÔNG lên cột sự cố (người chấm không phải xử lý), nhưng lý do vẫn
-      // phải tra được: đây là thứ duy nhất trả lời được khi sinh viên khiếu nại, và với ca
-      // không biên dịch được thì bảng testcase trống nên không còn chỗ nào khác nói giúp.
-      if (r.outcome === "SCORED" && r.score === 0 && r.diagnosticCode) {
-        note = `0 điểm — ${r.diagnosticCode}: ${r.errorLog || ""}`;
-      }
-      if (r.outcome === "SYSTEM_BLOCKED") {
-        // Bài chưa có điểm vì MÁY, không vì bài làm — phải ghi rõ trong CSV, nếu không người
-        // đọc file sẽ hiểu ô điểm trống là sinh viên bỏ trắng.
-        note = `Lỗi hệ thống, chưa có điểm: ${r.diagnosticCode || "UNCLASSIFIED"} · ${r.diagnosticOrigin || "UNDETERMINED"} · ${r.errorLog || ""}`;
-      }
-      if (r.status === "DONE") {
-        try {
-          const d = JSON.parse(r.details || "{}");
-          note = `Pass: ${d.soTestPass ?? 0}/${d.tongSoTest ?? 0}`;
-        } catch (_) {}
-      }
-      return csvRow([
-        r.studentName || r.studentId,          // tên thư mục bài nộp
-        r.score != null ? r.score.toFixed(1) : "",
-        // Cùng nhãn với bảng trên màn hình VÀ với CSV của trang Lịch sử chấm — hai file cùng cột
-        // mà một bên ghi "DONE" một bên ghi "Đã xong" thì không gộp lại được.
-        gradingStatusLabel(r.status, r.outcome),
-        formatGradingTime(r.gradingStartedAt),
-        formatGradingTime(r.gradingFinishedAt),
-        note,
-      ]);
-    });
-
-    // 2. Các file lỗi/từ chối ngay từ đầu (parseErrors) — chưa từng vào máy chấm nên không có mốc.
-    const errorRows = parseErrors.map(errStr => {
-      if (typeof errStr !== 'string') return "";
-      const parts = errStr.split(': ');
-      const filename = parts[0] || errStr;
-
-      const pathParts = normalizedPath(filename).split('/').filter(Boolean);
-      const username = pathParts.length > 1 && pathParts.at(-1)?.toLowerCase().endsWith(".zip")
-        ? pathParts.at(-2)
-        : filename;
-
-      return csvRow([username, "", "BỊ LOẠI", "", "", formatErrorMsg(errStr)]);
-    }).filter(row => row !== "");
-
-    // Tên file định dạng: Mã bộ testcase_YYYY-MM-DD.csv
-    const dateStr = new Date().toISOString().split('T')[0];
-    downloadCsv([header, ...validRows, ...errorRows].join("\n"), `${examId}_${dateStr}.csv`);
-  };
-
-  /**
-   * Tải về thư mục kết quả: bấm một cái là tải ngay, giải nén ra `Json/<MSSV>.json`.
-   *
-   * <p>KHÔNG dùng `showDirectoryPicker`: nó bắt người dùng chọn thư mục, và Chrome từ chối phần
-   * lớn thư mục quen tay ("thư mục này chứa tệp hệ thống") nên thao tác hay chết giữa chừng.
-   * Trình duyệt không tải xuống được một thư mục thật, nên ZIP là lớp vận chuyển duy nhất —
-   * bên trong vẫn đúng một thư mục `Json` với các file rời, không phải JSON gộp.
-   */
-  const downloadResultsFolder = async () => {
-    if (!batchId) return;
-    try {
-      const res = await fetch(`${API_BASE}/results/batch/${encodeURIComponent(batchId)}/archive`);
-      if (res.status === 404) throw new Error("Chưa có bài nào chấm xong để xuất.");
-      if (!res.ok) throw new Error("Không tạo được thư mục kết quả.");
-      const blob = await res.blob();
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
-      a.download = "Json.zip";
-      a.click();
-      URL.revokeObjectURL(a.href);
-    } catch (error) {
-      setUploadErr(error?.message || "Không xuất được thư mục JSON.");
-    }
-  };
-
-  // Tải JSON riêng của 1 sinh viên → MaSV.json
-  const downloadStudentJson = async (r) => {
-    const exId = r.examId || examId;
-    try {
-      const res = await fetch(`${API_BASE}/results/${encodeURIComponent(exId)}/${encodeURIComponent(r.studentId)}`);
-      if (!res.ok) return;
-      const text = await res.text();
-      const blob = new Blob([text], { type: "application/json" });
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
-      a.download = `${r.studentId}.json`;
-      a.click();
-    } catch (_) {}
   };
 
   const p = progress;
@@ -842,29 +567,25 @@ export default function AutomaticGradingPage() {
                 />
               </div>
 
-              {phase === "idle" && (
+              {/* Hiện cả khi phiên trước VỪA XONG: phiên đã kết thúc thì lượt upload kế tiếp là
+                  một phiên hoàn toàn mới, không cần bấm reset gì trước. */}
+              {(phase === "idle" || phase === "done") && (
                 <div>
                   <label className="mb-2 block text-xs font-bold uppercase tracking-wider text-slate-500">Upload Bài Nộp</label>
                   <div
                     onDrop={onDrop}
                     onDragOver={e => { e.preventDefault(); setDragging(true); }}
                     onDragLeave={() => setDragging(false)}
-                    onClick={scanning ? undefined : pickFolders}
-                    className={`rounded-xl border-2 border-dashed p-8 text-center transition-all ${
-                      scanning ? "cursor-wait border-indigo-200 bg-indigo-50/60" : "cursor-pointer"
-                    } ${
-                      dragging ? "border-indigo-500 bg-indigo-50 scale-[1.01]"
-                        : scanning ? "" : "border-slate-200 bg-slate-50 hover:border-indigo-300 hover:bg-slate-100"
+                    onClick={() => fileRef.current.click()}
+                    className={`cursor-pointer rounded-xl border-2 border-dashed p-8 text-center transition-all ${
+                      dragging ? "border-indigo-500 bg-indigo-50 scale-[1.01]" : "border-slate-200 bg-slate-50 hover:border-indigo-300 hover:bg-slate-100"
                     }`}
                   >
                     <div className={`mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full border border-slate-100 bg-white shadow-sm transition-transform ${dragging ? "scale-110" : ""}`}>
-                      {scanning
-                        ? <Loader2 size={24} className="animate-spin text-indigo-500" />
-                        : <UploadCloud size={24} className={dragging ? "text-indigo-500" : "text-slate-400"} />}
+                      <UploadCloud size={24} className={dragging ? "text-indigo-500" : "text-slate-400"} />
                     </div>
-                    <p className="text-sm font-semibold text-slate-700">
-                      {scanning ? "Đang đọc thư mục…" : "Kéo thả một hay nhiều thư mục bài nộp vào đây"}
-                    </p>
+                    <p className="mb-1 text-sm font-semibold text-slate-700">Kéo thả thư mục bài nộp vào đây</p>
+                    <p className="text-xs text-slate-500">Mỗi thư mục mang tên username và chứa một file <span className="font-mono text-slate-600">.zip</span> của thư mục lib</p>
                     <input
                       ref={fileRef}
                       type="file"
@@ -875,15 +596,6 @@ export default function AutomaticGradingPage() {
                       onChange={(event) => { addFiles(event.target.files); event.target.value = ""; }}
                     />
                   </div>
-                </div>
-              )}
-
-              {/* Tóm tắt lần thêm gần nhất: thêm được bao nhiêu, bỏ qua gì — chọn cả thư mục lớp
-                  thì đây là chỗ duy nhất biết được có thư mục nào thiếu bài không. */}
-              {phase === "idle" && uploadInfo && !uploadErr && (
-                <div className="flex items-start gap-3 rounded-xl border border-indigo-100 bg-indigo-50 p-3 text-indigo-700">
-                  <CheckCircle size={16} className="mt-0.5 shrink-0" />
-                  <p className="text-xs font-medium leading-relaxed">{uploadInfo}</p>
                 </div>
               )}
 
@@ -931,8 +643,8 @@ export default function AutomaticGradingPage() {
                 </div>
               )}
 
-              {/* Nút Execute */}
-              {phase === "idle" && (
+              {/* Nút Execute — bấm ở phase done là mở PHIÊN MỚI thay phiên vừa kết thúc. */}
+              {(phase === "idle" || phase === "done") && (
                 <button
                   onClick={execute}
                   disabled={files.length === 0 || blockedByRunningSession}
@@ -955,10 +667,9 @@ export default function AutomaticGradingPage() {
             </div>
           </div>
 
-          {/* Thêm bài vào phiên ĐANG mở — thu bài nhiều đợt. Hiện cả khi đã chấm xong: bài mới
-              được đẩy vào hàng đợi và phiên tự mở lại, không phải tạo phiên khác rồi tự ghép
-              kết quả của hai phiên. */}
-          {(phase === "polling" || phase === "done") && (
+          {/* Thêm bài vào phiên ĐANG CHẠY — thu bài nhiều đợt trong cùng một phiên. Chấm xong
+              hết là phiên KẾT THÚC: lúc đó dùng lại form upload ở trên để mở phiên mới. */}
+          {phase === "polling" && (
             <div className="card overflow-hidden">
               <div className="flex items-center gap-2 border-b border-slate-100 bg-slate-50/60 px-5 py-3.5">
                 <UploadCloud size={16} className="text-indigo-500" />
@@ -1137,8 +848,6 @@ export default function AutomaticGradingPage() {
                       Batch: <span className="rounded bg-slate-100 px-2 py-0.5 font-mono text-slate-700">{batchId}</span>
                     </p>
                   </div>
-                  {/* Không còn nút Tạm dừng ở đây. Chỉ số trạng thái bên dưới vẫn giữ vì phiên
-                      chấm lại mở từ trang Kho bộ testcase vẫn tạm dừng được. */}
                   <div className="flex items-end gap-3 text-right">
                     <div>
                     <span className="text-3xl font-bold text-slate-800">{pct}<span className="text-lg text-slate-400">%</span></span>
@@ -1174,26 +883,26 @@ export default function AutomaticGradingPage() {
                     {phase === "polling" && (
                       <>
                         <button
+                          type="button"
+                          onClick={toggleBatchPause}
+                          title={isPaused
+                            ? "Tiếp tục đưa bài đang chờ vào máy chấm"
+                            : "Tạm dừng sau khi các bài đang chạy hoàn tất"}
+                          className="flex items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-2 text-sm font-semibold text-indigo-700 transition-colors hover:bg-indigo-100"
+                        >
+                          {isPaused ? <Play size={15} /> : <Pause size={15} />}
+                          {isPaused ? "Tiếp tục" : "Tạm dừng"}
+                        </button>
+                        <button
                           onClick={stopGrading}
                           disabled={batchAction !== null}
-                          title="Ngừng chấm các bài còn lại, giữ nguyên kết quả đã có"
+                          title="Ngừng chấm các bài còn lại, giữ kết quả đã có; vẫn nạp thêm bài chấm tiếp được"
                           className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-700 transition-colors hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
                         >
                           {batchAction === "stop"
                             ? <Loader2 size={15} className="animate-spin" />
                             : <StopCircle size={15} />}
                           Dừng chấm
-                        </button>
-                        <button
-                          onClick={cancelGrading}
-                          disabled={batchAction !== null}
-                          title="Dừng và xóa toàn bộ kết quả + bài nộp của phiên chấm này"
-                          className="flex items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-600 transition-colors hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
-                        >
-                          {batchAction === "cancel"
-                            ? <Loader2 size={15} className="animate-spin" />
-                            : <Trash2 size={15} />}
-                          Hủy phiên chấm
                         </button>
                       </>
                     )}
@@ -1210,16 +919,6 @@ export default function AutomaticGradingPage() {
               <div className="card min-w-0 overflow-hidden">
                 <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50/50 px-6 py-4">
                   <h3 className="text-sm font-bold uppercase tracking-wider text-slate-700">Chi tiết kết quả</h3>
-                  {phase === "done" && (
-                    <div className="flex items-center gap-2">
-                      <button onClick={downloadResultsFolder} title="Xuất thư mục gồm một JSON cho mỗi sinh viên" className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 shadow-sm transition-all hover:text-slate-900 hover:shadow active:scale-95">
-                        <FileJson size={16} /> Xuất JSON
-                      </button>
-                      <button onClick={downloadCSV} className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 shadow-sm transition-all hover:text-slate-900 hover:shadow active:scale-95">
-                        <DownloadCloud size={16} /> Xuất CSV
-                      </button>
-                    </div>
-                  )}
                 </div>
 
                 {/* Sự cố HỆ THỐNG — thứ duy nhất người chấm phải xử lý. Bài 0 điểm do sinh viên
@@ -1322,12 +1021,11 @@ export default function AutomaticGradingPage() {
                 <div className="max-w-full overflow-x-auto">
                   <table className="w-full min-w-[680px] table-fixed border-collapse text-left">
                     <colgroup>
-                      <col className="w-[22%]" />
-                      <col className="w-[18%]" />
+                      <col className="w-[24%]" />
+                      <col className="w-[20%]" />
+                      <col className="w-[15%]" />
+                      <col className="w-[27%]" />
                       <col className="w-[14%]" />
-                      <col className="w-[25%]" />
-                      <col className="w-[13%]" />
-                      <col className="w-[8%]" />
                     </colgroup>
                     <thead>
                       <tr className="border-b border-slate-100 bg-white text-xs font-bold uppercase tracking-wider text-slate-500">
@@ -1336,7 +1034,6 @@ export default function AutomaticGradingPage() {
                         <th className="px-3 py-3.5 text-center">Tỉ lệ Pass</th>
                         <th className="px-3 py-3.5 text-center">Sự cố hệ thống</th>
                         <th className="px-3 py-3.5 text-center">Điểm số</th>
-                        <th className="px-3 py-3.5 text-center"></th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
@@ -1426,23 +1123,12 @@ export default function AutomaticGradingPage() {
                                 <span className="font-medium text-slate-300">—</span>
                               )}
                             </td>
-                            <td className="px-3 py-3.5 text-center">
-                              {(isDone || blocked) && (
-                                <button
-                                  onClick={() => downloadStudentJson(r)}
-                                  title={`Tải JSON của ${r.studentId}`}
-                                  className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-indigo-50 hover:text-indigo-600"
-                                >
-                                  <FileJson size={15} />
-                                </button>
-                              )}
-                            </td>
                           </tr>
                         );
                       })}
                       {allResultRows.length === 0 && (
                         <tr>
-                          <td colSpan="6" className="px-6 py-10 text-center text-sm text-slate-500">
+                          <td colSpan="5" className="px-6 py-10 text-center text-sm text-slate-500">
                             <Loader2 size={20} className="mx-auto mb-2 animate-spin text-slate-300" />
                             Đang chờ dữ liệu...
                           </td>
@@ -1450,7 +1136,7 @@ export default function AutomaticGradingPage() {
                       )}
                       {allResultRows.length > 0 && filteredResultRows.length === 0 && (
                         <tr>
-                          <td colSpan="6" className="px-6 py-10 text-center text-sm">
+                          <td colSpan="5" className="px-6 py-10 text-center text-sm">
                             {/* Lọc "Lỗi hệ thống" mà rỗng là TIN TỐT, không phải kết quả trống —
                                 nói thẳng ra thay vì để người chấm tự suy từ một bảng trắng. */}
                             {rowFilter === "blocked" ? (
@@ -1506,7 +1192,7 @@ function categorizeError(errStr) {
   if (/trùng mã sv|cùng lần upload|cùng lần nộp/i.test(msg))
     return { file, type: "Trùng trong lần nộp", detail: "Mã SV xuất hiện nhiều lần trong cùng một lần upload — chỉ giữ 1 bài.", tone: "amber" };
   if (/sai format|username|\.zip|định dạng/i.test(msg))
-    return { file, type: "Sai cấu trúc thư mục", detail: "Mỗi thư mục bài nộp phải chứa một file .zip (thường là lib.zip đã nén từ thư mục lib).", tone: "amber" };
+    return { file, type: "Sai cấu trúc thư mục", detail: "Mỗi thư mục username phải chứa một file .zip của thư mục lib.", tone: "amber" };
   if (/chỉ nhận|file rỗng|quá 50mb|rỗng/i.test(msg))
     return { file, type: "File không hợp lệ", detail: msg, tone: "rose" };
   if (/duplicate entry|đã có kết quả/i.test(msg))

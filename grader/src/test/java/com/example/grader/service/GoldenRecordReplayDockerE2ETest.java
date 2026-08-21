@@ -54,6 +54,7 @@ class GoldenRecordReplayDockerE2ETest {
     @Autowired BehaviorSuiteMaterializer materializer;
     @Autowired GoldenOracleCaptureService capture;
     @Autowired GoldenValidationService validation;
+    @Autowired GoldenRuntimeService runtime;
 
     @Autowired BehaviorArtifactRepository artifactRepository;
     @Autowired GoldenValidationRunRepository validationRepository;
@@ -110,6 +111,8 @@ class GoldenRecordReplayDockerE2ETest {
                 new MockMultipartFile("file", "golden.zip", "application/zip", goldenZip()),
                 "{}");
         authoring.markGoldenSolutionReady(suiteId, goldenArtifact);
+        Map<String, Object> runtimeResult = runtime.deploy(suiteId);
+        assertEquals("READY", runtimeResult.get("status"));
         artifacts.writeGenerated(
                 suiteId,
                 BehaviorArtifactType.GRADING_ENVIRONMENT,
@@ -131,7 +134,21 @@ class GoldenRecordReplayDockerE2ETest {
                 "target", Map.of("semanticId", "action.add")));
         authoring.appendEvent(recordingId, Map.of(
                 "kind", "checkpoint", "scope", "ui",
-                "expect", Map.of("visible_texts", List.of("RECORDED_HARDCODE_VALUE"), "no_exception", true)));
+                "expect", Map.of(
+                        "semantic_nodes", List.of(
+                                Map.of(
+                                        "target", Map.of("semanticId", "field.uid"),
+                                        "role", "text_field",
+                                        "value", "RECORDED_HARDCODE_VALUE",
+                                        "enabled", true,
+                                        "visible", true),
+                                Map.of(
+                                        "target", Map.of("semanticId", "action.add"),
+                                        "role", "button",
+                                        "enabled", true,
+                                        "visible", true)),
+                        "visible_texts", List.of("RECORDED_HARDCODE_VALUE"),
+                        "no_exception", true)));
         authoring.stopRecording(recordingId, Map.of());
         artifacts.writeGenerated(
                 suiteId,

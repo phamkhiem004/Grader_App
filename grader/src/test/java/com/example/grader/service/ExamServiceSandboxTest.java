@@ -9,15 +9,18 @@ import org.junit.jupiter.api.io.TempDir;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.io.ByteArrayOutputStream;
+import java.io.ByteArrayInputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 import java.util.zip.ZipOutputStream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.argThat;
@@ -30,6 +33,28 @@ class ExamServiceSandboxTest {
 
     @TempDir
     Path tempDir;
+
+    @Test
+    void exportsByteIdenticalZipForUnchangedTestcaseFiles() throws Exception {
+        Path testcaseDir = tempDir.resolve("exams/PE_DETERMINISTIC/testcase");
+        Files.createDirectories(testcaseDir);
+        Files.writeString(testcaseDir.resolve("exam_test.dart"), "void main() {}\n");
+        Files.writeString(testcaseDir.resolve("grader.dart"), "void main() {}\n");
+        Files.writeString(testcaseDir.resolve("skills_matrix.json"), "{}\n");
+        Files.writeString(testcaseDir.resolve("contract.json"), "{\"require_keys\":false}\n");
+
+        ExamService service = serviceWithReadyBaseImage(mock(ExamRepository.class));
+        byte[] first = service.zipTestcase("PE_DETERMINISTIC");
+        byte[] second = service.zipTestcase("PE_DETERMINISTIC");
+
+        assertArrayEquals(first, second);
+        try (ZipInputStream zip = new ZipInputStream(new ByteArrayInputStream(first))) {
+            ZipEntry entry;
+            while ((entry = zip.getNextEntry()) != null) {
+                assertEquals(0L, entry.getTime(), entry.getName());
+            }
+        }
+    }
 
     @Test
     void buildsSandboxFromExistingDirectoryWithoutCreatingZip() throws Exception {

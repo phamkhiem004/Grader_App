@@ -9,6 +9,7 @@ import java.util.Optional;
 public interface BehaviorSuiteRepository extends JpaRepository<BehaviorSuite, String> {
     Optional<BehaviorSuite> findBySuiteCode(String suiteCode);
     boolean existsBySuiteCode(String suiteCode);
+    long countByGoldenAppId(String goldenAppId);
     List<BehaviorSuite> findAllByOrderByUpdatedAtDesc();
     List<BehaviorSuite> findByExamIdOrderByUpdatedAtDesc(String examId);
 }

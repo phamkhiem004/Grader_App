@@ -8,6 +8,8 @@ import jakarta.transaction.Transactional;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.*;
 import java.util.regex.Pattern;
 
@@ -32,6 +34,7 @@ public class BehaviorAuthoringService {
     private final BehaviorScenarioRepository scenarios;
     private final GoldenRecordingRepository recordings;
     private final OracleSnapshotRepository oracles;
+    private final GoldenValidationRunRepository validationRuns;
     private final SkillRepository skills;
     private final ObjectMapper mapper = new ObjectMapper().findAndRegisterModules();
 
@@ -40,12 +43,14 @@ public class BehaviorAuthoringService {
                                     BehaviorScenarioRepository scenarios,
                                     GoldenRecordingRepository recordings,
                                     OracleSnapshotRepository oracles,
+                                    GoldenValidationRunRepository validationRuns,
                                     SkillRepository skills) {
         this.goldenApps = goldenApps;
         this.suites = suites;
         this.scenarios = scenarios;
         this.recordings = recordings;
         this.oracles = oracles;
+        this.validationRuns = validationRuns;
         this.skills = skills;
     }
 
@@ -146,6 +151,27 @@ public class BehaviorAuthoringService {
 
     public Map<String, Object> getSuite(String id) {
         return suiteView(suite(id), true);
+    }
+
+    /** Xóa dữ liệu nghiệp vụ của suite sau khi controller đã dọn file runtime/artifact. */
+    @Transactional
+    public Map<String, Object> deleteSuite(String id) {
+        BehaviorSuite suite = suite(id);
+        String goldenAppId = suite.getGoldenAppId();
+        List<BehaviorScenario> suiteScenarios =
+                scenarios.findBySuiteIdOrderByDisplayOrderAscCreatedAtAsc(id);
+        suiteScenarios.forEach(row -> oracles.deleteByScenarioId(row.getId()));
+        validationRuns.deleteBySuiteId(id);
+        scenarios.deleteBySuiteId(id);
+        recordings.deleteBySuiteId(id);
+        suites.delete(suite);
+        if (suites.countByGoldenAppId(goldenAppId) == 0) {
+            goldenApps.deleteById(goldenAppId);
+        }
+        return Map.of(
+                "deleted", true,
+                "suite_id", id,
+                "suite_code", suite.getSuiteCode());
     }
 
     public Map<String, Object> getRecording(String id) {
@@ -315,6 +341,7 @@ public class BehaviorAuthoringService {
         List<Map<String, Object>> steps = new ArrayList<>();
         List<Map<String, Object>> checkpoints = new ArrayList<>();
         Map<String, Object> variables = new LinkedHashMap<>();
+        Map<String, Integer> variableOccurrences = new LinkedHashMap<>();
         int actionNo = 0;
         for (Map<String, Object> event : trace) {
             String kind = text(event, "kind", "");
@@ -330,10 +357,14 @@ public class BehaviorAuthoringService {
                 if (event.containsKey("delta")) step.put("delta", event.get("delta"));
                 if (event.containsKey("direction")) step.put("direction", event.get("direction"));
                 if ("enter_text".equals(action) && event.get("value") != null) {
-                    String variable = variableName(map(event.get("target")), actionNo);
+                    String variableBase = variableName(map(event.get("target")), actionNo);
+                    int occurrence = variableOccurrences.merge(variableBase, 1, Integer::sum);
+                    String variable = occurrence == 1 ? variableBase : variableBase + "_" + occurrence;
                     variables.put(variable, Map.of(
                             "generator", generatorFor(variable),
-                            "example", String.valueOf(event.get("value"))));
+                            "example", String.valueOf(event.get("value")),
+                            "target", variableBase,
+                            "version", occurrence));
                     step.put("value", "${" + variable + "}");
                 } else if (event.containsKey("value")) {
                     step.put("value", event.get("value"));
@@ -362,7 +393,11 @@ public class BehaviorAuthoringService {
         if (actionNo == 0) throw new IllegalStateException("Record không chứa action có thể replay");
 
         Map<String, String> examples = new LinkedHashMap<>();
-        variables.forEach((key, value) -> {
+        List<Map.Entry<String, Object>> variableEntries = new ArrayList<>(variables.entrySet());
+        Collections.reverse(variableEntries);
+        variableEntries.forEach(entry -> {
+            String key = entry.getKey();
+            Object value = entry.getValue();
             Object example = map(value).get("example");
             if (example != null && !String.valueOf(example).isBlank()) {
                 examples.put(key, String.valueOf(example));
@@ -442,7 +477,10 @@ public class BehaviorAuthoringService {
         oracle.setScenarioId(scenario.getId());
         oracle.setGoldenAppId(suite.getGoldenAppId());
         oracle.setGoldenSha256(golden(suite.getGoldenAppId()).getArtifactSha256());
-        oracle.setSeed(recording.getSeed());
+        String requestedSeed = optional(body, "seed");
+        oracle.setSeed(requestedSeed == null
+                ? deterministicSeed(steps, checkpoints, recording.getInitialStateJson(), scenario.getViewportsJson())
+                : requestedSeed);
         oracle.setInputJson(json(input));
         oracle.setUiObservationJson(recording.getFinalObservationJson());
         Map<String, Object> databaseObservation = new LinkedHashMap<>();
@@ -473,14 +511,39 @@ public class BehaviorAuthoringService {
         BehaviorScenario scenario = scenario(scenarioId);
         ensureEditable(suite(scenario.getSuiteId()));
         List<Map<String, Object>> checkpoints = readObjectList(scenario.getCheckpointsJson()).stream()
-                .filter(item -> !"hidden_output_diff".equals(text(item, "generated_from", "")))
+                .filter(item -> !Set.of("hidden_output_diff", "hidden_output_consistency")
+                        .contains(text(item, "generated_from", "")))
                 .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
+        String uiCheckpointCorpus = checkpoints.stream()
+                .filter(item -> !"database_observation".equals(text(item, "kind", "")))
+                .map(this::json)
+                .collect(java.util.stream.Collectors.joining("\n"));
         int next = checkpoints.size() + 1;
         for (Map<String, Object> raw : derived == null ? List.<Map<String, Object>>of() : derived) {
             Map<String, Object> checkpoint = map(parameterizeCaptured(raw, materializedVariables));
             validateDatabaseObservation(checkpoint);
-            checkpoint.put("generated_from", "hidden_output_diff");
-            checkpoint.put("id", "database_diff_" + next++);
+            List<String> uiValues = map(checkpoint.get("row")).values().stream()
+                    .filter(Objects::nonNull)
+                    .map(String::valueOf)
+                    .filter(value -> value.matches(".*\\$\\{[A-Za-z0-9_]+}.*"))
+                    .filter(uiCheckpointCorpus::contains)
+                    .distinct()
+                    .toList();
+            if (!uiValues.isEmpty()
+                    && !"DELETE".equals(text(checkpoint, "operation", "").toUpperCase(Locale.ROOT))) {
+                checkpoint.put("kind", "entity_consistency");
+                checkpoint.put("scope", "cross_layer");
+                checkpoint.put("action", "observe_entity_consistency");
+                checkpoint.put("browser", "flutter_tester+sqlite");
+                checkpoint.put("ui_values", uiValues);
+                checkpoint.put("generated_from", "hidden_output_consistency");
+                checkpoint.put("id", "entity_consistency_" + next++);
+                checkpoint.put("name", text(checkpoint, "operation", "READ")
+                        + " nhat quan giua input, UI va SQLite tren bang " + text(checkpoint, "table", ""));
+            } else {
+                checkpoint.put("generated_from", "hidden_output_diff");
+                checkpoint.put("id", "database_diff_" + next++);
+            }
             checkpoint.putIfAbsent("weight", 1.0);
             checkpoints.add(checkpoint);
         }
@@ -495,7 +558,8 @@ public class BehaviorAuthoringService {
                 .orElseThrow(() -> new IllegalStateException("Scenario chưa có oracle để hoàn thiện"));
         Map<String, Object> observation = new LinkedHashMap<>();
         observation.put("checkpoints", checkpoints.stream()
-                .filter(item -> "database_observation".equals(text(item, "kind", "")))
+                .filter(item -> "database_observation".equals(text(item, "kind", ""))
+                        || "entity_consistency".equals(text(item, "kind", "")))
                 .toList());
         observation.put("output_database_sha256", outputSha256);
         observation.put("captured_variables", materializedVariables == null ? Map.of() : materializedVariables);
@@ -535,12 +599,34 @@ public class BehaviorAuthoringService {
         scenarios.save(scenario);
         if (invalidatesReplay) {
             staleScenarioOracles(scenario.getId());
-            if (suite.getStatus() == BehaviorSuiteStatus.PUBLISHED) {
-                suite.setStatus(BehaviorSuiteStatus.REVIEW);
-                suites.save(suite);
-            }
+        }
+        if (suite.getStatus() == BehaviorSuiteStatus.PUBLISHED) {
+            suite.setStatus(BehaviorSuiteStatus.REVIEW);
+            suites.save(suite);
         }
         return scenarioView(scenario, true);
+    }
+
+    @Transactional
+    public Map<String, Object> deleteScenario(String scenarioId) {
+        BehaviorScenario scenario = scenario(scenarioId);
+        BehaviorSuite suite = suite(scenario.getSuiteId());
+        ensureEditable(suite);
+        String recordingId = scenario.getSourceRecordingId();
+        oracles.deleteByScenarioId(scenarioId);
+        scenarios.delete(scenario);
+        if (recordingId != null && !recordingId.isBlank()) {
+            recordings.deleteById(recordingId);
+        }
+        if (suite.getStatus() == BehaviorSuiteStatus.PUBLISHED) {
+            suite.setStatus(BehaviorSuiteStatus.REVIEW);
+            suites.save(suite);
+        }
+        return Map.of(
+                "deleted", true,
+                "id", scenarioId,
+                "suite_id", suite.getId(),
+                "scenario_code", scenario.getScenarioCode());
     }
 
     /**
@@ -705,13 +791,27 @@ public class BehaviorAuthoringService {
 
     private void validateUiObservation(Map<String, Object> event) {
         Map<String, Object> expect = map(event.get("expect"));
+        List<Object> semanticNodes = objectList(expect.get("semantic_nodes"));
+        for (Object raw : semanticNodes) {
+            Map<String, Object> node = map(raw);
+            if (map(node.get("target")).isEmpty()) {
+                throw new IllegalArgumentException("Semantic node phải có target nhận diện");
+            }
+            String role = text(node, "role", "").toLowerCase(Locale.ROOT);
+            if (!role.isEmpty() && !Set.of(
+                    "text_field", "button", "checkbox", "switch", "radio",
+                    "text", "image", "link", "generic").contains(role)) {
+                throw new IllegalArgumentException("Loại semantic node không được hỗ trợ: " + role);
+            }
+        }
         if (map(event.get("target")).isEmpty()
                 && objectList(expect.get("visible_texts")).isEmpty()
                 && objectList(expect.get("hidden_texts")).isEmpty()
+                && semanticNodes.isEmpty()
                 && event.get("text") == null
                 && !bool(event.get("no_exception"), false)) {
             throw new IllegalArgumentException(
-                    "Checkpoint UI phải có target, visible_texts, hidden_texts, text hoặc no_exception");
+                    "Checkpoint UI phải có target, semantic_nodes, visible_texts, hidden_texts, text hoặc no_exception");
         }
         event.putIfAbsent("checkpoint", true);
         event.putIfAbsent("scope", "ui");
@@ -819,6 +919,27 @@ public class BehaviorAuthoringService {
 
     private String timestamp(Instant value) {
         return value == null ? null : value.toString();
+    }
+
+    /** Seed dựa trên nội dung hành vi, không phụ thuộc UUID hay thời điểm record. */
+    private String deterministicSeed(List<Map<String, Object>> steps,
+                                     List<Map<String, Object>> checkpoints,
+                                     String initialStateJson,
+                                     String viewportsJson) {
+        Map<String, Object> source = new TreeMap<>();
+        source.put("steps", steps);
+        source.put("checkpoints", checkpoints);
+        source.put("initial_state", readObject(initialStateJson));
+        source.put("viewports", readArray(viewportsJson));
+        try {
+            ObjectMapper canonical = mapper.copy()
+                    .enable(com.fasterxml.jackson.databind.SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS);
+            byte[] bytes = canonical.writeValueAsString(source).getBytes(StandardCharsets.UTF_8);
+            String hash = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
+            return "rar-v1-" + hash.substring(0, 24);
+        } catch (Exception e) {
+            throw new IllegalStateException("Không sinh được seed tất định", e);
+        }
     }
 
     private GoldenApp golden(String id) {

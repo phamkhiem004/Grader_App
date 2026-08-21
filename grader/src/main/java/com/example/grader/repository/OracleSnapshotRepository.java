@@ -10,4 +10,5 @@ public interface OracleSnapshotRepository extends JpaRepository<OracleSnapshot, 
     List<OracleSnapshot> findByScenarioIdOrderByCreatedAtDesc(String scenarioId);
     Optional<OracleSnapshot> findFirstByScenarioIdOrderByCreatedAtDesc(String scenarioId);
     Optional<OracleSnapshot> findFirstByScenarioIdAndSeedOrderByCreatedAtDesc(String scenarioId, String seed);
+    void deleteByScenarioId(String scenarioId);
 }

@@ -866,8 +866,13 @@ public class ExamService {
     private byte[] zipBytes(Map<String, String> files) throws Exception {
         var bos = new java.io.ByteArrayOutputStream();
         try (var zos = new java.util.zip.ZipOutputStream(bos)) {
-            for (var e : files.entrySet()) {
-                zos.putNextEntry(new java.util.zip.ZipEntry(e.getKey()));
+            for (var e : files.entrySet().stream()
+                    .sorted(Map.Entry.comparingByKey())
+                    .toList()) {
+                var entry = new java.util.zip.ZipEntry(e.getKey());
+                // Không để thời điểm tải xuống làm hai ZIP có cùng nội dung khác checksum.
+                entry.setTime(0L);
+                zos.putNextEntry(entry);
                 zos.write((e.getValue() == null ? "" : e.getValue()).getBytes(StandardCharsets.UTF_8));
                 zos.closeEntry();
             }

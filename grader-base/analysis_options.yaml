@@ -1,0 +1,30 @@
+# Bộ luật nền cho mã nguồn Flutter của sinh viên.
+# Giữ danh sách ngắn và ổn định để mỗi cảnh báo đều có ý nghĩa chấm điểm rõ ràng.
+analyzer:
+  exclude:
+    - build/**
+    - .dart_tool/**
+    - lib/*.g.dart
+    - lib/**/*.g.dart
+    - lib/*.freezed.dart
+    - lib/**/*.freezed.dart
+
+linter:
+  rules:
+    # Hợp đồng mã nguồn dễ đọc và kiểm tra.
+    - always_declare_return_types
+    - annotate_overrides
+
+    # Tránh nhánh rỗng hoặc mã không tạo ra tác dụng.
+    - avoid_empty_else
+    - empty_catches
+    - unnecessary_statements
+
+    # Bắt lỗi logic có thể làm ứng dụng trả kết quả sai hoặc crash.
+    - unrelated_type_equality_checks
+    - valid_regexps
+    - use_build_context_synchronously
+
+    # Phát hiện tài nguyên bất đồng bộ không được giải phóng.
+    - cancel_subscriptions
+    - close_sinks

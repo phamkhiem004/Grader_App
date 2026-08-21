@@ -179,6 +179,29 @@ public class BehaviorArtifactService {
                 .map(this::view).toList();
     }
 
+    /** Xóa cả metadata và thư mục artifact của một suite, không chạm suite khác. */
+    @Transactional
+    public void deleteSuiteArtifacts(String suiteId) {
+        requireSuite(suiteId);
+        Path root = artifactRoot();
+        Path target = root.resolve(suiteId).normalize();
+        if (!target.startsWith(root) || target.equals(root)) {
+            throw new IllegalStateException("Đường dẫn xóa artifact không an toàn");
+        }
+        try {
+            if (Files.exists(target)) {
+                try (var paths = Files.walk(target)) {
+                    for (Path path : paths.sorted(Comparator.reverseOrder()).toList()) {
+                        Files.deleteIfExists(path);
+                    }
+                }
+            }
+            artifacts.deleteBySuiteId(suiteId);
+        } catch (Exception e) {
+            throw new IllegalStateException("Không xóa được artifact của bộ chấm: " + e.getMessage(), e);
+        }
+    }
+
     public Resource resource(String suiteId, BehaviorArtifactType type) {
         BehaviorArtifact artifact = active(suiteId, type);
         try {

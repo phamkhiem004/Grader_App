@@ -105,6 +105,17 @@ public class BehaviorAuthoringController {
         });
     }
 
+    @DeleteMapping("/suites/{id}")
+    public ResponseEntity<?> deleteSuite(@PathVariable String id) {
+        return call(() -> {
+            // Chỉ gỡ testcase publish khi manifest xác nhận đúng chủ sở hữu.
+            materializer.deletePublishedBundleIfOwned(id);
+            runtimeService.deleteSuiteRuntime(id);
+            artifactService.deleteSuiteArtifacts(id);
+            return service.deleteSuite(id);
+        });
+    }
+
     @PostMapping("/suites/{id}/recordings")
     public ResponseEntity<?> startRecording(@PathVariable String id,
                                             @RequestBody(required = false) Map<String, Object> body) {
@@ -199,6 +210,16 @@ public class BehaviorAuthoringController {
             }
             writeTestcaseDefinition(suiteId, scenario.get("scenario_code"));
             return scenario;
+        });
+    }
+
+    @DeleteMapping("/scenarios/{id}")
+    public ResponseEntity<?> deleteScenario(@PathVariable String id) {
+        return call(() -> {
+            Map<String, Object> deleted = service.deleteScenario(id);
+            writeTestcaseDefinition(String.valueOf(deleted.get("suite_id")),
+                    deleted.get("scenario_code"));
+            return deleted;
         });
     }
 
@@ -299,6 +320,18 @@ public class BehaviorAuthoringController {
     @GetMapping("/suites/{id}/execution-plan")
     public ResponseEntity<?> executionPlan(@PathVariable String id) {
         return call(() -> service.executionPlan(id));
+    }
+
+    @GetMapping("/suites/{id}/code-preview")
+    public ResponseEntity<?> codePreview(
+            @PathVariable String id,
+            @RequestParam(value = "scenarioCode", required = false) String scenarioCode) {
+        return call(() -> materializer.previewCode(id, scenarioCode));
+    }
+
+    @GetMapping("/suites/{id}/determinism")
+    public ResponseEntity<?> determinism(@PathVariable String id) {
+        return call(() -> materializer.determinismReport(id));
     }
 
     private void writeTestcaseDefinition(String suiteId, Object changedScenarioCode) throws Exception {

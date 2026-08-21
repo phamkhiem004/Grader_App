@@ -9,4 +9,5 @@ import java.util.Optional;
 public interface GoldenValidationRunRepository extends JpaRepository<GoldenValidationRun, String> {
     List<GoldenValidationRun> findBySuiteIdOrderByCreatedAtDesc(String suiteId);
     Optional<GoldenValidationRun> findFirstBySuiteIdOrderByCreatedAtDesc(String suiteId);
+    void deleteBySuiteId(String suiteId);
 }

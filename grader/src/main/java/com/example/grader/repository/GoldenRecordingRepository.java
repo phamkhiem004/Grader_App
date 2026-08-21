@@ -15,6 +15,7 @@ import java.util.Optional;
 public interface GoldenRecordingRepository extends JpaRepository<GoldenRecording, String> {
     List<GoldenRecording> findBySuiteIdOrderByStartedAtDesc(String suiteId);
     long countBySuiteIdAndStatus(String suiteId, RecordingStatus status);
+    void deleteBySuiteId(String suiteId);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select recording from GoldenRecording recording where recording.id = :id")

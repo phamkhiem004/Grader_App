@@ -29,6 +29,7 @@ import java.util.zip.ZipFile;
 public class GoldenRuntimeService {
     private static final long MAX_EXPANDED_BYTES = 1_000L * 1024 * 1024;
     private static final int MAX_ZIP_ENTRIES = 20_000;
+    private static final String RECORDER_BRIDGE_VERSION = "semantic-v2";
 
     @Value("${grader.base-image:grading-base:latest}")
     private String baseImage;
@@ -63,7 +64,7 @@ public class GoldenRuntimeService {
         BehaviorSuite suite = suite(suiteId);
         GoldenApp app = golden(suite.getGoldenAppId());
         BehaviorArtifact golden = artifacts.active(suiteId, BehaviorArtifactType.GOLDEN_SOLUTION);
-        Path finalRoot = runtimeRoot().resolve(safeSegment(suiteId)).resolve(golden.getSha256()).normalize();
+        Path finalRoot = runtimeRoot().resolve(safeSegment(suiteId)).resolve(runtimeVersion(golden)).normalize();
         Path index = finalRoot.resolve("index.html");
         String runtimePath = runtimePath(suiteId);
 
@@ -151,16 +152,26 @@ public class GoldenRuntimeService {
         try {
             BehaviorArtifact golden = artifacts.active(suiteId, BehaviorArtifactType.GOLDEN_SOLUTION);
             available = Files.isRegularFile(runtimeRoot().resolve(safeSegment(suiteId))
-                    .resolve(golden.getSha256()).resolve("index.html"));
+                    .resolve(runtimeVersion(golden)).resolve("index.html"));
         } catch (Exception ignored) {
         }
         return view(app, runtimePath, available, available,
                 available ? "Golden runtime da san sang." : "Chua build runtime.");
     }
 
+    /** Dọn toàn bộ bản build web của đúng suite đã xóa. */
+    public void deleteSuiteRuntime(String suiteId) {
+        Path root = runtimeRoot();
+        Path target = root.resolve(safeSegment(suiteId)).normalize();
+        if (!target.startsWith(root) || target.equals(root)) {
+            throw new IllegalStateException("Duong dan xoa Golden runtime khong an toan");
+        }
+        deleteQuietly(target);
+    }
+
     public RuntimeFile resource(String suiteId, String assetPath) {
         BehaviorArtifact golden = artifacts.active(suiteId, BehaviorArtifactType.GOLDEN_SOLUTION);
-        Path root = runtimeRoot().resolve(safeSegment(suiteId)).resolve(golden.getSha256()).normalize();
+        Path root = runtimeRoot().resolve(safeSegment(suiteId)).resolve(runtimeVersion(golden)).normalize();
         String clean = assetPath == null || assetPath.isBlank() ? "index.html" : assetPath.replace('\\', '/');
         while (clean.startsWith("/")) clean = clean.substring(1);
         Path target = root.resolve(clean).normalize();
@@ -241,16 +252,64 @@ public class GoldenRuntimeService {
                   const scrollOffsets = new WeakMap();
                   const send = payload => window.parent.postMessage({type: TYPE, payload}, '*');
                   const textOf = el => ((el && (el.innerText || el.textContent)) || '').replace(/\\s+/g, ' ').trim();
+                  const attr = (el, ...names) => {
+                    for (const name of names) {
+                      const value = el.getAttribute(name);
+                      if (value != null && value.trim()) return value.trim();
+                    }
+                    return '';
+                  };
+                  const boolAttr = (el, name, fallback) => {
+                    const value = el.getAttribute(name);
+                    return value == null ? fallback : value !== 'false';
+                  };
+                  function roleOf(el) {
+                    const declared = attr(el, 'role').toLowerCase();
+                    const type = attr(el, 'type').toLowerCase();
+                    if (type === 'checkbox' || declared === 'checkbox') return 'checkbox';
+                    if (type === 'radio' || declared === 'radio') return 'radio';
+                    if (declared === 'switch') return 'switch';
+                    if (declared === 'textbox' || el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) return 'text_field';
+                    if (declared === 'button' || el instanceof HTMLButtonElement) return 'button';
+                    if (declared === 'img') return 'image';
+                    if (declared === 'link') return 'link';
+                    return 'text';
+                  }
+                  function targetOf(el) {
+                    const semanticId = attr(el, 'data-semantic-id', 'data-semantics-id');
+                    if (semanticId) return {semanticId};
+                    const label = attr(el, 'aria-label', 'data-semantics-label');
+                    if (label && label !== 'Enable accessibility') return {label};
+                    const hint = attr(el, 'placeholder');
+                    if (hint) return {hint};
+                    const text = textOf(el);
+                    return text && text.length <= 120 ? {text} : {};
+                  }
+                  function semanticState(el) {
+                    const target = targetOf(el);
+                    if (!Object.keys(target).length) return null;
+                    const role = roleOf(el);
+                    const rect = el.getBoundingClientRect();
+                    const style = getComputedStyle(el);
+                    const state = {target, role, visible: rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden'};
+                    const value = el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement
+                      ? el.value : attr(el, 'aria-valuetext', 'aria-value-now');
+                    if (value !== '') state.value = value;
+                    if (['text_field', 'button', 'checkbox', 'switch', 'radio'].includes(role)) {
+                      state.enabled = !('disabled' in el && el.disabled) && !boolAttr(el, 'aria-disabled', false);
+                    }
+                    if (['checkbox', 'switch', 'radio'].includes(role)) {
+                      state.checked = el instanceof HTMLInputElement ? el.checked : boolAttr(el, 'aria-checked', false);
+                    }
+                    return state;
+                  }
                   function semanticNode(event) {
                     const path = event.composedPath ? event.composedPath() : [];
                     for (const node of path) {
                       if (!(node instanceof Element)) continue;
-                      const label = node.getAttribute('aria-label') || node.getAttribute('data-semantics-label');
-                      if (label && label !== 'Enable accessibility') return {target: {label}, attribute: 'label', attributeValue: label};
-                      const hint = node.getAttribute('placeholder');
-                      if (hint) return {target: {hint}, attribute: 'hint', attributeValue: hint};
-                      const text = textOf(node);
-                      if (text && text.length <= 120) return {target: {text}, attribute: 'text', attributeValue: text};
+                      const target = targetOf(node);
+                      const key = Object.keys(target)[0];
+                      if (key) return {target, attribute: key, attributeValue: target[key]};
                     }
                     return null;
                   }
@@ -293,12 +352,18 @@ public class GoldenRuntimeService {
                     }, 250));
                   }, true);
                   function snapshot() {
-                    const texts = new Set();
-                    document.querySelectorAll('[aria-label], [data-semantics-label]').forEach(node => {
-                      const label = node.getAttribute('aria-label') || node.getAttribute('data-semantics-label');
-                      if (label && label !== 'Enable accessibility' && label.length <= 200) texts.add(label);
+                    const nodes = [];
+                    const seen = new Set();
+                    document.querySelectorAll('[aria-label], [data-semantics-label], [data-semantic-id], [data-semantics-id], input, textarea, button, [role]').forEach(node => {
+                      if (!(node instanceof Element)) return;
+                      const state = semanticState(node);
+                      if (!state || state.target.label === 'Enable accessibility') return;
+                      const signature = JSON.stringify([state.target, state.role, state.value, state.enabled, state.checked]);
+                      if (seen.has(signature)) return;
+                      seen.add(signature);
+                      nodes.push(state);
                     });
-                    send({kind: 'checkpoint', checkpoint: true, scope: 'ui', stage: 'ASSERT', attribute: 'text', attributeValue: '', valueType: 'json', value: [...texts], action: 'observe_ui', browser: 'flutter_tester', expect: {visible_texts: [...texts], hidden_texts: [], no_exception: true}});
+                    send({kind: 'checkpoint', checkpoint: true, scope: 'ui', stage: 'ASSERT', attribute: 'semantic_nodes', attributeValue: '', valueType: 'json', value: nodes, action: 'observe_ui', browser: 'flutter_tester', expect: {semantic_nodes: nodes, no_exception: true}});
                   }
                   window.addEventListener('message', event => {
                     if (event.data && event.data.type === COMMAND && event.data.action === 'snapshot_ui') snapshot();
@@ -421,6 +486,10 @@ public class GoldenRuntimeService {
 
     private String runtimePath(String suiteId) {
         return "/api/behavior-authoring/runtime/" + safeSegment(suiteId) + "/";
+    }
+
+    private String runtimeVersion(BehaviorArtifact golden) {
+        return golden.getSha256() + "-" + RECORDER_BRIDGE_VERSION;
     }
 
     private String safeSegment(String value) {

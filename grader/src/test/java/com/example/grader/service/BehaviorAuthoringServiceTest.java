@@ -22,14 +22,152 @@ class BehaviorAuthoringServiceTest {
     @Autowired GoldenRecordingRepository recordingRepository;
     @Autowired BehaviorSuiteRepository suiteRepository;
     @Autowired GoldenAppRepository goldenAppRepository;
+    @Autowired GoldenValidationRunRepository validationRunRepository;
 
     @AfterEach
     void cleanup() {
+        validationRunRepository.deleteAll();
         oracleRepository.deleteAll();
         scenarioRepository.deleteAll();
         recordingRepository.deleteAll();
         suiteRepository.deleteAll();
         goldenAppRepository.deleteAll();
+    }
+
+    @Test
+    void identicalRecordingsProduceIdenticalReplaySemanticsAndSeed() {
+        Map<String, Object> first = createEquivalentScenario("DETERMINISTIC_A");
+        Map<String, Object> second = createEquivalentScenario("DETERMINISTIC_B");
+
+        for (String field : List.of("variables", "initial_state", "steps", "checkpoints", "viewports")) {
+            assertEquals(first.get(field), second.get(field), field + " phải giống nhau");
+        }
+        Map<?, ?> firstOracle = (Map<?, ?>) first.get("oracle");
+        Map<?, ?> secondOracle = (Map<?, ?>) second.get("oracle");
+        assertEquals(firstOracle.get("seed"), secondOracle.get("seed"));
+        assertTrue(String.valueOf(firstOracle.get("seed")).startsWith("rar-v1-"));
+    }
+
+    @Test
+    void deleteSuiteRemovesItsDomainRowsAndUnusedGoldenApp() {
+        Map<String, Object> scenario = createEquivalentScenario("DELETE_GOLDEN_SUITE");
+        String suiteId = String.valueOf(scenario.get("suite_id"));
+        String scenarioId = String.valueOf(scenario.get("id"));
+        String goldenId = suiteRepository.findById(suiteId).orElseThrow().getGoldenAppId();
+
+        Map<String, Object> deleted = service.deleteSuite(suiteId);
+
+        assertEquals(true, deleted.get("deleted"));
+        assertFalse(suiteRepository.existsById(suiteId));
+        assertFalse(scenarioRepository.existsById(scenarioId));
+        assertTrue(recordingRepository.findBySuiteIdOrderByStartedAtDesc(suiteId).isEmpty());
+        assertFalse(goldenAppRepository.existsById(goldenId));
+    }
+
+    @Test
+    void repeatedInputUsesLatestVersionForUiAndDatabaseConsistency() {
+        Map<String, Object> golden = service.registerGoldenApp(Map.of(
+                "name", "Golden versioned input",
+                "runtime_url", "http://localhost:9010",
+                "ready", true));
+        Map<String, Object> suite = service.createSuite(Map.of(
+                "suite_code", "VERSIONED_INPUT",
+                "name", "Versioned input suite",
+                "golden_app_id", golden.get("id")));
+        Map<String, Object> recording = service.startRecording(String.valueOf(suite.get("id")), Map.of(
+                "name", "Add final user"));
+        String recordingId = String.valueOf(recording.get("id"));
+        service.appendEvent(recordingId, Map.of(
+                "kind", "action", "action", "enter_text",
+                "target", Map.of("semanticId", "field.email"),
+                "value", "invalid"));
+        service.appendEvent(recordingId, Map.of(
+                "kind", "action", "action", "enter_text",
+                "target", Map.of("semanticId", "field.email"),
+                "value", "final@example.com"));
+        service.appendEvent(recordingId, Map.of(
+                "kind", "action", "action", "tap",
+                "target", Map.of("semanticId", "action.add")));
+        service.appendEvent(recordingId, Map.of(
+                "kind", "checkpoint", "action", "observe_ui",
+                "expect", Map.of("visible_texts", List.of("final@example.com"), "no_exception", true)));
+        service.stopRecording(recordingId, Map.of());
+
+        Map<String, Object> scenario = service.abstractRecording(recordingId, Map.of(
+                "scenario_code", "ADD_FINAL_USER"));
+        Map<?, ?> variables = (Map<?, ?>) scenario.get("variables");
+        assertTrue(variables.containsKey("field_email"));
+        assertTrue(variables.containsKey("field_email_2"));
+        List<?> steps = (List<?>) scenario.get("steps");
+        assertEquals("${field_email}", ((Map<?, ?>) steps.get(0)).get("value"));
+        assertEquals("${field_email_2}", ((Map<?, ?>) steps.get(1)).get("value"));
+
+        Map<String, Object> completed = service.applyDerivedDatabaseCheckpoints(
+                String.valueOf(scenario.get("id")),
+                List.of(Map.of(
+                        "kind", "database_observation",
+                        "table", "users",
+                        "operation", "INSERT",
+                        "row", Map.of("email", "generated-final@example.test"))),
+                Map.of(
+                        "field_email", "generated-first@example.test",
+                        "field_email_2", "generated-final@example.test"),
+                "c".repeat(64));
+        List<?> checkpoints = (List<?>) completed.get("checkpoints");
+        Map<?, ?> consistency = checkpoints.stream()
+                .map(Map.class::cast)
+                .filter(item -> "entity_consistency".equals(item.get("kind")))
+                .findFirst().orElseThrow();
+        assertEquals("cross_layer", consistency.get("scope"));
+        assertEquals(List.of("${field_email_2}"), consistency.get("ui_values"));
+        assertEquals("${field_email_2}", ((Map<?, ?>) consistency.get("row")).get("email"));
+    }
+
+    @Test
+    void deleteScenarioRemovesScenarioOracleAndSourceRecording() {
+        Map<String, Object> scenario = createEquivalentScenario("DELETE_SINGLE_SCENARIO");
+        String scenarioId = String.valueOf(scenario.get("id"));
+        String recordingId = String.valueOf(scenario.get("source_recording_id"));
+
+        Map<String, Object> deleted = service.deleteScenario(scenarioId);
+
+        assertEquals(true, deleted.get("deleted"));
+        assertFalse(scenarioRepository.existsById(scenarioId));
+        assertFalse(recordingRepository.existsById(recordingId));
+        assertTrue(oracleRepository.findByScenarioIdOrderByCreatedAtDesc(scenarioId).isEmpty());
+    }
+
+    private Map<String, Object> createEquivalentScenario(String suiteCode) {
+        Map<String, Object> golden = service.registerGoldenApp(Map.of(
+                "name", "Golden " + suiteCode,
+                "runtime_url", "http://localhost:9010",
+                "ready", true));
+        Map<String, Object> suite = service.createSuite(Map.of(
+                "suite_code", suiteCode,
+                "name", "Deterministic suite",
+                "golden_app_id", golden.get("id")));
+        Map<String, Object> recording = service.startRecording(String.valueOf(suite.get("id")), Map.of(
+                "name", "Add user",
+                "viewport", Map.of("width", 390, "height", 844, "device_pixel_ratio", 1)));
+        String recordingId = String.valueOf(recording.get("id"));
+        service.appendEvent(recordingId, Map.of(
+                "kind", "action", "action", "enter_text",
+                "target", Map.of("semanticId", "field.email"),
+                "value", "student@example.com"));
+        service.appendEvent(recordingId, Map.of(
+                "kind", "action", "action", "tap",
+                "target", Map.of("semanticId", "action.add")));
+        service.appendEvent(recordingId, Map.of(
+                "kind", "checkpoint", "action", "observe_ui",
+                "expect", Map.of("visible_texts", List.of("student@example.com"), "no_exception", true)));
+        service.stopRecording(recordingId, Map.of());
+        return service.abstractRecording(recordingId, Map.of(
+                "scenario_code", "ADD_USER",
+                "name", "Add user",
+                "weight", 2.0,
+                "viewports", List.of(Map.of(
+                        "name", "phone", "width", 390, "height", 844,
+                        "device_pixel_ratio", 1))));
     }
 
     @Test
@@ -113,6 +251,45 @@ class BehaviorAuthoringServiceTest {
                 service.appendEvent(String.valueOf(recording.get("id")), Map.of(
                         "kind", "action", "action", "tap", "x", 20, "y", 40)));
         assertTrue(error.getMessage().contains("target ngữ nghĩa"));
+    }
+
+    @Test
+    void recordsSemanticUiStateAndRejectsUnsupportedRole() {
+        Map<String, Object> golden = service.registerGoldenApp(Map.of(
+                "name", "Golden semantic",
+                "runtime_url", "http://localhost:9010",
+                "ready", true));
+        Map<String, Object> suite = service.createSuite(Map.of(
+                "suite_code", "SEMANTIC_UI_STATE",
+                "name", "Semantic UI state",
+                "golden_app_id", golden.get("id")));
+        Map<String, Object> recording = service.startRecording(String.valueOf(suite.get("id")), Map.of());
+        String recordingId = String.valueOf(recording.get("id"));
+
+        Map<String, Object> semanticNode = Map.of(
+                "target", Map.of("label", "Email"),
+                "role", "text_field",
+                "visible", true,
+                "value", "student@example.com",
+                "enabled", true);
+        Map<String, Object> appended = service.appendEvent(recordingId, Map.of(
+                "kind", "checkpoint",
+                "action", "observe_ui",
+                "expect", Map.of(
+                        "semantic_nodes", List.of(semanticNode),
+                        "no_exception", true)));
+        @SuppressWarnings("unchecked")
+        Map<String, Object> event = (Map<String, Object>) appended.get("event");
+        assertEquals("semantic_nodes", ((Map<?, ?>) event.get("expect")).keySet().stream()
+                .filter("semantic_nodes"::equals).findFirst().orElseThrow());
+
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class, () ->
+                service.appendEvent(recordingId, Map.of(
+                        "kind", "checkpoint",
+                        "expect", Map.of("semantic_nodes", List.of(Map.of(
+                                "target", Map.of("label", "Email"),
+                                "role", "unknown_widget"))))));
+        assertTrue(error.getMessage().contains("Loại semantic node"));
     }
 
     @Test

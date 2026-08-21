@@ -14,4 +14,5 @@ public interface BehaviorArtifactRepository extends JpaRepository<BehaviorArtifa
     List<BehaviorArtifact> findBySuiteIdAndArtifactTypeAndActiveTrue(
             String suiteId, BehaviorArtifactType artifactType);
     long countBySuiteIdAndArtifactType(String suiteId, BehaviorArtifactType artifactType);
+    void deleteBySuiteId(String suiteId);
 }

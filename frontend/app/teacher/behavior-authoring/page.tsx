@@ -5,9 +5,9 @@ import { useSearchParams } from "next/navigation";
 import SidebarLayout from "@/components/layout/SidebarLayout";
 import { API_BASE } from "@/lib/config";
 import {
-  Check, CheckCircle2, Circle, Database, FileArchive, FileJson,
-  Loader2, MonitorPlay, Play, Plus, Radio, Send, ShieldCheck,
-  Square, Trash2, UploadCloud, XCircle,
+  Check, CheckCircle2, Circle, Code2, Copy, Database, FileArchive, FileJson,
+  Loader2, MonitorPlay, Pencil, Play, Plus, Radio, Send, ShieldCheck,
+  Square, Trash2, UploadCloud, X, XCircle,
 } from "lucide-react";
 
 type JsonMap = Record<string, unknown>;
@@ -27,6 +27,8 @@ interface Artifact { id: string; type: ArtifactType; version: number; file_name:
 interface Readiness { ready: boolean; missing: ArtifactType[]; artifacts: Partial<Record<ArtifactType, Artifact | null>> }
 interface GoldenValidation { status: "NOT_RUN" | "RUNNING" | "PASSED" | "FAILED" | "UNAVAILABLE"; current: boolean; total_checkpoints?: number; passed_checkpoints?: number; log?: string }
 interface RuntimeStatus { status: string; runtime_url?: string | null; runtime_path?: string | null; available?: boolean; cached?: boolean; message?: string; metadata?: JsonMap }
+interface CodePreviewFile { name: string; description: string; scope: "SCENARIO" | "BUNDLE" | "ENGINE"; content: string }
+interface CodePreview { suite_id: string; suite_code: string; selected_scenario_code?: string | null; scenario_count: number; criterion_count: number; files: CodePreviewFile[] }
 
 const ARTIFACTS: { type: ArtifactType; title: string; owner: "teacher" | "system"; accept: string; hint: string; icon: typeof Database }[] = [
   { type: "STUDENT_DATABASE", title: "1. Database phát cho sinh viên", owner: "teacher", accept: ".db,.sqlite,.sqlite3", hint: "Dữ liệu mẫu công khai đi cùng đề.", icon: Database },
@@ -40,6 +42,17 @@ const ARTIFACTS: { type: ArtifactType; title: string; owner: "teacher" | "system
 
 const ACTIONS = ["boot", "tap", "enter_text", "clear_text", "scroll", "back", "restart", "wait_until"];
 const LOCATORS = ["semanticId", "valueKey", "label", "hint", "text"];
+const SEMANTIC_ROLES = [
+  ["generic", "Không kiểm tra loại"],
+  ["text_field", "Ô nhập liệu"],
+  ["button", "Nút bấm"],
+  ["checkbox", "Checkbox"],
+  ["switch", "Switch"],
+  ["radio", "Radio"],
+  ["text", "Nội dung text"],
+  ["image", "Hình ảnh / icon"],
+  ["link", "Liên kết"],
+] as const;
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
@@ -96,6 +109,10 @@ function BehaviorAuthoringEditor() {
   const [checkpointLocator, setCheckpointLocator] = useState("semanticId");
   const [checkpointLocatorValue, setCheckpointLocatorValue] = useState("");
   const [checkpointVisible, setCheckpointVisible] = useState(true);
+  const [checkpointRole, setCheckpointRole] = useState("generic");
+  const [checkpointValue, setCheckpointValue] = useState("");
+  const [checkpointEnabled, setCheckpointEnabled] = useState("ignore");
+  const [checkpointChecked, setCheckpointChecked] = useState("ignore");
   const [databaseTable, setDatabaseTable] = useState("");
   const [databaseOperation, setDatabaseOperation] = useState("READ");
   const [databaseRow, setDatabaseRow] = useState("{}");
@@ -108,6 +125,11 @@ function BehaviorAuthoringEditor() {
   const [testDesktop, setTestDesktop] = useState(true);
   const [desktopWidth, setDesktopWidth] = useState(1280);
   const [desktopHeight, setDesktopHeight] = useState(800);
+  const [codePreview, setCodePreview] = useState<CodePreview | null>(null);
+  const [previewFileName, setPreviewFileName] = useState("");
+  const [editingScenario, setEditingScenario] = useState<JsonMap | null>(null);
+  const [editingScenarioName, setEditingScenarioName] = useState("");
+  const [editingScenarioWeight, setEditingScenarioWeight] = useState(1);
   const goldenFrame = useRef<HTMLIFrameElement | null>(null);
   // The Golden iframe can still emit a debounced event immediately after Stop.
   // Keep an imperative session guard so those late events never reach a closed
@@ -120,6 +142,10 @@ function BehaviorAuthoringEditor() {
     try { return previewUrl ? new URL(previewUrl).origin : ""; }
     catch { return ""; }
   }, [previewUrl]);
+  const previewFile = useMemo(
+    () => codePreview?.files.find((file) => file.name === previewFileName) || codePreview?.files[0] || null,
+    [codePreview, previewFileName],
+  );
 
   useEffect(() => setRecorderReady(false), [previewUrl]);
 
@@ -231,6 +257,16 @@ function BehaviorAuthoringEditor() {
     window.history.replaceState(null, "", "/teacher/archive");
   };
 
+  const deleteSuite = (selected: Suite) => {
+    if (!window.confirm(`Xóa vĩnh viễn bộ chấm “${selected.name}” và toàn bộ record, oracle, artifact, runtime liên quan?`)) return;
+    run(`delete-suite-${selected.id}`, async () => {
+      await api(`/behavior-authoring/suites/${selected.id}`, { method: "DELETE" });
+      setAvailableSuites((current) => current.filter((item) => item.id !== selected.id));
+      if (suite?.id === selected.id) closeSuite();
+      setNotice(`Đã xóa bộ chấm ${selected.suite_code}.`);
+    });
+  };
+
   const uploadArtifact = (type: ArtifactType, file?: File) => {
     if (!suite || !file) return;
     run(`upload-${type}`, async () => {
@@ -314,9 +350,19 @@ function BehaviorAuthoringEditor() {
           no_exception: true,
         };
       } else if (uiCheckpointType === "component") {
-        event.target = { [checkpointLocator]: checkpointLocatorValue.trim() };
-        event.visible = checkpointVisible;
-        event.expect = { visible: checkpointVisible, no_exception: true };
+        const semanticNode: JsonMap = {
+          target: { [checkpointLocator]: checkpointLocatorValue.trim() },
+          role: checkpointRole,
+          visible: checkpointVisible,
+        };
+        if (checkpointValue.trim()) semanticNode.value = checkpointValue;
+        if (checkpointEnabled !== "ignore") semanticNode.enabled = checkpointEnabled === "true";
+        if (checkpointChecked !== "ignore") semanticNode.checked = checkpointChecked === "true";
+        event.attribute = "semantic_nodes";
+        event.attributeValue = checkpointLocatorValue.trim();
+        event.valueType = "json";
+        event.value = [semanticNode];
+        event.expect = { semantic_nodes: [semanticNode], no_exception: true };
       } else {
         event.no_exception = true;
         event.expect = { no_exception: true };
@@ -327,6 +373,7 @@ function BehaviorAuthoringEditor() {
       });
       await refresh(suite.id);
       setCheckpointText(""); setHiddenCheckpointText(""); setCheckpointLocatorValue("");
+      setCheckpointValue(""); setCheckpointEnabled("ignore"); setCheckpointChecked("ignore");
     });
   };
 
@@ -412,6 +459,50 @@ function BehaviorAuthoringEditor() {
     setNotice(`Golden Solution đã pass ${result.passed_checkpoints}/${result.total_checkpoints} checkpoint.`);
   });
 
+  const openCodePreview = (selectedScenarioCode?: string) => suite && run("code-preview", async () => {
+    const query = selectedScenarioCode
+      ? `?scenarioCode=${encodeURIComponent(selectedScenarioCode)}`
+      : "";
+    const result = await api<CodePreview>(`/behavior-authoring/suites/${suite.id}/code-preview${query}`);
+    setCodePreview(result);
+    setPreviewFileName(result.files[0]?.name || "");
+  });
+
+  const openScenarioEditor = (item: JsonMap) => {
+    setEditingScenario(item);
+    setEditingScenarioName(String(item.name || item.scenario_code || ""));
+    setEditingScenarioWeight(Number(item.weight || 1));
+  };
+
+  const saveScenario = () => {
+    if (!suite || !editingScenario?.id || !editingScenarioName.trim()) return;
+    const scenarioId = String(editingScenario.id);
+    run(`edit-scenario-${scenarioId}`, async () => {
+      await api(`/behavior-authoring/scenarios/${scenarioId}`, {
+        method: "PUT",
+        body: JSON.stringify({
+          name: editingScenarioName.trim(),
+          weight: editingScenarioWeight,
+        }),
+      });
+      setEditingScenario(null);
+      await refresh(suite.id);
+      setNotice("Đã cập nhật scenario. Hãy chạy lại preflight trước khi publish.");
+    });
+  };
+
+  const deleteScenario = (item: JsonMap) => {
+    if (!suite || !item.id) return;
+    const scenarioName = String(item.name || item.scenario_code || "scenario");
+    if (!window.confirm(`Xóa scenario “${scenarioName}”, oracle và bản record nguồn của nó?`)) return;
+    const scenarioId = String(item.id);
+    run(`delete-scenario-${scenarioId}`, async () => {
+      await api(`/behavior-authoring/scenarios/${scenarioId}`, { method: "DELETE" });
+      await refresh(suite.id);
+      setNotice(`Đã xóa scenario ${scenarioName}.`);
+    });
+  };
+
   useEffect(() => {
     const receive = (event: MessageEvent) => {
       if (runtimeOrigin && event.origin !== runtimeOrigin) return;
@@ -443,14 +534,14 @@ function BehaviorAuthoringEditor() {
         )}
 
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-3"><div><p className="text-xs font-bold uppercase tracking-widest text-indigo-500">Bước 1</p><h2 className="text-xl font-bold">{suite ? "Thông tin bộ chấm" : "Chọn hoặc khởi tạo Golden suite"}</h2></div><div className="flex items-center gap-2">{suite && <><span className="rounded-full bg-indigo-100 px-3 py-1 text-sm font-bold text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300">{suite.suite_code} · {suite.status}</span><button onClick={closeSuite} className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-bold hover:border-indigo-400 dark:border-slate-700">Danh sách bộ chấm</button></>}</div></div>
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3"><div><p className="text-xs font-bold uppercase tracking-widest text-indigo-500">Bước 1</p><h2 className="text-xl font-bold">{suite ? "Thông tin bộ chấm" : "Chọn hoặc khởi tạo Golden suite"}</h2></div><div className="flex flex-wrap items-center gap-2">{suite && <><span className="rounded-full bg-indigo-100 px-3 py-1 text-sm font-bold text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300">{suite.suite_code} · {suite.status}</span><button onClick={() => deleteSuite(suite)} disabled={Boolean(busy)} className="inline-flex items-center gap-1 rounded-lg border border-rose-400 px-3 py-2 text-sm font-bold text-rose-600 disabled:opacity-50 dark:text-rose-300"><Trash2 size={15} /> Xóa bộ chấm</button><button onClick={closeSuite} className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-bold hover:border-indigo-400 dark:border-slate-700">Danh sách bộ chấm</button></>}</div></div>
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
             <input value={suite?.exam_id || examId} disabled={Boolean(suite)} onChange={(e) => setExamId(e.target.value)} placeholder="Mã đề, ví dụ PE_PRM393" className="rounded-xl border border-slate-300 bg-transparent px-4 py-3 outline-none focus:border-indigo-500 disabled:opacity-60 dark:border-slate-700" />
             <input value={suite?.name || name} disabled={Boolean(suite)} onChange={(e) => setName(e.target.value)} placeholder="Tên bộ chấm" className="rounded-xl border border-slate-300 bg-transparent px-4 py-3 outline-none focus:border-indigo-500 disabled:opacity-60 dark:border-slate-700" />
             <input value={runtimeUrl} disabled={Boolean(suite)} onChange={(e) => setRuntimeUrl(e.target.value)} placeholder="URL Golden App đã deploy (không bắt buộc)" className="rounded-xl border border-slate-300 bg-transparent px-4 py-3 outline-none focus:border-indigo-500 disabled:opacity-60 dark:border-slate-700" />
             <input value={databaseName} disabled={Boolean(suite)} onChange={(e) => setDatabaseName(e.target.value)} placeholder="Tên file SQLite dùng chung, ví dụ app.db" className="rounded-xl border border-slate-300 bg-transparent px-4 py-3 outline-none focus:border-indigo-500 disabled:opacity-60 dark:border-slate-700" />
           </div>
-          {!suite && <><button onClick={createSuite} disabled={Boolean(busy)} className="mt-4 inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-3 font-bold text-white hover:bg-indigo-500 disabled:opacity-50">{busy === "create" ? <Loader2 className="animate-spin" size={18} /> : <Plus size={18} />} Tạo bộ chấm mới</button>{availableSuites.length > 0 && <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-3">{availableSuites.map((item) => <button key={item.id} onClick={() => void openSuite(item)} className="rounded-xl border border-slate-200 p-4 text-left transition hover:border-indigo-400 hover:bg-indigo-50/50 dark:border-slate-700 dark:hover:bg-indigo-950/20"><div className="flex items-center justify-between gap-2"><span className="font-bold">{item.name}</span><span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-bold text-slate-600 dark:bg-slate-800 dark:text-slate-300">{item.status}</span></div><p className="mt-1 font-mono text-xs text-indigo-500">{item.suite_code}</p><p className="mt-2 text-xs text-slate-500">Mã đề: {item.exam_id || "chưa gắn"}</p></button>)}</div>}</>}
+          {!suite && <><button onClick={createSuite} disabled={Boolean(busy)} className="mt-4 inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-3 font-bold text-white hover:bg-indigo-500 disabled:opacity-50">{busy === "create" ? <Loader2 className="animate-spin" size={18} /> : <Plus size={18} />} Tạo bộ chấm mới</button>{availableSuites.length > 0 && <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-3">{availableSuites.map((item) => <div key={item.id} className="relative rounded-xl border border-slate-200 transition hover:border-indigo-400 hover:bg-indigo-50/50 dark:border-slate-700 dark:hover:bg-indigo-950/20"><button onClick={() => void openSuite(item)} className="block w-full p-4 pr-14 text-left"><div className="flex items-center justify-between gap-2"><span className="font-bold">{item.name}</span><span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-bold text-slate-600 dark:bg-slate-800 dark:text-slate-300">{item.status}</span></div><p className="mt-1 font-mono text-xs text-indigo-500">{item.suite_code}</p><p className="mt-2 text-xs text-slate-500">Mã đề: {item.exam_id || "chưa gắn"}</p></button><button onClick={() => deleteSuite(item)} disabled={Boolean(busy)} title="Xóa bộ chấm" className="absolute bottom-3 right-3 rounded-lg border border-rose-300 p-2 text-rose-500 hover:bg-rose-50 disabled:opacity-40 dark:border-rose-800 dark:hover:bg-rose-950"><Trash2 size={16} /></button></div>)}</div>}</>}
         </section>
 
         {suite && <>
@@ -475,7 +566,7 @@ function BehaviorAuthoringEditor() {
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 <button onClick={deployGoldenRuntime} disabled={!activeByType.GOLDEN_SOLUTION || Boolean(busy)} className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-40">{busy === "runtime-deploy" ? <Loader2 size={16} className="animate-spin" /> : <MonitorPlay size={16} />} Build & mở Golden</button>
                 <span className={`rounded-full px-3 py-1 text-xs font-bold ${recorderReady ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300" : "bg-slate-100 text-slate-500 dark:bg-slate-800"}`}>{recorderReady ? "Recorder đã kết nối" : runtimeStatus?.status || "Chưa build"}</span>
-                {recording && recorderReady && <button onClick={captureUiSnapshot} className="inline-flex items-center gap-2 rounded-lg border border-emerald-400 px-3 py-2 text-xs font-bold text-emerald-700 dark:text-emerald-300"><Check size={15} /> Chụp trạng thái UI</button>}
+                {recording && recorderReady && <button onClick={captureUiSnapshot} className="inline-flex items-center gap-2 rounded-lg border border-emerald-400 px-3 py-2 text-xs font-bold text-emerald-700 dark:text-emerald-300"><Check size={15} /> Chụp semantic UI</button>}
               </div>
               {previewUrl ? <div className="mt-4 w-full overflow-auto rounded-xl border border-slate-300 bg-slate-100 p-3 dark:border-slate-700 dark:bg-slate-950"><iframe ref={goldenFrame} title="Golden App" src={previewUrl} style={{ width: Math.min(viewportWidth, 900), minWidth: Math.min(viewportWidth, 900), height: Math.min(viewportHeight, 700) }} className="mx-auto block rounded-lg border border-slate-300 bg-white dark:border-slate-700" /></div> : <div className="mt-4 flex h-[300px] flex-col items-center justify-center rounded-xl border border-dashed border-slate-300 text-center dark:border-slate-700"><MonitorPlay size={42} className="text-slate-400" /><p className="mt-3 font-bold">Golden Solution chưa được build để thao tác</p><p className="mt-1 max-w-md text-sm text-slate-500">Upload Golden ZIP rồi bấm “Build & mở Golden”. Hệ thống tự host app và ghi click/nhập liệu bằng semantic locator.</p></div>}
             </div>
@@ -499,7 +590,7 @@ function BehaviorAuthoringEditor() {
                     <div className="mt-3 space-y-2">
                       <select value={uiCheckpointType} onChange={(e) => setUiCheckpointType(e.target.value as "text" | "component" | "no_exception")} className="w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 dark:border-slate-700">
                         <option value="text">Nội dung text xuất hiện / không xuất hiện</option>
-                        <option value="component">Thành phần UI tồn tại / không tồn tại</option>
+                        <option value="component">Thành phần UI và trạng thái semantic</option>
                         <option value="no_exception">Luồng không phát sinh exception</option>
                       </select>
                       {uiCheckpointType === "text" && <div className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
@@ -507,11 +598,20 @@ function BehaviorAuthoringEditor() {
                         <input value={hiddenCheckpointText} onChange={(e) => setHiddenCheckpointText(e.target.value)} placeholder="Text không được xuất hiện (tùy chọn)" className="min-w-0 rounded-lg border border-slate-300 bg-transparent px-3 py-2 dark:border-slate-700" />
                         <button onClick={appendUiCheckpoint} title="Lưu checkpoint UI" className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-bold text-white"><Check size={16} /></button>
                       </div>}
-                      {uiCheckpointType === "component" && <div className="grid gap-2 sm:grid-cols-[0.8fr_1.2fr_0.8fr_auto]">
-                        <select value={checkpointLocator} onChange={(e) => setCheckpointLocator(e.target.value)} className="rounded-lg border border-slate-300 bg-transparent px-3 py-2 dark:border-slate-700">{LOCATORS.map((item) => <option key={item} value={item}>{item}</option>)}</select>
-                        <input value={checkpointLocatorValue} onChange={(e) => setCheckpointLocatorValue(e.target.value)} placeholder="Giá trị nhận diện thành phần" className="min-w-0 rounded-lg border border-slate-300 bg-transparent px-3 py-2 dark:border-slate-700" />
-                        <select value={checkpointVisible ? "visible" : "hidden"} onChange={(e) => setCheckpointVisible(e.target.value === "visible")} className="rounded-lg border border-slate-300 bg-transparent px-3 py-2 dark:border-slate-700"><option value="visible">Phải tồn tại</option><option value="hidden">Không tồn tại</option></select>
-                        <button onClick={appendUiCheckpoint} title="Lưu checkpoint thành phần" className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-bold text-white"><Check size={16} /></button>
+                      {uiCheckpointType === "component" && <div className="space-y-2">
+                        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                          <select value={checkpointLocator} onChange={(e) => setCheckpointLocator(e.target.value)} className="rounded-lg border border-slate-300 bg-transparent px-3 py-2 dark:border-slate-700">{LOCATORS.map((item) => <option key={item} value={item}>{item}</option>)}</select>
+                          <input value={checkpointLocatorValue} onChange={(e) => setCheckpointLocatorValue(e.target.value)} placeholder="Giá trị nhận diện thành phần" className="min-w-0 rounded-lg border border-slate-300 bg-transparent px-3 py-2 dark:border-slate-700" />
+                          <select value={checkpointRole} onChange={(e) => setCheckpointRole(e.target.value)} className="rounded-lg border border-slate-300 bg-transparent px-3 py-2 dark:border-slate-700">{SEMANTIC_ROLES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>
+                          <select value={checkpointVisible ? "visible" : "hidden"} onChange={(e) => setCheckpointVisible(e.target.value === "visible")} className="rounded-lg border border-slate-300 bg-transparent px-3 py-2 dark:border-slate-700"><option value="visible">Phải hiển thị</option><option value="hidden">Không được hiển thị</option></select>
+                        </div>
+                        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-[1.4fr_1fr_1fr_auto]">
+                          <input value={checkpointValue} onChange={(e) => setCheckpointValue(e.target.value)} placeholder="Giá trị mong đợi (tùy chọn)" disabled={!checkpointVisible} className="min-w-0 rounded-lg border border-slate-300 bg-transparent px-3 py-2 disabled:opacity-40 dark:border-slate-700" />
+                          <select value={checkpointEnabled} onChange={(e) => setCheckpointEnabled(e.target.value)} disabled={!checkpointVisible} className="rounded-lg border border-slate-300 bg-transparent px-3 py-2 disabled:opacity-40 dark:border-slate-700"><option value="ignore">Không xét enabled</option><option value="true">Phải được bật</option><option value="false">Phải bị khóa</option></select>
+                          <select value={checkpointChecked} onChange={(e) => setCheckpointChecked(e.target.value)} disabled={!checkpointVisible || !["checkbox", "switch", "radio"].includes(checkpointRole)} className="rounded-lg border border-slate-300 bg-transparent px-3 py-2 disabled:opacity-40 dark:border-slate-700"><option value="ignore">Không xét checked</option><option value="true">Phải được chọn</option><option value="false">Không được chọn</option></select>
+                          <button onClick={appendUiCheckpoint} title="Lưu checkpoint semantic" className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-bold text-white"><Check size={16} /></button>
+                        </div>
+                        <p className="text-xs text-slate-500">Có thể chỉ kiểm tra sự tồn tại, hoặc kiểm tra thêm đúng loại widget, giá trị, enabled và checked.</p>
                       </div>}
                       {uiCheckpointType === "no_exception" && <div className="flex items-center justify-between gap-3 rounded-lg bg-slate-50 px-3 py-2 text-sm dark:bg-slate-800">
                         <span>Checkpoint pass khi luồng chạy tới đây mà ứng dụng không ném exception.</span>
@@ -529,7 +629,7 @@ function BehaviorAuthoringEditor() {
                         <textarea value={databaseRow} onChange={(e) => setDatabaseRow(e.target.value)} rows={2} placeholder={'Row JSON, ví dụ {"uid":"SV01"}'} className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-transparent px-3 py-2 font-mono text-xs dark:border-slate-700" />
                         <button onClick={appendDatabaseCheckpoint} title="Luu checkpoint database" className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-bold text-white"><Check size={16} /></button>
                       </div>
-                      <p className="text-xs text-slate-500">Mục này dùng để bổ sung assertion DB có chủ đích. Dù bỏ qua, hệ thống vẫn tự replay Golden, so Hidden DB với Output DB và tách INSERT/UPDATE/DELETE thành checkpoint độc lập.</p>
+                      <p className="text-xs text-slate-500">Mục này dùng để bổ sung assertion DB có chủ đích. Dù bỏ qua, hệ thống vẫn tự replay Golden, so Hidden DB với Output DB và tách INSERT/UPDATE/DELETE thành checkpoint độc lập. Nếu checkpoint UI và row SQLite cùng chứa giá trị nhập cuối, hệ thống tự gộp thành checkpoint đối chiếu Input → UI → Database.</p>
                     </div>
                   )}
                 </div>
@@ -549,13 +649,39 @@ function BehaviorAuthoringEditor() {
           </section>
 
           <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
-            <div className="flex flex-wrap items-center justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-widest text-indigo-500">Bước 5</p><h2 className="text-xl font-bold">Kiểm chứng Golden và publish</h2><p className="mt-1 text-sm text-slate-500">Còn thiếu: {readiness?.missing.join(", ") || "không"}. Preflight chạy chính plan trên Golden; publish chỉ mở khi toàn bộ checkpoint pass.</p><p className={`mt-2 text-sm font-bold ${validation?.status === "PASSED" && validation.current ? "text-emerald-600" : "text-amber-600"}`}>Preflight: {validation?.status || "NOT_RUN"}{validation?.total_checkpoints !== undefined ? ` · ${validation.passed_checkpoints}/${validation.total_checkpoints}` : ""}{validation && !validation.current ? " · plan đã thay đổi" : ""}</p></div><div className="flex flex-wrap gap-2"><button onClick={validateGolden} disabled={!readiness?.ready || Boolean(recording) || Boolean(busy)} className="inline-flex items-center gap-2 rounded-xl border border-indigo-300 px-5 py-3 font-bold text-indigo-700 disabled:cursor-not-allowed disabled:opacity-40 dark:border-indigo-700 dark:text-indigo-300">{busy === "validate-golden" ? <Loader2 className="animate-spin" size={18} /> : <Play size={18} />} Chạy thử trên Golden</button><button onClick={publish} disabled={!readiness?.ready || !validation?.current || validation.status !== "PASSED" || Boolean(recording) || Boolean(busy)} className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-5 py-3 font-bold text-white disabled:cursor-not-allowed disabled:opacity-40">{busy === "publish" ? <Loader2 className="animate-spin" size={18} /> : <Send size={18} />} Publish bộ chấm</button></div></div>
+            <div className="flex flex-wrap items-center justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-widest text-indigo-500">Bước 5</p><h2 className="text-xl font-bold">Kiểm chứng Golden và publish</h2><p className="mt-1 text-sm text-slate-500">Còn thiếu: {readiness?.missing.join(", ") || "không"}. Preflight chạy chính plan trên Golden; publish chỉ mở khi toàn bộ checkpoint pass.</p><p className={`mt-2 text-sm font-bold ${validation?.status === "PASSED" && validation.current ? "text-emerald-600" : "text-amber-600"}`}>Preflight: {validation?.status || "NOT_RUN"}{validation?.total_checkpoints !== undefined ? ` · ${validation.passed_checkpoints}/${validation.total_checkpoints}` : ""}{validation && !validation.current ? " · plan đã thay đổi" : ""}</p></div><div className="flex flex-wrap gap-2"><button onClick={() => openCodePreview()} disabled={!suite.scenarios?.length || Boolean(busy)} className="inline-flex items-center gap-2 rounded-xl border border-slate-300 px-5 py-3 font-bold text-slate-700 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-700 dark:text-slate-200">{busy === "code-preview" ? <Loader2 className="animate-spin" size={18} /> : <Code2 size={18} />} Xem code bộ chấm</button><button onClick={validateGolden} disabled={!readiness?.ready || Boolean(recording) || Boolean(busy)} className="inline-flex items-center gap-2 rounded-xl border border-indigo-300 px-5 py-3 font-bold text-indigo-700 disabled:cursor-not-allowed disabled:opacity-40 dark:border-indigo-700 dark:text-indigo-300">{busy === "validate-golden" ? <Loader2 className="animate-spin" size={18} /> : <Play size={18} />} Chạy thử trên Golden</button><button onClick={publish} disabled={!readiness?.ready || !validation?.current || validation.status !== "PASSED" || Boolean(recording) || Boolean(busy)} className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-5 py-3 font-bold text-white disabled:cursor-not-allowed disabled:opacity-40">{busy === "publish" ? <Loader2 className="animate-spin" size={18} /> : <Send size={18} />} Publish bộ chấm</button></div></div>
             <div className="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-              {(suite.scenarios || []).map((item, index) => <div key={String(item.id || index)} className="rounded-xl border border-slate-200 px-4 py-3 dark:border-slate-700"><div className="flex items-center justify-between gap-2"><span className="font-bold">{String(item.name || item.scenario_code)}</span><span className="rounded-full bg-indigo-100 px-2 py-1 text-xs font-bold text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300">{String(item.weight)} điểm</span></div><p className="mt-1 text-xs text-slate-500">{Array.isArray(item.steps) ? item.steps.length : 0} action · {Array.isArray(item.checkpoints) ? item.checkpoints.length : 0} checkpoint</p></div>)}
+              {(suite.scenarios || []).map((item, index) => <div key={String(item.id || index)} className="rounded-xl border border-slate-200 px-4 py-3 dark:border-slate-700"><div className="flex items-center justify-between gap-2"><span className="font-bold">{String(item.name || item.scenario_code)}</span><span className="rounded-full bg-indigo-100 px-2 py-1 text-xs font-bold text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300">{String(item.weight)} điểm</span></div><p className="mt-1 font-mono text-[11px] text-indigo-500">{String(item.scenario_code || "")}</p><p className="mt-2 text-xs text-slate-500">{Array.isArray(item.steps) ? item.steps.length : 0} action · {Array.isArray(item.checkpoints) ? item.checkpoints.length : 0} checkpoint</p><div className="mt-3 flex flex-wrap gap-2"><button onClick={() => openCodePreview(String(item.scenario_code || ""))} disabled={Boolean(busy)} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs font-bold text-slate-700 hover:border-indigo-400 disabled:opacity-40 dark:border-slate-700 dark:text-slate-200"><Code2 size={14} /> Xem testcase</button><button onClick={() => openScenarioEditor(item)} disabled={Boolean(busy)} className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-300 px-2.5 py-1.5 text-xs font-bold text-indigo-700 hover:bg-indigo-50 disabled:opacity-40 dark:border-indigo-800 dark:text-indigo-300 dark:hover:bg-indigo-950"><Pencil size={14} /> Sửa</button><button onClick={() => deleteScenario(item)} disabled={Boolean(busy)} className="inline-flex items-center gap-1.5 rounded-lg border border-rose-300 px-2.5 py-1.5 text-xs font-bold text-rose-600 hover:bg-rose-50 disabled:opacity-40 dark:border-rose-900 dark:hover:bg-rose-950"><Trash2 size={14} /> Xóa</button></div></div>)}
               {!suite.scenarios?.length && <p className="text-sm text-slate-500">Chưa có scenario. Hãy record ít nhất một luồng và sinh testcase.</p>}
             </div>
           </section>
         </>}
+        {editingScenario && <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/75 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-lg rounded-2xl border border-slate-700 bg-white p-5 shadow-2xl dark:bg-slate-900">
+            <div className="flex items-start justify-between gap-4"><div><h2 className="text-xl font-bold">Sửa scenario</h2><p className="mt-1 font-mono text-xs text-indigo-500">{String(editingScenario.scenario_code || "")}</p></div><button onClick={() => setEditingScenario(null)} className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"><X size={19} /></button></div>
+            <label className="mt-5 block text-sm font-bold">Tên scenario</label><input value={editingScenarioName} onChange={(event) => setEditingScenarioName(event.target.value)} className="mt-2 w-full rounded-xl border border-slate-300 bg-transparent px-4 py-3 dark:border-slate-700" />
+            <label className="mt-4 block text-sm font-bold">Trọng số</label><input type="number" min="0.1" step="0.1" value={editingScenarioWeight} onChange={(event) => setEditingScenarioWeight(Number(event.target.value))} className="mt-2 w-full rounded-xl border border-slate-300 bg-transparent px-4 py-3 dark:border-slate-700" />
+            <p className="mt-3 text-xs text-slate-500">Nếu thao tác hoặc checkpoint bị tạo sai, hãy xóa scenario và record lại để oracle luôn đồng bộ với Golden App.</p>
+            <div className="mt-5 flex justify-end gap-2"><button onClick={() => setEditingScenario(null)} className="rounded-xl border border-slate-300 px-4 py-2 font-bold dark:border-slate-700">Hủy</button><button onClick={saveScenario} disabled={Boolean(busy) || !editingScenarioName.trim() || editingScenarioWeight <= 0} className="rounded-xl bg-indigo-600 px-4 py-2 font-bold text-white disabled:opacity-40">{busy.startsWith("edit-scenario-") ? "Đang lưu…" : "Lưu thay đổi"}</button></div>
+          </div>
+        </div>}
+        {codePreview && previewFile && <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/75 p-3 backdrop-blur-sm sm:p-6">
+          <div className="flex h-[min(900px,94vh)] w-full max-w-[1500px] min-w-0 flex-col overflow-hidden rounded-2xl border border-slate-700 bg-slate-950 text-slate-100 shadow-2xl">
+            <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-800 px-5 py-4">
+              <div className="min-w-0"><p className="text-xs font-bold uppercase tracking-widest text-indigo-400">Code sinh theo bộ Golden</p><h2 className="mt-1 truncate text-xl font-bold">{codePreview.suite_code}{codePreview.selected_scenario_code ? ` · ${codePreview.selected_scenario_code}` : ""}</h2><p className="mt-1 text-sm text-slate-400">{codePreview.scenario_count} scenario · {codePreview.criterion_count} đầu điểm. File hiển thị được sinh từ cùng engine dùng khi publish.</p></div>
+              <button onClick={() => setCodePreview(null)} title="Đóng bản xem code" className="rounded-lg border border-slate-700 p-2 text-slate-300 hover:bg-slate-800"><X size={20} /></button>
+            </div>
+            <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
+              <aside className="flex shrink-0 gap-2 overflow-x-auto border-b border-slate-800 p-3 lg:w-72 lg:flex-col lg:overflow-y-auto lg:border-b-0 lg:border-r">
+                {codePreview.files.map((file) => <button key={file.name} onClick={() => setPreviewFileName(file.name)} className={`min-w-max rounded-lg border px-3 py-2 text-left transition lg:min-w-0 ${previewFile.name === file.name ? "border-indigo-500 bg-indigo-500/15 text-indigo-200" : "border-slate-800 text-slate-400 hover:border-slate-600 hover:text-slate-200"}`}><span className="block font-mono text-xs font-bold">{file.name}</span><span className="mt-1 hidden text-[11px] leading-4 lg:block">{file.description}</span></button>)}
+              </aside>
+              <main className="flex min-h-0 min-w-0 flex-1 flex-col">
+                <div className="flex items-center justify-between gap-3 border-b border-slate-800 px-4 py-3"><div className="min-w-0"><p className="truncate font-mono text-sm font-bold text-indigo-300">{previewFile.name}</p><p className="truncate text-xs text-slate-400">{previewFile.description}</p></div><button onClick={() => void navigator.clipboard.writeText(previewFile.content)} className="inline-flex shrink-0 items-center gap-2 rounded-lg border border-slate-700 px-3 py-2 text-xs font-bold hover:bg-slate-800"><Copy size={15} /> Sao chép</button></div>
+                <pre className="min-h-0 flex-1 overflow-auto whitespace-pre p-4 font-mono text-xs leading-5 text-slate-200"><code>{previewFile.content}</code></pre>
+              </main>
+            </div>
+          </div>
+        </div>}
       </div>
     </SidebarLayout>
   );

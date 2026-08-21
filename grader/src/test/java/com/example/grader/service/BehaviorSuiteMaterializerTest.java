@@ -12,6 +12,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -91,7 +92,16 @@ class BehaviorSuiteMaterializerTest {
         assertEquals(3.0, matrix.get("RAR_USER_ADD_USER_UI_VISIBLE_PHONE").get("weight").asDouble(), 0.0001);
         assertEquals(3.0, matrix.get("RAR_USER_ADD_USER_UI_VISIBLE_DESKTOP").get("weight").asDouble(), 0.0001);
         assertEquals(2.0, matrix.get("RAR_USER_ADD_USER_DB_ROW").get("weight").asDouble(), 0.0001);
-        verify(exams).save(argThat(exam -> exam.getTestcasePath().endsWith("testcase")));
+        Map<String, byte[]> firstGeneration = new LinkedHashMap<>();
+        for (String file : List.of("exam_test.dart", "grader.dart", "behavior_plan.json",
+                "skills_matrix.json", "contract.json", "suite_manifest.json")) {
+            firstGeneration.put(file, Files.readAllBytes(output.resolve(file)));
+        }
+        materializer.materialize("suite-1");
+        firstGeneration.forEach((file, content) -> assertArrayEquals(content,
+                assertDoesNotThrow(() -> Files.readAllBytes(output.resolve(file))),
+                file + " phải giống byte khi sinh lại cùng cấu hình"));
+        verify(exams, times(2)).save(argThat(exam -> exam.getTestcasePath().endsWith("testcase")));
     }
 
     @Test
@@ -150,5 +160,92 @@ class BehaviorSuiteMaterializerTest {
                 "Capture bundle chỉ dùng Hidden DB làm placeholder trước khi có Output DB thật");
         JsonNode behaviorPlan = new ObjectMapper().readTree(output.resolve("behavior_plan.json").toFile());
         assertEquals("scenario-42", behaviorPlan.path("cases").get(0).path("scenario_id").asText());
+    }
+
+    @Test
+    void previewsExactBundleCodeAndCanFocusOneScenarioWithoutArtifacts() {
+        BehaviorAuthoringService authoring = mock(BehaviorAuthoringService.class);
+        BehaviorArtifactService artifacts = mock(BehaviorArtifactService.class);
+        ExamRepository exams = mock(ExamRepository.class);
+        BehaviorSuiteMaterializer materializer = new BehaviorSuiteMaterializer(authoring, artifacts, exams);
+
+        Map<String, Object> scenario = Map.ofEntries(
+                Map.entry("id", "scenario-screen"),
+                Map.entry("scenario_code", "SCREEN_CONTRACT"),
+                Map.entry("name", "Cấu trúc màn hình"),
+                Map.entry("skill_code", "UI_BUTTONS_SELECTION"),
+                Map.entry("weight", 2.0),
+                Map.entry("variables", Map.of()),
+                Map.entry("initial_state", Map.of("reset_storage", true)),
+                Map.entry("steps", List.of(Map.of("id", "boot", "action", "boot", "target", Map.of()))),
+                Map.entry("viewports", List.of(Map.of("name", "phone", "width", 390, "height", 844))),
+                Map.entry("oracle", Map.of("status", "READY")),
+                Map.entry("checkpoints", List.of(Map.of(
+                        "id", "FIELD_EMAIL", "kind", "checkpoint", "scope", "ui",
+                        "weight", 1.0, "expect", Map.of("semantic_nodes", List.of(
+                                Map.of("target", Map.of("label", "Email"), "role", "text_field")))))));
+        Map<String, Object> plan = Map.of(
+                "schema_version", "1.0",
+                "suite", Map.of("id", "suite-1", "suite_code", "RAR_PREVIEW", "revision", 1),
+                "public_contract", Map.of("semantic_ids", List.of("field.email")),
+                "database_contract", Map.of("enabled", true, "database_name", "users.db"),
+                "runtime_config", Map.of("allowed_packages", List.of("flutter")),
+                "scenarios", List.of(scenario));
+        when(authoring.previewExecutionPlan("suite-1")).thenReturn(plan);
+
+        Map<String, Object> preview = materializer.previewCode("suite-1", "SCREEN_CONTRACT");
+
+        assertEquals(1, preview.get("criterion_count"));
+        List<Map<String, Object>> files = ((List<?>) preview.get("files")).stream()
+                .map(item -> (Map<String, Object>) item)
+                .toList();
+        assertEquals("scenario.json", files.get(0).get("name"));
+        assertTrue(String.valueOf(files.get(0).get("content")).contains("SCREEN_CONTRACT"));
+        assertTrue(files.stream().anyMatch(file -> "exam_test.dart".equals(file.get("name"))
+                && String.valueOf(file.get("content")).contains("void main()")));
+        assertTrue(files.stream().anyMatch(file -> "skills_matrix.json".equals(file.get("name"))
+                && String.valueOf(file.get("content")).contains("FIELD_EMAIL")));
+        verifyNoInteractions(artifacts, exams);
+    }
+
+    @Test
+    void semanticFingerprintIgnoresDatabaseIdentityButNotBehavior() {
+        BehaviorAuthoringService authoring = mock(BehaviorAuthoringService.class);
+        BehaviorArtifactService artifacts = mock(BehaviorArtifactService.class);
+        BehaviorSuiteMaterializer materializer = new BehaviorSuiteMaterializer(
+                authoring, artifacts, mock(ExamRepository.class));
+        Map<String, Object> scenarioA = new LinkedHashMap<>();
+        scenarioA.put("id", "random-id-a");
+        scenarioA.put("suite_id", "suite-a");
+        scenarioA.put("scenario_code", "ADD_USER");
+        scenarioA.put("name", "Add user");
+        scenarioA.put("weight", 2.0);
+        scenarioA.put("steps", List.of(Map.of(
+                "id", "step_1", "action", "tap", "target", Map.of("semanticId", "action.add"))));
+        scenarioA.put("checkpoints", List.of(Map.of(
+                "id", "checkpoint_1", "kind", "checkpoint",
+                "expect", Map.of("visible_texts", List.of("Saved")))));
+        scenarioA.put("viewports", List.of(Map.of("name", "phone", "width", 390, "height", 844)));
+        scenarioA.put("oracle", Map.of(
+                "id", "oracle-a", "created_at", "2026-01-01T00:00:00Z",
+                "seed", "rar-v1-fixed", "input", Map.of()));
+        Map<String, Object> scenarioB = new LinkedHashMap<>(scenarioA);
+        scenarioB.put("id", "random-id-b");
+        scenarioB.put("suite_id", "suite-b");
+        scenarioB.put("oracle", Map.of(
+                "id", "oracle-b", "created_at", "2026-08-21T00:00:00Z",
+                "seed", "rar-v1-fixed", "input", Map.of()));
+        Map<String, Object> planA = Map.of(
+                "public_contract", Map.of(), "database_contract", Map.of(),
+                "runtime_config", Map.of(), "scenarios", List.of(scenarioA));
+        Map<String, Object> planB = Map.of(
+                "public_contract", Map.of(), "database_contract", Map.of(),
+                "runtime_config", Map.of(), "scenarios", List.of(scenarioB));
+
+        assertEquals(materializer.semanticFingerprint(planA), materializer.semanticFingerprint(planB));
+
+        scenarioB.put("steps", List.of(Map.of(
+                "id", "step_1", "action", "tap", "target", Map.of("semanticId", "action.delete"))));
+        assertNotEquals(materializer.semanticFingerprint(planA), materializer.semanticFingerprint(planB));
     }
 }

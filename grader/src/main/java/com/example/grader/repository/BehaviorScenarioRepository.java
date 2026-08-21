@@ -11,4 +11,5 @@ public interface BehaviorScenarioRepository extends JpaRepository<BehaviorScenar
     Optional<BehaviorScenario> findBySuiteIdAndScenarioCode(String suiteId, String scenarioCode);
     Optional<BehaviorScenario> findFirstBySourceRecordingId(String sourceRecordingId);
     long countBySuiteIdAndEnabledTrue(String suiteId);
+    void deleteBySuiteId(String suiteId);
 }

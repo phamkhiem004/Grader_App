@@ -109,12 +109,7 @@ Future<void> _runBehaviorScenario(
       _printCheckpoint(checkpointCase, false, error.toString());
     }
     stdout.writeln(
-      '$_observationMarker${jsonEncode(<String, dynamic>{
-        'kind': 'BEHAVIOR_REPLAY_FAILURE',
-        'scenario_code': testCase['scenario_code'],
-        'checkpoint_id': _asMap(testCase['checkpoint'])['id'],
-        'message': error.toString(),
-      })}',
+      '$_observationMarker${jsonEncode(<String, dynamic>{'kind': 'BEHAVIOR_REPLAY_FAILURE', 'scenario_code': testCase['scenario_code'], 'checkpoint_id': _asMap(testCase['checkpoint'])['id'], 'message': error.toString()})}',
     );
     Error.throwWithStackTrace(error, stackTrace);
   }
@@ -137,20 +132,18 @@ void _printCheckpoint(
   String message,
 ) {
   stdout.writeln(
-    '$_checkpointMarker${jsonEncode(<String, dynamic>{
-      'test_id': testCase['test_id'],
-      'scenario_code': testCase['scenario_code'],
-      'passed': passed,
-      'message': message,
-    })}',
+    '$_checkpointMarker${jsonEncode(<String, dynamic>{'test_id': testCase['test_id'], 'scenario_code': testCase['scenario_code'], 'passed': passed, 'message': message})}',
   );
 }
 
 Future<void> _bootStudentApp(WidgetTester tester, Duration timeout) async {
   await tester.runAsync(() async {
-    await Future<void>.sync(student_app.main).timeout(timeout, onTimeout: () {
-    throw TimeoutException('student_app.main() không hoàn tất', timeout);
-    });
+    await Future<void>.sync(student_app.main).timeout(
+      timeout,
+      onTimeout: () {
+        throw TimeoutException('student_app.main() không hoàn tất', timeout);
+      },
+    );
   });
   await tester.pump();
   await _boundedPump(tester, timeout);
@@ -176,17 +169,29 @@ Future<void> _runStep(
     case 'boot':
       return;
     case 'tap':
-      final finder = await _waitForTarget(tester, _asMap(step['target']), timeout);
+      final finder = await _waitForTarget(
+        tester,
+        _asMap(step['target']),
+        timeout,
+      );
       await tester.ensureVisible(finder);
       await tester.tap(finder, warnIfMissed: false);
       return;
     case 'enter_text':
-      final finder = await _waitForTarget(tester, _asMap(step['target']), timeout);
+      final finder = await _waitForTarget(
+        tester,
+        _asMap(step['target']),
+        timeout,
+      );
       await tester.ensureVisible(finder);
       await tester.enterText(finder, _expand(step['value'], variables));
       return;
     case 'clear_text':
-      final finder = await _waitForTarget(tester, _asMap(step['target']), timeout);
+      final finder = await _waitForTarget(
+        tester,
+        _asMap(step['target']),
+        timeout,
+      );
       await tester.enterText(finder, '');
       return;
     case 'scroll':
@@ -229,6 +234,22 @@ Future<void> _assertCheckpoint(
   Duration timeout,
 ) async {
   final kind = _text(checkpoint, 'kind');
+  if (kind == 'entity_consistency' ||
+      _text(checkpoint, 'scope') == 'cross_layer') {
+    await tester.runAsync(
+      () => _assertDatabase(checkpoint, databaseContract, variables),
+    );
+    for (final raw in _asList(checkpoint['ui_values'])) {
+      final value = _expand(raw, variables);
+      await _waitUntil(
+        tester,
+        () => find.text(value).evaluate().isNotEmpty,
+        timeout,
+        'SQLite co row dung nhung UI khong hien thi cung gia tri "$value".',
+      );
+    }
+    return;
+  }
   if (kind == 'database_observation' ||
       _text(checkpoint, 'scope') == 'database') {
     await tester.runAsync(
@@ -238,9 +259,15 @@ Future<void> _assertCheckpoint(
   }
 
   final expectValue = _asMap(checkpoint['expect']);
+  for (final raw in _asList(expectValue['semantic_nodes'])) {
+    await _assertSemanticNode(tester, _asMap(raw), variables, timeout);
+  }
   final target = _asMap(checkpoint['target']);
   if (target.isNotEmpty) {
-    final visible = _bool(checkpoint['visible'] ?? expectValue['visible'], true);
+    final visible = _bool(
+      checkpoint['visible'] ?? expectValue['visible'],
+      true,
+    );
     await _waitUntil(
       tester,
       () => _finder(target).evaluate().isNotEmpty == visible,
@@ -260,7 +287,11 @@ Future<void> _assertCheckpoint(
   }
   for (final raw in _asList(expectValue['hidden_texts'])) {
     final value = _expand(raw, variables);
-    expect(find.text(value), findsNothing, reason: 'Nội dung "$value" vẫn còn trên UI.');
+    expect(
+      find.text(value),
+      findsNothing,
+      reason: 'Nội dung "$value" vẫn còn trên UI.',
+    );
   }
 
   final expectedText = checkpoint['text'] ?? expectValue['text'];
@@ -272,13 +303,144 @@ Future<void> _assertCheckpoint(
   if (_bool(noException, false)) _throwPendingException(tester, 'checkpoint');
 }
 
+Future<void> _assertSemanticNode(
+  WidgetTester tester,
+  Map<String, dynamic> node,
+  Map<String, String> variables,
+  Duration timeout,
+) async {
+  final target = _asMap(node['target']);
+  if (target.isEmpty) {
+    throw ArgumentError('Semantic node thiếu target nhận diện.');
+  }
+  final visible = _bool(node['visible'], true);
+  await _waitUntil(
+    tester,
+    () => _finder(target).evaluate().isNotEmpty == visible,
+    timeout,
+    'Thành phần semantic không có trạng thái hiển thị mong đợi: $target',
+  );
+  if (!visible) return;
+
+  final finder = _finder(target);
+  final role = _text(node, 'role').toLowerCase();
+  if (role.isNotEmpty && role != 'generic') {
+    expect(
+      _widgetsNear(finder).any((widget) => _matchesSemanticRole(widget, role)),
+      isTrue,
+      reason: 'Thành phần $target không đúng loại semantic "$role".',
+    );
+  }
+
+  if (node.containsKey('value')) {
+    final expected = _expand(node['value'], variables);
+    final actual = _semanticValue(_widgetsNear(finder));
+    expect(actual, expected, reason: 'Giá trị của $target không đúng.');
+  }
+  if (node.containsKey('enabled')) {
+    final actual = _semanticEnabled(_widgetsNear(finder));
+    expect(
+      actual,
+      _bool(node['enabled'], true),
+      reason: 'Trạng thái enabled của $target không đúng.',
+    );
+  }
+  if (node.containsKey('checked')) {
+    final actual = _semanticChecked(_widgetsNear(finder));
+    expect(
+      actual,
+      _bool(node['checked'], false),
+      reason: 'Trạng thái checked của $target không đúng.',
+    );
+  }
+}
+
+List<Widget> _widgetsNear(Finder finder) {
+  final widgets = <Widget>[];
+  final seen = <Widget>{};
+  void add(Element element) {
+    if (seen.add(element.widget)) widgets.add(element.widget);
+  }
+
+  for (final element in finder.evaluate()) {
+    add(element);
+    element.visitAncestorElements((ancestor) {
+      add(ancestor);
+      return widgets.length < 40;
+    });
+    void descendants(Element current, int depth) {
+      if (depth <= 0 || widgets.length >= 80) return;
+      current.visitChildElements((child) {
+        add(child);
+        descendants(child, depth - 1);
+      });
+    }
+
+    descendants(element, 5);
+  }
+  return widgets;
+}
+
+bool _matchesSemanticRole(Widget widget, String role) => switch (role) {
+  'text_field' => widget is TextField || widget is EditableText,
+  'button' =>
+    widget is ButtonStyleButton ||
+        widget is IconButton ||
+        widget is FloatingActionButton ||
+        (widget is InkWell && widget.onTap != null) ||
+        (widget is GestureDetector && widget.onTap != null),
+  'checkbox' => widget is Checkbox,
+  'switch' => widget is Switch,
+  'radio' => widget is Radio,
+  'text' => widget is Text || widget is RichText || widget is SelectableText,
+  'image' => widget is Image || widget is Icon,
+  'link' =>
+    (widget is InkWell && widget.onTap != null) ||
+        (widget is GestureDetector && widget.onTap != null),
+  _ => false,
+};
+
+String? _semanticValue(List<Widget> widgets) {
+  for (final widget in widgets) {
+    if (widget is TextField) return widget.controller?.text ?? '';
+    if (widget is EditableText) return widget.controller.text;
+  }
+  return null;
+}
+
+bool? _semanticEnabled(List<Widget> widgets) {
+  for (final widget in widgets) {
+    if (widget is TextField) return widget.enabled ?? true;
+    if (widget is ButtonStyleButton) return widget.onPressed != null;
+    if (widget is IconButton) return widget.onPressed != null;
+    if (widget is FloatingActionButton) return widget.onPressed != null;
+    if (widget is Checkbox) return widget.onChanged != null;
+    if (widget is Switch) return widget.onChanged != null;
+    if (widget is Radio) return widget.onChanged != null;
+    if (widget is InkWell) return widget.onTap != null;
+    if (widget is GestureDetector) return widget.onTap != null;
+  }
+  return null;
+}
+
+bool? _semanticChecked(List<Widget> widgets) {
+  for (final widget in widgets) {
+    if (widget is Checkbox) return widget.value ?? false;
+    if (widget is Switch) return widget.value;
+    if (widget is Radio) return widget.value == widget.groupValue;
+  }
+  return null;
+}
+
 Future<void> _assertDatabase(
   Map<String, dynamic> checkpoint,
   Map<String, dynamic> contract,
   Map<String, String> variables,
 ) async {
   if (!_bool(contract['enabled'], false)) {
-    throw StateError('Checkpoint DB tồn tại nhưng database_contract.enabled=false.');
+    throw StateError(
+      'Checkpoint DB tồn tại nhưng database_contract.enabled=false.',
+    );
   }
   final path = await _databasePath(contract, variables);
   if (!File(path).existsSync()) {
@@ -298,9 +460,17 @@ Future<void> _assertDatabase(
     final matches = rows.where((row) => _rowContains(row, expected)).toList();
     final operation = _text(checkpoint, 'operation').toUpperCase();
     if (operation == 'DELETE' || _bool(checkpoint['absent'], false)) {
-      expect(matches, isEmpty, reason: 'SQLite vẫn còn row phải được xóa: $expected');
+      expect(
+        matches,
+        isEmpty,
+        reason: 'SQLite vẫn còn row phải được xóa: $expected',
+      );
     } else {
-      expect(matches, isNotEmpty, reason: 'SQLite không có row mong đợi: $expected');
+      expect(
+        matches,
+        isNotEmpty,
+        reason: 'SQLite không có row mong đợi: $expected',
+      );
     }
     if (checkpoint['count'] != null) {
       expect(rows.length, _int(checkpoint['count'], -1));
@@ -324,10 +494,16 @@ Future<String> _databasePath(
 ) async {
   final configured = _expand(contract['path'], variables);
   if (configured.isNotEmpty) {
-    return p.isAbsolute(configured) ? configured : p.normalize(p.join('/app', configured));
+    return p.isAbsolute(configured)
+        ? configured
+        : p.normalize(p.join('/app', configured));
   }
-  final name = _expand(contract['database_name'] ?? contract['name'], variables);
-  if (name.isEmpty) throw StateError('database_contract thiếu path hoặc database_name.');
+  final name = _expand(
+    contract['database_name'] ?? contract['name'],
+    variables,
+  );
+  if (name.isEmpty)
+    throw StateError('database_contract thiếu path hoặc database_name.');
   final root = await databaseFactoryFfiNoIsolate.getDatabasesPath();
   return p.join(root, name);
 }
@@ -339,7 +515,8 @@ Future<void> _resetDatabase(
   if (!_bool(contract['enabled'], false)) return;
   final path = await _databasePath(contract, variables);
   final target = File(path);
-  if (target.existsSync()) await databaseFactoryFfiNoIsolate.deleteDatabase(path);
+  if (target.existsSync())
+    await databaseFactoryFfiNoIsolate.deleteDatabase(path);
   final fixturePath = _expand(contract['hidden_fixture_path'], variables);
   if (fixturePath.isEmpty) return;
   final fixture = File(fixturePath);
@@ -357,12 +534,16 @@ Future<void> _captureOutputDatabase(
   final outputPath = Platform.environment['GRADER_CAPTURE_OUTPUT_PATH'] ?? '';
   if (outputPath.isEmpty) return;
   if (!_bool(contract['enabled'], false)) {
-    throw StateError('Không thể capture Output DB khi database_contract.enabled=false.');
+    throw StateError(
+      'Không thể capture Output DB khi database_contract.enabled=false.',
+    );
   }
 
   final sourcePath = await _databasePath(contract, variables);
   if (!File(sourcePath).existsSync()) {
-    throw StateError('Không tìm thấy SQLite sau khi replay Golden: $sourcePath');
+    throw StateError(
+      'Không tìm thấy SQLite sau khi replay Golden: $sourcePath',
+    );
   }
   final output = File(outputPath);
   await output.parent.create(recursive: true);
@@ -381,23 +562,22 @@ Future<void> _captureOutputDatabase(
     throw StateError('Runner không sinh được Output DB tại $outputPath');
   }
 
-  final metadataPath = Platform.environment['GRADER_CAPTURE_METADATA_PATH'] ?? '';
+  final metadataPath =
+      Platform.environment['GRADER_CAPTURE_METADATA_PATH'] ?? '';
   if (metadataPath.isNotEmpty) {
     final metadata = File(metadataPath);
     await metadata.parent.create(recursive: true);
-    await metadata.writeAsString(jsonEncode(<String, dynamic>{
-      'schema_version': '1.0',
-      'source_database': sourcePath,
-      'output_database': output.absolute.path,
-      'variables': variables,
-    }));
+    await metadata.writeAsString(
+      jsonEncode(<String, dynamic>{
+        'schema_version': '1.0',
+        'source_database': sourcePath,
+        'output_database': output.absolute.path,
+        'variables': variables,
+      }),
+    );
   }
   stdout.writeln(
-    '$_captureMarker${jsonEncode(<String, dynamic>{
-      'captured': true,
-      'output_database': output.absolute.path,
-      'variables': variables,
-    })}',
+    '$_captureMarker${jsonEncode(<String, dynamic>{'captured': true, 'output_database': output.absolute.path, 'variables': variables})}',
   );
 }
 
@@ -419,7 +599,13 @@ Future<Finder> _waitForTarget(
 }
 
 Finder _finder(Map<String, dynamic> target) {
-  for (final keyName in const ['semanticId', 'semantic_id', 'valueKey', 'value_key', 'key']) {
+  for (final keyName in const [
+    'semanticId',
+    'semantic_id',
+    'valueKey',
+    'value_key',
+    'key',
+  ]) {
     final value = _text(target, keyName);
     if (value.isNotEmpty) {
       final finder = find.byKey(ValueKey<String>(value));
@@ -446,7 +632,9 @@ Finder _finder(Map<String, dynamic> target) {
   }
   final text = _text(target, 'text');
   if (text.isNotEmpty) return find.text(text);
-  throw ArgumentError('Target không có semanticId/key/label/hint/text: $target');
+  throw ArgumentError(
+    'Target không có semanticId/key/label/hint/text: $target',
+  );
 }
 
 Future<void> _waitUntil(
@@ -496,7 +684,11 @@ void _throwPendingException(WidgetTester tester, String stage) {
 Map<String, String> _materializeVariables(Map<String, dynamic> testCase) {
   final definitions = _asMap(testCase['variables']);
   final oracleInput = _asMap(_asMap(testCase['oracle'])['input']);
-  final seed = _text(_asMap(testCase['oracle']), 'seed', _text(testCase, 'scenario_code'));
+  final seed = _text(
+    _asMap(testCase['oracle']),
+    'seed',
+    _text(testCase, 'scenario_code'),
+  );
   final random = Random(_stableHash(seed));
   final values = <String, String>{};
   for (final entry in definitions.entries) {
@@ -528,7 +720,9 @@ int _stableHash(String value) {
 
 String _expand(Object? value, Map<String, String> variables) {
   var result = value?.toString() ?? '';
-  variables.forEach((key, item) => result = result.replaceAll('\${$key}', item));
+  variables.forEach(
+    (key, item) => result = result.replaceAll('\${$key}', item),
+  );
   return result;
 }
 
@@ -538,7 +732,8 @@ dynamic _expandValue(Object? value, Map<String, String> variables) {
 
 Map<String, dynamic> _readObject(String primary, String fallback) {
   final file = File(primary).existsSync() ? File(primary) : File(fallback);
-  if (!file.existsSync()) throw StateError('Không tìm thấy behavior_plan.json.');
+  if (!file.existsSync())
+    throw StateError('Không tìm thấy behavior_plan.json.');
   return _asMap(jsonDecode(file.readAsStringSync()));
 }
 

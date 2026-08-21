@@ -6,6 +6,7 @@ import com.example.grader.entity.BehaviorArtifact;
 import com.example.grader.entity.BehaviorArtifactType;
 import com.example.grader.repository.ExamRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Service;
@@ -17,6 +18,7 @@ import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.security.MessageDigest;
 import java.time.Instant;
 import java.util.*;
 import java.util.stream.Stream;
@@ -34,7 +36,8 @@ public class BehaviorSuiteMaterializer {
     private final BehaviorAuthoringService authoring;
     private final BehaviorArtifactService artifacts;
     private final ExamRepository exams;
-    private final ObjectMapper mapper = new ObjectMapper().findAndRegisterModules();
+    private final ObjectMapper mapper = new ObjectMapper().findAndRegisterModules()
+            .enable(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS);
 
     public BehaviorSuiteMaterializer(BehaviorAuthoringService authoring,
                                      BehaviorArtifactService artifacts,
@@ -67,7 +70,7 @@ public class BehaviorSuiteMaterializer {
         try {
             Files.createDirectories(examDir);
             staging = Files.createTempDirectory(examDir, ".rar-staging-");
-            writeBundle(staging, suiteId, plan, suite, suiteCode, cases, matrix, true);
+            writeBundle(staging, suiteId, plan, suite, suiteCode, cases, matrix, true, false);
 
             if (Files.exists(target)) {
                 backup = examDir.resolve(".testcase-rar-backup-" + UUID.randomUUID()).normalize();
@@ -127,7 +130,7 @@ public class BehaviorSuiteMaterializer {
         Path target = root.toAbsolutePath().normalize().resolve("test");
         try {
             Files.createDirectories(target);
-            writeBundle(target, suiteId, plan, suite, suiteCode, cases, buildMatrix(cases), true);
+            writeBundle(target, suiteId, plan, suite, suiteCode, cases, buildMatrix(cases), true, false);
             return target;
         } catch (Exception e) {
             throw new IllegalStateException("Không sinh được bundle preflight: " + e.getMessage(), e);
@@ -149,10 +152,156 @@ public class BehaviorSuiteMaterializer {
         Path target = root.toAbsolutePath().normalize().resolve("test");
         try {
             Files.createDirectories(target);
-            writeBundle(target, suiteId, plan, suite, suiteCode, cases, buildMatrix(cases), false);
+            writeBundle(target, suiteId, plan, suite, suiteCode, cases, buildMatrix(cases), false, true);
             return target;
         } catch (Exception e) {
             throw new IllegalStateException("Không sinh được bundle capture Golden: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Trả về đúng nội dung runner và dữ liệu điều khiển sẽ được sinh cho bộ chấm.
+     * Đây là thao tác chỉ đọc: không ghi Exam, không thay bundle đã publish và không cần copy fixture DB.
+     */
+    public Map<String, Object> previewCode(String suiteId, String selectedScenarioCode) {
+        try {
+            Map<String, Object> plan = authoring.previewExecutionPlan(suiteId);
+            Map<String, Object> suite = map(plan.get("suite"));
+            String suiteCode = ExamService.safeId(text(suite, "suite_code"), "bộ chấm");
+            List<Map<String, Object>> cases = expandCases(plan, suiteCode);
+            Map<String, Object> matrix = buildMatrix(cases);
+
+            String requestedCode = selectedScenarioCode == null ? "" : selectedScenarioCode.trim();
+            Map<String, Object> selectedScenario = new LinkedHashMap<>();
+            if (!requestedCode.isBlank()) {
+                selectedScenario = list(plan.get("scenarios")).stream()
+                        .map(BehaviorSuiteMaterializer::map)
+                        .filter(item -> requestedCode.equalsIgnoreCase(text(item, "scenario_code")))
+                        .findFirst()
+                        .orElseThrow(() -> new IllegalArgumentException(
+                                "Không tìm thấy scenario " + requestedCode + " trong bộ chấm"));
+            }
+
+            List<Map<String, Object>> files = new ArrayList<>();
+            if (!selectedScenario.isEmpty()) {
+                String scenarioCode = text(selectedScenario, "scenario_code");
+                Map<String, Object> scenarioMatrix = new LinkedHashMap<>();
+                matrix.forEach((testId, rawMetadata) -> {
+                    Map<String, Object> metadata = map(rawMetadata);
+                    if (scenarioCode.equals(String.valueOf(metadata.get("scenario_code")))) {
+                        scenarioMatrix.put(testId, metadata);
+                    }
+                });
+                files.add(previewFile(
+                        "scenario.json",
+                        "Scenario đang chọn: action, checkpoint, viewport, biến và oracle.",
+                        "SCENARIO",
+                        json(selectedScenario)));
+                files.add(previewFile(
+                        "scenario_testcases.json",
+                        "Các đầu điểm thực tế được tách ra từ checkpoint của scenario này.",
+                        "SCENARIO",
+                        json(scenarioMatrix)));
+            }
+
+            files.add(previewFile(
+                    "behavior_plan.json",
+                    "Toàn bộ action, checkpoint và oracle mà runner sẽ replay.",
+                    "BUNDLE",
+                    json(executablePlan(plan, suite, cases, false))));
+            files.add(previewFile(
+                    "skills_matrix.json",
+                    "Danh sách testcase, trọng số và checkpoint dùng để tính điểm.",
+                    "BUNDLE",
+                    json(matrix)));
+            files.add(previewFile(
+                    "exam_test.dart",
+                    "Runner Dart dùng chung; nội dung từng scenario được đọc từ behavior_plan.json.",
+                    "ENGINE",
+                    readResource("behavior-replay-engine/exam_test.dart")));
+            files.add(previewFile(
+                    "grader.dart",
+                    "Script tổng hợp kết quả flutter test thành điểm và JSON báo cáo.",
+                    "ENGINE",
+                    readResource("behavior-replay-engine/grader.dart")));
+            files.add(previewFile(
+                    "contract.json",
+                    "Contract công khai và package được phép của bộ chấm.",
+                    "BUNDLE",
+                    json(publicContract(plan))));
+
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("suite_id", suiteId);
+            result.put("suite_code", suiteCode);
+            result.put("selected_scenario_code",
+                    selectedScenario.isEmpty() ? null : selectedScenario.get("scenario_code"));
+            result.put("scenario_count", list(plan.get("scenarios")).size());
+            result.put("criterion_count", cases.size());
+            result.put("files", files);
+            return result;
+        } catch (IllegalArgumentException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IllegalStateException("Không tạo được bản xem code: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Sinh hai lần từ cùng trạng thái đã lưu và so hash từng file. Semantic fingerprint
+     * bỏ UUID/thời gian để hai suite tương đương có thể được đối chiếu đúng nghĩa.
+     */
+    public Map<String, Object> determinismReport(String suiteId) {
+        Map<String, Object> first = previewCode(suiteId, null);
+        Map<String, Object> second = previewCode(suiteId, null);
+        Map<String, String> firstHashes = previewHashes(first);
+        Map<String, String> secondHashes = previewHashes(second);
+        Map<String, Object> plan = authoring.previewExecutionPlan(suiteId);
+        List<String> legacyScenarios = new ArrayList<>();
+        for (Object raw : list(plan.get("scenarios"))) {
+            Map<String, Object> scenario = map(raw);
+            String seed = text(map(scenario.get("oracle")), "seed");
+            if (!seed.isBlank() && !seed.startsWith("rar-v1-")) {
+                legacyScenarios.add(text(scenario, "scenario_code"));
+            }
+        }
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("suite_id", suiteId);
+        result.put("exact_generation_repeatable", firstHashes.equals(secondHashes));
+        result.put("reauthoring_deterministic", legacyScenarios.isEmpty());
+        result.put("semantic_fingerprint", semanticFingerprint(plan));
+        result.put("file_sha256", firstHashes);
+        result.put("legacy_random_seed_scenarios", legacyScenarios);
+        result.put("note", legacyScenarios.isEmpty()
+                ? "Cùng action, checkpoint, contract, viewport, trọng số và fixture sẽ sinh cùng nội dung chấm."
+                : "Bundle hiện tại sinh lặp ổn định, nhưng scenario cũ còn seed ngẫu nhiên; hãy record lại scenario đó để tái tạo độc lập tuyệt đối.");
+        return result;
+    }
+
+    /** Chỉ gỡ bundle nếu manifest xác nhận nó thuộc đúng Golden suite này. */
+    public void deletePublishedBundleIfOwned(String suiteId) {
+        Map<String, Object> suite = authoring.getSuite(suiteId);
+        String configuredExamId = text(suite, "exam_id");
+        String suiteCode = ExamService.safeId(text(suite, "suite_code"), "bộ chấm");
+        String examId = ExamService.safeId(configuredExamId.isBlank() ? suiteCode : configuredExamId, "đề");
+        Path examDir = examsRoot().resolve(examId).normalize();
+        Path target = examDir.resolve("testcase").normalize();
+        Path manifest = target.resolve("suite_manifest.json");
+        try {
+            if (Files.isRegularFile(manifest)) {
+                Map<String, Object> content = mapper.readValue(manifest.toFile(), Map.class);
+                if (suiteId.equals(text(content, "suite_id"))) {
+                    deleteRecursively(target);
+                    exams.findByExamId(examId).ifPresent(exam -> {
+                        exam.setTestcasePath(null);
+                        exam.setTestcaseStatus("MISSING");
+                        exam.setTestcasePublishedAt(null);
+                        exam.setStatus(ExamStatus.BUILDING);
+                        exams.save(exam);
+                    });
+                }
+            }
+        } catch (Exception e) {
+            throw new IllegalStateException("Không gỡ được bundle đã publish: " + e.getMessage(), e);
         }
     }
 
@@ -163,7 +312,8 @@ public class BehaviorSuiteMaterializer {
                              String suiteCode,
                              List<Map<String, Object>> cases,
                              Map<String, Object> matrix,
-                             boolean requireOutputDatabase) throws Exception {
+                             boolean requireOutputDatabase,
+                             boolean includeInternalIdentity) throws Exception {
         copyResource("behavior-replay-engine/exam_test.dart", target.resolve("exam_test.dart"));
         copyResource("behavior-replay-engine/grader.dart", target.resolve("grader.dart"));
 
@@ -180,32 +330,20 @@ public class BehaviorSuiteMaterializer {
             copyArtifact(suiteId, BehaviorArtifactType.HIDDEN_DATABASE, fixtures.resolve("expected-output.db"));
         }
 
-        Map<String, Object> databaseContract = new LinkedHashMap<>(map(plan.get("database_contract")));
-        databaseContract.put("enabled", true);
-        databaseContract.put("student_fixture_path", "/app/test/fixtures/student.db");
-        databaseContract.put("hidden_fixture_path", "/app/test/fixtures/hidden.db");
-        databaseContract.put("expected_output_path", "/app/test/fixtures/expected-output.db");
-
-        Map<String, Object> executablePlan = new LinkedHashMap<>();
-        executablePlan.put("schema_version", plan.get("schema_version"));
-        executablePlan.put("suite", suite);
-        executablePlan.put("public_contract", plan.get("public_contract"));
-        executablePlan.put("database_contract", databaseContract);
-        executablePlan.put("runtime_config", plan.get("runtime_config"));
-        executablePlan.put("cases", cases);
-        writeJson(target.resolve("behavior_plan.json"), executablePlan);
+        writeJson(target.resolve("behavior_plan.json"),
+                executablePlan(plan, suite, cases, includeInternalIdentity));
         writeJson(target.resolve("skills_matrix.json"), matrix);
         writeJson(target.resolve("contract.json"), publicContract(plan));
-        writeJson(target.resolve("suite_manifest.json"), Map.of(
-                "engine", "GOLDEN_BEHAVIOR_RECORD_REPLAY",
-                "engine_version", "1.0.0",
-                "suite_id", suiteId,
-                "suite_code", suiteCode,
-                "revision", suite.getOrDefault("revision", 1),
-                "scenario_count", list(plan.get("scenarios")).size(),
-                "criterion_count", cases.size(),
-                "artifact_manifest", artifacts.activeManifest(suiteId),
-                "published_at", Instant.now().toString()));
+        Map<String, Object> manifest = new LinkedHashMap<>();
+        manifest.put("engine", "GOLDEN_BEHAVIOR_RECORD_REPLAY");
+        manifest.put("engine_version", "1.0.0");
+        manifest.put("suite_id", suiteId);
+        manifest.put("suite_code", suiteCode);
+        manifest.put("revision", suite.getOrDefault("revision", 1));
+        manifest.put("scenario_count", list(plan.get("scenarios")).size());
+        manifest.put("criterion_count", cases.size());
+        manifest.put("artifact_manifest", Optional.ofNullable(artifacts.activeManifest(suiteId)).orElse(Map.of()));
+        writeJson(target.resolve("suite_manifest.json"), manifest);
     }
 
     private List<Map<String, Object>> expandCases(Map<String, Object> plan, String suiteCode) {
@@ -307,6 +445,117 @@ public class BehaviorSuiteMaterializer {
         contract.put("allowed_packages", runtime.getOrDefault("allowed_packages", List.of(
                 "flutter", "flutter_test", "path", "sqflite", "sqflite_common_ffi")));
         return contract;
+    }
+
+    private Map<String, Object> executablePlan(Map<String, Object> plan,
+                                               Map<String, Object> suite,
+                                               List<Map<String, Object>> cases,
+                                               boolean includeInternalIdentity) {
+        Map<String, Object> databaseContract = new LinkedHashMap<>(map(plan.get("database_contract")));
+        databaseContract.put("enabled", true);
+        databaseContract.put("student_fixture_path", "/app/test/fixtures/student.db");
+        databaseContract.put("hidden_fixture_path", "/app/test/fixtures/hidden.db");
+        databaseContract.put("expected_output_path", "/app/test/fixtures/expected-output.db");
+
+        Map<String, Object> executable = new LinkedHashMap<>();
+        executable.put("schema_version", plan.get("schema_version"));
+        executable.put("suite", gradingSuite(suite, includeInternalIdentity));
+        executable.put("public_contract", plan.get("public_contract"));
+        executable.put("database_contract", databaseContract);
+        executable.put("runtime_config", plan.get("runtime_config"));
+        executable.put("cases", cases.stream()
+                .map(item -> gradingCase(item, includeInternalIdentity)).toList());
+        return executable;
+    }
+
+    private Map<String, Object> gradingSuite(Map<String, Object> suite, boolean includeInternalIdentity) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        if (includeInternalIdentity) out.put("id", suite.get("id"));
+        for (String key : List.of("suite_code", "exam_id", "name", "description", "schema_version", "revision")) {
+            if (suite.containsKey(key)) out.put(key, suite.get(key));
+        }
+        return out;
+    }
+
+    private Map<String, Object> gradingCase(Map<String, Object> source, boolean includeInternalIdentity) {
+        Map<String, Object> out = new LinkedHashMap<>(source);
+        if (!includeInternalIdentity) out.remove("scenario_id");
+        Map<String, Object> oracle = map(out.get("oracle"));
+        if (!oracle.isEmpty()) {
+            Map<String, Object> stableOracle = new LinkedHashMap<>();
+            for (String key : List.of("seed", "status", "input", "ui_observation", "database_observation")) {
+                if (oracle.containsKey(key)) stableOracle.put(key, oracle.get(key));
+            }
+            out.put("oracle", stableOracle);
+        }
+        return out;
+    }
+
+    private Map<String, String> previewHashes(Map<String, Object> preview) {
+        Map<String, String> hashes = new TreeMap<>();
+        for (Object raw : list(preview.get("files"))) {
+            Map<String, Object> file = map(raw);
+            hashes.put(text(file, "name"), sha256(String.valueOf(file.getOrDefault("content", ""))));
+        }
+        return hashes;
+    }
+
+    private Object canonicalSemanticPlan(Map<String, Object> plan) {
+        Map<String, Object> result = new TreeMap<>();
+        result.put("public_contract", plan.get("public_contract"));
+        result.put("database_contract", plan.get("database_contract"));
+        result.put("runtime_config", plan.get("runtime_config"));
+        List<Map<String, Object>> semanticScenarios = list(plan.get("scenarios")).stream()
+                .map(BehaviorSuiteMaterializer::map)
+                .sorted(Comparator.comparing(item -> text(item, "scenario_code")))
+                .map(item -> {
+                    Map<String, Object> stable = new TreeMap<>();
+                    for (String key : List.of("scenario_code", "name", "skill_code", "description", "display_order",
+                            "weight", "enabled", "variables", "initial_state", "steps", "checkpoints", "viewports")) {
+                        if (item.containsKey(key)) stable.put(key, item.get(key));
+                    }
+                    Map<String, Object> oracle = map(item.get("oracle"));
+                    if (!oracle.isEmpty()) stable.put("oracle", gradingCase(Map.of("oracle", oracle), false).get("oracle"));
+                    return stable;
+                }).toList();
+        result.put("scenarios", semanticScenarios);
+        return result;
+    }
+
+    String semanticFingerprint(Map<String, Object> plan) {
+        return sha256(canonicalSemanticPlan(plan));
+    }
+
+    private String sha256(Object value) {
+        try {
+            byte[] bytes = (value instanceof String text ? text : mapper.writeValueAsString(value))
+                    .getBytes(StandardCharsets.UTF_8);
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
+        } catch (Exception e) {
+            throw new IllegalStateException("Không tính được SHA-256", e);
+        }
+    }
+
+    private Map<String, Object> previewFile(String name,
+                                            String description,
+                                            String scope,
+                                            String content) {
+        Map<String, Object> file = new LinkedHashMap<>();
+        file.put("name", name);
+        file.put("description", description);
+        file.put("scope", scope);
+        file.put("content", content);
+        return file;
+    }
+
+    private String readResource(String resource) throws Exception {
+        try (InputStream input = new ClassPathResource(resource).getInputStream()) {
+            return new String(input.readAllBytes(), StandardCharsets.UTF_8);
+        }
+    }
+
+    private String json(Object value) throws Exception {
+        return mapper.writerWithDefaultPrettyPrinter().writeValueAsString(value) + "\n";
     }
 
     private String checkpointName(Map<String, Object> scenario, Map<String, Object> checkpoint, int index) {
